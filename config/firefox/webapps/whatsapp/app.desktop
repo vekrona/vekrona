@@ -2,6 +2,6 @@
 Name=WhatsApp
 Exec=vekrona-webapp whatsapp
 StartupWMClass=vekrona-whatsapp
-Icon=whatsapp
+Icon=web-browser
 Type=Application
 Categories=Network;

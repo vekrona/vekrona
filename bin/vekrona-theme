@@ -24,7 +24,7 @@ current_theme() {
 apply_theme() {
   local name="$1"
   local json="$THEMES_DIR/$name.json"
-  local png="$THEMES_DIR/$name.png"
+  local png="$THEMES_DIR/wallpapers/$name.png"
   [[ -f "$json" ]] || { echo "unknown theme: $name" >&2; exit 1; }
   [[ -f "$png" ]] || { echo "missing wallpaper: $png" >&2; exit 1; }
   dms ipc call settings set customThemeFile "$json"

@@ -9,7 +9,29 @@ if pgrep -x wf-recorder >/dev/null; then
 else
   mkdir -p "$DEST_DIR"
   FILE="$DEST_DIR/$(date +%Y%m%d-%H%M%S).mp4"
-  setsid wf-recorder -g "$(slurp)" -f "$FILE" &
-  disown
-  notify-send -a vekrona "Recording" "started, will save to $FILE"
+
+  geometry="$(slurp)" || { echo "vekrona-record: selection cancelled" >&2; exit 1; }
+  [[ -n "$geometry" ]] || { echo "vekrona-record: selection cancelled" >&2; exit 1; }
+
+  setsid wf-recorder -g "$geometry" -f "$FILE" &
+  pid=$!
+  disown "$pid"
+
+  confirmed=0
+  attempts=0
+  until (( attempts >= 50 )); do
+    if kill -0 "$pid" 2>/dev/null; then
+      confirmed=1
+      break
+    fi
+    attempts=$((attempts + 1))
+  done
+
+  if [[ $confirmed -eq 1 ]]; then
+    notify-send -a vekrona "Recording" "started, will save to $FILE"
+    echo "recording: started, $FILE"
+  else
+    echo "vekrona-record: wf-recorder failed to start" >&2
+    exit 1
+  fi
 fi

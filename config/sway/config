@@ -87,8 +87,8 @@ bindsym --to-code $hyper+Shift+t exec vekrona-theme next
 bindsym XF86AudioRaiseVolume exec dms ipc call audio increment 5
 bindsym XF86AudioLowerVolume exec dms ipc call audio decrement 5
 bindsym XF86AudioMute exec dms ipc call audio mute
-bindsym XF86MonBrightnessUp exec dms ipc call brightness increment 5
-bindsym XF86MonBrightnessDown exec dms ipc call brightness decrement 5
+bindsym XF86MonBrightnessUp exec dms ipc call brightness increment 5 ""
+bindsym XF86MonBrightnessDown exec dms ipc call brightness decrement 5 ""
 
 mode "resize" {
     bindsym --to-code h resize shrink width 10px
