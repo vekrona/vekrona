@@ -13,7 +13,7 @@ machine, with a clean Fedora 44 VM used to smoke-test each stage first.
 
 | Path | Contents |
 |---|---|
-| `install.sh` | stage runner: parses flags and stage names, refreshes sudo, runs `stages/NN-*.sh` in order, stamps completion under `~/.local/state/vekrona` |
+| `install.sh` | stage runner: parses flags and stage names, refreshes sudo, runs `stages/NN-*.sh` in order |
 | `lib/common.sh` | shared bash helpers (`log`, `die`, `ensure_*`, `assert_*`), sourced by every stage and by `bin/vekrona-rollback` and `bin/vekrona-snapshot` |
 | `stages/*.sh` | one script per stage, numbered so the run order is visible in a directory listing |
 | `config/` | source of truth for dotfiles; stage `50-user` symlinks these into `$HOME` |
@@ -47,7 +47,7 @@ the driver.
 
 ### Stage semantics
 
-- Name a stage by its number prefix or its full name: `./install.sh 30` and `./install.sh 30-packages` do the same thing.
+- Name a stage by its number prefix, its name suffix, or its full name: `./install.sh 30`, `./install.sh packages`, and `./install.sh 30-packages` all run the same stage.
 - `--skip STAGE` drops one stage from the run, and also drops it from the set that `70-verify` checks.
 - Pass explicit stage names to run a subset, for example `./install.sh 10 30` (used later to re-lock package versions after a Fedora upgrade, see Update policy below).
 - `90a-switch-dm` and `90b-remove` never run by default; name them explicitly, e.g. `./install.sh 90a-switch-dm`.
@@ -167,8 +167,10 @@ vekrona-theme list
 ```
 
 Caffeine (a fixed wall-clock duration is the point, not something to work
-around): runs `systemd-inhibit --what=sleep` for the given duration and sends
-a desktop notification, also bound to Hyper+Shift+c.
+around): `vekrona-caffeine` starts a transient systemd user unit
+(`systemd-run --user --unit=vekrona-caffeine`) that wraps `systemd-inhibit
+--what=sleep` for the given duration, and sends a desktop notification on
+start and stop; also bound to Hyper+Shift+c.
 
 ```
 vekrona-caffeine 30m
@@ -176,6 +178,7 @@ vekrona-caffeine 1h
 vekrona-caffeine 2h
 vekrona-caffeine status
 vekrona-caffeine off
+vekrona-caffeine        # no argument: stops it if running, else starts it for 1h
 ```
 
 Screenshot and recording:
@@ -200,9 +203,10 @@ Snapshots:
 vekrona-snapshot "before X"
 ```
 
-Wraps `sudo snapper -c root create -c number -d "<description>"`. Every dnf
-transaction also gets an automatic pre/post snapshot pair from the actions
-plugin installed by stage `20-snapper`.
+Wraps `sudo snapper -c root create -p -c number -d "<description>"`; the `-p`
+flag prints the new snapshot's number. Every dnf transaction also gets an
+automatic pre/post snapshot pair from the actions plugin installed by stage
+`20-snapper`.
 
 Rollback:
 
@@ -211,16 +215,22 @@ sudo vekrona-rollback <N>
 ```
 
 `vekrona-rollback` self-elevates through sudo if not already root. It mounts
-the top-level btrfs subvolume (`subvolid=5`), renames the live `root`
-subvolume to `root.old-<timestamp>`, snapshots `.snapshots/<N>/snapshot` as
-the new writable `root`, and moves `.snapshots` across so the restored root
-keeps its own snapshot history. It asks for confirmation unless run with
-`--yes`, and warns if the currently booted kernel has no matching
+the top-level btrfs subvolume (`subvolid=5`), snapshots
+`.snapshots/<N>/snapshot` as a writable `root.vekrona-new`, renames the live
+`root` subvolume to `root.old-<timestamp>`, promotes `root.vekrona-new` to
+`root`, and moves the old root's `.snapshots` across so the restored root
+keeps its own snapshot history. It then writes a marker file,
+`/.vekrona-rolled-back-from-<N>`, so a later check can confirm a rollback
+happened. It asks for confirmation unless run with `--yes`, and refuses to
+prompt at all when it has no controlling tty, so a non-interactive caller
+(such as the VM test harness) must pass `--yes`. Before that, it warns about
+every non-rescue kernel in `/boot` that has no matching
 `/lib/modules/<kernel>` directory inside the target snapshot. `/boot` is a
 separate ext4 filesystem and is never touched by a rollback, so rolling back
 to an old snapshot can leave a root whose kernel modules do not match what is
-actually in `/boot`; check that warning before rebooting. Reboot afterward
-(`systemctl reboot`) to boot into the restored root.
+actually in `/boot`; check that warning before rebooting. The script does not
+reboot for you; run `systemctl reboot` afterward to boot into the restored
+root.
 
 To look at a snapshot without committing to it: at the GRUB menu, press `e`
 on the boot entry, change `subvol=root` on the kernel command line to
@@ -234,8 +244,11 @@ Verifying a run:
 ./install.sh 70
 ```
 
-Runs the assertions in `stages/70-verify.sh` for whichever stages were part
-of the same `install.sh` invocation.
+Runs the assertions in `stages/70-verify.sh`. Run together with other
+stages, it checks only the stages that ran in that same invocation. Run
+alone, as above, it instead checks the full default stage set (minus
+anything passed to `--skip`), so a bare `./install.sh 70` re-verifies
+everything without re-running any stage.
 
 Steam launch option, wraps a game with ScopeBuddy using
 `config/scopebuddy/scb.conf` (`-f -W 3840 -H 2160 -r 240 --adaptive-sync -e`):
@@ -314,18 +327,21 @@ sudo dnf upgrade qt6-qtbase
 ## VM smoke test
 
 ```
-make -C vm deps      # installs virt-install, virt-viewer, libvirt-client if missing
-make -C vm create     # virt-install: Fedora 44 Everything netinstall + vm/ks.cfg kickstart (btrfs autopart, NOPASSWD sudo, git + openssh-server); reboots when done
-make -C vm test       # waits for SSH, rsyncs the repo in (excluding .git), runs ./install.sh --skip 10-nvidia, vm/session-check.sh, a vekrona-snapshot/vekrona-rollback round trip, vm/rollback-check.sh, a reboot, and a final subvol=/root check
+make -C vm deps      # installs virt-install/virt-viewer/libvirt-client if missing, enables the virtqemud/virtnetworkd/virtstoraged sockets, starts and autostarts the libvirt "default" network, adds you to the libvirt group (log out and back in for that to take effect)
+make -C vm create     # generates vm/ks.cfg from vm/ks.cfg.in, substituting your SSH public key (first of ~/.ssh/id_ed25519.pub, id_rsa.pub, *.pub, or set VM_SSH_PUBKEY); virt-install: Fedora 44 Everything netinstall + that kickstart (btrfs autopart, NOPASSWD sudo, git + openssh-server); the kickstart shuts the VM down after %post, then this target boots it with `virsh start`
+make -C vm test       # waits for SSH, enables linger for the VM user, rsyncs the repo in (excluding .git), runs ./install.sh --skip 10-nvidia, vm/session-check.sh, a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for its boot ID to change over SSH, then vm/rollback-check.sh against that snapshot number
 make -C vm destroy    # virsh destroy, then virsh undefine --remove-all-storage
 ```
 
 `vm/session-check.sh` starts a headless Sway session (`WLR_BACKENDS=headless`)
 under `systemd-run --user`, waits for the Sway IPC socket, confirms
-`sway-session.target` and `dms.service` are active, calls
+`sway-session.target` is active and starts `dms.service`, calls
 `dms ipc call lock status`, and validates the xremap config with
-`xremap-wlroots --validate-config`. `make -C vm console` and `make -C vm ssh`
-give interactive access to the VM in between.
+`xremap-wlroots --validate-config`. `vm/rollback-check.sh` then confirms the
+rollback left both `root` and a `root.old-*` subvolume at the top level, `/`
+mounted from `[/root]`, and the `/.vekrona-rolled-back-from-<N>` marker in
+place. `make -C vm console` and `make -C vm ssh` give interactive access to
+the VM in between.
 
 ## Decisions log
 
