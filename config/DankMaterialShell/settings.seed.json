@@ -1,0 +1,11 @@
+{
+  "acMonitorTimeout": 600,
+  "acLockTimeout": 300,
+  "acSuspendTimeout": 1800,
+  "lockBeforeSuspend": true,
+  "loginctlLockIntegration": true,
+  "currentThemeName": "custom",
+  "customThemeFile": "__HOME__/.config/DankMaterialShell/vekrona-themes/tokyo-night.json",
+  "monoFontFamily": "JetBrainsMono Nerd Font",
+  "use24HourClock": true
+}
