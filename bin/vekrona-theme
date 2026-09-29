@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+THEMES_DIR="$HOME/.config/DankMaterialShell/vekrona-themes"
+STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona/theme"
+
+usage() {
+  printf 'usage: %s <name>|next|list\n' "$(basename "$0")" >&2
+  exit 1
+}
+
+list_themes() {
+  local f
+  for f in "$THEMES_DIR"/*.json; do
+    [[ -e "$f" ]] || continue
+    basename "$f" .json
+  done | sort
+}
+
+current_theme() {
+  [[ -f "$STATE_FILE" ]] && cat "$STATE_FILE"
+}
+
+apply_theme() {
+  local name="$1"
+  local json="$THEMES_DIR/$name.json"
+  local png="$THEMES_DIR/$name.png"
+  [[ -f "$json" ]] || { echo "unknown theme: $name" >&2; exit 1; }
+  [[ -f "$png" ]] || { echo "missing wallpaper: $png" >&2; exit 1; }
+  dms ipc call settings set customThemeFile "$json"
+  dms ipc call settings set currentThemeName custom
+  dms ipc call wallpaper set "$png"
+  mkdir -p "$(dirname "$STATE_FILE")"
+  printf '%s\n' "$name" > "$STATE_FILE"
+  echo "theme: $name"
+}
+
+cmd="${1:-}"
+[[ -n "$cmd" ]] || usage
+
+case "$cmd" in
+  list)
+    list_themes
+    ;;
+  next)
+    mapfile -t names < <(list_themes)
+    [[ ${#names[@]} -gt 0 ]] || { echo "no themes found in $THEMES_DIR" >&2; exit 1; }
+    cur="$(current_theme || true)"
+    next_index=0
+    for i in "${!names[@]}"; do
+      if [[ "${names[$i]}" == "$cur" ]]; then
+        next_index=$(( (i + 1) % ${#names[@]} ))
+        break
+      fi
+    done
+    apply_theme "${names[$next_index]}"
+    ;;
+  *)
+    apply_theme "$cmd"
+    ;;
+esac

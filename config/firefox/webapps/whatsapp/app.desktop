@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=WhatsApp
+Exec=vekrona-webapp whatsapp
+StartupWMClass=vekrona-whatsapp
+Icon=whatsapp
+Type=Application
+Categories=Network;
