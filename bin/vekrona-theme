@@ -21,14 +21,23 @@ current_theme() {
   [[ -f "$STATE_FILE" ]] && cat "$STATE_FILE"
 }
 
+dms_settings_set() {
+  local key="$1" value="$2" output
+  output="$(dms ipc call settings set "$key" "$value" 2>&1)"
+  if [[ "$output" == *INVALID* || "$output" == *FAILURE* || "$output" == *ERROR* ]]; then
+    echo "vekrona-theme: dms ipc call settings set $key $value failed: $output" >&2
+    exit 1
+  fi
+}
+
 apply_theme() {
   local name="$1"
   local json="$THEMES_DIR/$name.json"
   local png="$THEMES_DIR/wallpapers/$name.png"
   [[ -f "$json" ]] || { echo "unknown theme: $name" >&2; exit 1; }
   [[ -f "$png" ]] || { echo "missing wallpaper: $png" >&2; exit 1; }
-  dms ipc call settings set customThemeFile "$json"
-  dms ipc call settings set currentThemeName custom
+  dms_settings_set customThemeFile "$json"
+  dms_settings_set currentThemeName custom
   dms ipc call wallpaper set "$png"
   mkdir -p "$(dirname "$STATE_FILE")"
   printf '%s\n' "$name" > "$STATE_FILE"

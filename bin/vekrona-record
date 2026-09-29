@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+UNIT_NAME="vekrona-record"
+UNIT="$UNIT_NAME.service"
 DEST_DIR="$HOME/Videos/Recordings"
 
-if pgrep -x wf-recorder >/dev/null; then
-  pkill -INT -x wf-recorder
+if systemctl --user is-active --quiet "$UNIT"; then
+  systemctl --user kill --signal=SIGINT "$UNIT"
   notify-send -a vekrona "Recording" "stopped, saved under $DEST_DIR"
 else
   mkdir -p "$DEST_DIR"
@@ -13,25 +15,15 @@ else
   geometry="$(slurp)" || { echo "vekrona-record: selection cancelled" >&2; exit 1; }
   [[ -n "$geometry" ]] || { echo "vekrona-record: selection cancelled" >&2; exit 1; }
 
-  setsid wf-recorder -g "$geometry" -f "$FILE" &
-  pid=$!
-  disown "$pid"
+  systemctl --user reset-failed "$UNIT" >/dev/null 2>&1 || true
+  systemd-run --user --collect --unit="$UNIT_NAME" wf-recorder -g "$geometry" -f "$FILE"
 
-  confirmed=0
-  attempts=0
-  until (( attempts >= 50 )); do
-    if kill -0 "$pid" 2>/dev/null; then
-      confirmed=1
-      break
-    fi
-    attempts=$((attempts + 1))
-  done
-
-  if [[ $confirmed -eq 1 ]]; then
+  if systemctl --user is-active --quiet "$UNIT"; then
     notify-send -a vekrona "Recording" "started, will save to $FILE"
     echo "recording: started, $FILE"
   else
     echo "vekrona-record: wf-recorder failed to start" >&2
+    journalctl --user -u "$UNIT_NAME" -n 5 >&2 || true
     exit 1
   fi
 fi

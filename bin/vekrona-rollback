@@ -36,14 +36,15 @@ device="${device%%\[*}"
 [[ -n "$device" ]] || die "could not determine btrfs device of /"
 
 mountpoint_dir="$(mktemp -d)"
-mount -o subvolid=5 "$device" "$mountpoint_dir"
 cleanup() {
+  local umount_output
   if mountpoint -q "$mountpoint_dir" 2>/dev/null; then
-    umount "$mountpoint_dir" 2>/dev/null || true
+    umount_output="$(umount "$mountpoint_dir" 2>&1)" || warn "failed to unmount $mountpoint_dir: $umount_output"
   fi
   rmdir "$mountpoint_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
+mount -o subvolid=5 "$device" "$mountpoint_dir"
 
 snapshot_dir="$mountpoint_dir/root/.snapshots/$number/snapshot"
 [[ -d "$snapshot_dir" ]] || die "snapshot not found: $snapshot_dir"

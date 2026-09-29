@@ -28,16 +28,16 @@ assert "uinput module loaded" bash -c "lsmod | grep -q '^uinput'"
 assert "xremap udev rule installed" test -f /usr/lib/udev/rules.d/00-xremap-input.rules
 
 root udevadm control --reload
-root udevadm trigger --sysname-match=uinput
+root udevadm trigger --settle --sysname-match=uinput
 
 ensure_root_file "$VEKRONA_ROOT/etc/udev/rules.d/70-vekrona-dgpu.rules" /etc/udev/rules.d/70-vekrona-dgpu.rules
 root udevadm control --reload
-root udevadm trigger --subsystem-match=drm
+root udevadm trigger --settle --subsystem-match=drm
 
 if [[ -e /dev/dri/vekrona-dgpu ]]; then
   log "ok: /dev/dri/vekrona-dgpu exists"
 else
-  log "note: /dev/dri/vekrona-dgpu absent (no PCI device at 0000:01:00.0 on this host)"
+  log "note: no /dev/dri/vekrona-dgpu (no matching DRM device at PCI 0000:01:00.0 or nvidia not loaded)"
 fi
 
 root systemctl daemon-reload

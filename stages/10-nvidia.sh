@@ -57,6 +57,8 @@ else
   ensure_pkg "${INSTALL_PKGS[@]}"
 fi
 
+latest_installed_kernel="$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort -V | tail -1)"
+[[ "$latest_installed_kernel" == "$(uname -r)" ]] || die "reboot into the latest installed kernel first"
 ensure_pkg "kernel-devel-$(uname -r)"
 
 if pkg_installed cuda-toolkit; then
