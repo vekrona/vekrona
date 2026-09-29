@@ -50,13 +50,16 @@ for s in "${selected[@]}"; do
 done
 [[ ${#run[@]} -gt 0 ]] || die "nothing to run"
 
-export VEKRONA_STAGES="${run[*]}"
+if [[ ${#run[@]} -eq 1 && "${run[0]}" == "70-verify" ]]; then
+  export VEKRONA_STAGES="${DEFAULT_STAGES[*]}"
+else
+  export VEKRONA_STAGES="${run[*]}"
+fi
 [[ $EUID -eq 0 ]] && die "run as your user, not root; stages call sudo where needed"
 
 for s in "${run[@]}"; do
   log "=== stage $s ==="
   sudo_refresh
   bash "$ROOT/stages/$s.sh"
-  stage_stamp "$s"
 done
 log "done: ${run[*]}"

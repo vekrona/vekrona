@@ -33,18 +33,52 @@ expand_installed() {
 
 env_is_installed() { dnf environment list --installed 2>/dev/null | grep -qE "^${1}[[:space:]]"; }
 
+review_assumeno() {
+  local out rc=0
+  out="$(root dnf "$@" --assumeno --setopt=protected_packages="$PROTECTED" 2>&1)" || rc=$?
+  printf '%s\n' "$out"
+  [[ $rc -eq 0 ]] && return 0
+  [[ $rc -eq 1 && "$out" == *"Operation aborted"* ]] && return 0
+  die "dnf $* --assumeno failed unexpectedly (exit $rc)"
+}
+
+MARK_USER_PKGS=(
+  NetworkManager NetworkManager-wifi polkit wireplumber pipewire pipewire-pulseaudio bluez
+  xdg-desktop-portal-gtk xdg-desktop-portal-wlr gnome-keyring gnome-keyring-pam
+  firefox flatpak sway sway-config-fedora sway-systemd greetd tuigreet ghostty dms
+  quickshell xremap-wlroots steam gamescope mangohud gamemode libnotify
+  grim slurp swappy wf-recorder wl-clipboard
+)
+
 session_is_sway || die "current session is not Sway (XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset})"
 session_started_by_gdm && die "gdm is still active; reboot into the greetd-started Sway session first"
 [[ "$(systemctl is-enabled greetd 2>/dev/null || true)" == enabled ]] || die "greetd is not enabled; run 90a-switch-dm and reboot first"
 
+mark_user_installed "${MARK_USER_PKGS[@]}"
+
 mapfile -t to_remove < <(expand_installed "${REMOVE_GLOBS[@]}")
+
+envs_to_remove=()
+for e in workstation-product-environment kde-desktop-environment; do
+  env_is_installed "$e" && envs_to_remove+=("$e")
+done
 
 if [[ ${#to_remove[@]} -gt 0 ]]; then
   log "reviewing removal of: ${to_remove[*]}"
-  root dnf remove --assumeno "${to_remove[@]}" || true
+  review_assumeno remove "${to_remove[@]}"
 else
   log "nothing from the explicit removal list is installed"
 fi
+
+if [[ ${#envs_to_remove[@]} -gt 0 ]]; then
+  log "reviewing removal of environment groups: ${envs_to_remove[*]}"
+  review_assumeno environment remove "${envs_to_remove[@]}"
+else
+  log "no target environment groups installed"
+fi
+
+log "reviewing autoremove"
+review_assumeno autoremove
 
 if [[ "${VEKRONA_YES:-0}" != "1" ]]; then
   read -r -p "vekrona: proceed with the removal reviewed above? [type yes] " reply < /dev/tty
@@ -58,18 +92,12 @@ if [[ ${#to_remove[@]} -gt 0 ]]; then
   done
 fi
 
-envs_to_remove=()
-for e in workstation-product-environment kde-desktop-environment; do
-  env_is_installed "$e" && envs_to_remove+=("$e")
-done
 if [[ ${#envs_to_remove[@]} -gt 0 ]]; then
   log "removing environment groups: ${envs_to_remove[*]}"
-  root dnf environment remove -y "${envs_to_remove[@]}"
+  root dnf environment remove -y --setopt=protected_packages="$PROTECTED" "${envs_to_remove[@]}"
   for e in "${envs_to_remove[@]}"; do
     env_is_installed "$e" && die "environment still installed after removal: $e"
   done
-else
-  log "no target environment groups installed"
 fi
 
 ensure_copr_absent agaspar/omedora-4 alternateved/keyd wezfurlong/wezterm-nightly phracek/PyCharm

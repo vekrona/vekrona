@@ -1,0 +1,1 @@
+SUBSYSTEM=="drm", KERNEL=="card*", KERNELS=="0000:01:00.0", SYMLINK+="dri/vekrona-dgpu"

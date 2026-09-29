@@ -38,16 +38,26 @@ cuda_driver_installed() {
   return 1
 }
 
-REMOVE_PKGS=(cuda-drivers 'nvidia-driver*' kmod-nvidia-latest-dkms nvidia-kmod-common 'libnvidia-*' nvidia-libXNVCtrl nvidia-modprobe nvidia-persistenced nvidia-settings)
+REMOVE_GLOBS=(cuda-drivers 'nvidia-driver*' kmod-nvidia-latest-dkms nvidia-kmod-common 'libnvidia-*' nvidia-libXNVCtrl nvidia-modprobe nvidia-persistenced nvidia-settings)
 INSTALL_PKGS=(akmod-nvidia xorg-x11-drv-nvidia-cuda)
 
 if cuda_driver_installed; then
-  log "removing cuda-repo driver and installing akmod-nvidia in one transaction"
-  root dnf5 "do" --action=remove "${REMOVE_PKGS[@]}" --action=install "${INSTALL_PKGS[@]}"
+  mapfile -t remove_pkgs < <(
+    for pat in "${REMOVE_GLOBS[@]}"; do rpm -qa --qf '%{NAME}\n' "$pat" 2>/dev/null; done | sort -u
+  )
+  if [[ ${#remove_pkgs[@]} -gt 0 ]]; then
+    log "removing cuda-repo driver and installing akmod-nvidia in one transaction"
+    root dnf5 "do" -y --action=remove "${remove_pkgs[@]}" --action=install "${INSTALL_PKGS[@]}"
+  else
+    log "no cuda-repo driver packages matched, installing akmod-nvidia"
+    ensure_pkg "${INSTALL_PKGS[@]}"
+  fi
 else
   log "no cuda-repo driver installed, skipping removal"
   ensure_pkg "${INSTALL_PKGS[@]}"
 fi
+
+ensure_pkg "kernel-devel-$(uname -r)"
 
 if pkg_installed cuda-toolkit; then
   root dnf upgrade -y cuda-toolkit

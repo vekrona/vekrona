@@ -9,7 +9,12 @@ dm_is_greetd() { [[ "$(basename "$(readlink -f /etc/systemd/system/display-manag
 
 session_is_sway || die "current session is not Sway (XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset}); log into the GDM-started Sway session first, then rerun 90a-switch-dm"
 
-root dnf mark user NetworkManager polkit wireplumber pipewire xdg-desktop-portal-gtk gnome-keyring gnome-keyring-pam
+mark_user_installed \
+  NetworkManager NetworkManager-wifi polkit wireplumber pipewire pipewire-pulseaudio bluez \
+  xdg-desktop-portal-gtk xdg-desktop-portal-wlr gnome-keyring gnome-keyring-pam \
+  firefox flatpak sway sway-config-fedora sway-systemd greetd tuigreet ghostty dms \
+  quickshell xremap-wlroots steam gamescope mangohud gamemode libnotify \
+  grim slurp swappy wf-recorder wl-clipboard
 
 if is_enabled gdm; then
   root systemctl disable gdm
