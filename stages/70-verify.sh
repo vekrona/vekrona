@@ -8,8 +8,13 @@ source "$ROOT/lib/common.sh"
 VEKRONA_VERIFY_ALL="${VEKRONA_VERIFY_ALL:-0}"
 VEKRONA_STAGES="${VEKRONA_STAGES:-}"
 
+DEFAULT_RAN_STAGES="00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming"
+
 ran() {
   [[ "$VEKRONA_VERIFY_ALL" == "1" ]] && return 0
+  if [[ "$VEKRONA_STAGES" == "70-verify" ]] && [[ " $DEFAULT_RAN_STAGES " == *" $1 "* ]]; then
+    return 0
+  fi
   [[ " $VEKRONA_STAGES " == *" $1 "* ]]
 }
 
@@ -34,6 +39,7 @@ ge() { [[ "$1" -ge "$2" ]]; }
 contains() { [[ "$2" == *"$1"* ]]; }
 not_contains() { [[ "$2" != *"$1"* ]]; }
 file_exists() { [[ -e "$1" ]]; }
+file_absent() { [[ ! -e "$1" ]]; }
 dir_exists() { [[ -d "$1" ]]; }
 owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
@@ -55,11 +61,20 @@ fi
 
 if ran 10-nvidia; then
   check assert "akmod-nvidia installed" pkg_installed akmod-nvidia
-  modeset="$(root cat /sys/module/nvidia_drm/parameters/modeset 2>/dev/null || echo '?')"
-  check assert "nvidia_drm modeset=Y" eq "$modeset" Y
-  gsp="$(nvidia-smi -q 2>/dev/null | grep 'GSP Firmware' || true)"
-  check assert "GSP firmware disabled (N/A)" contains 'N/A' "$gsp"
-  check assert "nvidia module is proprietary, not Open" not_contains 'Open' "$(cat /proc/driver/nvidia/version 2>/dev/null || true)"
+
+  nvidia_disk_version="$(modinfo -F version nvidia 2>/dev/null || true)"
+  nvidia_loaded_version="$(cat /sys/module/nvidia/version 2>/dev/null || true)"
+  if [[ -n "$nvidia_loaded_version" && "$nvidia_disk_version" == "$nvidia_loaded_version" ]]; then
+    modeset="$(root cat /sys/module/nvidia_drm/parameters/modeset 2>/dev/null || echo '?')"
+    check assert "nvidia_drm modeset=Y" eq "$modeset" Y
+    gsp="$(nvidia-smi -q 2>/dev/null | grep 'GSP Firmware' || true)"
+    check assert "GSP firmware disabled (N/A)" contains 'N/A' "$gsp"
+    check assert "nvidia module is proprietary, not Open" not_contains 'Open' "$(cat /proc/driver/nvidia/version 2>/dev/null || true)"
+  else
+    warn_check "nvidia_drm modeset=Y (reboot pending: disk=$nvidia_disk_version loaded=$nvidia_loaded_version)" false
+    warn_check "GSP firmware disabled (N/A) (reboot pending)" false
+    warn_check "nvidia module is proprietary, not Open (reboot pending)" false
+  fi
 
   for arg in nvidia.NVreg_EnableGpuFirmware=0 rd.driver.blacklist=nouveau; do
     if kernel_cmdline_has "$arg"; then
@@ -81,6 +96,7 @@ if ran 10-nvidia; then
 
   for d in /lib/modules/*/; do
     kver="$(basename "$d")"
+    [[ -e "/boot/vmlinuz-$kver" ]] || continue
     warn_check "nvidia module present for kernel $kver" nvidia_module_present_for "${d%/}"
   done
 
@@ -89,19 +105,23 @@ if ran 10-nvidia; then
 fi
 
 if ran 20-snapper; then
-  check assert_file_contains /etc/snapper/configs/root 'NUMBER_LIMIT="10"'
-  check assert_file_contains /etc/snapper/configs/root 'TIMELINE_CREATE="no"'
+  check assert "snapper config: NUMBER_LIMIT=10" root grep -qE 'NUMBER_LIMIT="10"' /etc/snapper/configs/root
+  check assert "snapper config: TIMELINE_CREATE=no" root grep -qE 'TIMELINE_CREATE="no"' /etc/snapper/configs/root
   check assert "snapper actions file present" file_exists /etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions
   check assert "libdnf5-plugin-actions installed" pkg_installed libdnf5-plugin-actions
   check assert "snapper-cleanup.timer enabled" unit_enabled snapper-cleanup.timer
 
-  n0="$(snapper list --columns number | tail -1 | tr -dc '0-9')"
+  snapper_csv() { root snapper --csvout list --no-headers --columns number,type,cleanup; }
+  csv_row_matches() { grep -qE -- "$1" <<<"$snapshots_csv"; }
+
+  n0="$(snapper_csv | tail -1 | cut -d, -f1)"
   root dnf install -y hello
   root dnf remove -y hello
-  n1="$(snapper list --columns number | tail -1 | tr -dc '0-9')"
+  snapshots_csv="$(snapper_csv)"
+  n1="$(tail -1 <<<"$snapshots_csv" | cut -d, -f1)"
   check assert "at least 2 new snapshots from install/remove round-trip" ge "$((n1 - n0))" 2
-  check assert "pre snapshot has cleanup=number" bash -c "snapper list --columns type,cleanup | grep -qE '^pre[[:space:]]*\|[[:space:]]*number'"
-  check assert "post snapshot has cleanup=number" bash -c "snapper list --columns type,cleanup | grep -qE '^post[[:space:]]*\|[[:space:]]*number'"
+  check assert "pre snapshot has cleanup=number" csv_row_matches '^[0-9]+,pre,number$'
+  check assert "post snapshot has cleanup=number" csv_row_matches '^[0-9]+,post,number$'
 fi
 
 if ran 30-packages; then
@@ -134,7 +154,7 @@ if ran 40-system; then
 fi
 
 if ran 50-user; then
-  check assert "sway config validates" sway --validate -c "$HOME/.config/sway/config"
+  check assert "sway config validates" sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
   check assert "xremap config validates" xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml"
   dms_env="$(systemctl --user show dms -p Environment 2>/dev/null || true)"
   check assert "dms.service has QSG_RHI_BACKEND=vulkan" contains 'QSG_RHI_BACKEND=vulkan' "$dms_env"
@@ -162,9 +182,19 @@ assert d.get('acLockTimeout') == 300, d.get('acLockTimeout')
     check assert "flatpak x11 override set: $app_id" contains x11 "$override"
   done
 
-  check assert "youtube webapp profile registered" bash -c "grep -q 'vekrona-youtube' '$HOME/.mozilla/firefox/profiles.ini'"
-  check assert "whatsapp webapp profile registered" bash -c "grep -q 'vekrona-whatsapp' '$HOME/.mozilla/firefox/profiles.ini'"
+  firefox_profiles_ini="$(firefox_profile_root)/profiles.ini"
+  check assert "youtube webapp profile registered" grep -q 'vekrona-youtube' "$firefox_profiles_ini"
+  check assert "whatsapp webapp profile registered" grep -q 'vekrona-whatsapp' "$firefox_profiles_ini"
   check assert "vekrona-theme installed" file_exists "$HOME/.local/bin/vekrona-theme"
+
+  if [[ -e /dev/dri/vekrona-dgpu ]]; then
+    check assert "vekrona-gpu.conf present (dGPU device exists)" file_exists "$HOME/.config/environment.d/vekrona-gpu.conf"
+  else
+    check assert "vekrona-gpu.conf absent (no dGPU device)" file_absent "$HOME/.config/environment.d/vekrona-gpu.conf"
+  fi
+
+  user_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"
+  warn_check "$HOME/.local/bin in systemd user PATH" contains "$HOME/.local/bin" "$user_path"
 fi
 
 if ran 60-gaming; then

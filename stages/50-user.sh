@@ -4,8 +4,29 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
+VEKRONA_RESET_DMS_SETTINGS="${VEKRONA_RESET_DMS_SETTINGS:-0}"
+
 ensure_symlink_tree "$VEKRONA_ROOT/config/sway" "$HOME/.config/sway"
 ensure_symlink "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$HOME/.config/environment.d/vekrona.conf"
+
+gpu_env_file="$HOME/.config/environment.d/vekrona-gpu.conf"
+if [[ -e /dev/dri/vekrona-dgpu ]]; then
+  gpu_env_line="WLR_DRM_DEVICES=/dev/dri/vekrona-dgpu"
+  if [[ -f "$gpu_env_file" && "$(cat "$gpu_env_file")" == "$gpu_env_line" ]]; then
+    log "up to date: $gpu_env_file"
+  else
+    log "writing: $gpu_env_file"
+    ensure_dir "$(dirname "$gpu_env_file")"
+    printf '%s\n' "$gpu_env_line" > "$gpu_env_file"
+    [[ "$(cat "$gpu_env_file")" == "$gpu_env_line" ]] || die "failed to write $gpu_env_file"
+  fi
+elif [[ -e "$gpu_env_file" ]]; then
+  log "removing: $gpu_env_file (/dev/dri/vekrona-dgpu absent)"
+  rm -f "$gpu_env_file"
+  [[ -e "$gpu_env_file" ]] && die "failed to remove $gpu_env_file"
+else
+  log "no /dev/dri/vekrona-dgpu, $gpu_env_file absent (ok)"
+fi
 ensure_symlink "$VEKRONA_ROOT/config/xremap/config.yml" "$HOME/.config/xremap/config.yml"
 ensure_symlink "$VEKRONA_ROOT/config/ghostty/config" "$HOME/.config/ghostty/config"
 
@@ -71,13 +92,13 @@ shopt -s nullglob
 for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
   app="$(basename "$appdir")"
   profile="vekrona-$app"
-  profiledir="$HOME/.mozilla/firefox/$profile"
-  if grep -q "Name=$profile$" "$HOME/.mozilla/firefox/profiles.ini" 2>/dev/null; then
+  profiledir="$(firefox_profile_root)/$profile"
+  if grep -q "Name=$profile$" "$(firefox_profile_root)/profiles.ini" 2>/dev/null; then
     log "firefox profile exists: $profile"
   else
     log "creating firefox profile: $profile"
     firefox --headless -CreateProfile "$profile $profiledir"
-    grep -q "Name=$profile$" "$HOME/.mozilla/firefox/profiles.ini" || die "firefox profile not created: $profile"
+    grep -q "Name=$profile$" "$(firefox_profile_root)/profiles.ini" || die "firefox profile not created: $profile"
   fi
   ensure_symlink "$appdir/user.js" "$profiledir/user.js"
   ensure_symlink "$appdir/userChrome.css" "$profiledir/chrome/userChrome.css"
