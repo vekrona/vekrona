@@ -178,7 +178,7 @@ VERSIONLOCK_FILE=/etc/dnf/versionlock.toml
 
 versionlock_has() { grep -qE "^name = \"$1\"" "$VERSIONLOCK_FILE" 2>/dev/null; }
 
-versionlock_evrs() { grep -E '^evr = ' "$VERSIONLOCK_FILE" 2>/dev/null | sed -E 's/^evr = "(.*)"$/\1/'; }
+versionlock_evrs() { grep -E '^value = ' "$VERSIONLOCK_FILE" 2>/dev/null | sed -E 's/^value = "(.*)"$/\1/'; }
 
 versionlock_installed() {
   local p
