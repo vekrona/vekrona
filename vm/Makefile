@@ -68,8 +68,8 @@ test:
 	rsync -a --exclude=.git "$(REPO_ROOT)/" $(VM_USER)@$$ip:vekrona/; \
 	ssh $(VM_USER)@$$ip 'cd vekrona && ./install.sh --skip 10-nvidia'; \
 	ssh $(VM_USER)@$$ip 'bash vekrona/vm/session-check.sh'; \
-	snap_n="$$(ssh $(VM_USER)@$$ip 'sudo snapper create --description vm-test --print-number')"; \
-	ssh $(VM_USER)@$$ip "sudo vekrona-rollback --yes $$snap_n"; \
+	snap_n="$$(ssh $(VM_USER)@$$ip 'sudo /home/$(VM_USER)/.local/bin/vekrona-snapshot vm-test')"; \
+	ssh $(VM_USER)@$$ip "sudo /home/$(VM_USER)/.local/bin/vekrona-rollback --yes $$snap_n"; \
 	ssh $(VM_USER)@$$ip 'sudo bash vekrona/vm/rollback-check.sh'; \
 	virsh reboot $(VM_NAME); \
 	attempt=0; \

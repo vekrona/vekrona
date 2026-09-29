@@ -12,9 +12,12 @@ trap cleanup EXIT
 
 mount -o subvolid=5 "$dev" "$mnt"
 
-ls "$mnt" | grep -qx root || { echo "top-level subvolume 'root' not found on $dev" >&2; exit 1; }
+[[ -d "$mnt/root" ]] || { echo "top-level subvolume 'root' not found on $dev" >&2; exit 1; }
 
-old="$(ls "$mnt" | grep -E '^root\.old-' || true)"
+old=""
+for entry in "$mnt"/root.old-*; do
+  [[ -d "$entry" ]] && { old="$(basename "$entry")"; break; }
+done
 [[ -n "$old" ]] || { echo "no root.old-* subvolume found after rollback" >&2; exit 1; }
 
 echo "rollback-check OK: root and $old present at the top-level mount"

@@ -18,7 +18,9 @@ systemd-run --user --unit vekrona-sway-test \
 sockfile=""
 attempt=0
 until [[ -n "$sockfile" ]]; do
-  sockfile="$(ls "$XDG_RUNTIME_DIR"/sway-ipc.* 2>/dev/null | head -1)"
+  for sock in "$XDG_RUNTIME_DIR"/sway-ipc.*; do
+    [[ -e "$sock" ]] && { sockfile="$sock"; break; }
+  done
   [[ -n "$sockfile" ]] && break
   attempt=$((attempt + 1))
   [[ $attempt -lt 60 ]] || fail "sway ipc socket never appeared"
