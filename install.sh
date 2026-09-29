@@ -13,7 +13,7 @@ usage: $0 [--skip STAGE]... [--reset-dms-settings] [STAGE...]
 
 Stages run in this order by default: ${DEFAULT_STAGES[*]}
 Cleanup stages must be named explicitly: 90a-switch-dm 90b-remove
-A STAGE may be given by its number prefix (e.g. 10) or full name (10-nvidia).
+A STAGE may be given by its number (10), its name (nvidia) or the full name (10-nvidia).
 --skip STAGE      omit a stage (also removes it from the set 70-verify checks)
 --reset-dms-settings  overwrite ~/.config/DankMaterialShell/settings.json from the seed
 EOF
@@ -23,7 +23,7 @@ EOF
 resolve_stage() {
   local want="$1" s
   for s in "${ALL_STAGES[@]}"; do
-    [[ "$s" == "$want" || "${s%%-*}" == "$want" ]] && { echo "$s"; return 0; }
+    [[ "$s" == "$want" || "${s%%-*}" == "$want" || "${s#*-}" == "$want" ]] && { echo "$s"; return 0; }
   done
   die "unknown stage: $want"
 }
