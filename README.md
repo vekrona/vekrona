@@ -186,7 +186,7 @@ Screenshot and recording:
 ```
 vekrona-screenshot area     # grim + slurp region capture, opens in swappy, saved to ~/Pictures/Screenshots
 vekrona-screenshot output   # full output, same pipeline
-vekrona-record              # slurp region select, wf-recorder toggle, saved to ~/Videos/Recordings
+vekrona-record              # slurp region select, systemd-run transient user unit toggle, saved to ~/Videos/Recordings
 ```
 
 Webapps (each opens a dedicated Firefox profile and window, set up by stage
