@@ -43,7 +43,7 @@ INSTALL_PKGS=(akmod-nvidia xorg-x11-drv-nvidia-cuda)
 
 if cuda_driver_installed; then
   log "removing cuda-repo driver and installing akmod-nvidia in one transaction"
-  root dnf5 do --action=remove "${REMOVE_PKGS[@]}" --action=install "${INSTALL_PKGS[@]}"
+  root dnf5 "do" --action=remove "${REMOVE_PKGS[@]}" --action=install "${INSTALL_PKGS[@]}"
 else
   log "no cuda-repo driver installed, skipping removal"
   ensure_pkg "${INSTALL_PKGS[@]}"

@@ -2,9 +2,9 @@
 set -euo pipefail
 
 VEKRONA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export VEKRONA_ROOT
 VEKRONA_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona"
 VEKRONA_USER="${SUDO_USER:-$USER}"
-VEKRONA_HOME="$(getent passwd "$VEKRONA_USER" | cut -d: -f6)"
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
