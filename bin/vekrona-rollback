@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+
+usage() {
+  echo "usage: $(basename "$0") [--yes] <snapshot-number>" >&2
+  exit 1
+}
+
+[[ $EUID -eq 0 ]] || exec sudo "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
+
+require_cmd findmnt mount umount mktemp btrfs
+
+confirm=1
+number=""
+for arg in "$@"; do
+  case "$arg" in
+    --yes) confirm=0 ;;
+    -h|--help) usage ;;
+    -*) usage ;;
+    *) [[ -z "$number" ]] || usage; number="$arg" ;;
+  esac
+done
+[[ "$number" =~ ^[0-9]+$ ]] || usage
+
+device="$(findmnt -no SOURCE /)"
+device="${device%%\[*}"
+[[ -n "$device" ]] || die "could not determine btrfs device of /"
+
+mountpoint="$(mktemp -d)"
+mount -o subvolid=5 "$device" "$mountpoint"
+cleanup() { umount "$mountpoint" 2>/dev/null || true; rmdir "$mountpoint" 2>/dev/null || true; }
+trap cleanup EXIT
+
+snapshot_dir="$mountpoint/root/.snapshots/$number/snapshot"
+[[ -d "$snapshot_dir" ]] || die "snapshot not found: $snapshot_dir"
+
+kernel_mismatch=0
+kernel_list="$(ls "$snapshot_dir/lib/modules" 2>/dev/null || true)"
+for vmlinuz in /boot/vmlinuz-*; do
+  [[ -e "$vmlinuz" ]] || continue
+  kernel="${vmlinuz#/boot/vmlinuz-}"
+  if ! grep -qxF "$kernel" <<<"$kernel_list"; then
+    warn "kernel $kernel (current /boot) has no matching /lib/modules in snapshot $number"
+    kernel_mismatch=1
+  fi
+done
+
+if [[ $confirm -eq 1 ]]; then
+  read -r -p "Roll back / to snapshot $number? This renames the current root subvolume. [y/N] " answer < /dev/tty
+  [[ "$answer" == "y" || "$answer" == "Y" ]] || die "aborted"
+fi
+
+backup="root.old-$(date +%Y%m%d%H%M%S)"
+log "renaming $mountpoint/root -> $mountpoint/$backup"
+mv "$mountpoint/root" "$mountpoint/$backup"
+
+log "creating writable snapshot $number as new root"
+btrfs subvolume snapshot "$mountpoint/$backup/.snapshots/$number/snapshot" "$mountpoint/root"
+
+if [[ -d "$mountpoint/root/.snapshots" ]]; then
+  rmdir "$mountpoint/root/.snapshots" || die "root/.snapshots exists and is not empty, resolve manually"
+fi
+mv "$mountpoint/$backup/.snapshots" "$mountpoint/root/.snapshots"
+
+log "rollback complete: / now points at snapshot $number, previous root kept as $backup"
+log "reboot to boot into the restored root: systemctl reboot"
+if [[ $kernel_mismatch -eq 1 ]]; then
+  warn "/boot is a separate filesystem and was NOT rolled back; the running kernel may be missing from the restored root, see warnings above"
+fi
