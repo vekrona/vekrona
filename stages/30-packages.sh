@@ -30,8 +30,7 @@ mark_user_installed \
   NetworkManager polkit wireplumber pipewire xdg-desktop-portal-gtk \
   gnome-keyring gnome-keyring-pam
 
-wlroots_pkg="$(rpm -q --whatprovides 'libwlroots-0.19.so()(64bit)' --qf '%{NAME}\n' 2>/dev/null | sort -u | head -n1)"
-[[ -n "$wlroots_pkg" ]] || die "no installed package provides libwlroots-0.19.so"
+wlroots_pkg="$(wlroots_package_name)"
 log "wlroots package for versionlock: $wlroots_pkg"
 
 versionlock_installed sway "$wlroots_pkg" dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots

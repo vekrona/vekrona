@@ -8,13 +8,8 @@ source "$ROOT/lib/common.sh"
 VEKRONA_VERIFY_ALL="${VEKRONA_VERIFY_ALL:-0}"
 VEKRONA_STAGES="${VEKRONA_STAGES:-}"
 
-DEFAULT_RAN_STAGES="00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming"
-
 ran() {
   [[ "$VEKRONA_VERIFY_ALL" == "1" ]] && return 0
-  if [[ "$VEKRONA_STAGES" == "70-verify" ]] && [[ " $DEFAULT_RAN_STAGES " == *" $1 "* ]]; then
-    return 0
-  fi
   [[ " $VEKRONA_STAGES " == *" $1 "* ]]
 }
 
@@ -39,7 +34,7 @@ ge() { [[ "$1" -ge "$2" ]]; }
 contains() { [[ "$2" == *"$1"* ]]; }
 not_contains() { [[ "$2" != *"$1"* ]]; }
 file_exists() { [[ -e "$1" ]]; }
-file_absent() { [[ ! -e "$1" ]]; }
+file_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 dir_exists() { [[ -d "$1" ]]; }
 owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
@@ -105,8 +100,8 @@ if ran 10-nvidia; then
 fi
 
 if ran 20-snapper; then
-  check assert "snapper config: NUMBER_LIMIT=10" root grep -qE 'NUMBER_LIMIT="10"' /etc/snapper/configs/root
-  check assert "snapper config: TIMELINE_CREATE=no" root grep -qE 'TIMELINE_CREATE="no"' /etc/snapper/configs/root
+  check assert "snapper config: NUMBER_LIMIT=10" root grep -qE '^NUMBER_LIMIT="10"$' /etc/snapper/configs/root
+  check assert "snapper config: TIMELINE_CREATE=no" root grep -qE '^TIMELINE_CREATE="no"$' /etc/snapper/configs/root
   check assert "snapper actions file present" file_exists /etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions
   check assert "libdnf5-plugin-actions installed" pkg_installed libdnf5-plugin-actions
   check assert "snapper-cleanup.timer enabled" unit_enabled snapper-cleanup.timer
@@ -125,12 +120,13 @@ if ran 20-snapper; then
 fi
 
 if ran 30-packages; then
-  for p in sway wlroots0.19 dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots ghostty greetd tuigreet; do
+  wlroots_pkg="$(wlroots_package_name)"
+  for p in sway "$wlroots_pkg" dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots ghostty greetd tuigreet; do
     check assert "package installed: $p" pkg_installed "$p"
   done
   quickshell_vendor="$(rpm -q --qf '%{VENDOR}' quickshell 2>/dev/null || true)"
   check assert "quickshell vendor is not agaspar" not_contains agaspar "$quickshell_vendor"
-  for p in sway dms quickshell qt6-qtbase xremap-wlroots; do
+  for p in sway "$wlroots_pkg" dms quickshell qt6-qtbase xremap-wlroots; do
     check assert "versionlock: $p" versionlock_has "$p"
   done
   os_version_id="$(source /etc/os-release && echo "$VERSION_ID")"
@@ -159,7 +155,7 @@ if ran 50-user; then
   dms_env="$(systemctl --user show dms -p Environment 2>/dev/null || true)"
   check assert "dms.service has QSG_RHI_BACKEND=vulkan" contains 'QSG_RHI_BACKEND=vulkan' "$dms_env"
   check assert "dms.service wanted by sway-session.target" file_exists "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
-  check assert "dms.service not wanted by graphical-session.target" bash -c "[[ ! -e '$HOME/.config/systemd/user/graphical-session.target.wants/dms.service' ]]"
+  check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
   check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
   check assert "DankMaterialShell settings.json present" file_exists "$HOME/.config/DankMaterialShell/settings.json"
@@ -177,7 +173,7 @@ assert d.get('acLockTimeout') == 300, d.get('acLockTimeout')
     [org.signal.Signal]=1
   )
   for app_id in "${!electron_apps[@]}"; do
-    flatpak info "$app_id" >/dev/null 2>&1 || continue
+    flatpak_installed "$app_id" || continue
     override="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
     check assert "flatpak x11 override set: $app_id" contains x11 "$override"
   done

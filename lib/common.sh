@@ -194,7 +194,10 @@ kernel_cmdline_has() { grep -qw -- "$1" /proc/cmdline; }
 
 grubby_has_arg() {
   local arg="$1"
-  root grubby --info=ALL | grep '^args=' | grep -qw -- "$arg"
+  root grubby --info=ALL | awk -v a="$arg" '
+    /^args=/ { n=split($0, w, /[ "]/); for (i=1;i<=n;i++) if (w[i]==a) found=1 }
+    END { exit !found }
+  '
 }
 
 ensure_kernel_arg() {
@@ -221,6 +224,17 @@ assert_file_contains() {
   local file="$1" pattern="$2"
   grep -qE -- "$pattern" "$file" || die "$file does not match: $pattern"
   log "ok: $file matches $pattern"
+}
+
+wlroots_package_name() {
+  local p
+  p="$(rpm -q --whatprovides 'libwlroots-0.19.so()(64bit)' --qf '%{NAME}\n' 2>/dev/null | sort -u | head -n1)"
+  [[ -n "$p" ]] || die "no installed package provides libwlroots-0.19.so"
+  printf '%s' "$p"
+}
+
+flatpak_installed() {
+  flatpak list --app --columns=application 2>/dev/null | grep -qx "$1"
 }
 
 firefox_profile_root() {

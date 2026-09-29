@@ -50,8 +50,29 @@ dms_seed="$VEKRONA_ROOT/config/DankMaterialShell/settings.seed.json"
 if [[ ! -f "$dms_settings" || "$VEKRONA_RESET_DMS_SETTINGS" == "1" ]]; then
   log "seeding DMS settings: $dms_settings"
   ensure_dir "$dms_settings_dir"
-  sed "s|__HOME__|$HOME|g" "$dms_seed" > "$dms_settings"
-  python3 -m json.tool "$dms_settings" >/dev/null || die "seeded DMS settings are not valid JSON: $dms_settings"
+  dms_settings_tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
+  python3 - "$dms_seed" "$HOME" > "$dms_settings_tmp" <<'PYEOF'
+import json
+import sys
+
+seed_path, home = sys.argv[1], sys.argv[2]
+
+def substitute(value):
+    if isinstance(value, str):
+        return value.replace("__HOME__", home)
+    if isinstance(value, dict):
+        return {k: substitute(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [substitute(v) for v in value]
+    return value
+
+with open(seed_path) as f:
+    data = json.load(f)
+
+json.dump(substitute(data), sys.stdout, indent=2)
+sys.stdout.write("\n")
+PYEOF
+  mv "$dms_settings_tmp" "$dms_settings"
 else
   log "DMS settings already present: $dms_settings"
 fi
@@ -65,10 +86,6 @@ if [[ -d "$VEKRONA_ROOT/fonts" ]] && find "$VEKRONA_ROOT/fonts" -type f -print -
 else
   warn "fonts/ missing or empty, skipping font install"
 fi
-
-flatpak_installed() {
-  flatpak list --app --columns=application 2>/dev/null | grep -qx "$1"
-}
 
 ensure_flatpak_override() {
   local app_id="$1" current

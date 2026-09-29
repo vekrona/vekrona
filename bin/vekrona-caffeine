@@ -30,8 +30,8 @@ start_caffeine() {
   systemctl --user reset-failed "$UNIT" >/dev/null 2>&1 || true
   systemd-run --user --collect --unit="$UNIT_NAME" --description="caffeine $dur" \
     systemd-inhibit --what=sleep --who=vekrona --why="caffeine $dur" sleep "$secs"
-  notify-send -a vekrona "Caffeine" "suspend inhibited for $dur"
-  echo "caffeine: on for $dur"
+  notify-send -a vekrona "Caffeine" "suspend inhibited for $dur; lock and screen-off still apply"
+  echo "caffeine: on for $dur; lock and screen-off still apply"
 }
 
 stop_caffeine() {

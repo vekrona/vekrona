@@ -50,9 +50,35 @@ MARK_USER_PKGS=(
   grim slurp swappy wf-recorder wl-clipboard
 )
 
+confirm() {
+  local prompt="$1"
+  [[ "${VEKRONA_YES:-0}" == "1" ]] && return 0
+  local reply
+  read -r -p "vekrona: $prompt [type yes] " reply < /dev/tty
+  [[ "$reply" == "yes" ]]
+}
+
 session_is_sway || die "current session is not Sway (XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset})"
 session_started_by_gdm && die "gdm is still active; reboot into the greetd-started Sway session first"
 [[ "$(systemctl is-enabled greetd 2>/dev/null || true)" == enabled ]] || die "greetd is not enabled; run 90a-switch-dm and reboot first"
+
+FEDORA_PROTECTED_CONF=/etc/dnf/protected.d/fedora-workstation.conf
+
+if pkg_installed fedora-release-identity-workstation; then
+  log "reviewing identity swap: fedora-release-identity-workstation -> fedora-release-identity-basic"
+  review_assumeno "do" --action=remove fedora-release-identity-workstation --action=install fedora-release-identity-basic
+
+  confirm "proceed with the identity swap reviewed above?" || die "identity swap not confirmed"
+
+  root dnf "do" -y --action=remove fedora-release-identity-workstation --action=install fedora-release-identity-basic
+  pkg_installed fedora-release-identity-workstation && die "fedora-release-identity-workstation still installed after swap"
+  pkg_installed fedora-release-identity-basic || die "fedora-release-identity-basic not installed after swap"
+else
+  log "fedora-release-identity-workstation not installed, skipping identity swap"
+fi
+
+[[ -f "$FEDORA_PROTECTED_CONF" ]] && die "$FEDORA_PROTECTED_CONF still present, gnome-shell removal would be blocked"
+log "ok: $FEDORA_PROTECTED_CONF absent"
 
 mark_user_installed "${MARK_USER_PKGS[@]}"
 
@@ -80,10 +106,7 @@ fi
 log "reviewing autoremove"
 review_assumeno autoremove
 
-if [[ "${VEKRONA_YES:-0}" != "1" ]]; then
-  read -r -p "vekrona: proceed with the removal reviewed above? [type yes] " reply < /dev/tty
-  [[ "$reply" == "yes" ]] || die "removal not confirmed"
-fi
+confirm "proceed with the removal reviewed above?" || die "removal not confirmed"
 
 if [[ ${#to_remove[@]} -gt 0 ]]; then
   root dnf remove -y --setopt=protected_packages="$PROTECTED" "${to_remove[@]}"
