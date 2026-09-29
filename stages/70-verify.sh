@@ -40,7 +40,6 @@ group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
 not_repo_enabled() { ! repo_enabled "$1"; }
 copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 copr_enabled() { repo_enabled "$(copr_id "$1")"; }
-versionlock_has() { root dnf versionlock list 2>/dev/null | grep -q "^$1-[0-9]"; }
 unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; }
 user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" enabled; }
 pkg_absent() { ! pkg_installed "$1"; }
@@ -116,10 +115,10 @@ if ran 30-packages; then
   done
   os_version_id="$(source /etc/os-release && echo "$VERSION_ID")"
   while IFS= read -r entry; do
-    [[ "$entry" =~ \.fc([0-9]+)\. ]] || continue
+    [[ "$entry" =~ \.fc([0-9]+) ]] || continue
     fcver="${BASH_REMATCH[1]}"
     warn_check "versionlock entry matches fc$os_version_id: $entry" eq "$fcver" "$os_version_id"
-  done < <(root dnf versionlock list 2>/dev/null)
+  done < <(versionlock_evrs)
   check assert "greetd user exists" bash -c "getent passwd greetd >/dev/null"
 fi
 

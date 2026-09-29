@@ -174,14 +174,20 @@ ensure_user_in_group() {
   getent group "$group" | grep -q "\b$VEKRONA_USER\b" || die "user not added to $group"
 }
 
+VERSIONLOCK_FILE=/etc/dnf/versionlock.toml
+
+versionlock_has() { grep -qE "^name = \"$1\"" "$VERSIONLOCK_FILE" 2>/dev/null; }
+
+versionlock_evrs() { grep -E '^evr = ' "$VERSIONLOCK_FILE" 2>/dev/null | sed -E 's/^evr = "(.*)"$/\1/'; }
+
 versionlock_installed() {
   local p
   for p in "$@"; do
     pkg_installed "$p" || die "refusing to lock a package that is not installed: $p"
-    if root dnf versionlock list 2>/dev/null | grep -q "^$p-[0-9]"; then log "locked: $p"; continue; fi
+    if versionlock_has "$p"; then log "locked: $p"; continue; fi
     log "locking: $p"
     root dnf versionlock add "$p"
-    root dnf versionlock list | grep -q "^$p-[0-9]" || die "lock not recorded: $p"
+    versionlock_has "$p" || die "lock not recorded in $VERSIONLOCK_FILE: $p"
   done
 }
 
