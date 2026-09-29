@@ -25,6 +25,7 @@ openssh-server
 rsync
 python3
 inotify-tools
+qemu-guest-agent
 %end
 
 %post
