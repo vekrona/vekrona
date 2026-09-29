@@ -17,19 +17,37 @@ Grilled 2026-09-29; three adversarial Opus reviews (system, desktop, installer) 
 | 3 | Remapper: **xremap** (`xremap-wlroots`, COPR `blakegardner/xremap`) | Binary `/usr/bin/xremap-wlroots`. `exact_match: true` on every keymap. Caps held → `[Ctrl_L, Alt_L, Super_L]`, tapped → Esc. Cmd layer per app_id exclusion. Key names per xremap (`LeftBrace`, `PageUp`…); `70-verify` runs `xremap-wlroots --validate-config`. User unit `PartOf/After/WantedBy=sway-session.target`, `--watch=config,device`. User in `input` group (README: security trade-off, keyboards readable by user processes; re-login needed). |
 | 4 | Terminal: **ghostty** | `super+c=copy_to_clipboard`, `super+v=paste_from_clipboard`; Hyper split binds dropped. Exclusion app_ids `com.mitchellh.ghostty`, `foot`, `org.wezfurlong.wezterm`. Files symlinked individually (DMS writes `~/.config/ghostty/themes/dankcolors`). |
 | 5 | Fedora policy: one release behind | F44 until F46 GA (~2027-04). README release-upgrade procedure: manual snapshot → `dnf versionlock clear` → `dnf system-upgrade` → verify → re-lock. `70-verify` warns when a lock's `.fcNN` ≠ `VERSION_ID`. |
-| 6 | Output | `output DP-7 mode 3840x2160@240Hz adaptive_sync on scale 1.5`. `WLR_DRM_DEVICES=/dev/dri/by-path/pci-0000:01:00.0-card` (hide AMD iGPU from wlroots). HDR off. |
+| 6 | Output | `output DP-7 mode 3840x2160@240Hz adaptive_sync on scale 1.5`. `WLR_DRM_DEVICES` is colon-separated so a by-path name cannot be used; stage 40 installs udev rule `70-vekrona-dgpu.rules` creating `/dev/dri/vekrona-dgpu` symlink for PCI 0000:01:00.0 (RTX 4090); stage 50 writes `~/.config/environment.d/vekrona-gpu.conf` with `WLR_DRM_DEVICES=/dev/dri/vekrona-dgpu` only when that device exists (hides AMD iGPU from wlroots). HDR off. |
 | 7 | Input + **Hyper = Ctrl+Alt+Super (Shift removed — review finding: with Shift inside Hyper, Hyper+Shift+X is the same mask as Hyper+X and overwrites it)** | `xkb_layout us,ua`, `xkb_options grp:alts_toggle,shift:both_capslock_cancel`, repeat 40/250, numlock on, flat accel -0.7. All letter binds `bindsym --to-code`. Sway: `set $hyper Mod4+Ctrl+Mod1`; Hyper = focus/launch layer, Hyper+Shift = move/secondary layer. |
-| 8 | UI: **DMS on Quickshell**, pinned COPR packages | COPRs `avengemedia/dms` + `avengemedia/danklinux`. Stage 30: `dnf install --from-repo=copr:copr.fedorainfracloud.org:avengemedia:danklinux quickshell` (swap off omedora build; assert `rpm -q --qf '%{vendor}' quickshell` ≠ agaspar) **before** locking `dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland`. README: Qt lock holds ~44 qt6 packages; `dnf check-upgrade 'qt6-*'` shows what is withheld. `dms.service` drop-in: `[Unit] ConditionEnvironment=XDG_CURRENT_DESKTOP=sway` `PartOf=sway-session.target` `[Service] Environment=QSG_RHI_BACKEND=vulkan` `[Install] WantedBy=sway-session.target` (not graphical-session.target: would start inside Hyprland/GNOME fallbacks and fight for `org.freedesktop.Notifications`). DMS polkit agent is the only agent (`lxqt-policykit` stays installed as a sway-config-fedora dep but is never exec'd). Removed from use (not from disk, sway-config-fedora requires some): waybar, fuzzel, mako, swayosd, swaylock, swayidle, wlsunset, swaybg, cliphist. |
-| 9 | Idle | DMS settings: `acMonitorTimeout: 600`, `acLockTimeout: 300`, `acSuspendTimeout: 1800`, `lockBeforeSuspend: true`, `loginctlLockIntegration: true`. logind `InhibitDelayMaxSec=15` (file `vekrona-inhibit-delay.conf`). README: if Quickshell dies while locked, Sway paints red; recovery from TTY: `SWAYSOCK=… WAYLAND_DISPLAY=… dms ipc call lock lock`. |
-| 10 | Sleep disabler | `vekrona-caffeine [30m|1h|2h|off]` = `systemd-inhibit --what=sleep --who=vekrona --why=caffeine sleep N` (a deliberate wall-clock duration is the feature, not pacing) + DMS notification; bound Hyper+Shift+c. DMS bar indicator: *unverified* plugin API → TODO.md. |
+| 8 | UI: **DMS on Quickshell**, pinned COPR packages | COPRs `avengemedia/dms` + `avengemedia/danklinux`. Stage 30: `dnf install --from-repo=copr:copr.fedorainfracloud.org:avengemedia:danklinux quickshell` (swap off omedora build; assert `rpm -q --qf '%{vendor}' quickshell` ≠ agaspar) **before** locking `dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland`. README: Qt lock holds ~44 qt6 packages; `dnf check-upgrade 'qt6-*'` shows what is withheld. `dms.service` drop-in (`config/systemd-user/dms.service.d/vekrona.conf`): `[Unit] ConditionEnvironment=XDG_CURRENT_DESKTOP=sway` `PartOf=sway-session.target` `[Service] Environment=QSG_RHI_BACKEND=vulkan` (no [Install]); enablement via `systemctl --user add-wants sway-session.target dms.service` (stage 50 asserts graphical-session.target.wants has no dms.service, isolating from Hyprland/GNOME). DMS polkit agent is the only agent (`lxqt-policykit` stays installed as a sway-config-fedora dep but is never exec'd). Removed from use (not from disk, sway-config-fedora requires some): waybar, fuzzel, mako, swayosd, swaylock, swayidle, wlsunset, swaybg, cliphist. |
+| 9 | Idle | DMS settings seed keys actually used: `acMonitorTimeout: 600` `acLockTimeout: 300` `acSuspendTimeout: 1800` `lockBeforeSuspend: true` `loginctlLockIntegration: true` `currentThemeName: "custom"` `customThemeFile` (with `__HOME__` substituted by stage 50) `monoFontFamily: "JetBrainsMono Nerd Font"` `clockFormat: "24h"`. Night mode and wallpaper are DMS *session* keys, set via `dms ipc call night ...` / `wallpaper set`. logind `InhibitDelayMaxSec=15` (file `vekrona-inhibit-delay.conf`). README: if Quickshell dies while locked, Sway paints red; recovery from TTY: `SWAYSOCK=… WAYLAND_DISPLAY=… dms ipc call lock lock`. |
+| 10 | Sleep disabler | `vekrona-caffeine [30m|1h|2h|off|status]` = transient user unit via `systemd-inhibit --what=sleep --who=vekrona --why="caffeine <duration>" sleep <seconds>` (backgrounded, PID + end-time stored to manage on/off/status) + DMS notification; bound Hyper+Shift+c. Invocation with no args defaults to 1h. DMS bar indicator: *unverified* plugin API → TODO.md. |
 | 11 | Login: **greetd + tuigreet** | `/etc/greetd/config.toml`: `[terminal] vt = 1`, `[default_session] command = "tuigreet --time --remember --cmd start-sway"`, `user = "greetd"`. tmpfiles `d /var/cache/tuigreet 0755 greetd greetd`. Switch = stage 90a: `systemctl disable gdm && systemctl enable --force greetd`, reboot. |
 | 12 | Omarchy parts | Themes (DMS custom JSON + DMS-run matugen templates, verified DMS runs matugen for static themes), launcher/power menu (DMS), screenshot grim+slurp+swappy, recording wf-recorder, keybindings ported to Hyper, clipboard/night/calendar (DMS), caffeine (#10). Wallpaper per theme. Webapps Firefox. Dropped: Chrome webapps, app set, wallpaper cycling. |
 | 13 | Themes | Tokyo Night, Catppuccin Mocha, Gruvbox Dark, Nord: `config/dms-themes/<name>.json` + wallpaper. `vekrona-theme <name>` = `dms ipc call settings set customThemeFile <path>` + `dms ipc call wallpaper set <path>`. Nerd font: **vendored** JetBrainsMono Nerd Font TTFs (OFL) → `~/.local/share/fonts/vekrona/`; verify `fc-list | grep -q 'JetBrainsMono Nerd'`. |
 | 14 | Webapps | `firefox -CreateProfile "<app> ~/.mozilla/firefox/vekrona-<app>"` (idempotent via profiles.ini check), symlink `user.js` (with `toolkit.legacyUserProfileCustomizations.stylesheets=true`) and `chrome/userChrome.css`; launcher `vekrona-webapp <app>` = `firefox --name vekrona-<app> -P <app> --no-remote --new-window <url>`; `.desktop` with `StartupWMClass`. Apps: YouTube, WhatsApp Web. |
 | 15 | Gaming | Steam RPM, gamescope, ScopeBuddy 1.5.0 pinned script, mangohud, gamemode. `scb.conf`: `-f -W 3840 -H 2160 -r 240 --adaptive-sync -e`. |
-| 16 | Snapshots | snapper `root` config, `NUMBER_LIMIT=10`, timeline off; actions lines with `-c number`; `snapper-cleanup.timer`. `vekrona-rollback <N>`: mount subvolid=5, `mv root root.old-<ts>`, writable `btrfs subvolume snapshot .snapshots/N/snapshot root`, `mv root.old-*/.snapshots root/.snapshots`, reboot; README warns `/boot` is separate ext4 (pick a kernel present in the snapshot). Rollback exercised for real in the VM (stage 1) and on the host after NVIDIA (stage 3); GRUB `subvol=` edit is look-only (read-only snapshot). TODO.md: nested subvolume for `/var/lib/libvirt/images`. |
-| 17 | Repo + mechanism | `~/wrk/vekrona` → `github.com/vekrona/vekrona`. Bash `install.sh [--skip STAGE]... [STAGE...]`; default = all except `90a`/`90b`. `sudo -v` at the start of every stage, no keep-alive loop. Helpers: check → act → assert → die. `symlink`: refuses a non-symlink target (backs it up to `<target>.pre-vekrona` and logs). Symlink **files** wherever apps write into the directory. DMS `settings.json`: seeded from repo when absent, never overwritten (`install.sh --reset-dms-settings` to reseed); verify checks the fixed keys via `dms ipc call settings get`. |
+| 16 | Snapshots | snapper `root` config, `NUMBER_LIMIT=10`, timeline off; actions lines with `-c number`; `snapper-cleanup.timer`. `vekrona-snapshot [description]` calls `snapper -c root create -c number -d "<description>"` (prints the snapshot number). `vekrona-rollback [--yes] <N>`: mount subvolid=5, rename current `root` → `root.old-<timestamp>`, create writable `btrfs subvolume snapshot .snapshots/N/snapshot` as new `root`, move old root's `.snapshots/` into new root, reboot; README warns `/boot` is separate ext4 (pick a kernel present in the snapshot). Rollback exercised for real in the VM (stage 1) and on the host after NVIDIA (stage 3); GRUB `subvol=` edit is look-only (read-only snapshot). TODO.md: nested subvolume for `/var/lib/libvirt/images`. |
+| 17 | Repo + mechanism | `~/wrk/vekrona` → `github.com/vekrona/vekrona`. Bash `install.sh [--skip STAGE]... [--reset-dms-settings] [STAGE...]`; default stages = `00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming 70-verify` (cleanup stages `90a-switch-dm` `90b-remove` must be named explicitly). `install.sh 70` alone verifies the full default set. `sudo -v` at the start of every stage, no keep-alive loop. Helpers: check → act → assert → die. `ensure_symlink` refuses a non-symlink target (backs it up to `<target>.pre-vekrona` and logs); **symlink files** wherever apps write into directories. DMS `settings.json`: seeded from repo when absent, never overwritten (`install.sh --reset-dms-settings` to reseed); verify checks the fixed keys via `dms ipc call settings get`. Versionlock state read from `/etc/dnf/versionlock.toml` (`name =` / `value =` lines); stage 10 locks `akmod-nvidia xorg-x11-drv-nvidia*` after install; stage 30 locks `sway wlroots0.19 dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots`. Verify checks `.fcNN` suffix matches `VERSION_ID` (warns on mismatch). |
 | 18 | Cleanup, two stages, after Sway proven | **90a-switch-dm**: precondition current session is Sway; `dnf mark user NetworkManager polkit wireplumber pipewire xdg-desktop-portal-gtk gnome-keyring gnome-keyring-pam`; disable gdm, enable --force greetd; reboot. **90b-remove**: precondition `systemctl is-active gdm` = inactive and session is Sway (greetd-started); `dnf remove --assumeno` review printed first, then explicit list: `omedora omedora-settings omedora-nerd-fonts hyprland* uwsm xdg-desktop-portal-hyprland keyd hyprsunset plasma-* kf6-* polkit-kde gnome-shell gdm gnome-session* gnome-control-center` + `dnf environment remove workstation-product-environment kde-desktop-environment`, with `--setopt=protected_packages=dnf5,sudo,systemd,systemd-udev,NetworkManager,shim-x64,grub2-efi-x64,setup,selinux-policy-targeted`; drop COPRs omedora-4, alternateved/keyd, wezterm-nightly, phracek/PyCharm; assert `busctl --user status org.freedesktop.secrets`, fonts, `vekrona-*.conf` files present. Re-created overrides use `vekrona-*.conf` filenames: logind inhibit-delay, oomd PSI, faillock deny=10, usbcore autosuspend=-1. |
+
+## Review log
+
+Three Opus critic reviews pre-implementation (2026-09-29): system/desktop architecture, installer flow, VM harness. One Opus code review post-implementation identified 11 blockers, each fixed:
+
+- snapper actions CSV format parser (dnf5 plugin)
+- WLR_DRM_DEVICES udev rule creation and conditional environment.d write
+- dnf mark/versionlock command syntax and options
+- Firefox profile root creation with -CreateProfile
+- rollback snapshot ordering and .snapshots move sequence
+- DMS theme/wallpaper file path substitution
+- sway --validate flag compatibility
+- verify stage selection filtering after --skip
+- VM: SSH key generation, network setup, stage timeouts
+- ScopeBuddy SHA256 pin verification
+- 90b comprehensive removal review
+
+14 bugs fixed during implementation across parsing, permissions, unit targeting, and state management.
 
 ## Machine facts (verified)
 
@@ -51,22 +69,75 @@ Grilled 2026-09-29; three adversarial Opus reviews (system, desktop, installer) 
 ```
 vekrona/
   install.sh            # stage runner: parses --skip/STAGE, sudo -v per stage, runs stages/NN-*.sh in order
-  lib/common.sh         # log die run_root ensure_pkg ensure_copr ensure_repo_file ensure_line ensure_symlink ensure_user_unit versionlock_after_install assert_*
-  stages/00-repos.sh 10-nvidia.sh 20-snapper.sh 30-packages.sh 40-system.sh 50-user.sh 60-gaming.sh 70-verify.sh 90a-switch-dm.sh 90b-remove.sh
-  config/sway/{config,environment,config.d/*.conf}
-  config/environment.d/vekrona.conf        # QSG_RHI_BACKEND, WLR_DRM_DEVICES, MOZ_ENABLE_WAYLAND, QT_QPA_PLATFORM
-  config/xremap/config.yml
-  config/ghostty/config
-  config/DankMaterialShell/settings.seed.json
-  config/dms-themes/{tokyo-night,catppuccin-mocha,gruvbox-dark,nord}.json  + wallpapers/*.png (generated solid/gradient placeholders)
-  config/systemd-user/{xremap.service,dms.service.d/vekrona.conf}
-  config/firefox/webapps/{youtube,whatsapp}/{user.js,userChrome.css,app.desktop,url}
-  config/scopebuddy/scb.conf  config/mangohud/MangoHud.conf
-  etc/greetd/config.toml  etc/tmpfiles.d/vekrona-tuigreet.conf  etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf  etc/systemd/oomd.conf.d/vekrona.conf  etc/security/vekrona-faillock (applied via ensure_line deny=10)  etc/modprobe.d/vekrona-usb-autosuspend.conf  etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions  etc/sway/environment (system: SWAY_EXTRA_ARGS)
-  fonts/JetBrainsMonoNerdFont-*.ttf (vendored, OFL)
-  bin/vekrona-rollback vekrona-caffeine vekrona-theme vekrona-webapp vekrona-screenshot vekrona-record
-  vm/{Makefile,ks.cfg,session-check.sh}
-  README.md  TODO.md  LICENSE
+  lib/common.sh         # Helpers: log warn die root sudo_refresh require_cmd pkg_installed ensure_pkg 
+                        # ensure_pkg_from_repo ensure_pkg_absent repo_enabled ensure_repo_enabled ensure_copr 
+                        # ensure_copr_absent ensure_root_file ensure_line ensure_symlink ensure_symlink_tree 
+                        # ensure_dir ensure_system_unit ensure_user_unit_enabled ensure_user_in_group 
+                        # versionlock_has versionlock_evrs versionlock_installed kernel_cmdline_has grubby_has_arg 
+                        # ensure_kernel_arg session_is_sway session_started_by_gdm assert assert_file_contains 
+                        # stage_stamp mark_user_installed firefox_profile_root
+  stages/
+    00-repos.sh         # enable rpmfusion, cuda, copr:avengemedia/{dms,danklinux}, copr:blakegardner/xremap
+    10-nvidia.sh        # akmod-nvidia 615.x, cuda-toolkit, versionlock nvidia pkgs
+    20-snapper.sh       # root config NUMBER_LIMIT=10, disable timeline, install cleanup timer
+    30-packages.sh      # sway/ghostty/xremap-wlroots/dms/quickshell/mangohud/gamemode/etc, versionlock qt6/quickshell/xremap
+    40-system.sh        # greetd config, tmpfiles, logind/oomd/faillock/uinput configs, xremap module + udev rule
+    50-user.sh          # config symlinks, sway/xremap/dms units, DMS settings seed, fonts, flatpak overrides, firefox webapps
+    60-gaming.sh        # steam, gamescope, ScopeBuddy, gamemode units
+    70-verify.sh        # assert repos/driver/snapper/locks/sway/xremap/dms/fonts/flatpak/scb/webapps/mangohud
+    90a-switch-dm.sh    # mark packages, disable gdm, enable greetd, reboot
+    90b-remove.sh       # remove omedora/hyprland/plasma/gnome-shell/gdm, disable copr:omedora-4/alternateved/keyd
+  config/
+    sway/config
+    sway/environment              # SWAY_EXTRA_ARGS="--unsupported-gpu"
+    sway/config.d/
+    environment.d/vekrona.conf    # QSG_RHI_BACKEND=vulkan WLR_DRM_DEVICES MOZ_ENABLE_WAYLAND QT_QPA_PLATFORM
+    xremap/config.yml             # caps-hyper modmap, cmd-layer/terminal-word-nav keymaps, exact_match: true
+    ghostty/config
+    DankMaterialShell/settings.seed.json  # seeded keys: acMonitor/LockTimeout acSuspendTimeout lockBeforeSuspend 
+                                          # loginctlLockIntegration currentThemeName customThemeFile monoFontFamily clockFormat
+    dms-themes/
+      {tokyo-night,catppuccin-mocha,gruvbox-dark,nord}.json
+      wallpapers/{tokyo-night,catppuccin-mocha,gruvbox-dark,nord}.png
+    systemd-user/
+      xremap.service
+      dms.service.d/vekrona.conf  # [Unit] ConditionEnvironment=XDG_CURRENT_DESKTOP=sway PartOf=sway-session.target
+                                   # [Service] Environment=QSG_RHI_BACKEND=vulkan (no [Install])
+    firefox/webapps/{youtube,whatsapp}/{user.js,userChrome.css,app.desktop,url}
+    scopebuddy/scb.conf           # -f -W 3840 -H 2160 -r 240 --adaptive-sync -e
+    mangohud/MangoHud.conf
+  etc/
+    greetd/config.toml
+    tmpfiles.d/vekrona-tuigreet.conf
+    modules-load.d/vekrona-uinput.conf
+    modprobe.d/vekrona-nvidia.conf     # nouveau.blacklist, modprobe options
+    modprobe.d/vekrona-usb-autosuspend.conf
+    udev/rules.d/70-vekrona-dgpu.rules # symlink /dev/dri/vekrona-dgpu for PCI 0000:01:00.0
+    systemd/
+      logind.conf.d/vekrona-inhibit-delay.conf   # InhibitDelayMaxSec=15
+      oomd.conf.d/vekrona.conf         # PSI thresholds
+    dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions
+  fonts/
+    JetBrainsMonoNerdFont-{Regular,Bold,Italic,BoldItalic,Medium}.ttf  # vendored OFL
+    OFL.txt
+    VERSION
+  bin/
+    vekrona-snapshot      # snapper -c root create -c number
+    vekrona-rollback      # mount subvolid=5, writable snapshot, move .snapshots, reboot
+    vekrona-caffeine      # systemd-inhibit --what=sleep for 30m/1h/2h/off/status
+    vekrona-theme         # dms ipc call settings set customThemeFile <path>
+    vekrona-webapp        # firefox --name vekrona-<app> -P <profile> --no-remote --new-window <url>
+    vekrona-screenshot    # grim+slurp+swappy
+    vekrona-record        # wf-recorder
+  vm/
+    Makefile              # virt-install F44 Everything + kickstart, runs install.sh --skip nvidia + session-check.sh
+    ks.cfg                # autopart --type=btrfs, %post clones repo, NOPASSWD sudo, sets F44 hostname
+    session-check.sh      # headless Sway: dms lock status, xremap validate, vekrona-rollback
+    rollback-check.sh     # (currently unused)
+  docs/PLAN.md
+  README.md               # release upgrade procedure, known issues, webapps setup
+  TODO.md
+  LICENSE
 ```
 
 ## Key config content
