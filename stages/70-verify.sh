@@ -134,18 +134,18 @@ if ran 40-system; then
 fi
 
 if ran 50-user; then
-  check assert "sway config validates" sway --validate -c "$VEKRONA_HOME/.config/sway/config"
-  check assert "xremap config validates" xremap-wlroots --validate-config "$VEKRONA_HOME/.config/xremap/config.yml"
+  check assert "sway config validates" sway --validate -c "$HOME/.config/sway/config"
+  check assert "xremap config validates" xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml"
   dms_env="$(systemctl --user show dms -p Environment 2>/dev/null || true)"
   check assert "dms.service has QSG_RHI_BACKEND=vulkan" contains 'QSG_RHI_BACKEND=vulkan' "$dms_env"
-  check assert "dms.service wanted by sway-session.target" file_exists "$VEKRONA_HOME/.config/systemd/user/sway-session.target.wants/dms.service"
-  check assert "dms.service not wanted by graphical-session.target" bash -c "[[ ! -e '$VEKRONA_HOME/.config/systemd/user/graphical-session.target.wants/dms.service' ]]"
+  check assert "dms.service wanted by sway-session.target" file_exists "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
+  check assert "dms.service not wanted by graphical-session.target" bash -c "[[ ! -e '$HOME/.config/systemd/user/graphical-session.target.wants/dms.service' ]]"
   check assert "xremap.service enabled" user_unit_enabled xremap
   check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
-  check assert "DankMaterialShell settings.json present" file_exists "$VEKRONA_HOME/.config/DankMaterialShell/settings.json"
+  check assert "DankMaterialShell settings.json present" file_exists "$HOME/.config/DankMaterialShell/settings.json"
   check assert "DMS settings: lockBeforeSuspend=true, acLockTimeout=300" python3 -c "
 import json
-d = json.load(open('$VEKRONA_HOME/.config/DankMaterialShell/settings.json'))
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('lockBeforeSuspend') is True, d.get('lockBeforeSuspend')
 assert d.get('acLockTimeout') == 300, d.get('acLockTimeout')
 "
@@ -162,9 +162,9 @@ assert d.get('acLockTimeout') == 300, d.get('acLockTimeout')
     check assert "flatpak x11 override set: $app_id" contains x11 "$override"
   done
 
-  check assert "youtube webapp profile registered" bash -c "grep -q 'vekrona-youtube' '$VEKRONA_HOME/.mozilla/firefox/profiles.ini'"
-  check assert "whatsapp webapp profile registered" bash -c "grep -q 'vekrona-whatsapp' '$VEKRONA_HOME/.mozilla/firefox/profiles.ini'"
-  check assert "vekrona-theme installed" file_exists "$VEKRONA_HOME/.local/bin/vekrona-theme"
+  check assert "youtube webapp profile registered" bash -c "grep -q 'vekrona-youtube' '$HOME/.mozilla/firefox/profiles.ini'"
+  check assert "whatsapp webapp profile registered" bash -c "grep -q 'vekrona-whatsapp' '$HOME/.mozilla/firefox/profiles.ini'"
+  check assert "vekrona-theme installed" file_exists "$HOME/.local/bin/vekrona-theme"
 fi
 
 if ran 60-gaming; then
@@ -172,7 +172,7 @@ if ran 60-gaming; then
   for p in gamescope mangohud gamemode steam; do
     check assert "package installed: $p" pkg_installed "$p"
   done
-  check assert "scopebuddy config present" file_exists "$VEKRONA_HOME/.config/scopebuddy/scb.conf"
+  check assert "scopebuddy config present" file_exists "$HOME/.config/scopebuddy/scb.conf"
 fi
 
 if ran 90a-switch-dm || ran 90b-remove; then
