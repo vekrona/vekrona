@@ -50,11 +50,16 @@ for s in "${selected[@]}"; do
 done
 [[ ${#run[@]} -gt 0 ]] || die "nothing to run"
 
+verify_scope=("${run[@]}")
 if [[ ${#run[@]} -eq 1 && "${run[0]}" == "70-verify" ]]; then
-  export VEKRONA_STAGES="${DEFAULT_STAGES[*]}"
-else
-  export VEKRONA_STAGES="${run[*]}"
+  verify_scope=()
+  for s in "${DEFAULT_STAGES[@]}"; do
+    skipped=0
+    for k in "${skip[@]+"${skip[@]}"}"; do [[ "$k" == "$s" ]] && skipped=1; done
+    [[ $skipped -eq 1 ]] || verify_scope+=("$s")
+  done
 fi
+export VEKRONA_STAGES="${verify_scope[*]}"
 [[ $EUID -eq 0 ]] && die "run as your user, not root; stages call sudo where needed"
 
 for s in "${run[@]}"; do
