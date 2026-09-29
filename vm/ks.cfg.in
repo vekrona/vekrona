@@ -14,13 +14,17 @@ network --bootproto=dhcp --hostname=vekrona-test
 
 rootpw --lock
 user --name=vekrona --password=vekrona --plaintext --groups=wheel
+sshkey --username=vekrona "@SSH_PUBKEY@"
 
-reboot
+shutdown
 
 %packages
 @core
 git
 openssh-server
+rsync
+python3
+inotify-tools
 %end
 
 %post

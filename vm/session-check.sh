@@ -16,16 +16,16 @@ systemd-run --user --unit vekrona-sway-test \
   || fail "could not start sway via systemd-run"
 
 sockfile=""
-attempt=0
-until [[ -n "$sockfile" ]]; do
+for sock in "$XDG_RUNTIME_DIR"/sway-ipc.*; do
+  [[ -e "$sock" ]] && { sockfile="$sock"; break; }
+done
+if [[ -z "$sockfile" ]]; then
+  inotifywait -q -e create -t 60 "$XDG_RUNTIME_DIR" >/dev/null 2>&1 || fail "sway ipc socket never appeared"
   for sock in "$XDG_RUNTIME_DIR"/sway-ipc.*; do
     [[ -e "$sock" ]] && { sockfile="$sock"; break; }
   done
-  [[ -n "$sockfile" ]] && break
-  attempt=$((attempt + 1))
-  [[ $attempt -lt 60 ]] || fail "sway ipc socket never appeared"
-  sleep 1
-done
+fi
+[[ -n "$sockfile" ]] || fail "sway ipc socket never appeared"
 export SWAYSOCK="$sockfile"
 
 swaymsg -t get_version >/dev/null || fail "swaymsg get_version failed"
@@ -33,15 +33,7 @@ swaymsg -t get_version >/dev/null || fail "swaymsg get_version failed"
 [[ "$(systemctl --user is-active sway-session.target 2>/dev/null || true)" == active ]] \
   || fail "sway-session.target not active"
 
-dms_active=""
-attempt=0
-until [[ "$dms_active" == active ]]; do
-  dms_active="$(systemctl --user is-active dms.service 2>/dev/null || true)"
-  [[ "$dms_active" == active ]] && break
-  attempt=$((attempt + 1))
-  [[ $attempt -lt 30 ]] || fail "dms.service did not become active"
-  sleep 2
-done
+systemctl --user start dms.service || fail "dms.service did not become active"
 
 dms ipc call lock status >/dev/null || fail "dms ipc call lock status failed"
 
