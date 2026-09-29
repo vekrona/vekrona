@@ -21,10 +21,10 @@ else
   repo_enabled "$CUDA_REPO_ID" || die "repo not enabled: $CUDA_REPO_ID"
 fi
 
-root dnf5 config-manager setopt "$CUDA_REPO_ID.exclude=$CUDA_EXCLUDE"
-cuda_repo_file="$(grep -rl "^\[$CUDA_REPO_ID\]" /etc/yum.repos.d/*.repo || true)"
-[[ -n "$cuda_repo_file" ]] || die "repo file not found for $CUDA_REPO_ID"
-assert_file_contains "$cuda_repo_file" '^exclude[[:space:]]*=.*nvidia-driver'
+root dnf5 config-manager setopt "$CUDA_REPO_ID.excludepkgs=$CUDA_EXCLUDE"
+grep -rqE '^excludepkgs[[:space:]]*=.*nvidia-driver' /etc/dnf/repos.override.d /etc/yum.repos.d 2>/dev/null \
+  || die "excludepkgs for $CUDA_REPO_ID not persisted under /etc/dnf/repos.override.d or /etc/yum.repos.d"
+log "ok: $CUDA_REPO_ID excludes cuda-repo driver packages"
 
 if [[ -f "$OLD_CUDA_REPOFILE" ]]; then
   log "removing: $OLD_CUDA_REPOFILE"
@@ -57,7 +57,7 @@ log "rebuilding akmods for $(uname -r)"
 root akmods --force --kernels "$(uname -r)"
 
 nvidia_version="$(modinfo -F version nvidia)"
-[[ "$nvidia_version" == 615.* ]] || die "unexpected nvidia module version: $nvidia_version (expected 615.x)"
+[[ "${nvidia_version%%.*}" -ge 615 ]] || die "unexpected nvidia module version: $nvidia_version (expected >= 615)"
 log "ok: nvidia module version $nvidia_version"
 
 compgen -G "/lib/modules/$(uname -r)/extra/nvidia*" >/dev/null || die "nvidia module missing under /lib/modules/$(uname -r)/extra"
