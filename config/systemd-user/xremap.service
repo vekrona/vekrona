@@ -1,0 +1,11 @@
+[Unit]
+Description=xremap key remapper
+PartOf=sway-session.target
+After=sway-session.target
+
+[Service]
+ExecStart=/usr/bin/xremap-wlroots --watch=config,device %h/.config/xremap/config.yml
+Restart=on-failure
+
+[Install]
+WantedBy=sway-session.target
