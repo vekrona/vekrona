@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf 'usage: %s <app>\n' "$(basename "$0")" >&2
+  exit 1
+}
+
+app="${1:-}"
+[[ -n "$app" ]] || usage
+
+self="$(readlink -f "$0")"
+repo_root="$(cd "$(dirname "$self")/.." && pwd)"
+url_file="$repo_root/config/firefox/webapps/$app/url"
+
+[[ -f "$url_file" ]] || { echo "unknown webapp: $app (no $url_file)" >&2; exit 1; }
+
+exec firefox --name "vekrona-$app" -P "vekrona-$app" --no-remote --new-window "$(cat "$url_file")"

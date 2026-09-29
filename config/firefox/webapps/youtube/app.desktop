@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=YouTube
+Exec=vekrona-webapp youtube
+StartupWMClass=vekrona-youtube
+Icon=youtube
+Type=Application
+Categories=Network;

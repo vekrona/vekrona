@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEST_DIR="$HOME/Videos/Recordings"
+
+if pgrep -x wf-recorder >/dev/null; then
+  pkill -INT -x wf-recorder
+  notify-send -a vekrona "Recording" "stopped, saved under $DEST_DIR"
+else
+  mkdir -p "$DEST_DIR"
+  FILE="$DEST_DIR/$(date +%Y%m%d-%H%M%S).mp4"
+  setsid wf-recorder -g "$(slurp)" -f "$FILE" &
+  disown
+  notify-send -a vekrona "Recording" "started, will save to $FILE"
+fi

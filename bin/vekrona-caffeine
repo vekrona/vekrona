@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/vekrona-caffeine.pid"
+
+usage() {
+  printf 'usage: %s [30m|1h|2h|off|status]\n' "$(basename "$0")" >&2
+  exit 1
+}
+
+seconds_for() {
+  case "$1" in
+    30m) echo 1800 ;;
+    1h) echo 3600 ;;
+    2h) echo 7200 ;;
+    *) usage ;;
+  esac
+}
+
+read_pid_file() {
+  [[ -f "$PID_FILE" ]] || return 1
+  read -r _pid _end < "$PID_FILE"
+  pid="$_pid"
+  end="$_end"
+}
+
+kill_existing() {
+  if read_pid_file; then
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+  fi
+}
+
+cmd="${1:-1h}"
+
+case "$cmd" in
+  off)
+    kill_existing
+    notify-send -a vekrona "Caffeine" "suspend inhibitor stopped"
+    echo "caffeine: off"
+    ;;
+  status)
+    if read_pid_file && kill -0 "$pid" 2>/dev/null; then
+      now="$(date +%s)"
+      remaining=$((end - now))
+      if (( remaining > 0 )); then
+        echo "caffeine: on, pid $pid, ${remaining}s remaining"
+      else
+        echo "caffeine: on, pid $pid, expiring"
+      fi
+    else
+      echo "caffeine: off"
+    fi
+    ;;
+  30m|1h|2h)
+    kill_existing
+    dur="$cmd"
+    secs="$(seconds_for "$dur")"
+    setsid systemd-inhibit --what=sleep --who=vekrona --why="caffeine $dur" sleep "$secs" &
+    pid=$!
+    disown "$pid"
+    printf '%s %s\n' "$pid" "$(( $(date +%s) + secs ))" > "$PID_FILE"
+    notify-send -a vekrona "Caffeine" "suspend inhibited for $dur"
+    echo "caffeine: on for $dur (pid $pid)"
+    ;;
+  *)
+    usage
+    ;;
+esac

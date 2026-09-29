@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODE="${1:-area}"
+DEST_DIR="$HOME/Pictures/Screenshots"
+FILE="$DEST_DIR/$(date +%Y%m%d-%H%M%S).png"
+
+mkdir -p "$DEST_DIR"
+
+case "$MODE" in
+  area)
+    grim -g "$(slurp)" - | tee "$FILE" | swappy -f -
+    ;;
+  output)
+    grim - | tee "$FILE" | swappy -f -
+    ;;
+  *)
+    printf 'usage: %s [area|output]\n' "$(basename "$0")" >&2
+    exit 1
+    ;;
+esac

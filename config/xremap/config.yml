@@ -1,0 +1,76 @@
+modmap:
+  - name: caps-hyper
+    remap:
+      CapsLock:
+        held: [Ctrl_L, Alt_L, Super_L]
+        alone: Esc
+        alone_timeout_millis: 300
+
+keymap:
+  - name: cmd-layer
+    exact_match: true
+    application:
+      not: [com.mitchellh.ghostty, foot, org.wezfurlong.wezterm]
+    remap:
+      Super-a: C-a
+      Super-c: C-c
+      Super-v: C-v
+      Super-x: C-x
+      Super-z: C-z
+      Super-s: C-s
+      Super-f: C-f
+      Super-n: C-n
+      Super-t: C-t
+      Super-w: C-w
+      Super-q: C-q
+      Super-r: C-r
+      Super-l: C-l
+      Super-p: C-p
+      Super-o: C-o
+      Super-i: C-i
+      Super-k: C-k
+      Super-b: C-b
+      Super-u: C-u
+      Super-d: C-d
+      Super-g: C-g
+      Super-h: C-h
+      Super-j: C-j
+      Super-e: C-e
+      Super-m: C-m
+      Super-y: C-y
+      Super-Shift-z: C-Shift-z
+      Super-Shift-t: C-Shift-t
+      Super-Shift-n: C-Shift-n
+      Super-Shift-p: C-Shift-p
+      Super-Shift-f: C-Shift-f
+      Super-Shift-g: C-Shift-g
+      Super-Shift-r: C-Shift-r
+      Super-Shift-w: C-Shift-w
+      Super-Left: Home
+      Super-Right: End
+      Super-Up: C-Home
+      Super-Down: C-End
+      Super-Shift-Left: Shift-Home
+      Super-Shift-Right: Shift-End
+      Super-Shift-Up: C-Shift-Home
+      Super-Shift-Down: C-Shift-End
+      Alt-Left: C-Left
+      Alt-Right: C-Right
+      Alt-Shift-Left: C-Shift-Left
+      Alt-Shift-Right: C-Shift-Right
+      Alt-BackSpace: C-BackSpace
+      Super-BackSpace: [Shift-Home, BackSpace]
+      Super-Shift-LeftBrace: C-PageUp
+      Super-Shift-RightBrace: C-PageDown
+      Super-Tab: Alt-Tab
+      Super-Shift-Tab: Alt-Shift-Tab
+      Super-comma: C-comma
+
+  - name: terminal-word-nav
+    exact_match: true
+    application:
+      only: [com.mitchellh.ghostty, foot, org.wezfurlong.wezterm]
+    remap:
+      Alt-Left: C-Left
+      Alt-Right: C-Right
+      Alt-BackSpace: C-BackSpace
