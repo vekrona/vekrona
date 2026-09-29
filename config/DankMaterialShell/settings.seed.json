@@ -1,0 +1,9 @@
+{
+  "acMonitorTimeout": 600,
+  "acLockTimeout": 300,
+  "acSuspendTimeout": 1800,
+  "lockBeforeSuspend": true,
+  "loginctlLockIntegration": true,
+  "customThemeFile": "",
+  "currentThemeName": "tokyo-night"
+}

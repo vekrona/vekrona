@@ -41,11 +41,11 @@ ensure_pkg_from_repo() {
   local p
   for p in "$@"; do
     local from
-    from="$(rpm -q --qf '%{FROM_REPO}\n' "$p" 2>/dev/null || true)"
+    from="$(dnf repoquery --installed --qf '%{from_repo}\n' "$p" 2>/dev/null || true)"
     if [[ "$from" == "$repo" ]]; then log "$p already from $repo"; continue; fi
     log "installing $p from $repo"
     root dnf install -y --from-repo="$repo" "$p"
-    from="$(rpm -q --qf '%{FROM_REPO}\n' "$p")"
+    from="$(dnf repoquery --installed --qf '%{from_repo}\n' "$p" 2>/dev/null)"
     [[ "$from" == "$repo" ]] || die "$p installed from $from, expected $repo"
   done
 }
