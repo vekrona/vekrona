@@ -3,7 +3,6 @@ set -euo pipefail
 
 VEKRONA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export VEKRONA_ROOT
-VEKRONA_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona"
 VEKRONA_USER="${SUDO_USER:-$USER}"
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
@@ -50,14 +49,12 @@ ensure_pkg_from_repo() {
   done
 }
 
-ensure_pkg_absent() {
-  local present=()
+mark_user_installed() {
+  local installed=()
   local p
-  for p in "$@"; do pkg_installed "$p" && present+=("$p"); done
-  [[ ${#present[@]} -eq 0 ]] && return 0
-  log "removing: ${present[*]}"
-  root dnf remove -y "${present[@]}"
-  for p in "${present[@]}"; do pkg_installed "$p" && die "package still installed: $p"; done
+  for p in "$@"; do pkg_installed "$p" && installed+=("$p"); done
+  [[ ${#installed[@]} -eq 0 ]] && { log "no installed packages to mark user among: $*"; return 0; }
+  root dnf mark -y user "${installed[@]}"
 }
 
 repo_enabled() { dnf repolist --enabled 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
@@ -115,7 +112,9 @@ ensure_symlink() {
   local src="$1" dst="$2"
   [[ -e "$src" ]] || die "symlink source missing: $src"
   if [[ -L "$dst" && "$(readlink -f "$dst")" == "$(readlink -f "$src")" ]]; then log "linked: $dst"; return 0; fi
-  if [[ -e "$dst" && ! -L "$dst" ]]; then
+  if [[ -L "$dst" ]]; then
+    warn "replacing symlink $dst, previous target: $(readlink "$dst")"
+  elif [[ -e "$dst" ]]; then
     local backup="$dst.pre-vekrona"
     [[ -e "$backup" ]] && die "backup already exists, resolve manually: $backup"
     warn "backing up existing $dst to $backup"
@@ -224,7 +223,10 @@ assert_file_contains() {
   log "ok: $file matches $pattern"
 }
 
-stage_stamp() {
-  ensure_dir "$VEKRONA_STATE"
-  date -Is > "$VEKRONA_STATE/$1.done"
+firefox_profile_root() {
+  if [[ -d "$HOME/.mozilla/firefox" ]]; then
+    printf '%s' "$HOME/.mozilla/firefox"
+  else
+    printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/firefox"
+  fi
 }

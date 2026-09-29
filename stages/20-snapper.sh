@@ -4,8 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
-require_cmd findmnt
-
 ensure_pkg snapper libdnf5-plugin-actions
 
 if [[ ! -d /etc/snapper/configs/root ]]; then
@@ -15,7 +13,12 @@ if [[ ! -d /etc/snapper/configs/root ]]; then
 fi
 
 snapper_config_value() {
-  root snapper -c root get-config | awk -F'\\|' -v k="$1" '{gsub(/^[ \t]+|[ \t]+$/,"",$1); if ($1==k) {gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}}'
+  local key="$1" line
+  line="$(root grep -E "^${key}=" /etc/snapper/configs/root 2>/dev/null | tail -n1)"
+  line="${line#*=}"
+  line="${line#\"}"
+  line="${line%\"}"
+  printf '%s' "$line"
 }
 
 ensure_snapper_setting() {

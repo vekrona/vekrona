@@ -22,11 +22,11 @@ ensure_pkg \
   kanshi wlr-randr brightnessctl playerctl \
   firefox \
   gnome-keyring gnome-keyring-pam \
-  gamescope mangohud gamemode steam \
+  gamescope mangohud gamemode steam libnotify \
   jetbrains-mono-fonts rsms-inter-fonts \
   accountsservice
 
-root dnf mark user \
+mark_user_installed \
   NetworkManager polkit wireplumber pipewire xdg-desktop-portal-gtk \
   gnome-keyring gnome-keyring-pam
 
