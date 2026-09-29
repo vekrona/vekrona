@@ -11,7 +11,7 @@ usage() {
 
 [[ $EUID -eq 0 ]] || exec sudo "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
 
-require_cmd findmnt mount umount mktemp btrfs
+require_cmd findmnt mount umount mountpoint mktemp btrfs
 
 confirm=1
 number=""
@@ -25,16 +25,27 @@ for arg in "$@"; do
 done
 [[ "$number" =~ ^[0-9]+$ ]] || usage
 
+has_tty() { : < /dev/tty; } 2>/dev/null
+
+if [[ $confirm -eq 1 ]] && ! has_tty; then
+  die "refusing to prompt without a controlling tty; re-run with --yes"
+fi
+
 device="$(findmnt -no SOURCE /)"
 device="${device%%\[*}"
 [[ -n "$device" ]] || die "could not determine btrfs device of /"
 
-mountpoint="$(mktemp -d)"
-mount -o subvolid=5 "$device" "$mountpoint"
-cleanup() { umount "$mountpoint" 2>/dev/null || true; rmdir "$mountpoint" 2>/dev/null || true; }
+mountpoint_dir="$(mktemp -d)"
+mount -o subvolid=5 "$device" "$mountpoint_dir"
+cleanup() {
+  if mountpoint -q "$mountpoint_dir" 2>/dev/null; then
+    umount "$mountpoint_dir" 2>/dev/null || true
+  fi
+  rmdir "$mountpoint_dir" 2>/dev/null || true
+}
 trap cleanup EXIT
 
-snapshot_dir="$mountpoint/root/.snapshots/$number/snapshot"
+snapshot_dir="$mountpoint_dir/root/.snapshots/$number/snapshot"
 [[ -d "$snapshot_dir" ]] || die "snapshot not found: $snapshot_dir"
 
 kernel_mismatch=0
@@ -42,6 +53,7 @@ kernel_list="$(ls "$snapshot_dir/lib/modules" 2>/dev/null || true)"
 for vmlinuz in /boot/vmlinuz-*; do
   [[ -e "$vmlinuz" ]] || continue
   kernel="${vmlinuz#/boot/vmlinuz-}"
+  [[ "$kernel" == 0-rescue-* ]] && continue
   if ! grep -qxF "$kernel" <<<"$kernel_list"; then
     warn "kernel $kernel (current /boot) has no matching /lib/modules in snapshot $number"
     kernel_mismatch=1
@@ -53,17 +65,26 @@ if [[ $confirm -eq 1 ]]; then
   [[ "$answer" == "y" || "$answer" == "Y" ]] || die "aborted"
 fi
 
+new_root="$mountpoint_dir/root.vekrona-new"
+log "creating writable snapshot $number at $new_root"
+btrfs subvolume snapshot "$snapshot_dir" "$new_root"
+[[ -d "$new_root" ]] || die "snapshot creation did not produce: $new_root"
+
 backup="root.old-$(date +%Y%m%d%H%M%S)"
-log "renaming $mountpoint/root -> $mountpoint/$backup"
-mv "$mountpoint/root" "$mountpoint/$backup"
+log "renaming $mountpoint_dir/root -> $mountpoint_dir/$backup"
+mv "$mountpoint_dir/root" "$mountpoint_dir/$backup"
 
-log "creating writable snapshot $number as new root"
-btrfs subvolume snapshot "$mountpoint/$backup/.snapshots/$number/snapshot" "$mountpoint/root"
+log "promoting snapshot $number to root"
+mv "$new_root" "$mountpoint_dir/root"
 
-if [[ -d "$mountpoint/root/.snapshots" ]]; then
-  rmdir "$mountpoint/root/.snapshots" || die "root/.snapshots exists and is not empty, resolve manually"
+if [[ -d "$mountpoint_dir/root/.snapshots" ]]; then
+  rmdir "$mountpoint_dir/root/.snapshots" || die "root/.snapshots exists and is not empty, resolve manually"
 fi
-mv "$mountpoint/$backup/.snapshots" "$mountpoint/root/.snapshots"
+mv "$mountpoint_dir/$backup/.snapshots" "$mountpoint_dir/root/.snapshots"
+
+marker="$mountpoint_dir/root/.vekrona-rolled-back-from-$number"
+: > "$marker"
+[[ -f "$marker" ]] || die "failed to write rollback marker: $marker"
 
 log "rollback complete: / now points at snapshot $number, previous root kept as $backup"
 log "reboot to boot into the restored root: systemctl reboot"

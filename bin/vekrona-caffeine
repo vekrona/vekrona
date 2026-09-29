@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/vekrona-caffeine.pid"
+UNIT_NAME="vekrona-caffeine"
+UNIT="$UNIT_NAME.service"
 
 usage() {
   printf 'usage: %s [30m|1h|2h|off|status]\n' "$(basename "$0")" >&2
@@ -17,53 +18,60 @@ seconds_for() {
   esac
 }
 
-read_pid_file() {
-  [[ -f "$PID_FILE" ]] || return 1
-  read -r _pid _end < "$PID_FILE"
-  pid="$_pid"
-  end="$_end"
+unit_active() { systemctl --user is-active --quiet "$UNIT"; }
+
+start_caffeine() {
+  local dur="$1"
+  local secs
+  secs="$(seconds_for "$dur")"
+  if unit_active; then
+    systemctl --user stop "$UNIT"
+  fi
+  systemctl --user reset-failed "$UNIT" >/dev/null 2>&1 || true
+  systemd-run --user --collect --unit="$UNIT_NAME" --description="caffeine $dur" \
+    systemd-inhibit --what=sleep --who=vekrona --why="caffeine $dur" sleep "$secs"
+  notify-send -a vekrona "Caffeine" "suspend inhibited for $dur"
+  echo "caffeine: on for $dur"
 }
 
-kill_existing() {
-  if read_pid_file; then
-    if kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-    fi
-    rm -f "$PID_FILE"
+stop_caffeine() {
+  if unit_active; then
+    systemctl --user stop "$UNIT"
+    notify-send -a vekrona "Caffeine" "suspend inhibitor stopped"
+    echo "caffeine: off"
+  else
+    echo "caffeine: off (was not running)"
   fi
 }
 
-cmd="${1:-1h}"
+status_caffeine() {
+  if unit_active; then
+    local desc
+    desc="$(systemctl --user show "$UNIT" -p Description --value)"
+    echo "caffeine: on ($desc)"
+  else
+    echo "caffeine: off"
+  fi
+}
+
+cmd="${1:-}"
 
 case "$cmd" in
   off)
-    kill_existing
-    notify-send -a vekrona "Caffeine" "suspend inhibitor stopped"
-    echo "caffeine: off"
+    stop_caffeine
     ;;
   status)
-    if read_pid_file && kill -0 "$pid" 2>/dev/null; then
-      now="$(date +%s)"
-      remaining=$((end - now))
-      if (( remaining > 0 )); then
-        echo "caffeine: on, pid $pid, ${remaining}s remaining"
-      else
-        echo "caffeine: on, pid $pid, expiring"
-      fi
-    else
-      echo "caffeine: off"
-    fi
+    status_caffeine
     ;;
   30m|1h|2h)
-    kill_existing
-    dur="$cmd"
-    secs="$(seconds_for "$dur")"
-    setsid systemd-inhibit --what=sleep --who=vekrona --why="caffeine $dur" sleep "$secs" &
-    pid=$!
-    disown "$pid"
-    printf '%s %s\n' "$pid" "$(( $(date +%s) + secs ))" > "$PID_FILE"
-    notify-send -a vekrona "Caffeine" "suspend inhibited for $dur"
-    echo "caffeine: on for $dur (pid $pid)"
+    start_caffeine "$cmd"
+    ;;
+  "")
+    if unit_active; then
+      stop_caffeine
+    else
+      start_caffeine 1h
+    fi
     ;;
   *)
     usage

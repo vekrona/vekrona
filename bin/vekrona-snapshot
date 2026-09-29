@@ -5,4 +5,4 @@ ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
 description="${1:-vekrona-snapshot}"
-root snapper -c root create -c number -d "$description"
+root snapper -c root create -p -c number -d "$description"

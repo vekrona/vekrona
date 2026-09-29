@@ -2,6 +2,6 @@
 Name=YouTube
 Exec=vekrona-webapp youtube
 StartupWMClass=vekrona-youtube
-Icon=youtube
+Icon=web-browser
 Type=Application
 Categories=Network;
