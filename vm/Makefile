@@ -20,7 +20,8 @@ deps:
 	rpm -q virt-install >/dev/null 2>&1 || sudo dnf install -y virt-install
 	rpm -q virt-viewer >/dev/null 2>&1 || sudo dnf install -y virt-viewer
 	rpm -q libvirt-client >/dev/null 2>&1 || sudo dnf install -y libvirt-client
-	rpm -q virt-install virt-viewer libvirt-client >/dev/null
+	rpm -q inotify-tools >/dev/null 2>&1 || sudo dnf install -y inotify-tools
+	rpm -q virt-install virt-viewer libvirt-client inotify-tools >/dev/null
 	sudo systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket
 	$(VIRSH) net-info default >/dev/null 2>&1 || { echo "libvirt 'default' network not found" >&2; exit 1; }
 	active="$$($(VIRSH) net-info default | awk -F': *' '/^Active/{print $$2}')"; \
@@ -29,10 +30,10 @@ deps:
 	[ "$$autostart" = "yes" ] || sudo $(VIRSH) net-autostart default
 	groups "$$USER" | grep -qw libvirt || { sudo usermod -aG libvirt "$$USER"; echo "added $$USER to the libvirt group; log out and back in for this to take effect" >&2; }
 
-$(KS): $(KS_TEMPLATE)
+$(KS): $(KS_TEMPLATE) $(VM_SSH_PUBKEY)
 	@[ -n "$(VM_SSH_PUBKEY)" ] || { echo "no SSH public key found under $(HOME)/.ssh; set VM_SSH_PUBKEY=/path/to/key.pub" >&2; exit 1; }
 	@[ -r "$(VM_SSH_PUBKEY)" ] || { echo "SSH public key not readable: $(VM_SSH_PUBKEY)" >&2; exit 1; }
-	sed "s#@SSH_PUBKEY@#$$(cat "$(VM_SSH_PUBKEY)")#" "$(KS_TEMPLATE)" > "$(KS)"
+	SSH_PUBKEY="$$(cat "$(VM_SSH_PUBKEY)")" python3 -c 'import os, sys; open(sys.argv[2], "w").write(open(sys.argv[1]).read().replace("@SSH_PUBKEY@", os.environ["SSH_PUBKEY"]))' "$(KS_TEMPLATE)" "$(KS)"
 
 create: $(KS)
 	@os_variant="$(OS_VARIANT)"; \
@@ -52,9 +53,9 @@ create: $(KS)
 		--extra-args "inst.ks=file:/ks.cfg console=ttyS0" \
 		--graphics none \
 		--noautoconsole \
+		--noreboot \
 		--wait -1; \
 	$(VIRSH) start "$(VM_NAME)"; \
-	$(VIRSH) event --domain "$(VM_NAME)" --event lifecycle --timeout 300 >/dev/null 2>&1 || true; \
 	echo "install finished and the VM started; run 'make test' next"
 
 destroy:
@@ -70,30 +71,41 @@ ssh:
 	ssh -o StrictHostKeyChecking=accept-new "$(VM_USER)@$$ip"
 
 test:
-	@ip=""; attempt=0; \
+	@bridge="$$($(VIRSH) net-info default | awk -F': *' '/^Bridge/{print $$2}')"; \
+	[ -n "$$bridge" ] || { echo "could not determine bridge for network 'default'" >&2; exit 1; }; \
+	status_file="/var/lib/libvirt/dnsmasq/$$bridge.status"; \
+	ip=""; attempt=0; \
 	until [ -n "$$ip" ] || [ $$attempt -ge 60 ]; do \
 		ip="$$($(VIRSH) domifaddr "$(VM_NAME)" --source lease 2>/dev/null | awk '/ipv4/{print $$4}' | cut -d/ -f1)"; \
-		[ -n "$$ip" ] || $(VIRSH) event --domain "$(VM_NAME)" --all --timeout 2 >/dev/null 2>&1 || true; \
+		if [ -z "$$ip" ]; then \
+			if [ -e "$$status_file" ] && [ -r "$$status_file" ]; then \
+				inotifywait -q -t 5 -e modify,close_write "$$status_file" >/dev/null 2>&1 || true; \
+			elif [ -e "$$status_file" ]; then \
+				sudo inotifywait -q -t 5 -e modify,close_write "$$status_file" >/dev/null 2>&1 || true; \
+			else \
+				inotifywait -q -t 5 -e create "$$(dirname "$$status_file")" >/dev/null 2>&1 || true; \
+			fi; \
+		fi; \
 		attempt=$$((attempt + 1)); \
 	done; \
 	[ -n "$$ip" ] || { echo "VM did not get an IPv4 address" >&2; exit 1; }; \
 	echo "vm ip: $$ip"; \
-	ssh -o StrictHostKeyChecking=accept-new -o ConnectionAttempts=60 -o ConnectTimeout=5 -o BatchMode=yes "$(VM_USER)@$$ip" true \
+	ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes"; \
+	ssh $$ssh_opts -o ConnectionAttempts=60 "$(VM_USER)@$$ip" true \
 		|| { echo "ssh never became reachable" >&2; exit 1; }; \
-	ssh "$(VM_USER)@$$ip" 'sudo loginctl enable-linger $(VM_USER)'; \
-	rsync -a --exclude=.git "$(REPO_ROOT)/" "$(VM_USER)@$$ip:vekrona/"; \
-	ssh "$(VM_USER)@$$ip" 'cd vekrona && ./install.sh --skip 10-nvidia'; \
-	ssh "$(VM_USER)@$$ip" 'bash vekrona/vm/session-check.sh'; \
-	snap_n="$$(ssh "$(VM_USER)@$$ip" 'sudo /home/$(VM_USER)/.local/bin/vekrona-snapshot vm-test')"; \
-	ssh "$(VM_USER)@$$ip" "sudo /home/$(VM_USER)/.local/bin/vekrona-rollback --yes $$snap_n"; \
-	old_boot_id="$$(ssh "$(VM_USER)@$$ip" cat /proc/sys/kernel/random/boot_id)"; \
+	ssh $$ssh_opts "$(VM_USER)@$$ip" 'sudo loginctl enable-linger $(VM_USER)'; \
+	rsync -a --exclude=.git -e "ssh $$ssh_opts" "$(REPO_ROOT)/" "$(VM_USER)@$$ip:vekrona/"; \
+	ssh $$ssh_opts "$(VM_USER)@$$ip" 'cd vekrona && ./install.sh --skip 10-nvidia'; \
+	ssh $$ssh_opts "$(VM_USER)@$$ip" 'bash vekrona/vm/session-check.sh'; \
+	snap_n="$$(ssh $$ssh_opts "$(VM_USER)@$$ip" 'sudo /home/$(VM_USER)/.local/bin/vekrona-snapshot vm-test')"; \
+	ssh $$ssh_opts "$(VM_USER)@$$ip" "sudo /home/$(VM_USER)/.local/bin/vekrona-rollback --yes $$snap_n"; \
+	old_boot_id="$$(ssh $$ssh_opts "$(VM_USER)@$$ip" cat /proc/sys/kernel/random/boot_id)"; \
 	$(VIRSH) reboot "$(VM_NAME)"; \
 	new_boot_id=""; attempt=0; \
 	until [ -n "$$new_boot_id" ] && [ "$$new_boot_id" != "$$old_boot_id" ]; do \
-		[ $$attempt -lt 60 ] || { echo "vm did not come back with a new boot_id after reboot" >&2; exit 1; }; \
-		new_boot_id="$$(ssh -o StrictHostKeyChecking=accept-new -o ConnectionAttempts=60 -o ConnectTimeout=5 -o BatchMode=yes "$(VM_USER)@$$ip" cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"; \
-		[ "$$new_boot_id" != "$$old_boot_id" ] || $(VIRSH) event --domain "$(VM_NAME)" --all --timeout 2 >/dev/null 2>&1 || true; \
+		[ $$attempt -lt 5 ] || { echo "vm did not come back with a new boot_id after reboot" >&2; exit 1; }; \
+		new_boot_id="$$(ssh $$ssh_opts -o ConnectionAttempts=60 "$(VM_USER)@$$ip" cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"; \
 		attempt=$$((attempt + 1)); \
 	done; \
-	ssh "$(VM_USER)@$$ip" "sudo bash vekrona/vm/rollback-check.sh $$snap_n"; \
+	ssh $$ssh_opts "$(VM_USER)@$$ip" "sudo bash vekrona/vm/rollback-check.sh $$snap_n"; \
 	echo "vm test passed"
