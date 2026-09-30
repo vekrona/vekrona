@@ -460,9 +460,11 @@ which follows the journal and turns four kinds of entry into a recorded error:
 - any other journal entry logged at priority `err` or above
 
 `vekrona-error report --title T [--summary S] [--source vekrona|manual]` adds
-a fifth kind by hand: it writes one structured entry to the journal (`logger
---journald`, nothing more), so it works as root, with no session bus, and
-before `python3-gobject` is even installed. `lib/common.sh`'s `die()` calls it
+a fifth kind by hand: it writes one structured entry straight to
+`/run/systemd/journal/socket` in journald's own native protocol (no `logger`
+dependency, and multi-line summaries survive intact), so it works as root,
+with no session bus, and before `python3-gobject` is even installed.
+`lib/common.sh`'s `die()` calls it
 this way on every stage failure, and `vekrona-keybindings`' own `die()` does
 the same, so a broken stage or a failed keybinding shows up here too instead
 of (or as well as) wherever it already prints to. If the system journal isn't
@@ -472,25 +474,37 @@ critical toast saying so and falls back to the user journal only.
 Each error is recorded once under
 `~/.local/state/vekrona/errors/<id>/` (`record.json` plus a `context.txt`
 captured at the time: the relevant `journalctl`/`systemctl status`/
-`coredumpctl info` output). Repeats of the same error (by a fingerprint that
-normalizes out digits, hex, paths, and UUIDs from the message) bump its count
-instead of creating a new record, and a repeat within 10 minutes of the last
-one doesn't re-toast. `~/.local/state/vekrona/errors/unread` holds the count
-of errors still in `new` status, kept for the DMS bar button (added by
-another stream) to read. The newest 500 records are kept.
+`coredumpctl info` output; a corrupt `record.json` is quarantined to
+`record.json.corrupt` rather than crashing the watcher or the CLI). Repeats of
+the same error (by a fingerprint that normalizes out digits, hex, paths, and
+UUIDs from the message) bump its count instead of creating a new record. A
+repeat within 10 minutes of the last one doesn't re-toast, *unless* the record
+had been `ack`ed (or launched) since the last occurrence, in which case it
+re-toasts regardless of the window — an acked error recurring is exactly what
+acking is supposed to surface again. `~/.local/state/vekrona/errors/unread`
+holds the count of errors still in `new` status, kept for the DMS bar button
+(added by another stream) to read. The newest 500 records, by `last_seen`, are
+kept; older ones are pruned.
 
 A toast (via DMS's notification daemon) has two actions, "Fix with agent" and
 "Mute" (clicking the toast body does the same as "Fix with agent"): the
-former launches `vekrona-agent --error <id>` detached, the coding agent
-launcher built by another stream, which calls `vekrona-error prompt <id>` to
-get its brief (see `config/agents/skills/vekrona-diagnose/SKILL.md`, symlinked
-into `~/.claude/skills/`, `~/.codex/skills/`, and `~/.agents/skills/`); the
-latter appends the error's fingerprint to
+former launches `vekrona-agent --error <id>` as a monitored child (its failure
+or non-zero exit is itself toasted, not swallowed), the coding agent launcher
+built by another stream, which calls `vekrona-error prompt <id>` to get its
+brief (see `config/agents/skills/vekrona-diagnose/SKILL.md`, symlinked into
+`~/.claude/skills/`, `~/.codex/skills/`, and `~/.agents/skills/`) and marks the
+record `launched`; the latter appends the error's fingerprint to
 `~/.config/vekrona/errors-mute` (one regex per line, matched against both the
-fingerprint and the title) and marks it muted, so a matching error is dropped
+fingerprint and the title; an unparseable line is toasted once by name rather
+than silently ignored) and marks it muted, so a matching error is dropped
 silently from then on, no record, no toast. More than 5 toasts within 30
 seconds collapse into one "N new errors" toast instead, whose action opens a
-picker rather than any single error.
+picker rather than any single error. The watcher remembers which notification
+id belongs to which error only while the same notification daemon (D-Bus
+owner) that issued them is still running; if it restarts (or clicking a
+notification racing a watcher restart), the action is answered with a small
+"this notification is stale; use Hyper+Shift+A" toast instead of being
+silently dropped.
 
 ```
 vekrona-error list [--all]     # table of recorded errors, newest first (--all includes muted)

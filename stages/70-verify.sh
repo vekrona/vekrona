@@ -184,7 +184,6 @@ if ran 50-user; then
   done
   check assert "python3-gobject installed" pkg_installed python3-gobject
   check assert "vekrona-error --help runs" vekrona-error --help
-  check assert "logger --journald is available for vekrona-error report" bash -c "command -v logger >/dev/null"
   check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
   check assert "vekrona fontconfig linked" file_exists "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
   check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"

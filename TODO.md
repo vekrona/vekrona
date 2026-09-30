@@ -1,8 +1,5 @@
 # TODO
 
-- `vekrona-error`'s record schema documents a `launched` status alongside `new`/`seen`/`muted`, but no subcommand in `vekrona-error` itself ever sets it; it's reserved for the `vekrona-agent` launcher (a separate stream) to set once it has actually launched an agent on an error. If that stream needs a CLI hook for this rather than writing `record.json` directly, add one (e.g. `vekrona-error launched <id>`) instead of reaching into the store format by hand.
-- `vm/errors-check.sh`'s desktop-notification check starts `dbus-monitor` in the background and only then triggers the error, without a hard readiness signal that `dbus-monitor` has actually installed its match rule before the trigger fires (no such signal exists without extra tooling). In practice the watcher's own `journalctl -f` pickup latency should exceed `dbus-monitor`'s startup time, but this ordering is a tested-in-good-faith bounded wait, not a deterministic synchronization; revisit if the check turns out flaky in CI.
-
 - `stages/10-nvidia.sh`'s `REMOVE_GLOBS` includes the glob `libnvidia-*`, which is removed in the same transaction as the cuda-repo driver whenever `cuda_driver_installed` is true. This glob also matches CUDA runtime libraries unrelated to the display driver itself (e.g. `libnvidia-ml`, `libnvidia-container`), so a host that has those installed for other reasons could have them removed as a side effect of this stage. Narrow the glob to the driver-specific packages it actually targets.
 - Nested btrfs subvolume for /var/lib/libvirt/images so snapshots do not pin VM images.
 - DMS bar indicator for vekrona-caffeine (plugin API unverified).

@@ -9,7 +9,10 @@ description: Investigate and fix an error recorded by vekrona's error pipeline (
 a record's fields and the path to a captured `context.txt`. Read that file first,
 in full: it already holds the most relevant journal excerpt (or `coredumpctl
 info`/`systemctl status` output) captured at the moment the error was recorded, so
-you rarely need to go hunting for the same evidence again.
+you rarely need to go hunting for the same evidence again. The full store, every
+recorded error's `record.json` and `context.txt`, lives under
+`~/.local/state/vekrona/errors/<id>/`; `vekrona-error show <id>` prints both
+without you having to find and `cat` them by hand.
 
 ## Investigate
 
@@ -18,23 +21,30 @@ Pull more evidence with whichever of these fits the error's `source`:
 - `journalctl -u <unit> -n 200` (add `--user` for a user unit; the record's `unit`
   field tells you which) — more journal context around a failed unit than
   `context.txt` captured.
-- `coredumpctl list`, `coredumpctl info <pid>`, `coredumpctl debug <pid>` — a
-  coredump's backtrace; `debug` drops you into gdb if you need to go further than
-  `info`'s summary.
+- `coredumpctl list`, `coredumpctl info <pid>` — a coredump's backtrace and
+  metadata; if `info`'s summary isn't enough, `coredumpctl debug <pid>` launches
+  gdb on the coredump directly, or do it by hand: `coredumpctl dump <pid> -o
+  /tmp/core` then `gdb -batch -ex bt /usr/bin/<exe> /tmp/core`.
 - `systemctl status <unit>` / `systemctl --user status <unit>` — current state,
   separate from the state captured at record time.
 - `dnf history` / `dnf history info <id>` — whether a recent package transaction
   is implicated.
-- `snapper list` — whether a snapshot exists from before the change that likely
-  caused this, and what's available to roll back to (`vekrona-rollback <N>`, but
-  see "Before risky changes" below before you reach for it).
+- `sudo snapper -c root list` — whether a snapshot exists from before the change
+  that likely caused this, and what's available to roll back to
+  (`vekrona-rollback <N>`, but see "Before risky changes" below before you reach
+  for it).
 
 ## Fix it in the repo, not on the live system
 
-vekrona's `config/` is the source of truth; the copies under `$HOME` are symlinks
-`stages/50-user.sh` creates with `ensure_symlink`. Never hand-edit a symlinked
-file in `$HOME` expecting it to stick — edit the file in this repo instead, then
-re-run the stage that installs it:
+vekrona's `config/` is the source of truth for most dotfiles: `stages/50-user.sh`
+symlinks them into `$HOME` with `ensure_symlink`, so a hand-edit of, say,
+`~/.config/sway/config` doesn't stick — edit `config/sway/config` in this repo
+instead. But not everything under `$HOME` is a symlink: `~/.config/DankMaterialShell/settings.json`
+and `~/.config/environment.d/vekrona-gpu.conf`, for two, are files stage
+`50-user` *generates* (from a seed, or conditionally from hardware), not links
+back into the repo. Check with `ls -la` (or a `readlink`) before assuming which
+kind you're looking at. Either way, fix the stage or the seed in this repo, then
+re-run it to see the fix take effect:
 
 ```
 ./install.sh <stage>        # e.g. ./install.sh 50-user, or ./install.sh 70 to re-verify

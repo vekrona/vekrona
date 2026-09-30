@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 import argparse
+import fcntl
 import hashlib
 import json
 import os
 import re
 import shutil
+import signal
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
-import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
-
-sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from _vekrona_rofi import load_theme_colors, rofi_theme_str  # noqa: E402
 
 PROG = "vekrona-error"
 
@@ -21,14 +22,16 @@ RETENTION = 500
 DEDUPE_WINDOW = 600
 BURST_LIMIT = 5
 BURST_WINDOW = 30
+CURSOR_FLUSH_EVERY = 50
+INTERNAL_TOAST_RATE_LIMIT = 60
 
-UNIT_FAILED_ID = "d9b373ed55a64feb8242e02dbe79a49c"
-UNIT_PROCESS_EXITED_ID = "98e322203f7a4ed290d09fe03c09fe15"
-KERNEL_OOM_ID = "fe6faa94e7774663a0da52717891d8ef"
-OOMD_KILL_ID = "d989611b15e44c9dbf31e3c81256e4ed"
-COREDUMP_ID = "fc2e22bc6ee647b6b90729ab34a250b1"
+MESSAGE_ID_COREDUMP = "fc2e22bc6ee647b6b90729ab34a250b1"
+MESSAGE_ID_UNIT_FAILED = "d9b373ed55a64feb8242e02dbe79a49c"
+MESSAGE_ID_UNIT_PROCESS_EXITED = "98e322203f7a4ed290d09fe03c09fe15"
+MESSAGE_ID_KERNEL_OOM = "fe6faa94e7774663a0da52717891d8ef"
+MESSAGE_ID_OOMD_KILL = "d989611b15e44c9dbf31e3c81256e4ed"
 
-EXCLUDED_UNITS = {"vekrona-errors.service", "vekrona-errors-failed.service"}
+JOURNAL_SOCKET_PATH = "/run/systemd/journal/socket"
 
 
 def die(msg):
@@ -79,6 +82,27 @@ def unread_file():
     return os.path.join(store_dir(), "unread")
 
 
+def notifications_file():
+    return os.path.join(store_dir(), "notifications.json")
+
+
+def lock_file():
+    return os.path.join(store_dir(), ".lock")
+
+
+@contextmanager
+def store_lock():
+    path = lock_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def atomic_write(path, text):
     d = os.path.dirname(path)
     os.makedirs(d, exist_ok=True)
@@ -86,6 +110,8 @@ def atomic_write(path, text):
     try:
         with os.fdopen(fd, "w") as f:
             f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
         try:
@@ -107,12 +133,28 @@ def context_path(error_id):
     return os.path.join(record_dir(error_id), "context.txt")
 
 
-def load_record(error_id):
+def quarantine_record(error_id, exc, on_quarantine):
+    path = record_path(error_id)
+    try:
+        os.replace(path, path + ".corrupt")
+    except OSError:
+        pass
+    message = f"quarantined a corrupt record: {error_id}: {exc}"
+    warn(message)
+    if on_quarantine is not None:
+        on_quarantine(error_id, message)
+
+
+def load_record(error_id, on_quarantine=None):
     path = record_path(error_id)
     if not os.path.isfile(path):
         return None
-    with open(path) as f:
-        return json.load(f)
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        quarantine_record(error_id, exc, on_quarantine)
+        return None
 
 
 def save_record(error_id, record):
@@ -128,17 +170,17 @@ def all_record_ids():
     )
 
 
-def all_records():
+def all_records(on_quarantine=None):
     records = []
     for rid in all_record_ids():
-        rec = load_record(rid)
+        rec = load_record(rid, on_quarantine)
         if rec is not None:
             records.append(rec)
     return records
 
 
-def recompute_unread():
-    count = sum(1 for rec in all_records() if rec.get("status") == "new")
+def recompute_unread(on_quarantine=None):
+    count = sum(1 for rec in all_records(on_quarantine) if rec.get("status") == "new")
     path = unread_file()
     current = None
     if os.path.isfile(path):
@@ -152,12 +194,19 @@ def recompute_unread():
 
 
 def prune_retention():
-    ids = all_record_ids()
-    excess = len(ids) - RETENTION
+    records = [(rec["id"], rec.get("last_seen", "")) for rec in all_records()]
+    records.sort(key=lambda pair: pair[1])
+    excess = len(records) - RETENTION
     if excess <= 0:
-        return
-    for rid in ids[:excess]:
-        shutil.rmtree(record_dir(rid), ignore_errors=True)
+        return []
+    removed = []
+    for rid, _ in records[:excess]:
+        try:
+            shutil.rmtree(record_dir(rid))
+            removed.append(rid)
+        except OSError as exc:
+            warn(f"failed to prune retained record {rid}: {exc}")
+    return removed
 
 
 def get_record_or_die(error_id):
@@ -167,11 +216,18 @@ def get_record_or_die(error_id):
     return rec
 
 
-def load_mute_patterns():
+def load_mute_patterns(cache=None):
     path = mute_file()
-    if not os.path.isfile(path):
+    try:
+        mtime = os.stat(path).st_mtime
+    except OSError:
+        if cache is not None:
+            cache.clear()
         return []
+    if cache is not None and cache.get("mtime") == mtime:
+        return cache["patterns"]
     patterns = []
+    invalid = []
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -179,13 +235,17 @@ def load_mute_patterns():
                 continue
             try:
                 patterns.append(re.compile(line))
-            except re.error:
-                continue
+            except re.error as exc:
+                invalid.append((line, str(exc)))
+    if cache is not None:
+        cache["mtime"] = mtime
+        cache["patterns"] = patterns
+        cache["invalid"] = invalid
     return patterns
 
 
-def mute_matches(fingerprint, title):
-    patterns = load_mute_patterns()
+def mute_matches(fingerprint, title, cache=None):
+    patterns = load_mute_patterns(cache)
     return any(p.search(fingerprint) or p.search(title) for p in patterns)
 
 
@@ -245,10 +305,10 @@ def classify(entry):
     except (TypeError, ValueError):
         priority = 6
 
-    if message_id == UNIT_PROCESS_EXITED_ID:
+    if message_id == MESSAGE_ID_UNIT_PROCESS_EXITED:
         return None
 
-    if message_id == COREDUMP_ID:
+    if message_id == MESSAGE_ID_COREDUMP:
         comm = field_str(entry.get("COREDUMP_COMM"))
         exe = field_str(entry.get("COREDUMP_EXE"))
         pid = field_str(entry.get("COREDUMP_PID"))
@@ -260,7 +320,7 @@ def classify(entry):
             "identifier": exe or comm, "unit": "", "exe": exe, "pid": pid,
         }
 
-    if message_id == UNIT_FAILED_ID:
+    if message_id == MESSAGE_ID_UNIT_FAILED:
         user_unit = field_str(entry.get("USER_UNIT"))
         system_unit = field_str(entry.get("UNIT"))
         unit = user_unit or system_unit
@@ -273,18 +333,15 @@ def classify(entry):
             "is_user_unit": bool(user_unit),
         }
 
-    emitter_unit = field_str(entry.get("_SYSTEMD_USER_UNIT"))
-    if emitter_unit in EXCLUDED_UNITS:
-        return None
-
-    if message_id in (KERNEL_OOM_ID, OOMD_KILL_ID):
-        title = "process killed by systemd-oomd" if message_id == OOMD_KILL_ID \
+    if message_id in (MESSAGE_ID_KERNEL_OOM, MESSAGE_ID_OOMD_KILL):
+        title = "process killed by systemd-oomd" if message_id == MESSAGE_ID_OOMD_KILL \
             else "process killed by the kernel (out of memory)"
-        pid = field_str(entry.get("_PID"))
-        exe = field_str(entry.get("_EXE"))
+        pid = field_str(entry.get("PID")) or field_str(entry.get("_PID"))
+        comm = field_str(entry.get("COMM")) or field_str(entry.get("_COMM"))
+        exe = field_str(entry.get("EXE")) or field_str(entry.get("_EXE"))
         return {
             "source": "oom", "title": title, "summary": message,
-            "identifier": pid or exe or syslog_id, "unit": "", "exe": exe, "pid": pid,
+            "identifier": pid or exe or comm or syslog_id, "unit": "", "exe": exe, "pid": pid,
         }
 
     if syslog_id == "vekrona" and entry.get("VEKRONA_TITLE") is not None:
@@ -370,23 +427,39 @@ def age_str(iso):
     return f"{seconds // 86400}d"
 
 
+def journald_send(fields):
+    parts = []
+    for key, value in fields.items():
+        value_bytes = value.encode("utf-8")
+        if b"\n" in value_bytes:
+            parts.append(key.encode("utf-8") + b"\n" + struct.pack("<Q", len(value_bytes)) + value_bytes + b"\n")
+        else:
+            parts.append(f"{key}={value}\n".encode("utf-8"))
+    payload = b"".join(parts)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    try:
+        sock.connect(JOURNAL_SOCKET_PATH)
+        sock.send(payload)
+    finally:
+        sock.close()
+
+
 def cmd_report(args):
     title = args.title
     summary = args.summary or ""
     message = f"{title}: {summary}" if summary else title
-    payload_lines = [
-        "SYSLOG_IDENTIFIER=vekrona",
-        "PRIORITY=3",
-        f"VEKRONA_SOURCE={args.source}",
-        f"VEKRONA_TITLE={title}",
-    ]
+    fields = {
+        "SYSLOG_IDENTIFIER": "vekrona",
+        "PRIORITY": "3",
+        "VEKRONA_SOURCE": args.source,
+        "VEKRONA_TITLE": title,
+        "MESSAGE": message,
+    }
     if summary:
-        payload_lines.append(f"VEKRONA_SUMMARY={summary}")
-    payload_lines.append(f"MESSAGE={message}")
-    payload = "\n".join(payload_lines) + "\n"
+        fields["VEKRONA_SUMMARY"] = summary
     try:
-        subprocess.run(["logger", "--journald"], input=payload, text=True, check=True, timeout=5)
-    except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired) as exc:
+        journald_send(fields)
+    except OSError as exc:
         die(f"failed to write to the journal: {exc}")
 
 
@@ -418,11 +491,12 @@ SKILL_NAME = "vekrona-diagnose"
 
 
 def cmd_prompt(args):
-    rec = get_record_or_die(args.id)
-    if rec.get("status") == "new":
-        rec["status"] = "seen"
-        save_record(args.id, rec)
-        recompute_unread()
+    with store_lock():
+        rec = get_record_or_die(args.id)
+        if rec.get("status") != "muted":
+            rec["status"] = "launched"
+            save_record(args.id, rec)
+            recompute_unread()
 
     root = repo_root()
     skill_path = os.path.join(root, "config", "agents", "skills", SKILL_NAME, "SKILL.md")
@@ -441,6 +515,7 @@ def cmd_prompt(args):
         print(f"exe: {rec['exe']}{pid_part}")
     print()
     print(f"Context captured at record time: {ctx}")
+    print(f"Store: {store_dir()} (see also: vekrona-error show {rec['id']})")
     print()
     print(
         "Diagnose the root cause of this error and, if there is a reasonable fix, "
@@ -461,6 +536,20 @@ def cmd_prompt(args):
           f"run: vekrona-error ack {rec['id']}")
 
 
+def rofi_theme_str_or_die():
+    theme_bin = sibling_bin("vekrona-rofi-theme") or shutil.which("vekrona-rofi-theme")
+    if not theme_bin:
+        die("vekrona-rofi-theme not found (needed to theme the rofi picker)")
+    try:
+        result = subprocess.run([theme_bin], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, timeout=10)
+    except OSError as exc:
+        die(f"failed to run vekrona-rofi-theme: {exc}")
+    if result.returncode != 0:
+        die(f"vekrona-rofi-theme failed: {(result.stderr or '').strip()}")
+    return result.stdout
+
+
 def cmd_pick(args):
     records = sorted_records(include_muted=False)
     if not records:
@@ -474,9 +563,9 @@ def cmd_pick(args):
         f"[{r['source']}] {r['title']} ×{r.get('count', 1)} — {age_str(r.get('last_seen'))}"
         for r in records
     ]
-    colors = load_theme_colors(die)
+    theme_str = rofi_theme_str_or_die()
     result = subprocess.run(
-        ["rofi", "-dmenu", "-i", "-p", "Errors", "-format", "i", "-theme-str", rofi_theme_str(colors)],
+        ["rofi", "-dmenu", "-i", "-p", "Errors", "-format", "i", "-theme-str", theme_str],
         input="\n".join(lines), capture_output=True, text=True,
     )
     if result.returncode != 0 or not result.stdout.strip():
@@ -490,38 +579,42 @@ def cmd_pick(args):
 
 
 def cmd_mute(args):
-    rec = get_record_or_die(args.id)
-    apply_mute(rec)
+    with store_lock():
+        rec = get_record_or_die(args.id)
+        apply_mute(rec)
     print(f"muted: {args.id}")
 
 
 def cmd_ack(args):
     if args.all:
         changed = False
-        for rid in all_record_ids():
-            rec = load_record(rid)
-            if rec and rec.get("status") == "new":
-                rec["status"] = "seen"
-                save_record(rid, rec)
-                changed = True
-        if changed:
-            recompute_unread()
+        with store_lock():
+            for rid in all_record_ids():
+                rec = load_record(rid)
+                if rec and rec.get("status") == "new":
+                    rec["status"] = "seen"
+                    save_record(rid, rec)
+                    changed = True
+            if changed:
+                recompute_unread()
         print("acked all new errors")
         return
     if not args.id:
         die("ack requires an id or --all")
-    rec = get_record_or_die(args.id)
-    if rec.get("status") != "muted":
-        rec["status"] = "seen"
-        save_record(args.id, rec)
-        recompute_unread()
+    with store_lock():
+        rec = get_record_or_die(args.id)
+        if rec.get("status") != "muted":
+            rec["status"] = "seen"
+            save_record(args.id, rec)
+            recompute_unread()
     print(f"acked: {args.id}")
 
 
 def cmd_rm(args):
-    get_record_or_die(args.id)
-    shutil.rmtree(record_dir(args.id), ignore_errors=True)
-    recompute_unread()
+    with store_lock():
+        get_record_or_die(args.id)
+        shutil.rmtree(record_dir(args.id), ignore_errors=True)
+        recompute_unread()
     print(f"removed: {args.id}")
 
 
@@ -529,20 +622,22 @@ def system_journal_readable():
     try:
         result = subprocess.run(["journalctl", "--system", "-q", "-n", "1", "-o", "json"],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10, text=True)
-    except Exception:
-        return False
-    return result.returncode == 0
+    except OSError as exc:
+        return False, str(exc)
+    if result.returncode == 0:
+        return True, ""
+    return False, (result.stderr or "").strip() or f"exit status {result.returncode}"
 
 
-def journal_cmd(use_system, cursor):
-    cmd = ["journalctl", "-f", "-o", "json", "--show-cursor"]
+def journal_argv(use_system, cursor):
+    argv = ["journalctl", "-f", "-o", "json", "--show-cursor"]
     if not use_system:
-        cmd.append("--user")
+        argv.append("--user")
     if cursor:
-        cmd += ["--after-cursor", cursor]
+        argv += ["--after-cursor", cursor]
     else:
-        cmd.append("--boot")
-    return cmd
+        argv.append("--boot")
+    return argv
 
 
 def read_cursor():
@@ -556,23 +651,83 @@ def read_cursor():
 def cmd_watch(args):
     import gi
     gi.require_version("GLib", "2.0")
-    from gi.repository import GLib, Gio
+    gi.require_version("GLibUnix", "2.0")
+    from gi.repository import GLib, Gio, GLibUnix
+
+    def get_name_owner(bus, name):
+        try:
+            result = bus.call_sync(
+                "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                "GetNameOwner", GLib.Variant("(s)", (name,)),
+                GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 5000, None,
+            )
+            return result.unpack()[0]
+        except GLib.Error:
+            return None
 
     class Watcher:
-        def __init__(self, bus, loop):
+        def __init__(self, bus, loop, owner):
             self.bus = bus
             self.loop = loop
+            self.owner = owner
             self.exit_code = 0
             self.fingerprint_index = {}
             self.notif_map = {}
+            self.mute_cache = {}
+            self.toasted_invalid_mute_lines = set()
+            self.quarantine_toasted = set()
+            self.error_toast_times = {}
+            self.error_toast_suppressed = {}
+            self.notify_fail_count = 0
             self.burst_window_start = None
             self.burst_count = 0
             self.burst_collapsed = 0
             self.burst_flush_scheduled = False
+            self.lines_since_cursor_flush = 0
+            self.last_cursor = None
             for rid in all_record_ids():
-                rec = load_record(rid)
+                rec = load_record(rid, self._toast_once_quarantine)
                 if rec:
                     self.fingerprint_index[rec["fingerprint"]] = rid
+            self._load_notif_map()
+
+        def _toast_once_quarantine(self, error_id, message):
+            if error_id in self.quarantine_toasted:
+                return
+            self.quarantine_toasted.add(error_id)
+            self.send_plain_toast("vekrona-errors", message)
+
+        def _load_notif_map(self):
+            path = notifications_file()
+            if not os.path.isfile(path):
+                return
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                return
+            if data.get("owner") != self.owner or not self.owner:
+                return
+            for notif_id_str, mapping in data.get("map", {}).items():
+                self.notif_map[int(notif_id_str)] = tuple(mapping)
+
+        def _persist_notif_map(self):
+            data = {
+                "owner": self.owner,
+                "map": {str(k): list(v) for k, v in self.notif_map.items()},
+            }
+            try:
+                atomic_write(notifications_file(), json.dumps(data))
+            except OSError as exc:
+                warn(f"failed to persist the notification map: {exc}")
+
+        def _on_name_owner_changed(self, connection, sender, path, iface, signal, params, user_data):
+            name, old_owner, new_owner = params.unpack()
+            if name != "org.freedesktop.Notifications":
+                return
+            self.owner = new_owner or None
+            self.notif_map.clear()
+            self._persist_notif_map()
 
         def _notify(self, title, body, actions, hints):
             try:
@@ -587,11 +742,24 @@ def cmd_watch(args):
                 )
                 return result.unpack()[0]
             except Exception as exc:
-                warn(f"failed to send a desktop notification: {exc}")
+                self.notify_fail_count += 1
+                warn(f"failed to send a desktop notification (failure #{self.notify_fail_count}): {exc}")
                 return None
 
         def send_plain_toast(self, title, body, urgency=2):
             self._notify(title, body, [], {"urgency": GLib.Variant("y", urgency)})
+
+        def _toast_rate_limited(self, category, title, body):
+            now = time.monotonic()
+            last = self.error_toast_times.get(category, 0)
+            if now - last < INTERNAL_TOAST_RATE_LIMIT:
+                self.error_toast_suppressed[category] = self.error_toast_suppressed.get(category, 0) + 1
+                return
+            suppressed = self.error_toast_suppressed.pop(category, 0)
+            self.error_toast_times[category] = now
+            if suppressed:
+                body = f"{body} ({suppressed} more suppressed)"
+            self.send_plain_toast(title, body)
 
         def _burst_allow(self):
             now = time.monotonic()
@@ -619,6 +787,7 @@ def cmd_watch(args):
                                          {"urgency": GLib.Variant("y", 1)})
                 if notif_id is not None:
                     self.notif_map[notif_id] = ("pick", None)
+                    self._persist_notif_map()
             return False
 
         def send_error_toast(self, error_id, record):
@@ -629,44 +798,57 @@ def cmd_watch(args):
             if record.get("count", 1) > 1:
                 body = f"{body} ×{record['count']}"
             actions = ["fix", "Fix with agent", "mute", "Mute", "default", "Fix with agent"]
-            hints = {
-                "urgency": GLib.Variant("y", urgency),
-                "x-vekrona-error-id": GLib.Variant("s", error_id),
-            }
+            hints = {"urgency": GLib.Variant("y", urgency)}
             notif_id = self._notify(record["title"], body, actions, hints)
             if notif_id is not None:
                 self.notif_map[notif_id] = ("error", error_id)
+                self._persist_notif_map()
+
+        def _spawn_and_watch(self, argv):
+            try:
+                proc = Gio.Subprocess.new(
+                    argv, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE)
+            except GLib.Error as exc:
+                self.send_plain_toast("vekrona", f"failed to launch agent: {exc}")
+                return
+            proc.communicate_utf8_async(None, None, self._on_spawned_done)
+
+        def _on_spawned_done(self, proc, result):
+            try:
+                proc.communicate_utf8_finish(result)
+            except GLib.Error as exc:
+                self.send_plain_toast("vekrona", f"failed to launch agent: {exc}")
+                return
+            status = proc.get_exit_status()
+            if status != 0:
+                self.send_plain_toast("vekrona", f"failed to launch agent: exit status {status}")
 
         def launch_agent(self, error_id):
             agent_bin = sibling_bin("vekrona-agent") or shutil.which("vekrona-agent")
             if not agent_bin:
                 self.send_plain_toast("vekrona", "failed to launch agent: vekrona-agent not found on PATH")
                 return
-            try:
-                subprocess.Popen([agent_bin, "--error", error_id], start_new_session=True,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except OSError as exc:
-                self.send_plain_toast("vekrona", f"failed to launch agent: {exc}")
+            self._spawn_and_watch([agent_bin, "--error", error_id])
 
         def launch_pick(self):
-            self_bin = os.path.realpath(__file__)
-            try:
-                subprocess.Popen([self_bin, "pick"], start_new_session=True)
-            except OSError as exc:
-                self.send_plain_toast("vekrona", f"failed to launch agent: {exc}")
+            self._spawn_and_watch([os.path.realpath(__file__), "pick"])
 
         def do_mute(self, error_id):
-            rec = load_record(error_id)
-            if rec is not None:
-                apply_mute(rec)
+            with store_lock():
+                rec = load_record(error_id, self._toast_once_quarantine)
+                if rec is not None:
+                    apply_mute(rec)
 
         def on_action_invoked(self, connection, sender, path, iface, signal, params, user_data):
+            if sender != self.owner:
+                return
             try:
                 notif_id, action_key = params.unpack()
             except Exception:
                 return
             mapping = self.notif_map.get(notif_id)
             if mapping is None:
+                self.send_plain_toast("vekrona", "this notification is stale; use Hyper+Shift+A", urgency=1)
                 return
             kind, error_id = mapping
             if action_key in ("fix", "default"):
@@ -678,11 +860,14 @@ def cmd_watch(args):
                 self.do_mute(error_id)
 
         def on_notification_closed(self, connection, sender, path, iface, signal, params, user_data):
+            if sender != self.owner:
+                return
             try:
                 notif_id = params.unpack()[0]
             except Exception:
                 return
-            self.notif_map.pop(notif_id, None)
+            if self.notif_map.pop(notif_id, None) is not None:
+                self._persist_notif_map()
 
         def _stale(self, old_iso, now):
             if not old_iso:
@@ -693,7 +878,19 @@ def cmd_watch(args):
                 return True
             return (now - old).total_seconds() > DEDUPE_WINDOW
 
+        def _check_invalid_mute_lines(self):
+            invalid = self.mute_cache.get("invalid") or []
+            for line, reason in invalid:
+                if line in self.toasted_invalid_mute_lines:
+                    continue
+                self.toasted_invalid_mute_lines.add(line)
+                self.send_plain_toast("vekrona-errors", f"invalid mute pattern, ignored: {line} ({reason})")
+
         def ingest(self, classified):
+            with store_lock():
+                self._ingest_locked(classified)
+
+        def _ingest_locked(self, classified):
             source = classified["source"]
             identifier = classified["identifier"]
             title = classified["title"]
@@ -703,17 +900,20 @@ def cmd_watch(args):
             now = datetime.now(timezone.utc)
             now_iso = now.isoformat()
 
+            muted = mute_matches(fingerprint, title, self.mute_cache)
+            self._check_invalid_mute_lines()
+
             existing_id = self.fingerprint_index.get(fingerprint)
 
-            if mute_matches(fingerprint, title):
+            if muted:
                 if existing_id:
-                    rec = load_record(existing_id)
+                    rec = load_record(existing_id, self._toast_once_quarantine)
                     if rec and rec.get("status") != "muted":
                         apply_mute(rec)
                 return
 
             if existing_id:
-                rec = load_record(existing_id)
+                rec = load_record(existing_id, self._toast_once_quarantine)
                 if rec is None:
                     existing_id = None
                 elif rec.get("status") == "muted":
@@ -728,7 +928,7 @@ def cmd_watch(args):
                     save_record(existing_id, rec)
                     if became_new:
                         recompute_unread()
-                    if self._stale(old_last_seen, now):
+                    if became_new or self._stale(old_last_seen, now):
                         self.send_error_toast(existing_id, rec)
                     return
 
@@ -743,70 +943,105 @@ def cmd_watch(args):
             write_context(error_id, classified)
             self.fingerprint_index[fingerprint] = error_id
             recompute_unread()
-            prune_retention()
+            for removed_id in prune_retention():
+                self.fingerprint_index = {
+                    fp: rid for fp, rid in self.fingerprint_index.items() if rid != removed_id
+                }
             self.send_error_toast(error_id, record)
 
-        def handle_entry(self, entry):
+        def _persist_cursor(self, cursor):
+            self.lines_since_cursor_flush = 0
+            self.last_cursor = cursor
+            try:
+                atomic_write(cursor_file(), cursor + "\n")
+            except OSError as exc:
+                warn(f"failed to persist the journal cursor: {exc}")
+
+        def handle_entry_line(self, line):
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                return
             cursor = entry.get("__CURSOR")
+            classified = None
             try:
                 classified = classify(entry)
                 if classified is not None:
                     self.ingest(classified)
             except Exception as exc:
                 warn(f"failed to process a journal entry: {exc}")
-            if cursor:
-                try:
-                    atomic_write(cursor_file(), cursor + "\n")
-                except OSError as exc:
-                    warn(f"failed to persist the journal cursor: {exc}")
-            return False
+                self._toast_rate_limited("ingest-error", "vekrona-errors",
+                                          f"failed to process a journal entry: {exc}")
+            self.lines_since_cursor_flush += 1
+            if cursor and (classified is not None or self.lines_since_cursor_flush >= CURSOR_FLUSH_EVERY):
+                self._persist_cursor(cursor)
 
-        def on_journal_stderr(self, line):
-            warn(f"journalctl: {line}")
-            return False
+        def flush_cursor_on_exit(self):
+            if self.last_cursor and self.lines_since_cursor_flush:
+                self._persist_cursor(self.last_cursor)
 
         def on_journal_died(self):
             warn("journalctl exited unexpectedly; exiting so systemd restarts the watcher")
             self.exit_code = 1
+            self.flush_cursor_on_exit()
             self.loop.quit()
-            return False
 
-        def stdout_reader(self, proc):
+        def start_reading_stdout(self, proc):
+            stream = Gio.DataInputStream.new(proc.get_stdout_pipe())
+            stream.read_line_async(GLib.PRIORITY_DEFAULT, None, self._on_stdout_line)
+
+        def _on_stdout_line(self, stream, result):
             try:
-                for line in proc.stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entry = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    GLib.idle_add(self.handle_entry, entry)
-            finally:
-                GLib.idle_add(self.on_journal_died)
+                line, _length = stream.read_line_finish_utf8(result)
+            except GLib.Error as exc:
+                warn(f"journalctl produced an undecodable line, skipping: {exc}")
+                stream.read_line_async(GLib.PRIORITY_DEFAULT, None, self._on_stdout_line)
+                return
+            if line is None:
+                self.on_journal_died()
+                return
+            if line:
+                self.handle_entry_line(line)
+            stream.read_line_async(GLib.PRIORITY_DEFAULT, None, self._on_stdout_line)
 
-        def stderr_reader(self, proc):
-            for line in proc.stderr:
-                line = line.strip()
-                if line:
-                    GLib.idle_add(self.on_journal_stderr, line)
+        def start_reading_stderr(self, proc):
+            stream = Gio.DataInputStream.new(proc.get_stderr_pipe())
+            stream.read_line_async(GLib.PRIORITY_DEFAULT, None, self._on_stderr_line)
+
+        def _on_stderr_line(self, stream, result):
+            try:
+                line, _length = stream.read_line_finish_utf8(result)
+            except GLib.Error:
+                return
+            if line is None:
+                return
+            if line:
+                warn(f"journalctl: {line}")
+            stream.read_line_async(GLib.PRIORITY_DEFAULT, None, self._on_stderr_line)
 
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    owner = get_name_owner(bus, "org.freedesktop.Notifications")
     loop = GLib.MainLoop()
-    watcher = Watcher(bus, loop)
+    watcher = Watcher(bus, loop, owner)
 
-    use_system = system_journal_readable()
+    use_system, reason = system_journal_readable()
     if not use_system:
+        detail = f" ({reason})" if reason else ""
         watcher.send_plain_toast(
             "vekrona-errors",
             "cannot read the system journal: add your user to wheel or systemd-journal "
-            "and log in again",
+            f"and log in again{detail}",
         )
-        log("falling back to the user journal only")
+        log(f"falling back to the user journal only: {reason}")
 
     cursor = read_cursor()
-    proc = subprocess.Popen(journal_cmd(use_system, cursor), stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, text=True, bufsize=1)
+    try:
+        proc = Gio.Subprocess.new(
+            journal_argv(use_system, cursor),
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+        )
+    except GLib.Error as exc:
+        die(f"failed to start journalctl: {exc}")
 
     bus.signal_subscribe(None, "org.freedesktop.Notifications", "ActionInvoked",
                           "/org/freedesktop/Notifications", None, Gio.DBusSignalFlags.NONE,
@@ -814,19 +1049,26 @@ def cmd_watch(args):
     bus.signal_subscribe(None, "org.freedesktop.Notifications", "NotificationClosed",
                           "/org/freedesktop/Notifications", None, Gio.DBusSignalFlags.NONE,
                           watcher.on_notification_closed, None)
+    bus.signal_subscribe(None, "org.freedesktop.DBus", "NameOwnerChanged",
+                          "/org/freedesktop/DBus", "org.freedesktop.Notifications",
+                          Gio.DBusSignalFlags.NONE, watcher._on_name_owner_changed, None)
 
-    threading.Thread(target=watcher.stdout_reader, args=(proc,), daemon=True).start()
-    threading.Thread(target=watcher.stderr_reader, args=(proc,), daemon=True).start()
-
-    try:
-        loop.run()
-    finally:
-        proc.terminate()
+    def on_sigterm():
+        watcher.flush_cursor_on_exit()
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+            proc.send_signal(signal.SIGTERM)
+        except GLib.Error:
+            pass
+        loop.quit()
+        return False
 
+    GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, on_sigterm)
+
+    watcher.start_reading_stdout(proc)
+    watcher.start_reading_stderr(proc)
+
+    loop.run()
+    watcher.flush_cursor_on_exit()
     sys.exit(watcher.exit_code)
 
 
@@ -851,7 +1093,7 @@ def build_parser():
     p.add_argument("id")
     p.set_defaults(func=cmd_show)
 
-    p = sub.add_parser("prompt", help="print an agent prompt for one error, marking it seen")
+    p = sub.add_parser("prompt", help="print an agent prompt for one error, marking it launched")
     p.add_argument("id")
     p.set_defaults(func=cmd_prompt)
 
