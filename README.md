@@ -482,7 +482,7 @@ or hash management to maintain:
    `vekrona-update` runs `dnf upgrade`.
 2. **Codex, OpenCode, Pi, and Cursor**, via one system-wide, root-owned
    [mise](https://mise.jdx.dev/) install (`etc/yum.repos.d/mise.repo`,
-   package `mise`, plus `nodejs-npm` for mise's npm backend). `/etc/mise/config.toml`
+   package `mise`, plus `nodejs22-npm` for mise's npm backend). `/etc/mise/config.toml`
    pins the tool list and sets a supply-chain cooldown,
    `minimum_release_age = "1d"`: mise will not install or upgrade to a
    release less than a day old, so a same-day compromised release of any of

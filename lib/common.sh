@@ -203,20 +203,22 @@ gpg_key_fingerprint() {
 }
 
 gpg_pubkey_installed() {
-  local keyid_lower="$1"
-  rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$keyid_lower"
+  # rpm on this Fedora release stores a gpg-pubkey package's full lowercase fingerprint as %{VERSION},
+  # not the classic 8-hex short key id, so that is what this checks against.
+  local fingerprint_lower="$1"
+  rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$fingerprint_lower"
 }
 
 ensure_gpg_key_imported() {
-  local url="$1" fingerprint="$2" keyid got
-  keyid="$(tr '[:upper:]' '[:lower:]' <<<"${fingerprint: -8}")"
-  gpg_pubkey_installed "$keyid" && { log "gpg key already imported: $fingerprint"; return 0; }
+  local url="$1" fingerprint="$2" fingerprint_lower got
+  fingerprint_lower="$(tr '[:upper:]' '[:lower:]' <<<"$fingerprint")"
+  gpg_pubkey_installed "$fingerprint_lower" && { log "gpg key already imported: $fingerprint"; return 0; }
   got="$(gpg_key_fingerprint "$url")"
   [[ -n "$got" ]] || die "could not determine gpg key fingerprint: $url"
   [[ "$got" == "$fingerprint" ]] || die "gpg key fingerprint mismatch for $url: got $got, expected $fingerprint"
   log "importing gpg key: $url"
   root rpm --import "$url"
-  gpg_pubkey_installed "$keyid" || die "gpg key not imported: $fingerprint"
+  gpg_pubkey_installed "$fingerprint_lower" || die "gpg key not imported: $fingerprint"
 }
 
 CLAUDE_CODE_REPO_ID="claude-code"
@@ -227,7 +229,7 @@ MISE_REPO_ID="mise-repo"
 MISE_GPG_URL="https://mise.jdx.dev/gpg-key.pub"
 MISE_GPG_FINGERPRINT="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
 
-VEKRONA_AGENT_PKGS=(claude-code mise nodejs-npm)
+VEKRONA_AGENT_PKGS=(claude-code mise nodejs22-npm)
 VEKRONA_AGENT_TOOLS=(codex pi opencode cursor-agent)
 
 MISE_SYSTEM_DATA_DIR=/usr/local/share/mise

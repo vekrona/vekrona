@@ -288,8 +288,8 @@ fi
 if ran 55-agents; then
   check assert "repo enabled: $CLAUDE_CODE_REPO_ID" repo_enabled "$CLAUDE_CODE_REPO_ID"
   check assert "repo enabled: $MISE_REPO_ID" repo_enabled "$MISE_REPO_ID"
-  check assert "gpg key imported: claude-code" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"${CLAUDE_CODE_GPG_FINGERPRINT: -8}")"
-  check assert "gpg key imported: mise" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"${MISE_GPG_FINGERPRINT: -8}")"
+  check assert "gpg key imported: claude-code" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$CLAUDE_CODE_GPG_FINGERPRINT")"
+  check assert "gpg key imported: mise" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$MISE_GPG_FINGERPRINT")"
   for p in "${VEKRONA_AGENT_PKGS[@]}"; do
     check assert "package installed: $p" pkg_installed "$p"
   done

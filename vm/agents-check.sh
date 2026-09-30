@@ -26,7 +26,7 @@ echo "agents-check: all harnesses resolve on PATH in a login shell"
 owner_pkg="$(rpm -qf /usr/bin/claude 2>/dev/null || true)"
 [[ "$owner_pkg" == claude-code-* ]] || fail "/usr/bin/claude is not owned by claude-code: $owner_pkg"
 
-sig="$(rpm -q --qf '%{SIGPGP:pgpsig}\n' claude-code 2>/dev/null || true)"
+sig="$(rpm -q --qf '%{RSAHEADER:pgpsig}\n' claude-code 2>/dev/null || true)"
 keyid="$(grep -oE 'Key ID [0-9A-Fa-f]+' <<<"$sig" | awk '{print tolower($3)}')"
 [[ "${keyid: -8}" == "1a7ecace" ]] || fail "claude-code signature key id mismatch: $sig"
 echo "agents-check: claude-code signed by key id ...${keyid: -8}"
@@ -36,10 +36,14 @@ for d in "$MISE_SYSTEM_DATA_DIR" "$MISE_SYSTEM_CONFIG_DIR"; do
 done
 echo "agents-check: mise system dirs are not writable by $(id -un)"
 
-snapper_numbers() { sudo snapper -c root list --columns number --no-headers --csvout; }
+snapper_numbers() { sudo snapper -c root --csvout --no-headers list --columns number; }
+
+vekrona_update_bin="$(command -v vekrona-update || true)"
+[[ -n "$vekrona_update_bin" ]] || vekrona_update_bin="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bin/vekrona-update"
+[[ -x "$vekrona_update_bin" ]] || fail "vekrona-update not found (looked on PATH and at $vekrona_update_bin)"
 
 before_count="$(snapper_numbers | wc -l)"
-"$HOME/.local/bin/vekrona-update"
+"$vekrona_update_bin"
 after_count="$(snapper_numbers | wc -l)"
 
 new_count=$((after_count - before_count))
