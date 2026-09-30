@@ -4,6 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
+session_is_sway || die "current session is not Sway (XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset})"
+session_started_by_gdm && die "gdm is still active; reboot into the greetd-started Sway session first"
+[[ "$(systemctl is-enabled greetd 2>/dev/null || true)" == enabled ]] || die "greetd is not enabled; run 90a-switch-dm and reboot first"
+
 BASE_PROTECTED="dnf5,sudo,systemd,systemd-udev,shim-x64,grub2-efi-x64,setup,selinux-policy-targeted"
 
 declare -a desktop_pkgs
@@ -56,10 +60,6 @@ confirm() {
   read -r -p "vekrona: $prompt [type yes] " reply < /dev/tty
   [[ "$reply" == "yes" ]]
 }
-
-session_is_sway || die "current session is not Sway (XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset})"
-session_started_by_gdm && die "gdm is still active; reboot into the greetd-started Sway session first"
-[[ "$(systemctl is-enabled greetd 2>/dev/null || true)" == enabled ]] || die "greetd is not enabled; run 90a-switch-dm and reboot first"
 
 FEDORA_PROTECTED_CONF=/etc/dnf/protected.d/fedora-workstation.conf
 

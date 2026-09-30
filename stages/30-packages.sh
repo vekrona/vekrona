@@ -11,15 +11,14 @@ quickshell_vendor="$(rpm -q --qf '%{VENDOR}' quickshell)"
 [[ "$quickshell_vendor" != *agaspar* ]] || die "quickshell still built by agaspar/omedora: $quickshell_vendor"
 log "ok: quickshell vendor is $quickshell_vendor"
 
-declare -a desktop_pkgs
-read_pkg_list desktop_pkgs vekrona_desktop_pkgs
-
 desktop_pkgs_except_quickshell=()
-for pkg in "${desktop_pkgs[@]}"; do
+for pkg in "${VEKRONA_DESKTOP_PKGS[@]}"; do
   [[ "$pkg" == quickshell ]] || desktop_pkgs_except_quickshell+=("$pkg")
 done
 ensure_pkg "${desktop_pkgs_except_quickshell[@]}"
 
+declare -a desktop_pkgs
+read_pkg_list desktop_pkgs vekrona_desktop_pkgs
 mark_user_installed "${desktop_pkgs[@]}"
 
 ensure_system_unit enabled tuned tuned-ppd

@@ -4,7 +4,7 @@ shopt -s inherit_errexit
 
 VEKRONA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export VEKRONA_ROOT
-VEKRONA_USER="${SUDO_USER:-$USER}"
+VEKRONA_USER="$(id -un)"
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
@@ -107,6 +107,26 @@ ensure_line() {
   log "appending to $file: $line"
   printf '%s\n' "$line" | root tee -a "$file" >/dev/null
   grep -qxF -- "$line" "$file" || die "line not written to $file"
+}
+
+user_gsettings() {
+  local bus="/run/user/$(id -u)/bus"
+  if [[ -S "$bus" ]]; then
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" gsettings "$@"
+  else
+    dbus-run-session -- gsettings "$@"
+  fi
+}
+
+ensure_gsettings() {
+  local schema="$1" key="$2" value="$3" current
+  local want="'$value'"
+  current="$(user_gsettings get "$schema" "$key")" || die "gsettings get failed: $schema $key"
+  [[ "$current" == "$want" ]] && { log "gsettings already set: $schema $key"; return 0; }
+  log "setting gsettings: $schema $key = $value"
+  user_gsettings set "$schema" "$key" "$value" || die "gsettings set failed: $schema $key"
+  current="$(user_gsettings get "$schema" "$key")"
+  [[ "$current" == "$want" ]] || die "gsettings not applied: $schema $key"
 }
 
 ensure_symlink() {
@@ -255,13 +275,21 @@ assert_file_contains() {
 }
 
 wlroots_package_name() {
-  local out p
-  if ! out="$(rpm -q --whatprovides 'libwlroots-0.19.so()(64bit)' --qf '%{NAME}\n' 2>&1)"; then
-    die "no package provides libwlroots-0.19.so: $out"
+  local requires soname out p
+  requires="$(rpm -q --requires sway)" || die "sway must be installed before resolving its wlroots package"
+  soname="$(grep -m1 '^libwlroots' <<<"$requires")" || die "installed sway requires no libwlroots soname"
+  if ! out="$(rpm -q --whatprovides "$soname" --qf '%{NAME}\n' 2>&1)"; then
+    die "no installed package provides $soname: $out"
   fi
   p="$(sort -u <<<"$out" | head -n1)"
-  [[ -n "$p" ]] || die "no package provides libwlroots-0.19.so"
+  [[ -n "$p" ]] || die "no installed package provides $soname"
   printf '%s' "$p"
+}
+
+dms_changelog_version() {
+  local qml=/usr/share/quickshell/dms/Services/ChangelogService.qml v
+  v="$(grep -oP 'currentVersion:\s*"\K[^"]+' "$qml")" || die "cannot read DMS changelog version from $qml"
+  printf '%s' "$v"
 }
 
 read_pkg_list() {
@@ -276,12 +304,12 @@ read_pkg_list() {
 }
 
 VEKRONA_DESKTOP_PKGS=(
-  NetworkManager NetworkManager-wifi accountsservice bluez brightnessctl
-  danksearch dgop dms firefox flatpak gamemode gamescope ghostty
+  NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl
+  danksearch dconf dgop dms firefox flatpak gamemode gamescope ghostty
   gnome-keyring gnome-keyring-pam greetd grim inotify-tools
   jetbrains-mono-fonts jq kanshi
-  libnotify mangohud matugen pipewire pipewire-pulseaudio playerctl polkit
-  python3 quickshell rsms-inter-fonts slurp steam swappy sway sway-config-fedora
+  libnotify mangohud matugen perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
+  python3 python3-pyyaml quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd tuigreet tuned-ppd wf-recorder wireplumber wl-clipboard wlr-randr
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
 )

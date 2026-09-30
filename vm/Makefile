@@ -46,6 +46,7 @@ HARNESS_METADATA_URI := urn:vekrona:harness
 HARNESS_METADATA_KEY := vekrona
 HARNESS_METADATA_XML := <harness xmlns="urn:vekrona:harness">vekrona-vm-makefile</harness>
 
+INSTALL_WAIT_MINUTES ?= 60
 IP_WAIT_TIMEOUT ?= 120
 REBOOT_EVENT_TIMEOUT ?= 60
 AGENT_RECONNECT_TIMEOUT ?= 300
@@ -105,13 +106,13 @@ create: $(KS)
 		--channel unix,target.type=virtio,target.name=org.qemu.guest_agent.0 \
 		--location "$$tree_url" \
 		--initrd-inject "$(KS)" \
-		--extra-args "inst.ks=file:/ks.cfg console=ttyS0" \
+		--extra-args "inst.ks=file:/$(notdir $(KS)) console=ttyS0" \
 		--graphics spice,listen=127.0.0.1 \
 		--video virtio \
 		--serial pty,log.file=$(SERIAL_LOG),log.append=off \
 		--noautoconsole \
 		--noreboot \
-		--wait -1; \
+		--wait $(INSTALL_WAIT_MINUTES); \
 	$(VIRSH) metadata "$(VM_NAME)" "$(HARNESS_METADATA_URI)" --key $(HARNESS_METADATA_KEY) --set '$(HARNESS_METADATA_XML)' --config; \
 	$(VIRSH) start "$(VM_NAME)"; \
 	echo "install finished and the VM started; serial console logged to $(SERIAL_LOG); run 'make test' next"

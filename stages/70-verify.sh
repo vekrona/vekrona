@@ -39,6 +39,7 @@ file_lacks_qsg_backend() { ! grep -q '^QSG_RHI_BACKEND=' "$1" 2>/dev/null; }
 dir_exists() { [[ -d "$1" ]]; }
 owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
+gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
 not_repo_enabled() { ! repo_enabled "$1"; }
 copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 copr_enabled() { repo_enabled "$(copr_id "$1")"; }
@@ -46,7 +47,7 @@ unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; 
 user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" enabled; }
 pkg_absent() { ! pkg_installed "$1"; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
-nvidia_module_present_for() { compgen -G "$1/extra/nvidia*" >/dev/null || compgen -G "$1/weak-updates/nvidia*" >/dev/null; }
+nvidia_module_present_for() { modinfo -k "$1" nvidia >/dev/null 2>&1; }
 
 verify_greetd_active() {
   check assert "greetd enabled" greetd_enabled
@@ -99,7 +100,7 @@ if ran 10-nvidia; then
   for d in /lib/modules/*/; do
     kver="$(basename "$d")"
     [[ -e "/boot/vmlinuz-$kver" ]] || continue
-    warn_check "nvidia module present for kernel $kver" nvidia_module_present_for "${d%/}"
+    warn_check "nvidia module present for kernel $kver" nvidia_module_present_for "$kver"
   done
 
   check assert "cuda-fedora44-x86_64 enabled" repo_enabled cuda-fedora44-x86_64
@@ -169,16 +170,41 @@ if ran 50-user; then
   check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
   check assert "xremap config validates" xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml"
+  check assert "sway keybindings all described" vekrona-keybindings --check
+  check assert "vekrona-keybindings --list has workspace 10 bindings" bash -c "vekrona-keybindings --list | grep -qF 'workspace 1…10'"
+  check assert "vekrona-keybindings --list has the help binding" bash -c "vekrona-keybindings --list | grep -qF 'Show keybindings help'"
   check assert "dms.service wanted by sway-session.target" file_exists "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
   check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
   check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
+  check assert "vekrona fontconfig linked" file_exists "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
+  check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"
+  check assert "fc-match sans-serif (Ukrainian i, U+0456) -> Inter" bash -c "fc-match 'sans-serif:charset=0456' | grep -q Inter"
+  check assert "fc-match monospace -> JetBrainsMono Nerd Font" bash -c "fc-match monospace | grep -q 'JetBrainsMono Nerd Font'"
+  check assert "gsettings font-name: Atkinson Hyperlegible Next 11" gsettings_eq org.gnome.desktop.interface font-name "Atkinson Hyperlegible Next 11"
+  check assert "gsettings document-font-name: Atkinson Hyperlegible Next 11" gsettings_eq org.gnome.desktop.interface document-font-name "Atkinson Hyperlegible Next 11"
+  check assert "gsettings monospace-font-name: JetBrainsMono Nerd Font 11" gsettings_eq org.gnome.desktop.interface monospace-font-name "JetBrainsMono Nerd Font 11"
   check assert "DankMaterialShell settings.json present" file_exists "$HOME/.config/DankMaterialShell/settings.json"
+  check assert "DMS changelog for the installed version marked seen" file_exists "$HOME/.config/DankMaterialShell/.changelog-$(dms_changelog_version)"
   check assert "DMS settings: lockBeforeSuspend=true, acLockTimeout=300" python3 -c "
 import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('lockBeforeSuspend') is True, d.get('lockBeforeSuspend')
 assert d.get('acLockTimeout') == 300, d.get('acLockTimeout')
+"
+  check assert "DMS settings: fontFamily=Atkinson Hyperlegible Next" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+assert d.get('fontFamily') == 'Atkinson Hyperlegible Next', d.get('fontFamily')
+"
+
+  check assert "vekronaSwayWorkspaces plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaSwayWorkspaces/plugin.json"
+  check assert "vekronaSwayWorkspaces plugin enabled" bash -c "jq -e '.vekronaSwayWorkspaces.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
+  check assert "vekronaSwayWorkspaces plugin placed in a DankBar widget list" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+bars = d.get('barConfigs', [])
+assert any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 "
 
   declare -A electron_apps=(

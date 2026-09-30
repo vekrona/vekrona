@@ -1,0 +1,146 @@
+name: iso
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: iso-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FEDORA_RELEASE: 44
+  NETINST_CACHE_DIR: iso/.cache/netinst
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:44
+      options: --cap-add SYS_ADMIN --cap-add MKNOD --device /dev/loop-control --device-cgroup-rule="b 7:* rmw" --security-opt label=disable
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Trust the checkout ownership inside the container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install build dependencies
+        run: dnf install -y lorax xorriso gnupg2 git rsync openssh-clients python3
+
+      - name: Cache Fedora netinstall ISO
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NETINST_CACHE_DIR }}
+          key: netinst-fedora${{ env.FEDORA_RELEASE }}-${{ hashFiles('iso/fetch-netinst.sh') }}
+          restore-keys: |
+            netinst-fedora${{ env.FEDORA_RELEASE }}-
+
+      - name: Fetch verified Fedora netinstall ISO
+        id: netinst
+        run: |
+          mkdir -p "$NETINST_CACHE_DIR"
+          path="$(bash iso/fetch-netinst.sh "$FEDORA_RELEASE" "$NETINST_CACHE_DIR")"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
+      - name: Generate throwaway test SSH key
+        run: ssh-keygen -t ed25519 -N '' -C vekrona-ci-test -f "$RUNNER_TEMP/test-key"
+
+      - name: Build release ISO
+        run: bash iso/build.sh --netinst "${{ steps.netinst.outputs.path }}" --out "$RUNNER_TEMP/release.iso"
+
+      - name: Build test ISO
+        run: bash iso/build.sh --netinst "${{ steps.netinst.outputs.path }}" --out "$RUNNER_TEMP/test.iso" --test-ssh-pubkey "$RUNNER_TEMP/test-key.pub"
+
+      - name: Checksum release ISO
+        run: cd "$RUNNER_TEMP" && sha256sum release.iso > release.iso.sha256
+
+      - name: Upload release ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-iso
+          path: |
+            ${{ runner.temp }}/release.iso
+            ${{ runner.temp }}/release.iso.sha256
+          retention-days: 14
+
+      - name: Upload test ISO and throwaway key
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-iso
+          path: |
+            ${{ runner.temp }}/test.iso
+            ${{ runner.temp }}/test-key
+            ${{ runner.temp }}/test-key.pub
+          retention-days: 14
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM for the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install QEMU and OVMF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 ovmf
+
+      - name: Download test ISO and throwaway key
+        uses: actions/download-artifact@v4
+        with:
+          name: test-iso
+          path: iso-test
+
+      - name: Run the ISO install test under QEMU
+        env:
+          VEKRONA_TEST_SSH_KEY: ${{ github.workspace }}/iso-test/test-key
+          VEKRONA_QEMU_LOG_DIR: ${{ github.workspace }}/iso-test-logs
+        run: |
+          chmod 600 "$VEKRONA_TEST_SSH_KEY"
+          mkdir -p "$VEKRONA_QEMU_LOG_DIR"
+          bash iso/qemu-test.sh iso-test/test.iso
+
+      - name: Upload QEMU serial logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-test-logs
+          path: iso-test-logs
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release ISO
+        uses: actions/download-artifact@v4
+        with:
+          name: release-iso
+          path: release
+
+      - name: Attach ISO to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/release.iso
+            release/release.iso.sha256

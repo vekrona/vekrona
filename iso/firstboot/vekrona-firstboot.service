@@ -1,0 +1,18 @@
+[Unit]
+Description=vekrona first-boot install
+ConditionPathExists=!/var/lib/vekrona/firstboot.done
+Before=getty@tty1.service
+Wants=network-online.target
+After=network-online.target systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/vekrona-firstboot
+ExecStopPost=/usr/bin/rm -f /etc/sudoers.d/vekrona-firstboot
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

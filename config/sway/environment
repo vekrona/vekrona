@@ -1,1 +1,5 @@
 SWAY_EXTRA_ARGS="--unsupported-gpu"
+# Fedora's start-sway skips this on KVM, but virtio-gpu with SPICE still misplaces (and can hang on) the hardware cursor plane.
+if [ "$(systemd-detect-virt --vm)" = kvm ]; then
+  WLR_NO_HARDWARE_CURSORS=1
+fi

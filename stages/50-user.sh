@@ -79,6 +79,76 @@ PYEOF
   mv "$tmp" "$dest"
 }
 
+ensure_dms_setting_default() {
+  local key="$1" value="$2"
+  jq -e --arg k "$key" 'has($k)' "$dms_settings" >/dev/null && { log "DMS setting already set: $key"; return 0; }
+  log "setting DMS default: $key = $value"
+  local tmp
+  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
+  if ! jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$dms_settings" > "$tmp"; then
+    rm -f "$tmp"
+    die "jq failed to set DMS default: $key"
+  fi
+  mv "$tmp" "$dms_settings"
+  [[ "$(jq -r --arg k "$key" '.[$k]' "$dms_settings")" == "$value" ]] || die "DMS default not applied: $key"
+}
+
+ensure_dms_bar_widget_plugin() {
+  local stock_id="$1" plugin_id="$2"
+  local tmp
+  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
+  if ! python3 - "$dms_settings" "$stock_id" "$plugin_id" > "$tmp" <<'PYEOF'
+import json
+import sys
+
+path, stock_id, plugin_id = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(path) as f:
+    data = json.load(f)
+
+for bar in data.get("barConfigs", []):
+    for key in ("leftWidgets", "centerWidgets", "rightWidgets"):
+        widgets = bar.get(key)
+        if not isinstance(widgets, list) or plugin_id in widgets:
+            continue
+        if stock_id in widgets:
+            widgets[widgets.index(stock_id)] = plugin_id
+
+json.dump(data, sys.stdout, indent=2)
+sys.stdout.write("\n")
+PYEOF
+  then
+    rm -f "$tmp"
+    die "python3 failed to migrate DMS bar widget: $stock_id -> $plugin_id"
+  fi
+  if cmp -s "$tmp" "$dms_settings"; then
+    rm -f "$tmp"
+    log "DMS bar widget already migrated or $stock_id not present: $dms_settings"
+  else
+    mv "$tmp" "$dms_settings"
+    log "migrated DMS bar widget: $stock_id -> $plugin_id"
+  fi
+}
+
+ensure_dms_plugin_enabled() {
+  local plugin_id="$1"
+  local plugin_settings="$dms_settings_dir/plugin_settings.json"
+  if [[ -f "$plugin_settings" ]] && jq -e --arg id "$plugin_id" '.[$id].enabled == true' "$plugin_settings" >/dev/null 2>&1; then
+    log "DMS plugin already enabled: $plugin_id"
+    return 0
+  fi
+  log "enabling DMS plugin: $plugin_id"
+  local tmp
+  tmp="$(mktemp "$dms_settings_dir/.plugin_settings.json.XXXXXX")"
+  if [[ -f "$plugin_settings" ]]; then
+    jq --arg id "$plugin_id" '.[$id].enabled = true' "$plugin_settings" > "$tmp" || { rm -f "$tmp"; die "jq failed to enable DMS plugin: $plugin_id"; }
+  else
+    jq -n --arg id "$plugin_id" '{($id): {enabled: true}}' > "$tmp" || { rm -f "$tmp"; die "jq failed to create plugin_settings.json: $plugin_id"; }
+  fi
+  mv "$tmp" "$plugin_settings"
+  jq -e --arg id "$plugin_id" '.[$id].enabled == true' "$plugin_settings" >/dev/null || die "DMS plugin not enabled: $plugin_id"
+}
+
 theme_state_dir="$(vekrona_state_dir)"
 theme_state_file="$(vekrona_active_theme_file)"
 theme_name_file="$(vekrona_theme_name_file)"
@@ -136,6 +206,29 @@ fi
 seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/settings.seed.json" "$dms_settings"
 seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/session.seed.json" "$dms_session" 0
 
+ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
+ensure_dms_setting_default monoFontFamily "JetBrainsMono Nerd Font"
+
+ensure_symlink_tree "$VEKRONA_ROOT/config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/plugins"
+ensure_dms_plugin_enabled vekronaSwayWorkspaces
+ensure_dms_bar_widget_plugin workspaceSwitcher vekronaSwayWorkspaces
+assert "DMS bar has the vekrona workspace plugin or no stock workspaceSwitcher remains" python3 -c "
+import json
+d = json.load(open('$dms_settings'))
+bars = d.get('barConfigs', [])
+has_plugin = any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
+has_stock = any('workspaceSwitcher' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
+assert has_plugin or not has_stock, (has_plugin, has_stock)
+"
+
+dms_changelog_seen="$(dirname "$dms_settings")/.changelog-$(dms_changelog_version)"
+if [[ -e "$dms_changelog_seen" ]]; then
+  log "already present: $dms_changelog_seen"
+else
+  log "marking DMS changelog as seen: $dms_changelog_seen"
+  touch "$dms_changelog_seen"
+fi
+
 assert "DMS matugen Ghostty template enabled" python3 -c "
 import json
 d = json.load(open('$dms_settings'))
@@ -145,6 +238,9 @@ assert d.get('matugenTemplateGhostty', True) is True
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/dms-themes" "$HOME/.config/DankMaterialShell/vekrona-themes"
 
+ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
+fc-cache -f >/dev/null
+
 if [[ -d "$VEKRONA_ROOT/fonts" ]] && find "$VEKRONA_ROOT/fonts" -type f -print -quit | grep -q .; then
   ensure_symlink_tree "$VEKRONA_ROOT/fonts" "$HOME/.local/share/fonts/vekrona"
   fc-cache -f >/dev/null
@@ -152,6 +248,10 @@ if [[ -d "$VEKRONA_ROOT/fonts" ]] && find "$VEKRONA_ROOT/fonts" -type f -print -
 else
   warn "fonts/ missing or empty, skipping font install"
 fi
+
+ensure_gsettings org.gnome.desktop.interface font-name "Atkinson Hyperlegible Next 11"
+ensure_gsettings org.gnome.desktop.interface document-font-name "Atkinson Hyperlegible Next 11"
+ensure_gsettings org.gnome.desktop.interface monospace-font-name "JetBrainsMono Nerd Font 11"
 
 ensure_flatpak_override() {
   local app_id="$1" current

@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR=/var/lib/vekrona
+SUDOERS_DROPIN=/etc/sudoers.d/vekrona-firstboot
+PAYLOAD_SRC=/usr/local/share/vekrona-src
+FAILURE_ISSUE=/etc/issue.d/vekrona-firstboot.issue
+
+log()  { printf '[vekrona-firstboot] %s\n' "$*"; }
+die()  { printf '[vekrona-firstboot] FAIL: %s\n' "$*" >&2; exit 1; }
+
+rm -f "$SUDOERS_DROPIN" "$FAILURE_ISSUE"
+mkdir -p "$STATE_DIR"
+rm -f "$STATE_DIR/firstboot.failed"
+
+cleanup() {
+  local rc=$?
+  rm -f "$SUDOERS_DROPIN"
+  if [[ $rc -ne 0 ]]; then
+    printf '%s\n' "$rc" > "$STATE_DIR/firstboot.failed"
+    log "FAILED with exit code $rc"
+    log "fix the problem shown above, then retry with: sudo systemctl start vekrona-firstboot"
+    mkdir -p "$(dirname "$FAILURE_ISSUE")"
+    printf '%s\n' \
+      "vekrona first-boot install FAILED (exit code $rc)." \
+      "See: journalctl -u vekrona-firstboot" \
+      "Fix the problem, then retry with: sudo systemctl start vekrona-firstboot" \
+      "" > "$FAILURE_ISSUE"
+  fi
+  exit "$rc"
+}
+trap cleanup EXIT
+
+find_admin_user() {
+  local wheel_members u uid admins=()
+  wheel_members="$(getent group wheel | cut -d: -f4)"
+  IFS=',' read -r -a wheel_members <<< "$wheel_members"
+  for u in "${wheel_members[@]}"; do
+    [[ -n "$u" ]] || continue
+    uid="$(id -u "$u" 2>/dev/null)" || continue
+    [[ "$uid" -ge 1000 ]] || continue
+    admins+=("$u")
+  done
+  [[ ${#admins[@]} -eq 1 ]] \
+    || die "expected exactly one UID>=1000 user in group wheel, found ${#admins[@]}: ${admins[*]:-none}"
+  printf '%s' "${admins[0]}"
+}
+
+user="$(find_admin_user)"
+uid="$(id -u "$user")"
+home="$(getent passwd "$user" | cut -d: -f6)"
+[[ -n "$home" && -d "$home" ]] || die "home directory not found for $user"
+
+target="$home/vekrona"
+if [[ -e "$target" ]]; then
+  [[ -d "$target/.git" ]] || die "$target already exists and is not a git checkout; refusing to overwrite"
+  log "$target already present, skipping payload copy"
+else
+  [[ -d "$PAYLOAD_SRC" ]] || die "payload missing: $PAYLOAD_SRC"
+  cp -a "$PAYLOAD_SRC" "$target"
+fi
+chown -R "$user:$user" "$target"
+
+loginctl enable-linger "$user"
+
+cat > "$SUDOERS_DROPIN" <<EOF
+$user ALL=(ALL) NOPASSWD: ALL
+Defaults:$user !authenticate
+EOF
+chmod 0440 "$SUDOERS_DROPIN"
+visudo -cf "$SUDOERS_DROPIN" || die "generated sudoers drop-in failed validation"
+
+systemctl start network-online.target || die "network-online.target did not come up"
+
+systemctl start "user@$uid.service" || die "systemd user manager did not start for $user (uid $uid)"
+
+bus="/run/user/$uid/bus"
+deadline=$((SECONDS + 30))
+while [[ ! -S "$bus" ]]; do
+  (( SECONDS < deadline )) || die "D-Bus user session socket never appeared: $bus"
+  inotifywait -qq -t 5 -e create "/run/user/$uid" >/dev/null 2>&1 || true
+done
+
+has_nvidia() {
+  local dev vendor class
+  for dev in /sys/bus/pci/devices/*/; do
+    [[ -r "$dev/vendor" && -r "$dev/class" ]] || continue
+    vendor="$(cat "$dev/vendor")"
+    [[ "$vendor" == "0x10de" ]] || continue
+    class="$(cat "$dev/class")"
+    [[ "$class" == 0x03* ]] && return 0
+  done
+  return 1
+}
+
+install_args=()
+has_nvidia || install_args=(--skip 10-nvidia)
+
+log "running ./install.sh ${install_args[*]:-} as $user"
+sudo -iu "$user" env \
+  "XDG_RUNTIME_DIR=/run/user/$uid" \
+  "DBUS_SESSION_BUS_ADDRESS=unix:path=$bus" \
+  "$target/install.sh" "${install_args[@]}"
+
+touch "$STATE_DIR/firstboot.done"
+systemctl disable vekrona-firstboot.service
+log "vekrona install complete; rebooting"
+systemctl reboot

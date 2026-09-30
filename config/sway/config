@@ -7,6 +7,8 @@ include ~/.config/sway/config.d/*.conf
 
 output DP-7 mode 3840x2160@240Hz adaptive_sync on scale 1.5
 
+font pango:Atkinson Hyperlegible Next 10
+
 input "type:keyboard" {
     xkb_layout us,ua
     xkb_options grp:alts_toggle,shift:both_capslock_cancel
@@ -26,80 +28,161 @@ gaps inner 6
 smart_gaps on
 focus_follows_mouse yes
 
+#: Open terminal
 bindsym $hyper+Return exec $term
+#: Toggle spotlight launcher
 bindsym $hyper+Space exec dms ipc call spotlight toggle
+#: Toggle clipboard history
 bindsym --to-code $hyper+v exec dms ipc call clipboard toggle
+#: Toggle notification center
 bindsym --to-code $hyper+n exec dms ipc call notifications toggle
+#: Toggle control center
 bindsym $hyper+comma exec dms ipc call control-center toggle
+#: Lock screen
 bindsym $hyper+Escape exec dms ipc call lock lock
+#: Toggle power menu
 bindsym $hyper+BackSpace exec dms ipc call powermenu toggle
+#: Show keybindings help
+bindsym $hyper+slash exec vekrona-keybindings
 
+#: Switch to workspace 1
 bindsym $hyper+1 workspace number 1
+#: Switch to workspace 2
 bindsym $hyper+2 workspace number 2
+#: Switch to workspace 3
 bindsym $hyper+3 workspace number 3
+#: Switch to workspace 4
 bindsym $hyper+4 workspace number 4
+#: Switch to workspace 5
 bindsym $hyper+5 workspace number 5
+#: Switch to workspace 6
 bindsym $hyper+6 workspace number 6
+#: Switch to workspace 7
 bindsym $hyper+7 workspace number 7
+#: Switch to workspace 8
 bindsym $hyper+8 workspace number 8
+#: Switch to workspace 9
 bindsym $hyper+9 workspace number 9
+#: Switch to workspace 10
+bindsym $hyper+0 workspace number 10
 
+#: Move window to workspace 1
 bindsym $hyper+Shift+1 move container to workspace number 1
+#: Move window to workspace 2
 bindsym $hyper+Shift+2 move container to workspace number 2
+#: Move window to workspace 3
 bindsym $hyper+Shift+3 move container to workspace number 3
+#: Move window to workspace 4
 bindsym $hyper+Shift+4 move container to workspace number 4
+#: Move window to workspace 5
 bindsym $hyper+Shift+5 move container to workspace number 5
+#: Move window to workspace 6
 bindsym $hyper+Shift+6 move container to workspace number 6
+#: Move window to workspace 7
 bindsym $hyper+Shift+7 move container to workspace number 7
+#: Move window to workspace 8
 bindsym $hyper+Shift+8 move container to workspace number 8
+#: Move window to workspace 9
 bindsym $hyper+Shift+9 move container to workspace number 9
+#: Move window to workspace 10
+bindsym $hyper+Shift+0 move container to workspace number 10
 
+#: Focus left
 bindsym --to-code $hyper+h focus left
+#: Focus down
 bindsym --to-code $hyper+j focus down
+#: Focus up
 bindsym --to-code $hyper+k focus up
+#: Focus right
 bindsym --to-code $hyper+l focus right
+#: Focus left
 bindsym $hyper+Left focus left
+#: Focus down
 bindsym $hyper+Down focus down
+#: Focus up
 bindsym $hyper+Up focus up
+#: Focus right
 bindsym $hyper+Right focus right
 
+#: Move window left
 bindsym --to-code $hyper+Shift+h move left
+#: Move window down
 bindsym --to-code $hyper+Shift+j move down
+#: Move window up
 bindsym --to-code $hyper+Shift+k move up
+#: Move window right
 bindsym --to-code $hyper+Shift+l move right
+#: Move window left
 bindsym $hyper+Shift+Left move left
+#: Move window down
 bindsym $hyper+Shift+Down move down
+#: Move window up
 bindsym $hyper+Shift+Up move up
+#: Move window right
 bindsym $hyper+Shift+Right move right
 
+#: Enter resize mode
 bindsym --to-code $hyper+r mode "resize"
+#: Toggle fullscreen
 bindsym --to-code $hyper+f fullscreen toggle
+#: Close window
 bindsym --to-code $hyper+w kill
+#: Toggle floating
 bindsym --to-code $hyper+t floating toggle
+#: Toggle split layout
 bindsym --to-code $hyper+e layout toggle split
+#: Split horizontally (next window opens below)
+bindsym --to-code $hyper+minus splitv
+#: Split vertically (next window opens to the right)
+bindsym --to-code $hyper+backslash splith
 
+#: Go to a new (first empty) workspace
+bindsym --to-code $hyper+equal exec vekrona-workspace-new
+#: Move window to a new (first empty) workspace
+bindsym --to-code $hyper+Shift+equal exec vekrona-workspace-new --move
+
+#: Take a screenshot
 bindsym $hyper+Print exec vekrona-screenshot
+#: Record the screen
 bindsym $hyper+Shift+Print exec vekrona-record
+#: Toggle caffeine (prevent sleep)
 bindsym --to-code $hyper+Shift+c exec vekrona-caffeine
+#: Toggle night light
 bindsym --to-code $hyper+Shift+n exec dms ipc call night toggle
+#: Switch to the next theme
 bindsym --to-code $hyper+Shift+t exec vekrona-theme next
 
+#: Volume up
 bindsym XF86AudioRaiseVolume exec dms ipc call audio increment 5
+#: Volume down
 bindsym XF86AudioLowerVolume exec dms ipc call audio decrement 5
+#: Mute audio
 bindsym XF86AudioMute exec dms ipc call audio mute
+#: Brightness up
 bindsym XF86MonBrightnessUp exec dms ipc call brightness increment 5 ""
+#: Brightness down
 bindsym XF86MonBrightnessDown exec dms ipc call brightness decrement 5 ""
 
 mode "resize" {
+    #: Resize: shrink width
     bindsym --to-code h resize shrink width 10px
+    #: Resize: grow height
     bindsym --to-code j resize grow height 10px
+    #: Resize: shrink height
     bindsym --to-code k resize shrink height 10px
+    #: Resize: grow width
     bindsym --to-code l resize grow width 10px
+    #: Resize: shrink width
     bindsym Left resize shrink width 10px
+    #: Resize: grow height
     bindsym Down resize grow height 10px
+    #: Resize: shrink height
     bindsym Up resize shrink height 10px
+    #: Resize: grow width
     bindsym Right resize grow width 10px
+    #: Exit resize mode
     bindsym Return mode "default"
+    #: Exit resize mode
     bindsym Escape mode "default"
 }
 

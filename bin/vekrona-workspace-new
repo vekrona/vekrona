@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf 'usage: %s [--move]\n' "$(basename "$0")" >&2
+  exit 1
+}
+
+move=0
+case "${1:-}" in
+  "") ;;
+  --move) move=1 ;;
+  *) usage ;;
+esac
+
+used="$(swaymsg -t get_workspaces | jq -r '.[].num')"
+
+free=""
+for n in 1 2 3 4 5 6 7 8 9 10; do
+  if ! grep -qx "$n" <<<"$used"; then
+    free="$n"
+    break
+  fi
+done
+
+if [[ -z "$free" ]]; then
+  notify-send -a vekrona "Workspaces" "all 10 workspaces are in use"
+  echo "vekrona-workspace-new: all 10 workspaces are in use" >&2
+  exit 1
+fi
+
+if [[ $move -eq 1 ]]; then
+  swaymsg "move container to workspace number $free, workspace number $free" >/dev/null
+else
+  swaymsg "workspace number $free" >/dev/null
+fi

@@ -1,0 +1,6 @@
+FROM registry.fedoraproject.org/fedora:44
+
+RUN dnf -y install lorax xorriso isomd5sum git python3 openssh-clients \
+    && dnf clean all
+
+WORKDIR /src

@@ -3,3 +3,10 @@
 vm/ks-*.cfg
 vm/.ssh/
 vm/__pycache__/
+iso/out/
+iso/downloads/
+iso/.cache/
+iso/*.iso
+iso/kickstart/vekrona-*.ks
+
+iso/.ssh/

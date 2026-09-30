@@ -1,0 +1,34 @@
+lang en_US.UTF-8
+keyboard --xlayouts='us','ua'
+selinux --enforcing
+network --bootproto=dhcp --hostname=vekrona --activate
+bootloader --location=mbr
+autopart --type=btrfs
+reboot
+
+%packages
+@core
+git
+sudo
+rsync
+inotify-tools
+%end
+
+%post --nochroot --erroronfail --log=/mnt/sysimage/root/vekrona-payload-copy.log
+set -euo pipefail
+PAYLOAD_SRC=/run/install/repo/vekrona-src
+[ -d "$PAYLOAD_SRC" ] || { echo "vekrona payload not found on install media: $PAYLOAD_SRC" >&2; exit 1; }
+mkdir -p /mnt/sysimage/usr/local/share
+cp -a "$PAYLOAD_SRC" /mnt/sysimage/usr/local/share/vekrona-src
+%end
+
+%post --erroronfail --log=/root/vekrona-firstboot-setup.log
+set -euo pipefail
+SRC=/usr/local/share/vekrona-src
+restorecon -Rv "$SRC"
+install -m 0755 "$SRC/iso/firstboot/vekrona-firstboot" /usr/local/sbin/vekrona-firstboot
+restorecon -v /usr/local/sbin/vekrona-firstboot
+install -m 0644 "$SRC/iso/firstboot/vekrona-firstboot.service" /etc/systemd/system/vekrona-firstboot.service
+restorecon -v /etc/systemd/system/vekrona-firstboot.service
+systemctl enable vekrona-firstboot.service
+%end

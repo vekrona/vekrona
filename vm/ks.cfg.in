@@ -30,6 +30,14 @@ vekrona ALL=(ALL) NOPASSWD: ALL
 Defaults:vekrona !authenticate
 EOF
 chmod 0440 /etc/sudoers.d/vekrona
+install -d /etc/systemd/sleep.conf.d
+cat > /etc/systemd/sleep.conf.d/virtio-gpu-cannot-resume.conf <<'EOF'
+[Sleep]
+AllowSuspend=no
+AllowHibernation=no
+AllowHybridSleep=no
+AllowSuspendThenHibernate=no
+EOF
 systemctl enable sshd
 install -d -m 0700 -o vekrona -g vekrona /home/vekrona/.ssh
 cat >> /home/vekrona/.ssh/authorized_keys <<'EOF'

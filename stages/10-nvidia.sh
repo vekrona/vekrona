@@ -6,12 +6,20 @@ source "$ROOT/lib/common.sh"
 
 require_cmd rpm dnf5 grubby modinfo
 
+target_kver="$(uname -r)"
+assert_running_kernel_is_latest() {
+  local latest
+  latest="$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort -V | tail -1)"
+  [[ "$latest" == "$target_kver" ]] || die "reboot into the latest installed kernel first (running $target_kver, latest installed $latest)"
+}
+
+assert_running_kernel_is_latest
+ensure_pkg "kernel-devel-$target_kver"
+
 CUDA_REPO_ID="cuda-fedora44-x86_64"
 CUDA_REPOFILE_URL="https://developer.download.nvidia.com/compute/cuda/repos/fedora44/x86_64/cuda-fedora44.repo"
 CUDA_EXCLUDE='nvidia-driver*,cuda-drivers*,nvidia-modprobe,nvidia-persistenced,nvidia-settings,nvidia-libXNVCtrl*,nvidia-xconfig,nvidia-open,nvidia-imex,nvidia-kmod-common,libnvidia-fbc,kmod-nvidia-*-dkms,nvidia-fs*,nvidia-gds*,xorg-x11-nvidia*'
 OLD_CUDA_REPOFILE="/etc/yum.repos.d/cuda-fedora43.repo"
-
-ensure_repo_enabled rpmfusion-nonfree-nvidia-driver
 
 if repo_enabled "$CUDA_REPO_ID"; then
   log "repo enabled: $CUDA_REPO_ID"
@@ -59,23 +67,22 @@ fi
 
 require_cmd akmods
 
-latest_installed_kernel="$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort -V | tail -1)"
-[[ "$latest_installed_kernel" == "$(uname -r)" ]] || die "reboot into the latest installed kernel first"
-ensure_pkg "kernel-devel-$(uname -r)"
+assert_running_kernel_is_latest
+ensure_pkg "kernel-devel-$target_kver"
 
 if pkg_installed cuda-toolkit; then
   root dnf upgrade -y cuda-toolkit
 fi
 
-log "rebuilding akmods for $(uname -r)"
-root akmods --force --kernels "$(uname -r)"
+log "rebuilding akmods for $target_kver"
+root akmods --force --kernels "$target_kver"
 
 nvidia_version="$(modinfo -F version nvidia)"
 [[ "${nvidia_version%%.*}" -ge 615 ]] || die "unexpected nvidia module version: $nvidia_version (expected >= 615)"
 log "ok: nvidia module version $nvidia_version"
 
-compgen -G "/lib/modules/$(uname -r)/extra/nvidia*" >/dev/null || die "nvidia module missing under /lib/modules/$(uname -r)/extra"
-log "ok: nvidia module present under /lib/modules/$(uname -r)/extra"
+modinfo -k "$target_kver" nvidia >/dev/null 2>&1 || die "nvidia module missing for kernel $target_kver"
+log "ok: nvidia module present for kernel $target_kver"
 
 ensure_kernel_arg nvidia.NVreg_EnableGpuFirmware=0 pcie_aspm=off
 
@@ -85,8 +92,12 @@ else
   ensure_kernel_arg "rd.driver.blacklist=nouveau,nova_core" "modprobe.blacklist=nouveau,nova_core"
 fi
 
-if grep -rq 'NVreg_PreserveVideoMemoryAllocations=1' /etc/modprobe.d /usr/lib/modprobe.d 2>/dev/null \
-  && grep -rq 'NVreg_TemporaryFilePath=/var/tmp' /etc/modprobe.d /usr/lib/modprobe.d 2>/dev/null; then
+modprobe_option_active() {
+  grep -rhE '^[[:space:]]*[^#[:space:]]' /etc/modprobe.d /usr/lib/modprobe.d 2>/dev/null | grep -qE -- "$1"
+}
+
+if modprobe_option_active 'NVreg_PreserveVideoMemoryAllocations=1' \
+  && modprobe_option_active 'NVreg_TemporaryFilePath=/var/tmp'; then
   log "ok: nvidia modprobe options present"
 else
   ensure_root_file "$ROOT/etc/modprobe.d/vekrona-nvidia.conf" /etc/modprobe.d/vekrona-nvidia.conf
@@ -103,9 +114,7 @@ missing_kernels=()
 for moddir in /lib/modules/*/; do
   kernel="$(basename "$moddir")"
   [[ -e "/boot/vmlinuz-$kernel" ]] || continue
-  if ! find "$moddir/extra" "$moddir/weak-updates" -maxdepth 1 -iname 'nvidia*.ko*' 2>/dev/null | grep -q .; then
-    missing_kernels+=("$kernel")
-  fi
+  modinfo -k "$kernel" nvidia >/dev/null 2>&1 || missing_kernels+=("$kernel")
 done
 [[ ${#missing_kernels[@]} -eq 0 ]] || warn "nvidia module missing for installed kernels: ${missing_kernels[*]}"
 

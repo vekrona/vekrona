@@ -1,0 +1,551 @@
+#!/usr/bin/env python3
+import argparse
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from typing import Optional
+
+import yaml
+
+PROG = "vekrona-keybindings"
+
+
+def die(msg):
+    print(f"{PROG}: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+KEY_MAP = {
+    "Return": "Enter",
+    "BackSpace": "Backspace",
+    "Escape": "Esc",
+    "Print": "Print Screen",
+    "comma": ",",
+    "period": ".",
+    "slash": "/",
+    "minus": "-",
+    "equal": "=",
+    "backslash": "\\",
+    "LeftBrace": "[",
+    "RightBrace": "]",
+    "Ctrl_L": "Ctrl",
+    "Ctrl_R": "Ctrl",
+    "Alt_L": "Alt",
+    "Alt_R": "Alt",
+    "Super_L": "Super",
+    "Super_R": "Super",
+    "CapsLock": "Caps Lock",
+    "XF86AudioRaiseVolume": "Volume Up",
+    "XF86AudioLowerVolume": "Volume Down",
+    "XF86AudioMute": "Mute",
+    "XF86MonBrightnessUp": "Brightness Up",
+    "XF86MonBrightnessDown": "Brightness Down",
+}
+
+MOD_MAP = {
+    "Mod4": "Super",
+    "Mod1": "Alt",
+    "Ctrl": "Ctrl",
+    "Control": "Ctrl",
+    "Shift": "Shift",
+    "Hyper": "Hyper",
+    "C": "Ctrl",
+    "Super": "Super",
+    "Alt": "Alt",
+}
+
+
+def prettify_key(name):
+    return KEY_MAP.get(name, name)
+
+
+BIND_RE = re.compile(r'^bindsym\s+((?:--\S+\s+)*)(\S+)\s+(.+)$')
+MODE_START_RE = re.compile(r'^mode\s+"([^"]+)"\s*\{\s*$')
+SET_RE = re.compile(r'^set\s+\$(\w+)\s+(.+)$')
+INCLUDE_RE = re.compile(r'^include\s+(.+)$')
+
+
+@dataclass
+class RawBind:
+    path: str
+    lineno: int
+    line: str
+    combo: str
+    command: str
+    description: Optional[str]
+    mode: Optional[str]
+
+
+@dataclass
+class Binding:
+    mods: list
+    key: str
+    key_raw: Optional[str]
+    command: Optional[str]
+    description: str
+    mode: Optional[str]
+    order: int
+
+
+@dataclass
+class Row:
+    keys: str
+    description: str
+    command: Optional[str]
+    priority: tuple
+
+
+def resolve_include(pattern, base_dir):
+    expanded = os.path.expanduser(os.path.expandvars(pattern))
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(base_dir, expanded)
+    return expanded
+
+
+def gather_sway_files(main_path):
+    files = []
+    queue = [main_path]
+    visited = set()
+    while queue:
+        path = queue.pop(0)
+        if path in visited:
+            continue
+        visited.add(path)
+        if not os.path.isfile(path):
+            die(f"sway config file missing: {path}")
+        files.append(path)
+        base_dir = os.path.dirname(path)
+        with open(path) as f:
+            for line in f:
+                m = INCLUDE_RE.match(line.strip())
+                if not m:
+                    continue
+                resolved = resolve_include(m.group(1), base_dir)
+                for match in sorted(glob.glob(resolved)):
+                    if os.path.isfile(match):
+                        queue.append(match)
+    return files
+
+
+def substitute_vars(text, variables):
+    for _ in range(5):
+        new = re.sub(r'\$(\w+)', lambda m: variables.get(m.group(1), m.group(0)), text)
+        if new == text:
+            return new
+        text = new
+    return text
+
+
+def parse_sway(main_path):
+    files = gather_sway_files(main_path)
+    lines_by_file = {f: open(f).read().splitlines() for f in files}
+
+    variables = {}
+    for f in files:
+        for line in lines_by_file[f]:
+            m = SET_RE.match(line.strip())
+            if m:
+                variables[m.group(1)] = m.group(2).strip()
+
+    raw_binds = []
+    missing = []
+    for f in files:
+        lines = lines_by_file[f]
+        mode_stack = []
+        for i, raw_line in enumerate(lines):
+            s = raw_line.strip()
+            mode_match = MODE_START_RE.match(s)
+            if mode_match:
+                mode_stack.append(mode_match.group(1))
+                continue
+            if s == "}":
+                if mode_stack:
+                    mode_stack.pop()
+                continue
+            m = BIND_RE.match(s)
+            if not m:
+                continue
+            combo, command = m.group(2), m.group(3)
+            description = None
+            if i > 0:
+                prev = lines[i - 1].strip()
+                dm = re.match(r'^#:\s*(.+)$', prev)
+                if dm:
+                    description = dm.group(1).strip()
+            if description is None:
+                missing.append((f, i + 1, raw_line))
+            raw_binds.append(RawBind(f, i + 1, raw_line, combo, command, description,
+                                      mode_stack[-1] if mode_stack else None))
+
+    return variables, raw_binds, missing
+
+
+def hyper_parts_of(variables):
+    hyper_value = variables.get("hyper")
+    if not hyper_value:
+        die("sway config has no 'set $hyper' definition")
+    return hyper_value.split("+")
+
+
+def build_bindings(variables, raw_binds):
+    hyper_parts = hyper_parts_of(variables)
+
+    def pretty_mods(mods_raw):
+        if mods_raw[:len(hyper_parts)] == hyper_parts:
+            mods_raw = ["Hyper"] + mods_raw[len(hyper_parts):]
+        return [MOD_MAP.get(m, m) for m in mods_raw]
+
+    bindings = []
+    for order, rb in enumerate(raw_binds):
+        expanded_combo = substitute_vars(rb.combo, variables)
+        parts = [p for p in expanded_combo.split("+") if p]
+        key_raw = parts[-1]
+        mods_raw = parts[:-1]
+        command = substitute_vars(rb.command, variables)
+        bindings.append(Binding(
+            mods=pretty_mods(mods_raw),
+            key=prettify_key(key_raw),
+            key_raw=key_raw,
+            command=command,
+            description=rb.description,
+            mode=rb.mode,
+            order=order,
+        ))
+    return bindings
+
+
+WORKSPACE_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+
+
+def collapse_workspace_range(bindings, command_re, expected_mods, synthetic_description):
+    by_num = {}
+    for b in bindings:
+        if b.mode is not None or b.command is None:
+            continue
+        m = command_re.match(b.command)
+        if m and tuple(b.mods) == expected_mods:
+            by_num[int(m.group(1))] = b
+
+    if set(by_num) != set(range(1, 11)):
+        return bindings
+    if any(by_num[n].key_raw != WORKSPACE_KEYS[n - 1] for n in range(1, 11)):
+        return bindings
+
+    removed = {id(by_num[n]) for n in range(1, 11)}
+    remaining = [b for b in bindings if id(b) not in removed]
+    synthetic = Binding(
+        mods=list(expected_mods),
+        key="1…0",
+        key_raw=None,
+        command=None,
+        description=synthetic_description,
+        mode=None,
+        order=min(by_num[n].order for n in range(1, 11)),
+    )
+    remaining.append(synthetic)
+    return remaining
+
+
+def merge_alternative_chords(bindings):
+    groups = {}
+    order_list = []
+    for b in bindings:
+        key = (b.mode, tuple(b.mods), b.description, b.command)
+        if key not in groups:
+            groups[key] = []
+            order_list.append(key)
+        groups[key].append(b)
+
+    merged = []
+    for key in order_list:
+        group = groups[key]
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        combined_keys = " / ".join(dict.fromkeys(g.key for g in group))
+        first = group[0]
+        merged.append(Binding(
+            mods=first.mods,
+            key=combined_keys,
+            key_raw=None,
+            command=first.command,
+            description=first.description,
+            mode=first.mode,
+            order=min(g.order for g in group),
+        ))
+    return merged
+
+
+def binding_priority(b):
+    if b.description == "Show keybindings help":
+        return (0, b.order)
+    if b.description.startswith("Switch to workspace"):
+        return (10, b.order)
+    if b.description.startswith("Move window to workspace"):
+        return (11, b.order)
+    if b.command == 'mode "resize"':
+        return (20, b.order)
+    if b.description in ("Toggle fullscreen", "Close window", "Toggle floating", "Toggle split layout"):
+        return (21, b.order)
+    if b.description.startswith("Focus "):
+        return (22, b.order)
+    if b.description.startswith("Move window "):
+        return (23, b.order)
+    if b.mode == "resize":
+        return (24, b.order)
+    if b.key_raw and b.key_raw.startswith("XF86"):
+        return (80, b.order)
+    if b.command and b.command.startswith("exec"):
+        return (30, b.order)
+    return (50, b.order)
+
+
+def binding_rows(bindings):
+    return [
+        Row(
+            keys=" + ".join(b.mods + [b.key]),
+            description=b.description,
+            command=b.command,
+            priority=binding_priority(b),
+        )
+        for b in bindings
+    ]
+
+
+def pretty_xremap_combo(token):
+    parts = token.split("-")
+    *mods, key = parts
+    pretty_mods = []
+    for m in mods:
+        if m not in MOD_MAP:
+            die(f"xremap config uses an unrecognized modifier: {m} (in {token})")
+        pretty_mods.append(MOD_MAP[m])
+    return " + ".join(pretty_mods + [prettify_key(key)])
+
+
+def pretty_xremap_value(value):
+    if isinstance(value, list):
+        return ", then ".join(pretty_xremap_combo(v) for v in value)
+    return pretty_xremap_combo(value)
+
+
+def load_xremap_rows(path):
+    if not os.path.isfile(path):
+        die(f"xremap config missing: {path}")
+    with open(path) as f:
+        data = yaml.safe_load(f)
+
+    rows = []
+    order = 0
+
+    for modmap in data.get("modmap", []):
+        for physical_key, spec in modmap.get("remap", {}).items():
+            held = spec.get("held")
+            alone = spec.get("alone")
+            physical_pretty = prettify_key(physical_key)
+            if held:
+                rows.append(Row(f"{physical_pretty} (hold)",
+                                 " + ".join(prettify_key(k) for k in held),
+                                 None, (91, order)))
+                order += 1
+            if alone:
+                rows.append(Row(f"{physical_pretty} (tap)", pretty_xremap_value(alone),
+                                 None, (91, order)))
+                order += 1
+
+    keymaps = {km["name"]: km.get("remap", {}) for km in data.get("keymap", [])}
+    cmd_layer = keymaps.get("cmd-layer", {})
+    term_layer = keymaps.get("terminal-word-nav", {})
+
+    letter_re = re.compile(r'^Super-([a-z])$')
+    regular_letter_keys = set()
+    for k, v in cmd_layer.items():
+        m = letter_re.match(k)
+        if m and v == f"C-{m.group(1)}":
+            regular_letter_keys.add(k)
+
+    if regular_letter_keys:
+        rows.append(Row("Super + A…Z", "Ctrl + A…Z (everywhere except terminals)",
+                         None, (92, order)))
+        order += 1
+
+    for key in sorted(set(cmd_layer) | set(term_layer)):
+        if key in regular_letter_keys:
+            continue
+        in_cmd, in_term = key in cmd_layer, key in term_layer
+        if in_cmd and in_term and cmd_layer[key] == term_layer[key]:
+            scope, value = "everywhere", cmd_layer[key]
+        elif in_cmd:
+            scope, value = "everywhere except terminals", cmd_layer[key]
+        else:
+            scope, value = "terminals only", term_layer[key]
+        rows.append(Row(pretty_xremap_combo(key), f"{pretty_xremap_value(value)} ({scope})",
+                         None, (93, order)))
+        order += 1
+
+    return rows
+
+
+def load_layout_row(sway_main_path):
+    with open(sway_main_path) as f:
+        text = f.read()
+    opts_match = re.search(r'xkb_options\s+(\S+)', text)
+    layout_match = re.search(r'xkb_layout\s+(\S+)', text)
+    if not opts_match or not layout_match:
+        return []
+    if "grp:alts_toggle" not in opts_match.group(1).split(","):
+        return []
+    layouts = " / ".join(layout_match.group(1).split(","))
+    return [Row("Alt + Alt", f"Switch keyboard layout ({layouts})", None, (95, 0))]
+
+
+def load_theme_colors():
+    state_home = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    theme_file = os.path.join(state_home, "vekrona", "active-theme.json")
+    if not os.path.isfile(theme_file):
+        die(f"active theme file not found: {theme_file} (run vekrona-theme <name> first)")
+    with open(theme_file) as f:
+        data = json.load(f)
+    dark = data.get("dark")
+    if not dark:
+        die(f"{theme_file} has no 'dark' section")
+    return dark
+
+
+def rofi_theme_str(colors):
+    return f"""
+* {{
+    font: "JetBrainsMono Nerd Font 11";
+    background: {colors['background']};
+    foreground: {colors['backgroundText']};
+    lightbg: {colors['surfaceContainer']};
+    lightfg: {colors['surfaceText']};
+    border-color: {colors['outline']};
+    separatorcolor: {colors['outlineVariant']};
+    normal-background: {colors['background']};
+    normal-foreground: {colors['backgroundText']};
+    alternate-normal-background: {colors['surfaceContainerLow']};
+    alternate-normal-foreground: {colors['backgroundText']};
+    selected-normal-background: {colors['primary']};
+    selected-normal-foreground: {colors['primaryText']};
+    active-background: {colors['background']};
+    active-foreground: {colors['secondary']};
+    alternate-active-background: {colors['surfaceContainerLow']};
+    alternate-active-foreground: {colors['secondary']};
+    selected-active-background: {colors['primary']};
+    selected-active-foreground: {colors['primaryText']};
+    urgent-background: {colors['background']};
+    urgent-foreground: {colors['error']};
+    alternate-urgent-background: {colors['surfaceContainerLow']};
+    alternate-urgent-foreground: {colors['error']};
+    selected-urgent-background: {colors['error']};
+    selected-urgent-foreground: {colors['errorText']};
+}}
+window {{
+    border: 2px;
+    width: 60%;
+}}
+listview {{
+    lines: 18;
+}}
+"""
+
+
+HEADER_TEXT = "Hyper = CapsLock held, or Super+Ctrl+Alt"
+
+
+def rows_from_sway(variables, raw_binds):
+    bindings = build_bindings(variables, raw_binds)
+    bindings = collapse_workspace_range(bindings, re.compile(r'^workspace number (\d+)$'),
+                                         ("Hyper",), "Switch to workspace 1…10")
+    bindings = collapse_workspace_range(bindings, re.compile(r'^move container to workspace number (\d+)$'),
+                                         ("Hyper", "Shift"), "Move window to workspace 1…10")
+    bindings = merge_alternative_chords(bindings)
+    return binding_rows(bindings)
+
+
+def build_all_rows(sway_main_path, xremap_path):
+    variables, raw_binds, missing = parse_sway(sway_main_path)
+    if missing:
+        die("bindsym without a '#:' description directly above it:\n" +
+            "\n".join(f"  {path}:{lineno}: {line.strip()}" for path, lineno, line in missing))
+    rows = rows_from_sway(variables, raw_binds)
+    rows += load_xremap_rows(xremap_path)
+    rows += load_layout_row(sway_main_path)
+    rows.sort(key=lambda r: r.priority)
+    return rows
+
+
+def render_rows(rows):
+    column = max((len(r.keys) for r in rows), default=0)
+    return [f"{r.keys.ljust(column)} → {r.description}" for r in rows]
+
+
+def cmd_check(sway_main_path):
+    _, raw_binds, missing = parse_sway(sway_main_path)
+    if missing:
+        for path, lineno, line in missing:
+            print(f"{path}:{lineno}: missing '#:' description above: {line.strip()}", file=sys.stderr)
+        sys.exit(1)
+    print(f"{PROG}: ok, every bindsym has a description ({len(raw_binds)} bindings checked)")
+
+
+def cmd_list(sway_main_path, xremap_path):
+    rows = build_all_rows(sway_main_path, xremap_path)
+    print(HEADER_TEXT)
+    print()
+    for line in render_rows(rows):
+        print(line)
+
+
+def cmd_menu(sway_main_path, xremap_path):
+    if not shutil.which("rofi"):
+        die("rofi not found (install the 'rofi' package)")
+    rows = build_all_rows(sway_main_path, xremap_path)
+    lines = render_rows(rows)
+    colors = load_theme_colors()
+
+    result = subprocess.run(
+        ["rofi", "-dmenu", "-i", "-p", "Keybindings", "-mesg", HEADER_TEXT,
+         "-format", "i", "-theme-str", rofi_theme_str(colors)],
+        input="\n".join(lines), capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return
+    index = int(result.stdout.strip())
+    row = rows[index]
+    if row.command:
+        run = subprocess.run(["swaymsg", "--", row.command], capture_output=True, text=True)
+        if run.returncode != 0:
+            error = (run.stderr or run.stdout).strip()
+            subprocess.run(["notify-send", "-a", PROG, "Keybinding failed", f"{row.command}\n{error}"])
+            die(f"swaymsg {row.command!r} failed: {error}")
+
+
+def main():
+    parser = argparse.ArgumentParser(prog=PROG)
+    parser.add_argument("--list", action="store_true", help="print keybindings to stdout instead of showing rofi")
+    parser.add_argument("--check", action="store_true", help="validate that every bindsym has a description")
+    args = parser.parse_args()
+
+    home = os.path.expanduser("~")
+    sway_main_path = os.path.join(home, ".config", "sway", "config")
+    xremap_path = os.path.join(home, ".config", "xremap", "config.yml")
+    if not os.path.isfile(sway_main_path):
+        die(f"sway config not found: {sway_main_path}")
+
+    if args.check:
+        cmd_check(sway_main_path)
+    elif args.list:
+        cmd_list(sway_main_path, xremap_path)
+    else:
+        cmd_menu(sway_main_path, xremap_path)
+
+
+if __name__ == "__main__":
+    main()

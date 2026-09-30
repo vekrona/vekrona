@@ -31,7 +31,11 @@ existing Fedora Workstation" below.
 | `etc/` | system files installed into `/etc` by `ensure_root_file` |
 | `bin/vekrona-*` | the CLI tools; stage `50-user` symlinks the whole directory into `~/.local/bin` |
 | `fonts/` | vendored JetBrainsMono Nerd Font (OFL, v3.5.1), symlinked into `~/.local/share/fonts/vekrona` |
+| `config/fontconfig/conf.d/50-vekrona-fonts.conf` | fontconfig aliases: `sans-serif`/`system-ui` prefer Atkinson Hyperlegible Next then Inter (Atkinson has no Cyrillic, Inter covers it), `monospace` prefers JetBrainsMono Nerd Font; symlinked into `~/.config/fontconfig/conf.d/` |
+| `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/` | DMS DankBar plugin: always shows Sway workspaces 1-5 plus any existing 6-10, replacing the stock workspace switcher (see "The vekronaSwayWorkspaces DankBar plugin" below); stage `50-user` symlinks the whole `plugins/` directory into `~/.config/DankMaterialShell/plugins/` |
 | `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, rollback, and login-manager checks |
+| `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (plain-QEMU install-and-boot test of a test ISO) |
+| `.github/workflows/iso.yml` | CI: builds the release and test ISOs in a Fedora 44 container, boots the test ISO under QEMU/KVM on the runner, and attaches the release ISO to tagged GitHub releases |
 | `docs/PLAN.md` | the design record: decisions, verified machine facts, rollout, verification, known issues |
 | `TODO.md` | open follow-ups not yet folded into a stage |
 
@@ -70,6 +74,16 @@ enables greetd and switches the default target to `graphical.target`. See
 "New default stage: 65-login-manager" below for the exact condition.
 
 Reboot, then log in through the greeter (tuigreet, running `start-sway`).
+
+### Install from ISO
+
+Instead of installing plain Fedora minimal by hand and cloning this repo
+yourself, `iso/build.sh` bakes both into a Fedora 44 Everything netinstall
+ISO: Anaconda still asks for a disk and a user (btrfs autopart preset), then
+a first-boot service clones this repo to the new user's home and runs
+`./install.sh` unattended, ending at the same greetd login prompt. See "ISO
+and CI" below for how the ISO is built, what first boot does, and how it is
+tested.
 
 ### Migrating an existing Fedora Workstation
 
@@ -183,13 +197,18 @@ launch/focus layer on it:
 | Hyper+comma | `dms ipc call control-center toggle` |
 | Hyper+Escape | `dms ipc call lock lock` |
 | Hyper+BackSpace | `dms ipc call powermenu toggle` |
-| Hyper+1..9 | switch to workspace 1 through 9 |
+| Hyper+slash | show the keybindings help panel (`vekrona-keybindings`) |
+| Hyper+1..9, Hyper+0 | switch to workspace 1 through 10 |
 | Hyper+h/j/k/l, arrow keys | focus left/down/up/right |
 | Hyper+r | enter resize mode (h/j/k/l or arrows resize, Return or Escape exits) |
 | Hyper+f | toggle fullscreen |
 | Hyper+w | kill the focused window |
 | Hyper+t | toggle floating |
 | Hyper+e | toggle split layout |
+| Hyper+- | split horizontally: the next window opens below the focused one |
+| Hyper+\\ | split vertically: the next window opens to the right of the focused one |
+| Hyper+= | go to a new workspace (the first empty one, `vekrona-workspace-new`) |
+| Hyper+Shift+= | move the focused window to a new workspace and follow it |
 | Hyper+Print | `vekrona-screenshot` |
 | Hyper+Shift+c | `vekrona-caffeine` |
 | Hyper+Shift+n | `dms ipc call night toggle` |
@@ -201,7 +220,7 @@ them:
 
 | Binding | Action |
 |---|---|
-| Hyper+Shift+1..9 | move the focused container to workspace 1 through 9 |
+| Hyper+Shift+1..9, Hyper+Shift+0 | move the focused container to workspace 1 through 10 |
 | Hyper+Shift+h/j/k/l, arrow keys | move the focused container left/down/up/right |
 | Hyper+Shift+Print | `vekrona-record` |
 
@@ -209,6 +228,26 @@ Shift is not folded into the Hyper mask itself: Hyper is exactly
 Ctrl+Alt+Super, and Hyper+Shift is a separate binding on top of it. Putting
 Shift inside the Hyper mask would make Hyper+Shift+X carry the same modifier
 mask as some other Hyper+X binding and silently overwrite it.
+
+### Keybindings help panel
+
+`bin/vekrona-keybindings`, bound to Hyper+slash, is an Omarchy-style help
+panel: it reads `~/.config/sway/config` and its `include`s directly (Sway
+itself doesn't expand includes in `swaymsg -t get_config`), pairs every
+`bindsym` with the `#: <description>` comment line placed directly above it
+in the config, and renders them in a `rofi -dmenu` list styled from the
+active vekrona/DMS theme (`~/.local/state/vekrona/active-theme.json`).
+Alternative chords (`h` / `Left`) and the workspace 1..10 bindings are
+collapsed into single rows; picking a Sway row runs its command through
+`swaymsg`. It also lists the xremap Caps Lock and Cmd-layer remaps
+(`config/xremap/config.yml`) and the `Alt+Alt` layout toggle, both
+informational only. `vekrona-keybindings --list` prints the same rows as
+plain text and `--check` fails if any `bindsym` in the Sway config is
+missing its `#:` description; `stages/70-verify.sh` runs `--check` and
+greps `--list` for the workspace-10 and help rows. Every `bindsym` in
+`config/sway/config`, including the `mode "resize"` block and the XF86
+media keys, must carry a `#:` description line directly above it, or the
+panel refuses to run.
 
 ### The Cmd layer (xremap)
 
@@ -403,6 +442,28 @@ scb -- %command%
 MangoHud toggle in-game: Shift_R+F12 (`config/mangohud/MangoHud.conf`,
 `toggle_hud=Shift_R+F12`).
 
+## The vekronaSwayWorkspaces DankBar plugin
+
+Stock DMS pads its workspace switcher to only 3 slots and otherwise shows
+whatever Sway currently reports, which deletes an empty workspace as soon as
+you focus away from it. `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/`
+is a DMS DankBar widget plugin that instead always shows workspaces 1-5, even
+empty, plus any workspace 6-10 that currently exists. Click a pill to switch
+(`workspace number N` over the Sway IPC socket via `Quickshell.I3`), scroll
+over the widget to step through the shown workspaces. Focused, occupied
+(has a window), and urgent workspaces are colored using the same `Theme`
+tokens (`Theme.primary`/`Theme.secondary`/`Theme.error`) as the stock widget.
+
+Stage `50-user` symlinks the plugin directory into
+`~/.config/DankMaterialShell/plugins/`, enables it in
+`~/.config/DankMaterialShell/plugin_settings.json`, and replaces
+`workspaceSwitcher` with `vekronaSwayWorkspaces` in place in any
+`barConfigs[].{left,center,right}Widgets` list that still names the stock
+widget, without touching any other bar customization; `settings.seed.json`
+already ships `vekronaSwayWorkspaces` in place of the stock widget for a
+fresh install. `70-verify` checks the plugin is linked, enabled, and placed
+in a bar widget list.
+
 ## Update policy
 
 Stay one Fedora release behind: this machine runs F44 until F46 reaches GA.
@@ -412,7 +473,7 @@ time to catch up before this machine takes the upgrade.
 The versionlocked set, applied by the stage that installs each package and
 recorded in `/etc/dnf/versionlock.toml`:
 
-- Stage `30-packages` locks `sway`, the installed wlroots0.19-providing package, `dms`, `quickshell`, `qt6-qtbase`, `qt6-qtdeclarative`, `qt6-qtwayland`, `xremap-wlroots`, the whole compositor and shell stack, so a routine `dnf upgrade` cannot pull one of them out from under versions that were actually tested together.
+- Stage `30-packages` locks `sway`, the wlroots package providing the libwlroots soname the installed `sway` links against, `dms`, `quickshell`, `qt6-qtbase`, `qt6-qtdeclarative`, `qt6-qtwayland`, `xremap-wlroots`, the whole compositor and shell stack, so a routine `dnf upgrade` cannot pull one of them out from under versions that were actually tested together.
 - Stage `10-nvidia` locks `akmod-nvidia` and every installed `xorg-x11-drv-nvidia*` package, so a routine upgrade cannot install a newer proprietary driver against an untested kernel.
 
 `stages/70-verify.sh` warns when a lock's `.fcNN` suffix no longer matches the
@@ -482,7 +543,7 @@ before any target runs.
 
 ```
 make -C vm deps      # installs virt-install/virt-viewer/libvirt-client/inotify-tools/ImageMagick/python3-libvirt if missing, enables the virtqemud/virtnetworkd/virtstoraged sockets, starts and autostarts the libvirt "default" network, adds you to the libvirt group (log out and back in for that to take effect)
-make -C vm create     # generates vm/ks-$(VM_NAME).cfg from vm/ks.cfg.in (one generated kickstart per VM name, gitignored, so `make create VM_NAME=foo` next to an existing vekrona-test VM regenerates the right file instead of reusing a stale hostname), generating a dedicated harness SSH key pair at vm/.ssh/id_ed25519 (ed25519, no passphrase, gitignored) if it doesn't exist yet, and substituting your personal SSH public key (first of ~/.ssh/id_ed25519.pub, id_rsa.pub, *.pub, or set VM_SSH_PUBKEY), the harness key, and VM_NAME (as the guest hostname) into the kickstart; virt-install: Fedora Everything netinstall of the release set by FEDORA_RELEASE in vm/Makefile (currently 44), with vm/install-tree.sh resolving the Fedora geo-redirector to one concrete mirror and verifying it serves the install tree before virt-install ever touches it (no retries: a redirector that does not itself redirect is rejected outright), + that kickstart (btrfs autopart, NOPASSWD sudo, password `vekrona` for graphical login, `%packages` limited to what the harness itself needs before any stage has run: `@core rsync qemu-guest-agent`; openssh-server is already an @core mandatory package; both the harness key and your personal key are authorized for the VM user); the --os-variant hardware profile is fedora<release> when the host's osinfo database knows it, otherwise the newest known profile plus a warning naming `osinfo-db-import --user --latest`; the VM gets a virtio video device, a local-only SPICE display (`--graphics spice,listen=127.0.0.1`), and a guest-agent channel requested explicitly; the serial console is logged to `/var/log/libvirt/qemu/$(VM_NAME)-serial0.log` (root-owned, read it with sudo) so an install or boot failure can be diagnosed afterwards; the domain is marked as owned by this harness in its libvirt metadata (see `destroy` below); the kickstart shuts the VM down after %post, then this target boots it with `virsh start`
+make -C vm create     # generates vm/ks-$(VM_NAME).cfg from vm/ks.cfg.in (one generated kickstart per VM name, gitignored, so `make create VM_NAME=foo` next to an existing vekrona-test VM regenerates the right file instead of reusing a stale hostname), generating a dedicated harness SSH key pair at vm/.ssh/id_ed25519 (ed25519, no passphrase, gitignored) if it doesn't exist yet, and substituting your personal SSH public key (first of ~/.ssh/id_ed25519.pub, id_rsa.pub, *.pub, or set VM_SSH_PUBKEY), the harness key, and VM_NAME (as the guest hostname) into the kickstart; virt-install: Fedora Everything netinstall of the release set by FEDORA_RELEASE in vm/Makefile (currently 44), with vm/install-tree.sh resolving the Fedora geo-redirector to one concrete mirror and verifying it serves the install tree before virt-install ever touches it (no retries: a redirector that does not itself redirect is rejected outright), + that kickstart (btrfs autopart, NOPASSWD sudo, password `vekrona` for graphical login, system sleep disabled in the guest because virtio-gpu does not survive suspend and resume (DMS would otherwise suspend an idle VM after 30 min and wedge Sway on its display), `%packages` limited to what the harness itself needs before any stage has run: `@core rsync qemu-guest-agent`; openssh-server is already an @core mandatory package; both the harness key and your personal key are authorized for the VM user); the --os-variant hardware profile is fedora<release> when the host's osinfo database knows it, otherwise the newest known profile plus a warning naming `osinfo-db-import --user --latest`; the VM gets a virtio video device, a local-only SPICE display (`--graphics spice,listen=127.0.0.1`), and a guest-agent channel requested explicitly; the serial console is logged to `/var/log/libvirt/qemu/$(VM_NAME)-serial0.log` (root-owned, read it with sudo) so an install or boot failure can be diagnosed afterwards; the domain is marked as owned by this harness in its libvirt metadata (see `destroy` below); the kickstart shuts the VM down after %post, then this target boots it with `virsh start`
 make -C vm test       # connects only with the harness key (-i vm/.ssh/id_ed25519, IdentitiesOnly=yes, -F /dev/null and IdentityAgent=none so your ~/.ssh/config and any SSH agent, including 1Password, are never touched); waits for an IPv4 lease (vm/wait-for-ip.sh, event-driven: it watches the libvirt dnsmasq lease file with inotifywait rather than polling on a sleep), waits for SSH, enables linger for the VM user, rsyncs the repo in (excluding .git and vm/.ssh, so the harness key never leaves the host), runs ./install.sh --skip 10-nvidia (which installs everything the harness scripts below need: python3/inotify-tools are not in the kickstart, stage 30-packages installs them before session-check.sh ever runs; git is not installed by any stage or needed in the VM, since the repo arrives by rsync, not by clone), vm/session-check.sh, a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for it to actually reboot and for qemu-guest-agent to reconnect, both through libvirt domain events (vm/wait-for-reboot.py), then waits for SSH again, runs vm/rollback-check.sh against that snapshot number, requires `systemctl is-system-running --wait` to report `running` (a degraded boot, with any failed unit, fails the test and prints the failed units), and finally runs vm/login-manager-check.sh to prove the fresh-install login manager (stage 65-login-manager): greetd active, greetd enabled, default target graphical.target. One timed wall-clock wait remains, unlike every other wait here: SSH reachability itself, retried up to `SSH_CONNECT_ATTEMPTS` times, isolated in one `wait_for_ssh` helper in vm/Makefile (see TODO.md)
 make -C vm destroy    # refuses to act on a domain that is not marked as owned by this harness (see `create` above); virsh destroy if running, then virsh undefine --remove-all-storage, then removes the generated vm/ks-$(VM_NAME).cfg
 make -C vm adopt      # marks an existing domain as owned by this harness, for a domain `create` made before the ownership mark existed; requires its generated vm/ks-$(VM_NAME).cfg to already exist, as evidence this harness actually created it
@@ -529,6 +590,73 @@ involved: the NVIDIA stage and every GPU feature that depends on it (stage
 output, Bluetooth, and anything that needs pointer input, such as an area
 screenshot or a screen-recording region selection, since `make -C vm type`
 and `make -C vm key` only send keystrokes.
+
+## ISO and CI
+
+`iso/` builds an installable Fedora 44 ISO (Sway/DMS baked in via a
+first-boot install) on top of the official Fedora Everything netinstall, and
+`.github/workflows/iso.yml` builds and tests it on every push, pull request,
+and tag:
+
+- `iso/fetch-netinst.sh <release> <dest-dir>` downloads and GPG/sha256-verifies
+  the official Fedora Everything netinstall ISO for `<release>`, printing its
+  path; a verified file already in `<dest-dir>` is reused instead of
+  re-downloaded.
+- `iso/build.sh --netinst <iso> --out <iso>` refuses to run against a dirty
+  working tree (the ISO embeds a `git clone` of HEAD, so uncommitted changes
+  would silently be missing from it) — commit or stash first. It points the
+  cloned checkout's `origin` remote at the source repo's own `origin` URL, so
+  the installed system can `git pull` for real, and every kickstart `%post`
+  uses `--erroronfail` so a failing step aborts the install instead of
+  continuing silently. It then runs `mkksiso` (Fedora 44 host, `lorax`
+  installed) to produce the release ISO: interactive on boot, Anaconda asks
+  for a disk and a user; with no `timezone` line, the installer defaults to
+  `America/New_York` and shows a non-blocking warning on the hub, clearable
+  by visiting Time & Date during install. With `--test-ssh-pubkey <file>` it
+  instead produces a fully unattended test ISO: wipes the disk, installs
+  btrfs, creates user `vekrona` (password `vekrona`, in `wheel`), enables
+  sshd with that key authorized, boots with `console=ttyS0`, and reboots
+  when Anaconda finishes. `mkksiso` rebuilds the ISO's EFI boot image
+  (`mkefiboot`), which loop-mounts a small FAT image, so the container this
+  runs in needs `/dev/loop-control` plus `--cap-add SYS_ADMIN --cap-add
+  MKNOD --device /dev/loop-control --device-cgroup-rule='b 7:* rmw'
+  --security-opt label=disable` (a rootful container; rootless podman
+  refuses device-cgroup rules outright) — `iso/build.sh` itself `mknod`s
+  `/dev/loop0`-`/dev/loop7` if missing so it never depends on the host
+  already having free loop devices. `iso/Containerfile` plus `podman build
+  -t vekrona-iso-builder -f iso/Containerfile .` and `sudo podman run --rm
+  <the flags above> -v "$PWD:/src:Z" -w /src vekrona-iso-builder bash
+  iso/build.sh ...` reproduce this locally.
+- The installed system runs `vekrona-firstboot.service` once on first boot:
+  it runs `./install.sh` as the `vekrona` user (skipping `10-nvidia` when
+  there is no NVIDIA GPU), then writes `/var/lib/vekrona/firstboot.done` or
+  `firstboot.failed` and reboots into `greetd` on success.
+- `iso/qemu-test.sh <test.iso>` boots that test ISO under plain
+  `qemu-system-x86_64` with KVM (UEFI via OVMF, 8 GiB RAM, 4 vCPUs, a 40G
+  qcow2 disk, user-mode networking with an SSH port forward, and the serial
+  console logged to a file). It runs the install once with `-no-reboot` so
+  QEMU exits when Anaconda reboots, then boots the installed disk on its
+  own; waits for SSH with the matching test private key
+  (`VEKRONA_TEST_SSH_KEY`), then for the firstboot completion marker
+  (printing `firstboot.failed` plus `journalctl -u vekrona-firstboot` and
+  failing if firstboot failed), then for the post-firstboot reboot and SSH
+  again; and finally asserts `systemctl is-system-running --wait` is
+  `running` (printing failed units otherwise), `greetd` is active, and runs
+  `vm/session-check.sh`, `vm/login-manager-check.sh`, `./install.sh --skip
+  10-nvidia 70` (verify: warnings allowed, no `FAIL:`), and a
+  `vekrona-snapshot`/`vekrona-rollback` round trip, over SSH with the same
+  options as `vm/Makefile` (harness key only, `IdentitiesOnly`, `-F
+  /dev/null`, `IdentityAgent=none`, no known-hosts file). Every wait is
+  polled with a bounded, env-overridable timeout rather than a fixed sleep;
+  on any failure it prints the serial console log tail before cleaning up
+  its QEMU processes and temp files.
+
+The `iso.yml` workflow has three jobs: `build` (Fedora 44 container, caches
+the downloaded netinstall ISO by release, builds both the release and a
+throwaway-keyed test ISO, uploads both as artifacts), `test` (enables KVM on
+the `ubuntu-latest` runner and runs `iso/qemu-test.sh` against the test ISO,
+uploading the serial logs on any outcome), and `release` (tags only, attaches
+the release ISO and its checksum to the GitHub release).
 
 ## Decisions log
 
