@@ -1,5 +1,7 @@
 # TODO
 
+- `cursor-agent`'s mise entry uses the http backend, which only ever exposes the current build, so `minimum_release_age` (the supply-chain cooldown stage `55-agents` sets for the other three agent CLIs) cannot hold it back the way it does for the npm and aqua backends. Separately, OpenCode's aqua entry and Cursor's http entry carry no upstream checksum in mise's registry, unlike the npm-backend tools, so integrity for those two rests on HTTPS transport alone. Both are accepted, residual risks documented in README ("Agents: delivery and updates"); revisit if mise or Cursor add a checksummed/versioned release feed.
+
 - `stages/10-nvidia.sh`'s `REMOVE_GLOBS` includes the glob `libnvidia-*`, which is removed in the same transaction as the cuda-repo driver whenever `cuda_driver_installed` is true. This glob also matches CUDA runtime libraries unrelated to the display driver itself (e.g. `libnvidia-ml`, `libnvidia-container`), so a host that has those installed for other reasons could have them removed as a side effect of this stage. Narrow the glob to the driver-specific packages it actually targets.
 - Nested btrfs subvolume for /var/lib/libvirt/images so snapshots do not pin VM images.
 - DMS bar indicator for vekrona-caffeine (plugin API unverified).

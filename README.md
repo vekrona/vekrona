@@ -33,7 +33,7 @@ existing Fedora Workstation" below.
 | `fonts/` | vendored JetBrainsMono Nerd Font (OFL, v3.5.1), symlinked into `~/.local/share/fonts/vekrona` |
 | `config/fontconfig/conf.d/50-vekrona-fonts.conf` | fontconfig aliases: `sans-serif`/`system-ui` prefer Atkinson Hyperlegible Next then Inter (Atkinson has no Cyrillic, Inter covers it), `monospace` prefers JetBrainsMono Nerd Font; symlinked into `~/.config/fontconfig/conf.d/` |
 | `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/` | DMS DankBar plugin: always shows Sway workspaces 1-5 plus any existing 6-10, replacing the stock workspace switcher (see "The vekronaSwayWorkspaces DankBar plugin" below); stage `50-user` symlinks the whole `plugins/` directory into `~/.config/DankMaterialShell/plugins/` |
-| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, rollback, and login-manager checks |
+| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, agents, rollback, and login-manager checks |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (plain-QEMU install-and-boot test of a test ISO) |
 | `.github/workflows/iso.yml` | CI: builds the release and test ISOs in a Fedora 44 container, boots the test ISO under QEMU/KVM on the runner, and attaches the release ISO to tagged GitHub releases |
 | `docs/PLAN.md` | the design record: decisions, verified machine facts, rollout, verification, known issues |
@@ -65,13 +65,15 @@ cd ~/wrk/vekrona
 ```
 
 With no arguments, `install.sh` runs the default stage list in this order:
-`00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming 65-login-manager 70-verify`.
+`00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 55-agents 60-gaming 65-login-manager 70-verify`.
 Snapper runs before NVIDIA so a snapshot exists before stage `10-nvidia` touches
 the driver. Stage `65-login-manager` runs last, after everything that
 installs and configures greetd (`30-packages`, `40-system`) and right before
 verify: on a fresh install nothing owns `display-manager.service` yet, so it
 enables greetd and switches the default target to `graphical.target`. See
-"New default stage: 65-login-manager" below for the exact condition.
+"New default stage: 65-login-manager" below for the exact condition. Stage
+`55-agents` installs the coding-agent harnesses (Claude Code, Codex, OpenCode,
+Pi, Cursor); see "Agents: delivery and updates" below.
 
 Reboot, then log in through the greeter (tuigreet, running `start-sway`).
 
@@ -464,7 +466,112 @@ already ships `vekronaSwayWorkspaces` in place of the stock widget for a
 fresh install. `70-verify` checks the plugin is linked, enabled, and placed
 in a bar widget list.
 
+## Agents: delivery and updates
+
+Five coding-agent CLIs run on this desktop, each launched by name from Sway
+(the launcher itself is a separate concern from this repo): Claude Code,
+Codex, OpenCode, Pi, and Cursor. All five are subscription-login tools; no
+API keys are configured or stored by vekrona. Stage `55-agents` installs
+them through exactly two package managers, so there is no per-tool lockfile
+or hash management to maintain:
+
+1. **Claude Code**, via Anthropic's own signed dnf repo
+   (`etc/yum.repos.d/claude-code.repo`, package `claude-code`). This is a
+   root-owned `/usr/bin/claude` that never self-updates (`claude doctor`
+   reports "Auto-updates: Managed by package manager") — it only moves when
+   `vekrona-update` runs `dnf upgrade`.
+2. **Codex, OpenCode, Pi, and Cursor**, via one system-wide, root-owned
+   [mise](https://mise.jdx.dev/) install (`etc/yum.repos.d/mise.repo`,
+   package `mise`, plus `nodejs-npm` for mise's npm backend). `/etc/mise/config.toml`
+   pins the tool list and sets a supply-chain cooldown,
+   `minimum_release_age = "1d"`: mise will not install or upgrade to a
+   release less than a day old, so a same-day compromised release of any of
+   these tools is never pulled automatically. The cooldown is verified to
+   apply to the npm backend (Codex, Pi) and the aqua backend (OpenCode). It
+   does **not** apply to Cursor: `cursor-agent` comes from mise's http
+   backend, which only ever exposes the current build, so there is no older
+   build for the cooldown to fall back to. Separately, OpenCode's aqua entry
+   and Cursor's http entry carry no upstream checksum in `mise`'s registry,
+   so integrity for those two rests on HTTPS transport alone, not a pinned
+   hash. Both are residual, accepted risks; see `TODO.md`.
+
+Both repo files are GPG-signed (`gpgcheck=1`), and stage `55-agents` does not
+trust dnf's own on-demand key import: before installing anything, it
+downloads each repo's key, computes its fingerprint locally
+(`gpg --import-options show-only`), and `die`s if that fingerprint does not
+exactly match the one verified against the vendor out of band
+(`ensure_gpg_key_imported`, `lib/common.sh`; fingerprints and URLs are the
+`CLAUDE_CODE_GPG_*`/`MISE_GPG_*` constants there). Only once the fingerprint
+matches does it `rpm --import` the key and install the package.
+
+`mise install --system`/`mise upgrade --system` only work for
+binary-download backends, which rules out Codex and Pi (npm backend); the
+one form that installs, upgrades, and reshims all four tools uniformly is to
+skip `--system` and instead point plain `mise` at root-owned directories:
+`MISE_DATA_DIR=/usr/local/share/mise MISE_CONFIG_DIR=/etc/mise`. This is the
+`mise_system` helper in `lib/common.sh`, the one chokepoint stage
+`55-agents` and `bin/vekrona-update` both call, so there is exactly one place
+that knows how mise is invoked system-wide. The result,
+`/usr/local/share/mise/installs/*` and
+`/usr/local/share/mise/shims/{codex,pi,opencode,cursor-agent}`, is
+root:root and not writable by the user; stage `55-agents` asserts this by
+actually attempting a write and expecting it to fail, not by only reading
+permission bits.
+
+PATH carries the shims directory,
+`/usr/local/share/mise/shims`, in two places, since the sway session and a
+login shell/SSH/TTY session build their `PATH` differently: the sway session
+picks it up from `config/environment.d/vekrona.conf` (appended to the
+existing `PATH`), and a login shell, SSH session, or plain text console
+picks it up from `etc/profile.d/vekrona-mise.sh` (a root file, `ensure_root_file`).
+`OPENCODE_DISABLE_AUTOUPDATE=true` is set in both of those same two places:
+OpenCode has a self-update path of its own, and setting this disables it so
+the root-owned mise install is the only thing that ever changes OpenCode's
+binary. Codex accepts an equivalent flag
+(`-c check_for_update_on_startup=false`) but the launcher that calls it (a
+separate stream of work) is expected to pass it. Cursor has no such flag;
+its root-owned install already denies its own updater write access, so there
+is nothing to disable.
+
+Stage `55-agents` warns, but does not fail, if a user-local copy of any of
+these binaries exists under `~/.local/bin` (for example, a native
+Claude-Code installer that already put `claude` there on a previously
+hand-set-up machine): `~/.local/bin` comes first on `PATH`, so a leftover
+copy there silently shadows the managed, root-owned binary and stops it from
+ever being the one that runs, or the one `vekrona-update` keeps current.
+Remove the flagged file so the name resolves to the managed install instead.
+
 ## Update policy
+
+`vekrona-update` is the one command for "update the whole computer": it
+takes a pre-update snapper snapshot, runs `dnf upgrade --refresh`, `flatpak
+update`, and `mise` (system-wide) upgrade + reshim, then takes a matching
+post-update snapshot, printing what changed at each step (each tool's own
+output) and the pre-snapshot number with a `vekrona-rollback <N>` hint at the
+end. Run it yourself in a terminal:
+
+```
+vekrona-update
+```
+
+It asks for `sudo` once up front (like `install.sh`), then never prompts
+again: `dnf upgrade -y`, `flatpak update -y`, and `mise upgrade` are all
+non-interactive by default, so nothing about a routine update requires a
+`--yes` flag. A `mise upgrade --dry-run` runs first and prints a `WARN` line
+for every release the `minimum_release_age` cooldown is currently holding
+back, so a run that changes less than expected explains why in its own
+output rather than silently doing less.
+
+The post-update snapshot is taken from an `EXIT` trap, so even a failing
+step (a `die` from a failed `dnf upgrade`, for instance) still leaves a
+matched pre/post pair on disk instead of a dangling pre snapshot with
+nothing to compare it to; the printed rollback hint is the way back to
+before the run regardless of where it failed. Stage `20-snapper`'s own dnf
+actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`)
+also fires its own pre/post pair around the `dnf upgrade` transaction inside
+this run, nested inside `vekrona-update`'s own pair; that nesting is
+expected and harmless (snapper snapshots are cheap CoW, and `NUMBER_LIMIT=10`
+prunes old ones), not a bug to work around.
 
 Stay one Fedora release behind: this machine runs F44 until F46 reaches GA.
 Staying a release behind gives the NVIDIA driver, Sway/wlroots, and DMS/Qt
@@ -476,9 +583,16 @@ recorded in `/etc/dnf/versionlock.toml`:
 - Stage `30-packages` locks `sway`, the wlroots package providing the libwlroots soname the installed `sway` links against, `dms`, `quickshell`, `qt6-qtbase`, `qt6-qtdeclarative`, `qt6-qtwayland`, `xremap-wlroots`, the whole compositor and shell stack, so a routine `dnf upgrade` cannot pull one of them out from under versions that were actually tested together.
 - Stage `10-nvidia` locks `akmod-nvidia` and every installed `xorg-x11-drv-nvidia*` package, so a routine upgrade cannot install a newer proprietary driver against an untested kernel.
 
-`stages/70-verify.sh` warns when a lock's `.fcNN` suffix no longer matches the
-running Fedora version, which is the signal that a lock is now holding back
-more than intended.
+`vekrona-update`'s `dnf upgrade` respects both locks automatically (dnf never
+moves a versionlocked package on a plain upgrade); `stages/70-verify.sh`
+warns when a lock's `.fcNN` suffix no longer matches the running Fedora
+version, which is the signal that a lock is now holding back more than
+intended.
+
+To change the `minimum_release_age` cooldown, edit the one line in
+`etc/mise/config.toml` and re-run `./install.sh 55`, which reinstalls the
+file and re-runs `mise_system install`/`reshim` against the new setting; the
+same file also controls which tool versions mise tracks (`[tools]`).
 
 Release upgrade procedure:
 

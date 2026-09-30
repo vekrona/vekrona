@@ -194,6 +194,51 @@ ensure_user_in_group() {
   getent group "$group" | grep -q "\b$VEKRONA_USER\b" || die "user not added to $group"
 }
 
+owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
+
+gpg_key_fingerprint() {
+  local url="$1"
+  curl -fsSL "$url" | gpg --batch --with-colons --import-options show-only --dry-run --import - 2>/dev/null \
+    | awk -F: '/^fpr:/{print $10; exit}'
+}
+
+gpg_pubkey_installed() {
+  local keyid_lower="$1"
+  rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$keyid_lower"
+}
+
+ensure_gpg_key_imported() {
+  local url="$1" fingerprint="$2" keyid got
+  keyid="$(tr '[:upper:]' '[:lower:]' <<<"${fingerprint: -8}")"
+  gpg_pubkey_installed "$keyid" && { log "gpg key already imported: $fingerprint"; return 0; }
+  got="$(gpg_key_fingerprint "$url")"
+  [[ -n "$got" ]] || die "could not determine gpg key fingerprint: $url"
+  [[ "$got" == "$fingerprint" ]] || die "gpg key fingerprint mismatch for $url: got $got, expected $fingerprint"
+  log "importing gpg key: $url"
+  root rpm --import "$url"
+  gpg_pubkey_installed "$keyid" || die "gpg key not imported: $fingerprint"
+}
+
+CLAUDE_CODE_REPO_ID="claude-code"
+CLAUDE_CODE_GPG_URL="https://downloads.claude.ai/keys/claude-code.asc"
+CLAUDE_CODE_GPG_FINGERPRINT="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+
+MISE_REPO_ID="mise-repo"
+MISE_GPG_URL="https://mise.jdx.dev/gpg-key.pub"
+MISE_GPG_FINGERPRINT="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
+
+VEKRONA_AGENT_PKGS=(claude-code mise nodejs-npm)
+VEKRONA_AGENT_TOOLS=(codex pi opencode cursor-agent)
+
+MISE_SYSTEM_DATA_DIR=/usr/local/share/mise
+MISE_SYSTEM_CONFIG_DIR=/etc/mise
+
+mise_system() {
+  # mise --system only installs binary-download backends; overriding MISE_DATA_DIR/MISE_CONFIG_DIR
+  # instead runs the normal (non-system) code path against root-owned dirs, which also covers our npm/aqua/http tools.
+  root env MISE_DATA_DIR="$MISE_SYSTEM_DATA_DIR" MISE_CONFIG_DIR="$MISE_SYSTEM_CONFIG_DIR" mise "$@"
+}
+
 VERSIONLOCK_FILE=/etc/dnf/versionlock.toml
 
 versionlock_has() { grep -qE "^name = \"$1\"" "$VERSIONLOCK_FILE" 2>/dev/null; }
