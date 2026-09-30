@@ -53,24 +53,24 @@ jobs:
           echo "path=$path" >> "$GITHUB_OUTPUT"
 
       - name: Generate throwaway test SSH key
-        run: ssh-keygen -t ed25519 -N '' -C vekrona-ci-test -f "$RUNNER_TEMP/test-key"
+        run: mkdir -p iso/out && ssh-keygen -t ed25519 -N '' -C vekrona-ci-test -f iso/out/test-key
 
       - name: Build release ISO
-        run: bash iso/build.sh --netinst "${{ steps.netinst.outputs.path }}" --out "$RUNNER_TEMP/release.iso"
+        run: bash iso/build.sh --netinst "${{ steps.netinst.outputs.path }}" --out "iso/out/release.iso"
 
       - name: Build test ISO
-        run: bash iso/build.sh --netinst "${{ steps.netinst.outputs.path }}" --out "$RUNNER_TEMP/test.iso" --test-ssh-pubkey "$RUNNER_TEMP/test-key.pub"
+        run: bash iso/build.sh --netinst "${{ steps.netinst.outputs.path }}" --out "iso/out/test.iso" --test-ssh-pubkey "iso/out/test-key.pub"
 
       - name: Checksum release ISO
-        run: cd "$RUNNER_TEMP" && sha256sum release.iso > release.iso.sha256
+        run: cd iso/out && sha256sum release.iso > release.iso.sha256
 
       - name: Upload release ISO
         uses: actions/upload-artifact@v4
         with:
           name: release-iso
           path: |
-            ${{ runner.temp }}/release.iso
-            ${{ runner.temp }}/release.iso.sha256
+            iso/out/release.iso
+            iso/out/release.iso.sha256
           retention-days: 14
 
       - name: Upload test ISO and throwaway key
@@ -78,9 +78,9 @@ jobs:
         with:
           name: test-iso
           path: |
-            ${{ runner.temp }}/test.iso
-            ${{ runner.temp }}/test-key
-            ${{ runner.temp }}/test-key.pub
+            iso/out/test.iso
+            iso/out/test-key
+            iso/out/test-key.pub
           retention-days: 14
 
   test:
@@ -106,16 +106,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: test-iso
-          path: iso-test
+          path: iso/out
 
       - name: Run the ISO install test under QEMU
         env:
-          VEKRONA_TEST_SSH_KEY: ${{ github.workspace }}/iso-test/test-key
+          VEKRONA_TEST_SSH_KEY: ${{ github.workspace }}/iso/out/test-key
           VEKRONA_QEMU_LOG_DIR: ${{ github.workspace }}/iso-test-logs
         run: |
           chmod 600 "$VEKRONA_TEST_SSH_KEY"
           mkdir -p "$VEKRONA_QEMU_LOG_DIR"
-          bash iso/qemu-test.sh iso-test/test.iso
+          bash iso/qemu-test.sh iso/out/test.iso
 
       - name: Upload QEMU serial logs
         if: always()
