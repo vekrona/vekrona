@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.fedoraproject.Anaconda.Addons.VekronaAccount
+Exec=/usr/libexec/anaconda/start-module vekrona_account.service
+User=root

@@ -100,7 +100,7 @@ jobs:
       - name: Install QEMU and OVMF
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf
+          sudo apt-get install -y qemu-system-x86 ovmf socat
 
       - name: Download test ISO and throwaway key
         uses: actions/download-artifact@v4
