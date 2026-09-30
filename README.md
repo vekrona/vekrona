@@ -30,10 +30,12 @@ existing Fedora Workstation" below.
 | `config/` | source of truth for dotfiles; stage `50-user` symlinks these into `$HOME`. Stage `50-user` also generates `~/.config/environment.d/vekrona-gpu.conf` itself, not tracked under `config/`, only when `/dev/dri/vekrona-dgpu` exists (see Known issues) |
 | `etc/` | system files installed into `/etc` by `ensure_root_file` |
 | `bin/vekrona-*` | the CLI tools; stage `50-user` symlinks the whole directory into `~/.local/bin` |
+| `config/systemd-user/vekrona-errors.service`, `vekrona-errors-failed.service` | `vekrona-errors.service` runs `vekrona-error watch` (the error pipeline, see "Error pipeline" below); `vekrona-errors-failed.service` is its `OnFailure=` notifier. Stage `50-user` links and enables them the same way it does `xremap.service` |
+| `config/agents/skills/vekrona-diagnose/` | the Claude Code skill an agent uses to investigate a vekrona error; stage `50-user` symlinks it into `~/.claude/skills/`, `~/.codex/skills/`, and `~/.agents/skills/` |
 | `fonts/` | vendored JetBrainsMono Nerd Font (OFL, v3.5.1), symlinked into `~/.local/share/fonts/vekrona` |
 | `config/fontconfig/conf.d/50-vekrona-fonts.conf` | fontconfig aliases: `sans-serif`/`system-ui` prefer Atkinson Hyperlegible Next then Inter (Atkinson has no Cyrillic, Inter covers it), `monospace` prefers JetBrainsMono Nerd Font; symlinked into `~/.config/fontconfig/conf.d/` |
 | `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/` | DMS DankBar plugin: always shows Sway workspaces 1-5 plus any existing 6-10, replacing the stock workspace switcher (see "The vekronaSwayWorkspaces DankBar plugin" below); stage `50-user` symlinks the whole `plugins/` directory into `~/.config/DankMaterialShell/plugins/` |
-| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, agents, rollback, and login-manager checks |
+| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, agents, error-pipeline, rollback, and login-manager checks |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (plain-QEMU install-and-boot test of a test ISO) |
 | `.github/workflows/iso.yml` | CI: builds the release and test ISOs in a Fedora 44 container, boots the test ISO under QEMU/KVM on the runner, and attaches the release ISO to tagged GitHub releases |
 | `docs/PLAN.md` | the design record: decisions, verified machine facts, rollout, verification, known issues |
@@ -443,6 +445,76 @@ scb -- %command%
 
 MangoHud toggle in-game: Shift_R+F12 (`config/mangohud/MangoHud.conf`,
 `toggle_hud=Shift_R+F12`).
+
+## Error pipeline
+
+Every error on the machine lands in one place, so any of them can launch a
+coding agent to go diagnose it. `vekrona-errors.service` (a user unit, like
+`xremap.service`, `WantedBy=sway-session.target`) runs `vekrona-error watch`,
+which follows the journal and turns four kinds of entry into a recorded error:
+
+- a coredump (`systemd-coredump`, any crashing process)
+- a failed systemd unit, system or user (it reads the *system* journal, which
+  a `wheel` member can read in full and which already includes user units'
+  own entries, so one watcher covers both without needing the
+  `systemd-journal` group)
+- a kernel OOM kill, or a `systemd-oomd` kill
+- any other journal entry logged at priority `err` or above
+
+`vekrona-error report --title T [--summary S] [--source vekrona|manual]` adds
+a fifth kind by hand: it writes one structured entry straight to
+`/run/systemd/journal/socket` in journald's own native protocol (no `logger`
+dependency, and multi-line summaries survive intact), so it works as root,
+with no session bus, and before `python3-gobject` is even installed.
+`lib/common.sh`'s `die()` calls it
+this way on every stage failure, and `vekrona-keybindings`' own `die()` does
+the same, so a broken stage or a failed keybinding shows up here too instead
+of (or as well as) wherever it already prints to. If the system journal isn't
+readable at all (not in `wheel` or `systemd-journal`), the watcher sends one
+critical toast saying so and falls back to the user journal only.
+
+Each error is recorded once under
+`~/.local/state/vekrona/errors/<id>/` (`record.json` plus a `context.txt`
+captured at the time: the relevant `journalctl`/`systemctl status`/
+`coredumpctl info` output; a corrupt `record.json` is quarantined to
+`record.json.corrupt` rather than crashing the watcher or the CLI). Repeats of
+the same error (by a fingerprint that normalizes out digits, hex, paths, and
+UUIDs from the message) bump its count instead of creating a new record. A
+repeat within 10 minutes of the last one doesn't re-toast, *unless* the record
+had been `ack`ed (or launched) since the last occurrence, in which case it
+re-toasts regardless of the window — an acked error recurring is exactly what
+acking is supposed to surface again. `~/.local/state/vekrona/errors/unread`
+holds the count of errors still in `new` status, kept for the DMS bar button
+(added by another stream) to read. The newest 500 records, by `last_seen`, are
+kept; older ones are pruned.
+
+A toast (via DMS's notification daemon) has two actions, "Fix with agent" and
+"Mute" (clicking the toast body does the same as "Fix with agent"): the
+former launches `vekrona-agent --error <id>` as a monitored child (its failure
+or non-zero exit is itself toasted, not swallowed), the coding agent launcher
+built by another stream, which calls `vekrona-error prompt <id>` to get its
+brief (see `config/agents/skills/vekrona-diagnose/SKILL.md`, symlinked into
+`~/.claude/skills/`, `~/.codex/skills/`, and `~/.agents/skills/`) and marks the
+record `launched`; the latter appends the error's fingerprint to
+`~/.config/vekrona/errors-mute` (one regex per line, matched against both the
+fingerprint and the title; an unparseable line is toasted once by name rather
+than silently ignored) and marks it muted, so a matching error is dropped
+silently from then on, no record, no toast. More than 5 toasts within 30
+seconds collapse into one "N new errors" toast instead, whose action opens a
+picker rather than any single error. The watcher remembers which notification
+id belongs to which error only while the same notification daemon (D-Bus
+owner) that issued them is still running; if it restarts (or clicking a
+notification racing a watcher restart), the action is answered with a small
+"this notification is stale; use Hyper+Shift+A" toast instead of being
+silently dropped.
+
+```
+vekrona-error list [--all]     # table of recorded errors, newest first (--all includes muted)
+vekrona-error show <id>        # one error's record plus its captured context
+vekrona-error mute <id>        # mute this error's fingerprint
+vekrona-error ack <id>|--all   # mark handled
+vekrona-error pick             # rofi picker (bound to Hyper+Shift+A by another stream) -> launches the agent on the pick
+```
 
 ## The vekronaSwayWorkspaces DankBar plugin
 

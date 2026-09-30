@@ -8,7 +8,18 @@ VEKRONA_USER="$(id -un)"
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31m[vekrona] FAIL:\033[0m %s\n' "$*" >&2; exit 1; }
+
+report_error_for_die() {
+  local msg="$1" bin="$VEKRONA_ROOT/bin/vekrona-error"
+  [[ -x "$bin" ]] || return 0
+  timeout 5 "$bin" report --title "$msg" --source vekrona >/dev/null 2>&1
+}
+
+die()  {
+  printf '\033[1;31m[vekrona] FAIL:\033[0m %s\n' "$*" >&2
+  report_error_for_die "$*" || warn "failed to report this error to vekrona-error"
+  exit 1
+}
 
 root() {
   if [[ $EUID -eq 0 ]]; then "$@"; else sudo "$@"; fi
@@ -376,8 +387,8 @@ VEKRONA_DESKTOP_PKGS=(
   gnome-keyring gnome-keyring-pam greetd grim inotify-tools
   jetbrains-mono-fonts jq kanshi
   libnotify mangohud matugen perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
-  python3 python3-pyyaml quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
-  sway-systemd tuigreet tuned-ppd wf-recorder wireplumber wl-clipboard wlr-randr
+  python3 python3-gobject python3-pyyaml quickshell rofi rsms-inter-fonts slurp steam swappy sway
+  sway-config-fedora sway-systemd tuigreet tuned-ppd wf-recorder wireplumber wl-clipboard wlr-randr
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
 )
 
