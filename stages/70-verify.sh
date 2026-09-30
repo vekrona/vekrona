@@ -37,7 +37,6 @@ file_exists() { [[ -e "$1" ]]; }
 file_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 file_lacks_qsg_backend() { ! grep -q '^QSG_RHI_BACKEND=' "$1" 2>/dev/null; }
 dir_exists() { [[ -d "$1" ]]; }
-owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
 gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
 not_repo_enabled() { ! repo_enabled "$1"; }
@@ -284,6 +283,33 @@ assert d.get('matugenTemplateGhostty', True) is True
 
   user_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"
   warn_check "$HOME/.local/bin in systemd user PATH" contains "$HOME/.local/bin" "$user_path"
+fi
+
+if ran 55-agents; then
+  check assert "repo enabled: $CLAUDE_CODE_REPO_ID" repo_enabled "$CLAUDE_CODE_REPO_ID"
+  check assert "repo enabled: $MISE_REPO_ID" repo_enabled "$MISE_REPO_ID"
+  check assert "gpg key imported: claude-code" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$CLAUDE_CODE_GPG_FINGERPRINT")"
+  check assert "gpg key imported: mise" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$MISE_GPG_FINGERPRINT")"
+  for p in "${VEKRONA_AGENT_PKGS[@]}"; do
+    check assert "package installed: $p" pkg_installed "$p"
+  done
+  check assert "/etc/mise/config.toml matches repo" cmp -s "$VEKRONA_ROOT/etc/mise/config.toml" /etc/mise/config.toml
+  check assert "/etc/profile.d/vekrona-mise.sh matches repo" cmp -s "$VEKRONA_ROOT/etc/profile.d/vekrona-mise.sh" /etc/profile.d/vekrona-mise.sh
+  check assert "claude resolves" bash -c "command -v claude >/dev/null"
+  for t in "${VEKRONA_AGENT_TOOLS[@]}"; do
+    check assert "$t shim present" bash -c "[[ -x '$MISE_SYSTEM_DATA_DIR/shims/$t' ]]"
+  done
+  check assert "$MISE_SYSTEM_DATA_DIR owned by root" owned_by "$MISE_SYSTEM_DATA_DIR" root
+  check assert "$MISE_SYSTEM_CONFIG_DIR owned by root" owned_by "$MISE_SYSTEM_CONFIG_DIR" root
+  for name in claude "${VEKRONA_AGENT_TOOLS[@]}"; do
+    warn_check "no user-local copy shadows $name on PATH" bash -c "[[ ! -e '$HOME/.local/bin/$name' ]]"
+  done
+
+  mise_shims_dir="$MISE_SYSTEM_DATA_DIR/shims"
+  for f in "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$VEKRONA_ROOT/etc/profile.d/vekrona-mise.sh"; do
+    check assert_file_contains "$f" "$mise_shims_dir"
+    check assert_file_contains "$f" 'OPENCODE_DISABLE_AUTOUPDATE=true'
+  done
 fi
 
 if ran 60-gaming; then

@@ -194,6 +194,73 @@ ensure_user_in_group() {
   getent group "$group" | grep -q "\b$VEKRONA_USER\b" || die "user not added to $group"
 }
 
+owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
+
+gpg_key_fingerprint_file() {
+  # --dry-run --show-only still needs a writable GNUPGHOME to open a keybox in, so use a scratch one
+  # rather than the invoking user's own (possibly nonexistent) ~/.gnupg.
+  local file="$1" gnupg_home fp
+  gnupg_home="$(mktemp -d)"
+  fp="$(gpg --homedir "$gnupg_home" --batch --with-colons --import-options show-only --dry-run --import "$file" 2>/dev/null \
+    | awk -F: '/^fpr:/{print $10; exit}')"
+  rm -rf "$gnupg_home"
+  printf '%s' "$fp"
+}
+
+gpg_pubkey_installed() {
+  # rpm on this Fedora release stores a gpg-pubkey package's full lowercase fingerprint as %{VERSION},
+  # not the classic 8-hex short key id, so that is what this checks against.
+  local fingerprint_lower="$1"
+  rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$fingerprint_lower"
+}
+
+ensure_gpg_key_imported() {
+  local url="$1" fingerprint="$2" fingerprint_lower got tmp
+  ensure_pkg gnupg2
+  fingerprint_lower="$(tr '[:upper:]' '[:lower:]' <<<"$fingerprint")"
+  gpg_pubkey_installed "$fingerprint_lower" && { log "gpg key already imported: $fingerprint"; return 0; }
+  tmp="$(mktemp)"
+  curl -fsSL "$url" -o "$tmp" || die "failed to download gpg key: $url"
+  # Fingerprint the exact bytes we are about to import, not a second, separate download of the same URL.
+  got="$(gpg_key_fingerprint_file "$tmp")"
+  [[ -n "$got" ]] || { rm -f "$tmp"; die "could not determine gpg key fingerprint: $url"; }
+  [[ "$got" == "$fingerprint" ]] || { rm -f "$tmp"; die "gpg key fingerprint mismatch for $url: got $got, expected $fingerprint"; }
+  log "importing gpg key: $url"
+  root rpm --import "$tmp"
+  rm -f "$tmp"
+  gpg_pubkey_installed "$fingerprint_lower" || die "gpg key not imported: $fingerprint"
+}
+
+CLAUDE_CODE_REPO_ID="claude-code"
+CLAUDE_CODE_GPG_URL="https://downloads.claude.ai/keys/claude-code.asc"
+CLAUDE_CODE_GPG_FINGERPRINT="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+
+MISE_REPO_ID="mise-repo"
+MISE_GPG_URL="https://mise.jdx.dev/gpg-key.pub"
+MISE_GPG_FINGERPRINT="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
+
+VEKRONA_AGENT_PKGS=(claude-code mise nodejs22-npm)
+VEKRONA_AGENT_TOOLS=(codex pi opencode cursor-agent)
+
+MISE_SYSTEM_DATA_DIR=/usr/local/share/mise
+MISE_SYSTEM_CONFIG_DIR=/etc/mise
+MISE_SYSTEM_CACHE_DIR=/usr/local/share/mise/cache
+MISE_SYSTEM_STATE_DIR=/usr/local/share/mise/state
+
+mise_system() {
+  # mise --system only installs binary-download backends; overriding MISE_DATA_DIR/MISE_CONFIG_DIR
+  # instead runs the normal (non-system) code path against root-owned dirs, which also covers our npm/aqua/http tools.
+  # sudo resets HOME to /root; pin HOME and every cache path so npm/mise never write outside this tree.
+  root env \
+    HOME="$MISE_SYSTEM_DATA_DIR" \
+    MISE_DATA_DIR="$MISE_SYSTEM_DATA_DIR" \
+    MISE_CONFIG_DIR="$MISE_SYSTEM_CONFIG_DIR" \
+    MISE_CACHE_DIR="$MISE_SYSTEM_CACHE_DIR" \
+    MISE_STATE_DIR="$MISE_SYSTEM_STATE_DIR" \
+    npm_config_cache="$MISE_SYSTEM_DATA_DIR/npm-cache" \
+    mise "$@"
+}
+
 VERSIONLOCK_FILE=/etc/dnf/versionlock.toml
 
 versionlock_has() { grep -qE "^name = \"$1\"" "$VERSIONLOCK_FILE" 2>/dev/null; }

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+
+[[ $EUID -eq 0 ]] && die "run as your user, not root; this script uses sudo where needed"
+
+sudo_refresh
+
+pre_number=""
+post_number=""
+
+on_exit() {
+  local status=$?
+  if [[ -n "$pre_number" && -z "$post_number" ]]; then
+    post_number="$(root snapper -c root create -p -c number -d "vekrona-update post" --pre-number "$pre_number")" \
+      || warn "failed to create post-update snapshot; pre-update snapshot $pre_number has no matching post snapshot"
+  fi
+  [[ -n "$post_number" ]] && log "post-update snapshot: $post_number"
+  [[ -n "$pre_number" ]] && log "roll back with: vekrona-rollback $pre_number"
+  exit "$status"
+}
+trap on_exit EXIT
+
+pre_number="$(root snapper -c root create -p -c number -d "vekrona-update pre")"
+[[ -n "$pre_number" ]] || die "failed to create pre-update snapshot"
+log "pre-update snapshot: $pre_number"
+
+log "=== dnf upgrade ==="
+root dnf upgrade --refresh -y
+
+log "=== flatpak update ==="
+root flatpak update --system -y --noninteractive
+
+log "=== mise system: checking for upgrades (minimum_release_age may hold some back) ==="
+mise_system upgrade --dry-run
+
+log "=== mise system: upgrading ==="
+mise_system upgrade
+
+log "=== mise system: reshim ==="
+mise_system reshim
+
+post_number="$(root snapper -c root create -p -c number -d "vekrona-update post" --pre-number "$pre_number")"
+[[ -n "$post_number" ]] || die "failed to create post-update snapshot"
+
+log "done: system updated"
