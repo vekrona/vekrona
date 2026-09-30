@@ -14,7 +14,8 @@ post_number=""
 on_exit() {
   local status=$?
   if [[ -n "$pre_number" && -z "$post_number" ]]; then
-    post_number="$(root snapper -c root create -p -c number -d "vekrona-update post" --pre-number "$pre_number" || true)"
+    post_number="$(root snapper -c root create -p -c number -d "vekrona-update post" --pre-number "$pre_number")" \
+      || warn "failed to create post-update snapshot; pre-update snapshot $pre_number has no matching post snapshot"
   fi
   [[ -n "$post_number" ]] && log "post-update snapshot: $post_number"
   [[ -n "$pre_number" ]] && log "roll back with: vekrona-rollback $pre_number"
@@ -30,7 +31,7 @@ log "=== dnf upgrade ==="
 root dnf upgrade --refresh -y
 
 log "=== flatpak update ==="
-flatpak update -y
+root flatpak update --system -y --noninteractive
 
 log "=== mise system: checking for upgrades (minimum_release_age may hold some back) ==="
 mise_system upgrade --dry-run

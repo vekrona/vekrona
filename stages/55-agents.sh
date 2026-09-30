@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
-require_cmd rpm curl gpg dnf5
+require_cmd rpm curl dnf5
 
 ensure_root_file "$ROOT/etc/yum.repos.d/claude-code.repo" /etc/yum.repos.d/claude-code.repo
 ensure_root_file "$ROOT/etc/yum.repos.d/mise.repo" /etc/yum.repos.d/mise.repo

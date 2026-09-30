@@ -196,10 +196,15 @@ ensure_user_in_group() {
 
 owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 
-gpg_key_fingerprint() {
-  local url="$1"
-  curl -fsSL "$url" | gpg --batch --with-colons --import-options show-only --dry-run --import - 2>/dev/null \
-    | awk -F: '/^fpr:/{print $10; exit}'
+gpg_key_fingerprint_file() {
+  # --dry-run --show-only still needs a writable GNUPGHOME to open a keybox in, so use a scratch one
+  # rather than the invoking user's own (possibly nonexistent) ~/.gnupg.
+  local file="$1" gnupg_home fp
+  gnupg_home="$(mktemp -d)"
+  fp="$(gpg --homedir "$gnupg_home" --batch --with-colons --import-options show-only --dry-run --import "$file" 2>/dev/null \
+    | awk -F: '/^fpr:/{print $10; exit}')"
+  rm -rf "$gnupg_home"
+  printf '%s' "$fp"
 }
 
 gpg_pubkey_installed() {
@@ -210,14 +215,19 @@ gpg_pubkey_installed() {
 }
 
 ensure_gpg_key_imported() {
-  local url="$1" fingerprint="$2" fingerprint_lower got
+  local url="$1" fingerprint="$2" fingerprint_lower got tmp
+  ensure_pkg gnupg2
   fingerprint_lower="$(tr '[:upper:]' '[:lower:]' <<<"$fingerprint")"
   gpg_pubkey_installed "$fingerprint_lower" && { log "gpg key already imported: $fingerprint"; return 0; }
-  got="$(gpg_key_fingerprint "$url")"
-  [[ -n "$got" ]] || die "could not determine gpg key fingerprint: $url"
-  [[ "$got" == "$fingerprint" ]] || die "gpg key fingerprint mismatch for $url: got $got, expected $fingerprint"
+  tmp="$(mktemp)"
+  curl -fsSL "$url" -o "$tmp" || die "failed to download gpg key: $url"
+  # Fingerprint the exact bytes we are about to import, not a second, separate download of the same URL.
+  got="$(gpg_key_fingerprint_file "$tmp")"
+  [[ -n "$got" ]] || { rm -f "$tmp"; die "could not determine gpg key fingerprint: $url"; }
+  [[ "$got" == "$fingerprint" ]] || { rm -f "$tmp"; die "gpg key fingerprint mismatch for $url: got $got, expected $fingerprint"; }
   log "importing gpg key: $url"
-  root rpm --import "$url"
+  root rpm --import "$tmp"
+  rm -f "$tmp"
   gpg_pubkey_installed "$fingerprint_lower" || die "gpg key not imported: $fingerprint"
 }
 
@@ -234,11 +244,21 @@ VEKRONA_AGENT_TOOLS=(codex pi opencode cursor-agent)
 
 MISE_SYSTEM_DATA_DIR=/usr/local/share/mise
 MISE_SYSTEM_CONFIG_DIR=/etc/mise
+MISE_SYSTEM_CACHE_DIR=/usr/local/share/mise/cache
+MISE_SYSTEM_STATE_DIR=/usr/local/share/mise/state
 
 mise_system() {
   # mise --system only installs binary-download backends; overriding MISE_DATA_DIR/MISE_CONFIG_DIR
   # instead runs the normal (non-system) code path against root-owned dirs, which also covers our npm/aqua/http tools.
-  root env MISE_DATA_DIR="$MISE_SYSTEM_DATA_DIR" MISE_CONFIG_DIR="$MISE_SYSTEM_CONFIG_DIR" mise "$@"
+  # sudo resets HOME to /root; pin HOME and every cache path so npm/mise never write outside this tree.
+  root env \
+    HOME="$MISE_SYSTEM_DATA_DIR" \
+    MISE_DATA_DIR="$MISE_SYSTEM_DATA_DIR" \
+    MISE_CONFIG_DIR="$MISE_SYSTEM_CONFIG_DIR" \
+    MISE_CACHE_DIR="$MISE_SYSTEM_CACHE_DIR" \
+    MISE_STATE_DIR="$MISE_SYSTEM_STATE_DIR" \
+    npm_config_cache="$MISE_SYSTEM_DATA_DIR/npm-cache" \
+    mise "$@"
 }
 
 VERSIONLOCK_FILE=/etc/dnf/versionlock.toml

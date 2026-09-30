@@ -511,8 +511,14 @@ skip `--system` and instead point plain `mise` at root-owned directories:
 `MISE_DATA_DIR=/usr/local/share/mise MISE_CONFIG_DIR=/etc/mise`. This is the
 `mise_system` helper in `lib/common.sh`, the one chokepoint stage
 `55-agents` and `bin/vekrona-update` both call, so there is exactly one place
-that knows how mise is invoked system-wide. The result,
-`/usr/local/share/mise/installs/*` and
+that knows how mise is invoked system-wide. `mise_system` runs this through
+`sudo`, which resets `HOME` to `/root`; left alone, that would leak npm's and
+mise's own caches into `/root` on every install or upgrade. `mise_system`
+pins `HOME`, `MISE_CACHE_DIR`, `MISE_STATE_DIR`, and `npm_config_cache` to
+paths under `/usr/local/share/mise` instead, so nothing lands outside the
+managed tree; verified empirically by diffing a full listing of `/root`
+before and after a real (network-downloading) `mise_system install` — zero
+new entries. The result, `/usr/local/share/mise/installs/*` and
 `/usr/local/share/mise/shims/{codex,pi,opencode,cursor-agent}`, is
 root:root and not writable by the user; stage `55-agents` asserts this by
 actually attempting a write and expecting it to fail, not by only reading
@@ -555,19 +561,29 @@ vekrona-update
 ```
 
 It asks for `sudo` once up front (like `install.sh`), then never prompts
-again: `dnf upgrade -y`, `flatpak update -y`, and `mise upgrade` are all
-non-interactive by default, so nothing about a routine update requires a
-`--yes` flag. A `mise upgrade --dry-run` runs first and prints a `WARN` line
-for every release the `minimum_release_age` cooldown is currently holding
-back, so a run that changes less than expected explains why in its own
-output rather than silently doing less.
+again: `dnf upgrade -y`, `flatpak update --system -y --noninteractive`, and
+`mise upgrade` are all non-interactive by default, so nothing about a
+routine update requires a `--yes` flag. `flatpak update` runs `--system`
+because stage `30-packages` only adds the flathub remote system-wide
+(`ensure_flatpak_remote_system`), not per-user, and as root it does not need
+`--noninteractive`'s usual job of suppressing a polkit prompt, since root
+already has the privilege the system helper would otherwise ask for. A
+`mise upgrade --dry-run` runs first and prints a `WARN` line for every
+release the `minimum_release_age` cooldown is currently holding back, so a
+run that changes less than expected explains why in its own output rather
+than silently doing less.
 
 The post-update snapshot is taken from an `EXIT` trap, so even a failing
 step (a `die` from a failed `dnf upgrade`, for instance) still leaves a
 matched pre/post pair on disk instead of a dangling pre snapshot with
 nothing to compare it to; the printed rollback hint is the way back to
-before the run regardless of where it failed. Stage `20-snapper`'s own dnf
-actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`)
+before the run regardless of where it failed. If the post-update snapshot
+itself cannot be created, the trap surfaces that with a `warn` rather than
+swallowing it, but still exits with whatever status the run already had
+(a snapshot failure never masks an earlier, more important failure, and
+never turns a successful run into a reported failure either). Stage
+`20-snapper`'s own dnf actions plugin
+(`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`)
 also fires its own pre/post pair around the `dnf upgrade` transaction inside
 this run, nested inside `vekrona-update`'s own pair; that nesting is
 expected and harmless (snapper snapshots are cheap CoW, and `NUMBER_LIMIT=10`

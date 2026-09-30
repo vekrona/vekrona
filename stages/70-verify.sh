@@ -304,6 +304,12 @@ if ran 55-agents; then
   for name in claude "${VEKRONA_AGENT_TOOLS[@]}"; do
     warn_check "no user-local copy shadows $name on PATH" bash -c "[[ ! -e '$HOME/.local/bin/$name' ]]"
   done
+
+  mise_shims_dir="$MISE_SYSTEM_DATA_DIR/shims"
+  for f in "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$VEKRONA_ROOT/etc/profile.d/vekrona-mise.sh"; do
+    check assert_file_contains "$f" "$mise_shims_dir"
+    check assert_file_contains "$f" 'OPENCODE_DISABLE_AUTOUPDATE=true'
+  done
 fi
 
 if ran 60-gaming; then
