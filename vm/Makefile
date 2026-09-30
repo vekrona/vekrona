@@ -208,6 +208,7 @@ test: require-harness-key
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/session-check.sh'; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agents-check.sh'; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/errors-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agent-launch-check.sh'; \
 	snap_n="$$(ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo /home/$(VM_USER)/.local/bin/vekrona-snapshot vm-test')"; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" "sudo /home/$(VM_USER)/.local/bin/vekrona-rollback --yes $$snap_n"; \
 	python3 "$(WAIT_FOR_REBOOT_SCRIPT)" "$(VM_NAME)" $(REBOOT_EVENT_TIMEOUT) $(AGENT_RECONNECT_TIMEOUT); \
