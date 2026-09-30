@@ -26,6 +26,9 @@ jobs:
       options: --cap-add SYS_ADMIN --cap-add MKNOD --device /dev/loop-control --device-cgroup-rule="b 7:* rmw" --security-opt label=disable
     timeout-minutes: 60
     steps:
+      - name: Install build dependencies
+        run: dnf install -y lorax xorriso gnupg2 git rsync openssh-clients python3
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -33,9 +36,6 @@ jobs:
 
       - name: Trust the checkout ownership inside the container
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Install build dependencies
-        run: dnf install -y lorax xorriso gnupg2 git rsync openssh-clients python3
 
       - name: Cache Fedora netinstall ISO
         uses: actions/cache@v4
