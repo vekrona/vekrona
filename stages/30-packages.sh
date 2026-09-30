@@ -11,26 +11,23 @@ quickshell_vendor="$(rpm -q --qf '%{VENDOR}' quickshell)"
 [[ "$quickshell_vendor" != *agaspar* ]] || die "quickshell still built by agaspar/omedora: $quickshell_vendor"
 log "ok: quickshell vendor is $quickshell_vendor"
 
-ensure_pkg \
-  sway sway-config-fedora sway-systemd \
-  xdg-desktop-portal-wlr xdg-desktop-portal-gtk \
-  greetd tuigreet \
-  ghostty \
-  xremap-wlroots \
-  dms dgop matugen danksearch \
-  grim slurp swappy wf-recorder wl-clipboard \
-  kanshi wlr-randr brightnessctl playerctl \
-  firefox \
-  gnome-keyring gnome-keyring-pam \
-  gamescope mangohud gamemode steam libnotify \
-  jetbrains-mono-fonts rsms-inter-fonts \
-  accountsservice
+declare -a desktop_pkgs
+read_pkg_list desktop_pkgs vekrona_desktop_pkgs
 
-mark_user_installed \
-  NetworkManager polkit wireplumber pipewire xdg-desktop-portal-gtk \
-  gnome-keyring gnome-keyring-pam
+desktop_pkgs_except_quickshell=()
+for pkg in "${desktop_pkgs[@]}"; do
+  [[ "$pkg" == quickshell ]] || desktop_pkgs_except_quickshell+=("$pkg")
+done
+ensure_pkg "${desktop_pkgs_except_quickshell[@]}"
 
-wlroots_pkg="$(wlroots_package_name)"
-log "wlroots package for versionlock: $wlroots_pkg"
+mark_user_installed "${desktop_pkgs[@]}"
 
-versionlock_installed sway "$wlroots_pkg" dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots
+ensure_system_unit enabled tuned tuned-ppd
+
+ensure_flatpak_remote_system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+declare -a versionlock_pkgs
+read_pkg_list versionlock_pkgs vekrona_versionlock_pkgs
+log "versionlock packages: ${versionlock_pkgs[*]}"
+
+versionlock_installed "${versionlock_pkgs[@]}"

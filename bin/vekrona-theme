@@ -1,12 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+
 THEMES_DIR="$HOME/.config/DankMaterialShell/vekrona-themes"
-STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona/theme"
+STATE_DIR="$(vekrona_state_dir)"
+STATE_FILE="$(vekrona_theme_name_file)"
+ACTIVE_THEME_FILE="$(vekrona_active_theme_file)"
+DANKCOLORS_FILE="$HOME/.config/ghostty/themes/dankcolors"
+WAIT_SECONDS=10
+
+GHOSTTY_BUS_NAME="com.mitchellh.ghostty"
+GHOSTTY_OBJECT_PATH="/com/mitchellh/ghostty"
+
+INOTIFY_PID=""
 
 usage() {
   printf 'usage: %s <name>|next|list\n' "$(basename "$0")" >&2
   exit 1
+}
+
+require_inotifywait() {
+  command -v inotifywait >/dev/null 2>&1 || {
+    echo "vekrona-theme: inotifywait not found (install inotify-tools)" >&2
+    exit 1
+  }
 }
 
 list_themes() {
@@ -22,12 +41,102 @@ current_theme() {
 }
 
 dms_settings_set() {
-  local key="$1" value="$2" output
-  output="$(dms ipc call settings set "$key" "$value" 2>&1)"
-  if [[ "$output" == *INVALID* || "$output" == *FAILURE* || "$output" == *ERROR* ]]; then
-    echo "vekrona-theme: dms ipc call settings set $key $value failed: $output" >&2
+  local key="$1" value="$2" output rc=0
+  output="$(dms ipc call settings set "$key" "$value" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 || "$output" == *INVALID* || "$output" == *FAILURE* || "$output" == *ERROR* ]]; then
+    echo "vekrona-theme: dms ipc call settings set $key $value failed: $output (Ghostty and the recorded theme are unchanged)" >&2
     exit 1
   fi
+}
+
+dms_wallpaper_set() {
+  local png="$1" output rc=0
+  output="$(dms ipc call wallpaper set "$png" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 || "$output" != SUCCESS* ]]; then
+    echo "vekrona-theme: dms ipc call wallpaper set $png failed: $output (DMS and Ghostty are already on the new theme; the wallpaper and the recorded theme name were not updated, re-run to retry)" >&2
+    exit 1
+  fi
+}
+
+current_background() {
+  [[ -f "$DANKCOLORS_FILE" ]] || return 0
+  sed -n 's/^background = //p' "$DANKCOLORS_FILE"
+}
+
+stop_dankcolors_watch() {
+  if [[ -n "$INOTIFY_PID" ]]; then
+    pkill -TERM -P "$INOTIFY_PID" 2>/dev/null || true
+    kill "$INOTIFY_PID" 2>/dev/null || true
+    wait "$INOTIFY_PID" 2>/dev/null || true
+    INOTIFY_PID=""
+  fi
+  INOTIFY_FD=""
+}
+
+start_dankcolors_watch() {
+  local watch_dir line
+  watch_dir="$(dirname "$DANKCOLORS_FILE")"
+  mkdir -p "$watch_dir"
+
+  coproc INOTIFY_CP { inotifywait -m -e close_write,moved_to,create "$watch_dir" 2>&1; }
+  INOTIFY_PID="$INOTIFY_CP_PID"
+  INOTIFY_FD="${INOTIFY_CP[0]}"
+  disown "$INOTIFY_PID"
+  trap cleanup EXIT
+
+  while IFS= read -r -t "$WAIT_SECONDS" -u "$INOTIFY_FD" line 2>/dev/null; do
+    [[ "$line" == "Watches established." ]] && return 0
+    echo "vekrona-theme: $line" >&2
+  done
+  if kill -0 "$INOTIFY_PID" 2>/dev/null; then
+    echo "vekrona-theme: inotifywait did not report readiness in time" >&2
+  else
+    echo "vekrona-theme: inotifywait exited before reporting readiness" >&2
+  fi
+  return 1
+}
+
+wait_for_background() {
+  local expected="$1"
+  [[ "$(current_background)" == "$expected" ]] && return 0
+  local deadline now remaining line
+  deadline=$(( $(date +%s) + WAIT_SECONDS ))
+  while :; do
+    now="$(date +%s)"
+    remaining=$(( deadline - now ))
+    (( remaining > 0 )) || return 1
+    IFS= read -r -t "$remaining" -u "$INOTIFY_FD" line 2>/dev/null || return 1
+    [[ "$(current_background)" == "$expected" ]] && return 0
+  done
+}
+
+ghostty_running() {
+  busctl --user list 2>/dev/null | awk -v n="$GHOSTTY_BUS_NAME" '$1==n && $2!="-"{f=1} END{exit !f}'
+}
+
+reload_ghostty() {
+  ghostty_running || return 0
+  busctl --user call "$GHOSTTY_BUS_NAME" "$GHOSTTY_OBJECT_PATH" org.gtk.Actions Activate "sava{sv}" reload-config 0 0 >/dev/null \
+    || echo "vekrona-theme: could not reload running ghostty windows, reload manually (ctrl+shift+,)" >&2
+}
+
+dms_answers() {
+  dms ipc call theme getMode >/dev/null 2>&1
+}
+
+RESTORE_ACTIVE_THEME_ON_EXIT=0
+ACTIVE_THEME_BACKUP=""
+
+cleanup() {
+  stop_dankcolors_watch
+  if [[ "$RESTORE_ACTIVE_THEME_ON_EXIT" == "1" ]]; then
+    if [[ -n "$ACTIVE_THEME_BACKUP" && -f "$ACTIVE_THEME_BACKUP" ]]; then
+      cp "$ACTIVE_THEME_BACKUP" "$ACTIVE_THEME_FILE"
+    else
+      rm -f "$ACTIVE_THEME_FILE"
+    fi
+  fi
+  [[ -n "$ACTIVE_THEME_BACKUP" ]] && rm -f "$ACTIVE_THEME_BACKUP"
 }
 
 apply_theme() {
@@ -36,9 +145,47 @@ apply_theme() {
   local png="$THEMES_DIR/wallpapers/$name.png"
   [[ -f "$json" ]] || { echo "unknown theme: $name" >&2; exit 1; }
   [[ -f "$png" ]] || { echo "missing wallpaper: $png" >&2; exit 1; }
-  dms_settings_set customThemeFile "$json"
+
+  local expected_bg
+  expected_bg="$(jq -r '.dark.background' "$json")"
+  [[ -n "$expected_bg" && "$expected_bg" != null ]] || {
+    echo "vekrona-theme: $json has no .dark.background" >&2
+    exit 1
+  }
+
+  ghostty_theme_for "$name" >/dev/null
+
+  dms_answers || {
+    echo "vekrona-theme: DMS is not responding to IPC (Ghostty and the recorded theme are unchanged)" >&2
+    exit 1
+  }
+
+  start_dankcolors_watch || exit 1
+
+  mkdir -p "$STATE_DIR"
+  ACTIVE_THEME_BACKUP=""
+  if [[ -f "$ACTIVE_THEME_FILE" ]]; then
+    ACTIVE_THEME_BACKUP="$(mktemp "$STATE_DIR/.active-theme.json.backup.XXXXXX")"
+    cp "$ACTIVE_THEME_FILE" "$ACTIVE_THEME_BACKUP"
+  fi
+  cp "$json" "$ACTIVE_THEME_FILE"
+  RESTORE_ACTIVE_THEME_ON_EXIT=1
+
+  dms_settings_set customThemeFile "$ACTIVE_THEME_FILE"
   dms_settings_set currentThemeName custom
-  dms ipc call wallpaper set "$png"
+
+  if ! wait_for_background "$expected_bg"; then
+    echo "vekrona-theme: theme '$name' did not take in DMS (background is '$(current_background)', expected '$expected_bg'). Ghostty and the recorded theme are unchanged." >&2
+    exit 1
+  fi
+  RESTORE_ACTIVE_THEME_ON_EXIT=0
+  stop_dankcolors_watch
+
+  write_ghostty_theme_include "$name"
+  reload_ghostty
+
+  dms_wallpaper_set "$png"
+
   mkdir -p "$(dirname "$STATE_FILE")"
   printf '%s\n' "$name" > "$STATE_FILE"
   echo "theme: $name"
@@ -52,6 +199,7 @@ case "$cmd" in
     list_themes
     ;;
   next)
+    require_inotifywait
     mapfile -t names < <(list_themes)
     [[ ${#names[@]} -gt 0 ]] || { echo "no themes found in $THEMES_DIR" >&2; exit 1; }
     cur="$(current_theme || true)"
@@ -65,6 +213,7 @@ case "$cmd" in
     apply_theme "${names[$next_index]}"
     ;;
   *)
+    require_inotifywait
     apply_theme "$cmd"
     ;;
 esac

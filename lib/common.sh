@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+shopt -s inherit_errexit
 
 VEKRONA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export VEKRONA_ROOT
@@ -215,6 +216,33 @@ session_is_sway() { [[ "${XDG_CURRENT_DESKTOP:-}" == "sway" ]]; }
 
 session_started_by_gdm() { [[ "$(systemctl is-active gdm 2>/dev/null || true)" == "active" ]]; }
 
+dm_unit_target() {
+  local f=/etc/systemd/system/display-manager.service
+  [[ -e "$f" ]] && basename "$(readlink -f "$f")"
+}
+
+dm_is_greetd() { [[ "$(dm_unit_target 2>/dev/null || true)" == greetd.service ]]; }
+
+default_target_is_graphical() { [[ "$(systemctl get-default)" == graphical.target ]]; }
+
+greetd_enabled() { [[ "$(systemctl is-enabled greetd 2>/dev/null || true)" == enabled ]]; }
+
+enable_greetd_login_manager() {
+  if greetd_enabled; then
+    log "greetd already enabled"
+  else
+    root systemctl enable --force greetd
+  fi
+  if default_target_is_graphical; then
+    log "default target already graphical.target"
+  else
+    root systemctl set-default graphical.target
+  fi
+  assert "greetd enabled" greetd_enabled
+  assert "display-manager.service points to greetd" dm_is_greetd
+  assert "default target is graphical.target" default_target_is_graphical
+}
+
 assert() {
   local msg="$1"; shift
   if "$@"; then log "ok: $msg"; else die "assertion failed: $msg"; fi
@@ -227,15 +255,111 @@ assert_file_contains() {
 }
 
 wlroots_package_name() {
-  local p
-  p="$(rpm -q --whatprovides 'libwlroots-0.19.so()(64bit)' --qf '%{NAME}\n' 2>/dev/null | sort -u | head -n1)"
-  [[ -n "$p" ]] || die "no installed package provides libwlroots-0.19.so"
+  local out p
+  if ! out="$(rpm -q --whatprovides 'libwlroots-0.19.so()(64bit)' --qf '%{NAME}\n' 2>&1)"; then
+    die "no package provides libwlroots-0.19.so: $out"
+  fi
+  p="$(sort -u <<<"$out" | head -n1)"
+  [[ -n "$p" ]] || die "no package provides libwlroots-0.19.so"
   printf '%s' "$p"
+}
+
+read_pkg_list() {
+  local -n out_arr="$1"
+  shift
+  local raw line
+  raw="$("$@")"
+  out_arr=()
+  while IFS= read -r line; do
+    out_arr+=("$line")
+  done <<< "$raw"
+}
+
+VEKRONA_DESKTOP_PKGS=(
+  NetworkManager NetworkManager-wifi accountsservice bluez brightnessctl
+  danksearch dgop dms firefox flatpak gamemode gamescope ghostty
+  gnome-keyring gnome-keyring-pam greetd grim inotify-tools
+  jetbrains-mono-fonts jq kanshi
+  libnotify mangohud matugen pipewire pipewire-pulseaudio playerctl polkit
+  python3 quickshell rsms-inter-fonts slurp steam swappy sway sway-config-fedora
+  sway-systemd tuigreet tuned-ppd wf-recorder wireplumber wl-clipboard wlr-randr
+  wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
+)
+
+vekrona_desktop_pkgs() {
+  local wlroots_pkg
+  wlroots_pkg="$(wlroots_package_name)"
+  printf '%s\n' "${VEKRONA_DESKTOP_PKGS[@]}" "$wlroots_pkg"
+}
+
+VEKRONA_VERSIONLOCK_PKGS=(sway dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots)
+
+vekrona_versionlock_pkgs() {
+  local wlroots_pkg
+  wlroots_pkg="$(wlroots_package_name)"
+  printf '%s\n' "${VEKRONA_VERSIONLOCK_PKGS[@]}" "$wlroots_pkg"
 }
 
 flatpak_installed() {
   flatpak list --app --columns=application 2>/dev/null | grep -qx "$1"
 }
+
+flatpak_remote_system_enabled() {
+  local name="$1" line
+  line="$(flatpak remotes --system --show-disabled --columns=name,options 2>/dev/null | awk -F'\t' -v n="$name" '$1==n')"
+  [[ -n "$line" ]] || return 1
+  [[ "$line" != *disabled* ]]
+}
+
+flatpak_remote_system_exists() {
+  local name="$1"
+  flatpak remotes --system --show-disabled --columns=name 2>/dev/null | grep -qx "$name"
+}
+
+ensure_flatpak_remote_system() {
+  local name="$1" url="$2"
+  if flatpak_remote_system_enabled "$name"; then
+    log "flatpak remote present: $name"
+    return 0
+  fi
+  if flatpak_remote_system_exists "$name"; then
+    log "enabling flatpak remote: $name"
+    root flatpak remote-modify --system --enable "$name"
+  else
+    log "adding flatpak remote: $name"
+    root flatpak remote-add --if-not-exists --system "$name" "$url"
+  fi
+  flatpak_remote_system_enabled "$name" || die "flatpak remote not added or not enabled: $name"
+}
+
+declare -A GHOSTTY_THEME_MAP=(
+  [tokyo-night]="TokyoNight"
+  [nord]="Nord"
+  [gruvbox-dark]="Gruvbox Dark"
+  [catppuccin-mocha]="Catppuccin Mocha"
+)
+
+GHOSTTY_THEME_INCLUDE="$HOME/.config/ghostty/vekrona-theme"
+
+ghostty_theme_for() {
+  local name="$1"
+  [[ -n "${GHOSTTY_THEME_MAP[$name]+x}" ]] || die "no Ghostty built-in theme mapped for vekrona theme: $name"
+  printf '%s' "${GHOSTTY_THEME_MAP[$name]}"
+}
+
+write_ghostty_theme_include() {
+  local vekrona_name="$1" ghostty_name include_dir tmp
+  ghostty_name="$(ghostty_theme_for "$vekrona_name")"
+  include_dir="$(dirname "$GHOSTTY_THEME_INCLUDE")"
+  ensure_dir "$include_dir"
+  tmp="$(mktemp "$include_dir/.$(basename "$GHOSTTY_THEME_INCLUDE").XXXXXX")"
+  printf 'theme = %s\n' "$ghostty_name" > "$tmp"
+  mv "$tmp" "$GHOSTTY_THEME_INCLUDE"
+}
+
+vekrona_state_dir() { printf '%s' "${XDG_STATE_HOME:-$HOME/.local/state}/vekrona"; }
+vekrona_theme_name_file() { printf '%s' "$(vekrona_state_dir)/theme"; }
+vekrona_active_theme_file() { printf '%s' "$(vekrona_state_dir)/active-theme.json"; }
 
 firefox_profile_root() {
   if [[ -d "$HOME/.mozilla/firefox" ]]; then

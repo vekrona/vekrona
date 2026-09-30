@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
-require_cmd rpm dnf5 grubby akmods modinfo
+require_cmd rpm dnf5 grubby modinfo
 
 CUDA_REPO_ID="cuda-fedora44-x86_64"
 CUDA_REPOFILE_URL="https://developer.download.nvidia.com/compute/cuda/repos/fedora44/x86_64/cuda-fedora44.repo"
@@ -56,6 +56,8 @@ else
   log "no cuda-repo driver installed, skipping removal"
   ensure_pkg "${INSTALL_PKGS[@]}"
 fi
+
+require_cmd akmods
 
 latest_installed_kernel="$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort -V | tail -1)"
 [[ "$latest_installed_kernel" == "$(uname -r)" ]] || die "reboot into the latest installed kernel first"

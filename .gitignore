@@ -1,3 +1,5 @@
 .claude/
 *.pre-vekrona
-vm/ks.cfg
+vm/ks-*.cfg
+vm/.ssh/
+vm/__pycache__/

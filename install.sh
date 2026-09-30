@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$ROOT/lib/common.sh"
 
-DEFAULT_STAGES=(00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming 70-verify)
+DEFAULT_STAGES=(00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming 65-login-manager 70-verify)
 ALL_STAGES=("${DEFAULT_STAGES[@]}" 90a-switch-dm 90b-remove)
 
 usage() {

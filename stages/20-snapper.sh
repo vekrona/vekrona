@@ -6,10 +6,10 @@ source "$ROOT/lib/common.sh"
 
 ensure_pkg snapper libdnf5-plugin-actions
 
-if [[ ! -d /etc/snapper/configs/root ]]; then
+if [[ ! -f /etc/snapper/configs/root ]]; then
   log "creating snapper config: root"
   root snapper -c root create-config /
-  [[ -d /etc/snapper/configs/root ]] || die "snapper config not created: root"
+  [[ -f /etc/snapper/configs/root ]] || die "snapper config not created: root"
 fi
 
 snapper_config_value() {

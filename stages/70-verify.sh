@@ -35,6 +35,7 @@ contains() { [[ "$2" == *"$1"* ]]; }
 not_contains() { [[ "$2" != *"$1"* ]]; }
 file_exists() { [[ -e "$1" ]]; }
 file_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
+file_lacks_qsg_backend() { ! grep -q '^QSG_RHI_BACKEND=' "$1" 2>/dev/null; }
 dir_exists() { [[ -d "$1" ]]; }
 owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
@@ -46,6 +47,12 @@ user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true
 pkg_absent() { ! pkg_installed "$1"; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
 nvidia_module_present_for() { compgen -G "$1/extra/nvidia*" >/dev/null || compgen -G "$1/weak-updates/nvidia*" >/dev/null; }
+
+verify_greetd_active() {
+  check assert "greetd enabled" greetd_enabled
+  check assert "display-manager.service points to greetd" dm_is_greetd
+  check assert "default target is graphical.target" default_target_is_graphical
+}
 
 if ran 00-repos; then
   check assert "repo enabled: rpmfusion-nonfree" repo_enabled rpmfusion-nonfree
@@ -106,7 +113,7 @@ if ran 20-snapper; then
   check assert "libdnf5-plugin-actions installed" pkg_installed libdnf5-plugin-actions
   check assert "snapper-cleanup.timer enabled" unit_enabled snapper-cleanup.timer
 
-  snapper_csv() { root snapper --csvout list --no-headers --columns number,type,cleanup; }
+  snapper_csv() { root snapper --csvout --no-headers list --columns number,type,cleanup; }
   csv_row_matches() { grep -qE -- "$1" <<<"$snapshots_csv"; }
 
   n0="$(snapper_csv | tail -1 | cut -d, -f1)"
@@ -120,13 +127,14 @@ if ran 20-snapper; then
 fi
 
 if ran 30-packages; then
-  wlroots_pkg="$(wlroots_package_name)"
-  for p in sway "$wlroots_pkg" dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots ghostty greetd tuigreet; do
+  declare -a versionlock_pkgs
+  read_pkg_list versionlock_pkgs vekrona_versionlock_pkgs
+  for p in "${versionlock_pkgs[@]}" ghostty greetd tuigreet; do
     check assert "package installed: $p" pkg_installed "$p"
   done
   quickshell_vendor="$(rpm -q --qf '%{VENDOR}' quickshell 2>/dev/null || true)"
   check assert "quickshell vendor is not agaspar" not_contains agaspar "$quickshell_vendor"
-  for p in sway "$wlroots_pkg" dms quickshell qt6-qtbase xremap-wlroots; do
+  for p in "${versionlock_pkgs[@]}"; do
     check assert "versionlock: $p" versionlock_has "$p"
   done
   os_version_id="$(source /etc/os-release && echo "$VERSION_ID")"
@@ -136,6 +144,14 @@ if ran 30-packages; then
     warn_check "versionlock entry matches fc$os_version_id: $entry" eq "$fcver" "$os_version_id"
   done < <(versionlock_evrs)
   check assert "greetd user exists" bash -c "getent passwd greetd >/dev/null"
+
+  check assert "package installed: tuned-ppd" pkg_installed tuned-ppd
+  check assert "tuned.service enabled" unit_enabled tuned
+  check assert "tuned-ppd.service enabled" unit_enabled tuned-ppd
+  warn_check "power profiles D-Bus name answers: net.hadess.PowerProfiles" \
+    busctl introspect net.hadess.PowerProfiles /net/hadess/PowerProfiles
+
+  check assert "flathub flatpak remote present and enabled system-wide" flatpak_remote_system_enabled flathub
 fi
 
 if ran 40-system; then
@@ -150,10 +166,9 @@ if ran 40-system; then
 fi
 
 if ran 50-user; then
-  check assert "sway config validates" sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
+  check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
+    sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
   check assert "xremap config validates" xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml"
-  dms_env="$(systemctl --user show dms -p Environment 2>/dev/null || true)"
-  check assert "dms.service has QSG_RHI_BACKEND=vulkan" contains 'QSG_RHI_BACKEND=vulkan' "$dms_env"
   check assert "dms.service wanted by sway-session.target" file_exists "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
   check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
@@ -183,10 +198,62 @@ assert d.get('acLockTimeout') == 300, d.get('acLockTimeout')
   check assert "whatsapp webapp profile registered" grep -q 'vekrona-whatsapp' "$firefox_profiles_ini"
   check assert "vekrona-theme installed" file_exists "$HOME/.local/bin/vekrona-theme"
 
+  ghostty_theme_dir="/usr/share/ghostty/themes"
+  for theme_json in "$VEKRONA_ROOT"/config/dms-themes/*.json; do
+    theme_name="$(basename "$theme_json" .json)"
+    ghostty_theme_name="$(ghostty_theme_for "$theme_name")"
+    check assert "ghostty built-in theme exists: $theme_name -> $ghostty_theme_name" \
+      file_exists "$ghostty_theme_dir/$ghostty_theme_name"
+  done
+
+  recorded_theme_name="$(cat "$(vekrona_theme_name_file)" 2>/dev/null || true)"
+  nonempty() { [[ -n "$1" ]]; }
+  check assert "recorded theme name present" nonempty "$recorded_theme_name"
+  recorded_ghostty_theme="$(ghostty_theme_for "$recorded_theme_name")"
+  check assert "ghostty theme include present" file_exists "$GHOSTTY_THEME_INCLUDE"
+  check assert_file_contains "$GHOSTTY_THEME_INCLUDE" "^theme = $recorded_ghostty_theme\$"
+
+  check assert_file_contains "$HOME/.config/ghostty/config" '^config-file = vekrona-theme$'
+  check assert "ghostty config validates" ghostty +validate-config
+
+  check assert "DMS matugen Ghostty template enabled" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+assert d.get('runDmsMatugenTemplates', True) is True
+assert d.get('matugenTemplateGhostty', True) is True
+"
+
+  gpu_env_file="$HOME/.config/environment.d/vekrona-gpu.conf"
+  dms_main_pid="$(systemctl --user show dms -p MainPID --value 2>/dev/null || true)"
+  qsg_declared_env="$(systemctl --user show dms -p Environment 2>/dev/null || true)"
+  qsg_manager_env="$(systemctl --user show-environment 2>/dev/null || true)"
+  dms_process_env=""
+  if [[ -n "$dms_main_pid" && "$dms_main_pid" != "0" ]]; then
+    dms_process_env="$(tr '\0' '\n' < "/proc/$dms_main_pid/environ" 2>/dev/null || true)"
+  fi
+
   if [[ -e /dev/dri/vekrona-dgpu ]]; then
-    check assert "vekrona-gpu.conf present (dGPU device exists)" file_exists "$HOME/.config/environment.d/vekrona-gpu.conf"
+    check assert "vekrona-gpu.conf present (dGPU device exists)" file_exists "$gpu_env_file"
+    check assert_file_contains "$gpu_env_file" '^QSG_RHI_BACKEND=vulkan$'
+    if [[ -n "$dms_main_pid" && "$dms_main_pid" != "0" ]]; then
+      warn_check "dms.service process has QSG_RHI_BACKEND=vulkan (warn, not fail: environment.d only takes effect for a new login; a process already running from before this stage ran can lag until reboot or re-login)" \
+        contains 'QSG_RHI_BACKEND=vulkan' "$dms_process_env"
+    else
+      log "dms.service not running, skipping its process environment check"
+    fi
   else
-    check assert "vekrona-gpu.conf absent (no dGPU device)" file_absent "$HOME/.config/environment.d/vekrona-gpu.conf"
+    check assert "vekrona-gpu.conf absent (no dGPU device)" file_absent "$gpu_env_file"
+    for f in "$HOME/.config/environment.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"; do
+      check assert "$f has no QSG_RHI_BACKEND" file_lacks_qsg_backend "$f"
+    done
+    check assert "dms.service declared Environment has no QSG_RHI_BACKEND" not_contains 'QSG_RHI_BACKEND' "$qsg_declared_env"
+    check assert "systemd --user manager environment has no QSG_RHI_BACKEND" not_contains 'QSG_RHI_BACKEND' "$qsg_manager_env"
+    if [[ -n "$dms_main_pid" && "$dms_main_pid" != "0" ]]; then
+      warn_check "dms.service process has no QSG_RHI_BACKEND (warn, not fail: environment.d only takes effect for a new login; a process already running from before this stage ran can lag until reboot or re-login)" \
+        not_contains 'QSG_RHI_BACKEND' "$dms_process_env"
+    else
+      log "dms.service not running, skipping its process environment check"
+    fi
   fi
 
   user_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"
@@ -201,12 +268,28 @@ if ran 60-gaming; then
   check assert "scopebuddy config present" file_exists "$HOME/.config/scopebuddy/scb.conf"
 fi
 
+if ran 65-login-manager; then
+  dm_target="$(dm_unit_target 2>/dev/null || true)"
+  if dm_is_greetd; then
+    verify_greetd_active
+  elif [[ -n "$dm_target" ]]; then
+    log "another display manager enabled ($dm_target); skipping greetd checks, 90a-switch-dm is the migration path"
+  else
+    die "no display manager enabled"
+  fi
+fi
+
 if ran 90a-switch-dm || ran 90b-remove; then
-  check assert "greetd enabled" unit_enabled greetd
+  verify_greetd_active
   warn_check "gdm not present or disabled" gdm_absent_or_disabled
   warn_check "secrets service reachable" busctl --user status org.freedesktop.secrets
   for p in omedora hyprland keyd; do
     check assert "package absent: $p" pkg_absent "$p"
+  done
+  declare -a desktop_pkgs
+  read_pkg_list desktop_pkgs vekrona_desktop_pkgs
+  for p in "${desktop_pkgs[@]}"; do
+    check assert "protected desktop package present: $p" pkg_installed "$p"
   done
   for f in /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/oomd.conf.d/vekrona.conf /etc/modprobe.d/vekrona-usb-autosuspend.conf; do
     check assert "override still present: $f" file_exists "$f"

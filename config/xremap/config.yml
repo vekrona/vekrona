@@ -73,4 +73,3 @@ keymap:
     remap:
       Alt-Left: C-Left
       Alt-Right: C-Right
-      Alt-BackSpace: C-BackSpace

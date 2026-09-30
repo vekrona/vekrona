@@ -1,13 +1,24 @@
 # vekrona
 
-Personal Fedora 44 Workstation desktop: Sway plus DankMaterialShell (DMS) on
-Quickshell, replacing an Omarchy-on-Fedora setup (omedora COPR, Hyprland,
-Omarchy's Quickshell shell) on the same machine. Priorities in order: stability
-first, gaming-ready second, and a macOS-style keyboard (Caps Lock as a Hyper
-key, Cmd-style shortcuts) without breaking terminal control sequences. Built
-for one desktop: Ryzen 7950X3D, RTX 4090, and a Dell AW3225QF (4K, 240 Hz,
-QD-OLED) on output DP-7. The migration runs stage by stage, in place, on that
-machine, with a clean Fedora 44 VM used to smoke-test each stage first.
+Personal Fedora 44 desktop recipe: Sway plus DankMaterialShell (DMS) on
+Quickshell. Priorities in order: stability first, gaming-ready second, and a
+macOS-style keyboard (Caps Lock as a Hyper key, Cmd-style shortcuts) without
+breaking terminal control sequences. Built for one desktop: Ryzen 7950X3D,
+RTX 4090, and a Dell AW3225QF (4K, 240 Hz, QD-OLED) on output DP-7.
+
+The baseline for a fresh install is Fedora Linux 44 MINIMAL (the Everything
+netinstall with only `@core` selected): text console, no desktop, no display
+manager. `./install.sh` takes that baseline all the way to a Sway/DMS desktop
+behind a login manager, with a clean Fedora 44 VM used to smoke-test the
+whole run first.
+
+This repo also carries the original migration it was built for: turning an
+existing Fedora Workstation install (GNOME/GDM, KDE, an Omarchy-on-Fedora
+setup with Hyprland) into the same Sway/DMS desktop in place, on that
+specific machine, without reinstalling. That migration stays supported
+through two extra stages, `90a-switch-dm` and `90b-remove`, which are never
+part of the default run and must be named explicitly. See "Migrating an
+existing Fedora Workstation" below.
 
 ## Layout of the repo
 
@@ -16,23 +27,32 @@ machine, with a clean Fedora 44 VM used to smoke-test each stage first.
 | `install.sh` | stage runner: parses flags and stage names, refreshes sudo, runs `stages/NN-*.sh` in order |
 | `lib/common.sh` | shared bash helpers (`log`, `die`, `ensure_*`, `assert_*`), sourced by every stage and by `bin/vekrona-rollback` and `bin/vekrona-snapshot` |
 | `stages/*.sh` | one script per stage, numbered so the run order is visible in a directory listing |
-| `config/` | source of truth for dotfiles; stage `50-user` symlinks these into `$HOME` |
+| `config/` | source of truth for dotfiles; stage `50-user` symlinks these into `$HOME`. Stage `50-user` also generates `~/.config/environment.d/vekrona-gpu.conf` itself, not tracked under `config/`, only when `/dev/dri/vekrona-dgpu` exists (see Known issues) |
 | `etc/` | system files installed into `/etc` by `ensure_root_file` |
 | `bin/vekrona-*` | the CLI tools; stage `50-user` symlinks the whole directory into `~/.local/bin` |
 | `fonts/` | vendored JetBrainsMono Nerd Font (OFL, v3.5.1), symlinked into `~/.local/share/fonts/vekrona` |
-| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session and rollback checks |
+| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, rollback, and login-manager checks |
 | `docs/PLAN.md` | the design record: decisions, verified machine facts, rollout, verification, known issues |
 | `TODO.md` | open follow-ups not yet folded into a stage |
 
 ## Install
 
-### Prerequisites
+### Fresh install on Fedora minimal
 
-- Fedora 44 Workstation.
-- Btrfs root subvolume, with `/boot` on its own filesystem (this machine has it on ext4). Stage `20-snapper` and `bin/vekrona-rollback` assume btrfs and snapper.
-- A user account with sudo access. `install.sh` refuses to run as root itself; stages call `sudo` where they need it.
+Prerequisites:
 
-### Clone and run
+- Fedora Linux 44, installed from the Everything netinstall with only `@core`
+  selected: text console, `multi-user.target`, no desktop, no display
+  manager.
+- Network access.
+- Btrfs root subvolume, with `/boot` on its own filesystem. Stage
+  `20-snapper` and `bin/vekrona-rollback` assume btrfs and snapper.
+- A user account with sudo access. `install.sh` refuses to run as root
+  itself; stages call `sudo` where they need it.
+- `git`, installed by hand, since no stage can install its own bootstrap
+  dependency: `sudo dnf install -y git`.
+
+Commands:
 
 ```
 git clone https://github.com/vekrona/vekrona ~/wrk/vekrona
@@ -41,9 +61,82 @@ cd ~/wrk/vekrona
 ```
 
 With no arguments, `install.sh` runs the default stage list in this order:
-`00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming 70-verify`.
+`00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming 65-login-manager 70-verify`.
 Snapper runs before NVIDIA so a snapshot exists before stage `10-nvidia` touches
-the driver.
+the driver. Stage `65-login-manager` runs last, after everything that
+installs and configures greetd (`30-packages`, `40-system`) and right before
+verify: on a fresh install nothing owns `display-manager.service` yet, so it
+enables greetd and switches the default target to `graphical.target`. See
+"New default stage: 65-login-manager" below for the exact condition.
+
+Reboot, then log in through the greeter (tuigreet, running `start-sway`).
+
+### Migrating an existing Fedora Workstation
+
+This is the original use case this repo was built for: turning an existing
+Fedora Workstation machine (GNOME/GDM, KDE, an Omarchy-on-Fedora setup with
+Hyprland) into the same Sway/DMS desktop in place, without reinstalling. It
+runs the same default stage list first (Sway ends up living next to GNOME and
+Hyprland during this), then two extra stages that are never part of the
+default run:
+
+- `90a-switch-dm` disables gdm and enables greetd (through the same shared
+  helper `65-login-manager` uses), unconditionally, then asks for a reboot.
+  Its precondition is that the current session is Sway, reached either by
+  logging in through GDM's Sway entry or by running `start-sway` from a text
+  console.
+- `90b-remove`, run after that reboot from the greetd-started Sway session,
+  reviews and removes the leftover Omarchy/Hyprland/KDE/GNOME packages.
+
+`docs/PLAN.md` has the full rationale and the gated rollout used the one time
+this machine was actually migrated; see "Rollout order" below for the
+step-by-step version.
+
+`90b-remove` is proven by its reviewed dry runs, not by an executed removal.
+It was rehearsed in a VM prepared with a GNOME, GDM, KDE Plasma, and
+Workstation environment fixture, all the way up to its final confirmation
+prompt: the stage's own `--assumeno` review showed an explicit removal of
+206 packages and an `autoremove` of 4 more, none of them from the verified
+vekrona base and none from the vekrona package list. The rehearsal stopped
+there; the removal itself was not executed, because the test environment's
+permission guard refused the confirmation keystroke. Two things could not be
+rehearsed in that VM at all, because the VM fixture never had them
+installed: the Omarchy, omedora, and Hyprland packages that the real machine
+carries, and the `fedora-release-identity-workstation` to
+`fedora-release-identity-basic` identity swap that only runs when
+`fedora-release-identity-workstation` is installed. Before running
+`90b-remove` for real: take a snapshot first (`vekrona-snapshot`), and read
+the reviewed removal and autoremove lists it prints before typing `yes`.
+
+Separately, the two-step review-confirm-execute flow itself (explicit
+removal, then `autoremove`) was executed for real, not just reviewed, against
+a small KDE Plasma fixture on a minimal Fedora VM, to prove the confirmation
+and execution path actually works end to end. That fixture is much smaller
+than the real machine's Workstation-plus-Omarchy install, so it does not
+stand in for the 206/4-package rehearsal above; it only proves the mechanism,
+not the real machine's package set.
+
+### New default stage: 65-login-manager
+
+`stages/65-login-manager.sh` and `stages/90a-switch-dm.sh` share one helper
+in `lib/common.sh`, `enable_greetd_login_manager`, that enables greetd, sets
+`graphical.target`, and asserts both plus that `display-manager.service`
+points to greetd. The difference between the two stages is the precondition:
+
+- `65-login-manager` only acts when **no** display manager is enabled at all
+  (`/etc/systemd/system/display-manager.service` absent), which is the state
+  of a fresh minimal install and the idempotent no-op state once greetd is
+  already the one enabled. If some other display manager owns
+  `display-manager.service` (gdm, sddm, lightdm, the state of an
+  unmigrated Workstation install), it logs that and leaves it alone;
+  `90a-switch-dm` is the migration path for that case.
+- `90a-switch-dm` has no such guard: migrating a Workstation machine means
+  explicitly disabling gdm and switching to greetd.
+
+`70-verify.sh` shares the same three assertions between the two stages
+instead of duplicating them, gated the same way: under `65-login-manager` it
+only checks greetd when `display-manager.service` already points to it, and
+asserts nothing about greetd when another display manager is in charge.
 
 ### Stage semantics
 
@@ -51,7 +144,7 @@ the driver.
 - `--skip STAGE` drops one stage from the run, and also drops it from the set that `70-verify` checks.
 - Pass explicit stage names to run a subset, for example `./install.sh 10 30` (used later to re-lock package versions after a Fedora upgrade, see Update policy below).
 - `90a-switch-dm` and `90b-remove` never run by default; name them explicitly, e.g. `./install.sh 90a-switch-dm`.
-- `--reset-dms-settings` overwrites `~/.config/DankMaterialShell/settings.json` from the seed file. Without it, an existing `settings.json` is left alone on every re-run, so DMS settings changed by hand survive a re-run of stage `50-user`.
+- `--reset-dms-settings` overwrites `~/.config/DankMaterialShell/settings.json` from the seed file. Without it, an existing `settings.json` is left alone on every re-run, so DMS settings changed by hand survive a re-run of stage `50-user`. This flag only resets `settings.json`. The separate DMS session file, `~/.local/state/DankMaterialShell/session.json`, is seeded whenever it is absent regardless of this flag, and is never overwritten once it exists, even by `--reset-dms-settings`.
 - Each stage starts with `sudo -v`, so expect one password prompt per stage. There is no background loop refreshing the sudo timestamp mid-stage, so a long stage can prompt again partway through.
 - Every stage is written to be idempotent: the `ensure_*` helpers in `lib/common.sh` check the current state before changing anything, so re-running `./install.sh` after a partial or failed run only touches what is still missing.
 - `ensure_symlink` never overwrites a real file silently. If the symlink target already exists and is not itself a symlink, it gets moved to `<target>.pre-vekrona` first. If that backup path is already taken, the stage fails instead of picking a second name, because a second collision at the same path usually means an earlier conflict was never resolved by hand.
@@ -61,10 +154,10 @@ the driver.
 `docs/PLAN.md` prescribes a specific, gated rollout for migrating a machine for
 the first time, each step confirmed before moving to the next:
 
-1. VM first. `make -C vm create`, then `make -C vm test`, which runs `./install.sh --skip 10-nvidia` inside the VM, a headless Sway session check, and a real snapshot/rollback round trip (see VM smoke test below).
-2. Host, no reboot needed: stages `00`, `20`, `30`, `40`, `50`, `60`.
+1. VM first. `make -C vm create`, then `make -C vm test`, which runs `./install.sh --skip 10-nvidia` inside the VM, a headless Sway session check, a real snapshot/rollback round trip, and (post-reboot) the fresh-install login manager check (see VM smoke test below).
+2. Host, no reboot needed: stages `00`, `20`, `30`, `40`, `50`, `60` (`65-login-manager` is skipped here on purpose: gdm is still enabled on a Workstation machine at this point, so it would only log and leave it alone; running it explicitly adds nothing until the cleanup step).
 3. Host, NVIDIA: stage `10`, reboot, `./install.sh 70`, then a real `vekrona-rollback` to the pre-`10` snapshot and back.
-4. Host, Sway validation: log into the Sway session and check the 240 Hz output, the Hyper layer, the Cmd layer in a browser versus a terminal, lock/idle/suspend, DMS features, all four themes, the webapps, and autostart apps such as 1Password.
+4. Host, Sway validation: log into the Sway session (through GDM's Sway entry, or `start-sway` from a text console) and check the 240 Hz output, the Hyper layer, the Cmd layer in a browser versus a terminal, lock/idle/suspend, DMS features, all four themes, the webapps, and autostart apps such as 1Password.
 5. Host, gaming: one Vulkan title through Steam with the `scb --` launch option, for about 30 minutes.
 6. Host, cleanup: `90a-switch-dm`, reboot, then `90b-remove`, then `./install.sh 70` again.
 7. Finish the README and push.
@@ -142,10 +235,16 @@ letter, Cmd+a through Cmd+z, sends the same letter under Ctrl instead:
 | Cmd+comma | Ctrl+comma | | |
 
 Inside those three terminals, the Cmd layer is off entirely so Ctrl still
-reaches the shell for things like Ctrl+C. Only word navigation is remapped
-there (Alt+Left/Right to Ctrl+Left/Right, Alt+Backspace to Ctrl+Backspace).
-Copy and paste in ghostty come from ghostty's own keybinds instead
-(`config/ghostty/config`: `super+c=copy_to_clipboard`,
+reaches the shell for things like Ctrl+C. Only Alt+Left/Right is remapped
+there, to Ctrl+Left/Right, which readline (`backward-word`/`forward-word`)
+already understands. Alt+Backspace is left unmapped in the terminal: Ghostty
+sends it as ESC DEL (`\e\x7f`), which bash's readline already binds to
+`backward-kill-word`, deleting the previous word. Remapping it to
+Ctrl+Backspace like the Cmd layer does for GUI apps does not work here:
+Ghostty encodes Ctrl+Backspace as a bare Ctrl-H byte (`^H`, 0x08), and
+readline binds plain Ctrl-H to `backward-delete-char`, so it would delete one
+character instead of a word. Copy and paste in ghostty come from ghostty's
+own keybinds instead (`config/ghostty/config`: `super+c=copy_to_clipboard`,
 `super+v=paste_from_clipboard`), not from xremap.
 
 `xkb_options grp:alts_toggle` in `config/sway/config` toggles between the two
@@ -154,11 +253,55 @@ together.
 
 ## Daily operations
 
-Theme (applies both the DMS color scheme and a matching 4K wallpaper, and
-remembers the current theme in `~/.local/state/vekrona/theme` so `next`
-cycles correctly; the four themes are `tokyo-night`, `catppuccin-mocha`,
-`gruvbox-dark`, `nord`, and their wallpapers are generated solid/gradient
-placeholders, swap them for real images if wanted):
+Theme (applies the DMS color scheme, the terminal colors, and a matching 4K
+wallpaper, and remembers the current theme in `~/.local/state/vekrona/theme`
+so `next` cycles correctly; the four themes are `tokyo-night`,
+`catppuccin-mocha`, `gruvbox-dark`, `nord`, and their wallpapers are
+generated solid/gradient placeholders, swap them for real images if wanted).
+
+Terminal colors come from Ghostty's own built-in themes, not from DMS. Each
+vekrona theme maps to one Ghostty built-in theme, in the single mapping
+`ghostty_theme_for` in `lib/common.sh` that `vekrona-theme`,
+`stages/50-user.sh` and `stages/70-verify.sh` all read; a vekrona theme with
+no entry in that mapping is a hard, immediate error, never a silent
+fallback. `vekrona-theme` writes the mapped name into
+`~/.config/ghostty/vekrona-theme` (a single `theme = <name>` line, written
+atomically), which `config/ghostty/config` pulls in with `config-file =
+vekrona-theme`, and then reloads any already-running Ghostty windows over
+Ghostty's own D-Bus `org.gtk.Actions` interface (the same `reload-config`
+action its default `ctrl+shift+,` keybind runs), so open terminals update
+immediately without the user doing anything. `stages/50-user.sh` writes
+this same include for the seeded default theme on a fresh install, or for
+whichever theme is recorded in `~/.local/state/vekrona/theme` on an
+existing one, so a terminal opened in the very first session already has
+the right colors: it does not depend on DMS at all.
+
+DMS and GTK application colors are a separate path and still come from DMS.
+The theme content lives in `~/.local/state/vekrona/active-theme.json`,
+which `customThemeFile` in the DMS settings seed points at from the first
+session onward, so DMS watches that one file and reloads it on every
+write; the script writes the new theme into it, then waits for DMS to
+confirm the new colors (via `inotifywait` on the ghostty theme file DMS
+still generates as a side effect, so it needs `inotify-tools`) and exits
+non-zero with a clear message if the theme did not take within the wait,
+without retrying or restarting the shell itself. DMS seeds the wallpaper
+for the first session from `~/.local/state/DankMaterialShell/session.json`,
+so it shows correctly without any `vekrona-theme` call. The DMS colors for
+that very first session are not guaranteed: DMS has an internal startup
+race between checking whether `matugen` is available and loading the
+custom theme file, and when it loses that race it does not retry, so GTK
+application colors can stay at GTK defaults until the first
+`vekrona-theme <name>` call. No event exists to reliably wait on for that
+race from outside DMS, so this is not automated. The terminal no longer has
+this problem: Ghostty reads its colors from its own built-in themes, so
+they are correct from the first session, with no DMS involvement.
+
+That startup race is also why DMS's matugen template switches,
+`runDmsMatugenTemplates` and `matugenTemplateGhostty` in the settings seed,
+must stay enabled: they are what makes DMS regenerate the Ghostty color
+files at all once it wins the race, and stage `50-user` and stage `70-verify`
+both assert they are `true` (the seed omits them, so DMS's own default of
+`true` applies; the assertion catches anyone turning them off by hand).
 
 ```
 vekrona-theme <name>
@@ -278,6 +421,9 @@ more than intended.
 
 Release upgrade procedure:
 
+1. Smoke-test the new release in the VM first: bump `FEDORA_RELEASE` in `vm/Makefile`, then run `make -C vm destroy`, `make -C vm create` and `make -C vm test` (see VM smoke test below).
+2. Upgrade the host:
+
 ```
 vekrona-snapshot "before F<N> upgrade"
 sudo dnf versionlock clear
@@ -318,20 +464,50 @@ sudo dnf upgrade qt6-qtbase
 - ScopeBuddy 1.5.0 sets `SCB_STEAMARGIGNORE=1` by default, which makes it ignore the `-e` flag configured in `scb.conf`'s `SCB_GAMESCOPE_ARGS` unless that default is overridden. Check ScopeBuddy's own behavior before assuming `-e` is doing anything.
 - The user is in the `input` group so xremap-wlroots can read raw keyboard events. Any process running as that user can read raw input from every input device on the system, not only the keyboard; a re-login is needed after the group is added.
 - If DMS crashes while the screen is locked, Sway paints the screen red instead of showing a lock UI. Recover from a text console: find the locked session's socket paths under `/run/user/$(id -u)/` (`ls /run/user/$(id -u)/sway-ipc.*` for `SWAYSOCK`, and the matching `WAYLAND_DISPLAY`), then run `SWAYSOCK=<path> WAYLAND_DISPLAY=<display> dms ipc call lock lock`.
+- A different, worse symptom: if `QSG_RHI_BACKEND=vulkan` is in effect on a machine whose Vulkan is software (Mesa lavapipe, not a real GPU driver), the very first frame of the session lock screen can deadlock inside Qt's Vulkan RHI backend. DMS does not crash and Sway does not paint red; instead the whole Quickshell process freezes solid: the lock screen's clock stops advancing, every `dms ipc call` hangs instead of returning, and a PAM helper process it spawned on lock is left as a zombie, never reaped. Neither the documented red-screen recovery above nor `systemctl --user restart dms` gets you out of this: the IPC call just queues behind the same stuck thread, and a freshly restarted `dms.service` re-acquires the lock and freezes again within seconds while the session is still marked locked. The only recovery found is a reboot. This is why `QSG_RHI_BACKEND=vulkan` is now set only through the hardware-conditional `vekrona-gpu.conf` (see "Layout of the repo" and `docs/PLAN.md` decision #6), gated on `/dev/dri/vekrona-dgpu`, and is never set at all on a machine without that device. Proven in the `vekrona-rehearsal` VM (no dGPU, software Vulkan) on 2026-09-29: forcing `QSG_RHI_BACKEND=vulkan` reproduced the freeze on both an idle-triggered lock and a manual IPC lock; `opengl`, `software`, and Qt's unset default (which resolves to OpenGL on this stack) all locked and unlocked correctly under the same software rendering. Lock and unlock under `QSG_RHI_BACKEND=vulkan` on the real machine, which has the actual RTX 4090 and a real Vulkan driver rather than software rendering, is UNTESTED and must be tested there before relying on it: lock by the Hyper+Escape keybinding, hold a few minutes, unlock; lock by `dms ipc call lock lock`, hold a few minutes, unlock; let the idle timeout lock it on its own, hold a few minutes, unlock. Only rely on the dGPU branch once all three pass on that machine.
 - Units and IME state left over from Omarchy, `omarchy-fcitx5`, `omarchy-crash-watch`, and others, plus `/usr/lib/environment.d/10-omarchy-fcitx.conf`, keep running inside Sway until stage `90b-remove` actually removes the omedora packages that own them.
+- `90b-remove` no longer removes `kf6-*` explicitly, because `kf6-kimageformats` is a dependency of the Fedora wallpaper package that `sway-config-fedora` needs; KDE framework libraries are removed only as orphans, once nothing else needs them, by the stage's own `autoremove`. The desktop package list (`VEKRONA_DESKTOP_PKGS` in `lib/common.sh`, the packages this desktop actually depends on: NetworkManager, portals, Sway and its stack, DMS, gaming, fonts) is also passed to dnf as a protected package set on every removal and `autoremove` command the stage runs, so a future collision fails the stage instead of silently taking Sway out with it. Not every package vekrona installs is on that list and protected this way: `snapper`, `libdnf5-plugin-actions`, and the NVIDIA packages installed by stage `10-nvidia` (`akmod-nvidia`, `xorg-x11-drv-nvidia-cuda`, and so on) are not in `VEKRONA_DESKTOP_PKGS`, so `90b-remove` does not protect them from its own explicit removal or `autoremove`.
+- `90b-remove` no longer runs `dnf environment remove workstation-product-environment kde-desktop-environment`. A rehearsal in a VM built like the real machine showed that command taking 661 packages, 23 of which belonged to the verified vekrona base: CPU/GPU/Wi-Fi/audio firmware, filesystem tools (`dosfstools`, `exfatprogs`, `ntfs-3g`), and media libraries. The cause is that the Workstation and KDE environments bundle groups such as Hardware Support, Multimedia, Fonts, and Printing Support, and removing the environment removes every group in it, protected packages or not. `90b-remove` now removes only the packages named in its explicit list plus whatever `autoremove` finds orphaned afterward. This means applications that were installed as members of the old GNOME or KDE groups (GNOME's own apps, LibreOffice, and so on) stay installed after `90b-remove`; nothing currently prunes them.
 - `pcie_aspm=off` is set as a kernel argument by stage `10-nvidia` without a recorded reason. Revisit if PCIe power management ever matters on this machine.
 - All DankMaterialShell windows, spotlight, notifications, control center, and so on, share a single Wayland app_id, so a Sway window rule cannot target just one of them.
 - `WLR_NO_HARDWARE_CURSORS=1` is documented but not set in `config/environment.d/vekrona.conf`. Only add it if the cursor becomes invisible, a known wlroots-on-NVIDIA symptom.
 - Whether the snapper actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`) fires during an offline `dnf system-upgrade` transaction is unverified. Take the manual snapshot in the release upgrade procedure regardless.
+- Every greetd login logs `gkr-pam: unable to locate daemon control file` at error priority. This is the stock `/etc/pam.d/greetd` from the `greetd` package (vekrona does not install or modify it): its `auth` phase runs `pam_gnome_keyring.so` before any keyring daemon exists, so the module logs this and stashes the password; the `session` phase's `pam_gnome_keyring.so auto_start` then starts `gnome-keyring-daemon` and unlocks the login keyring with that stashed password. Verified in the `vekrona-test` VM across a reboot and fresh login: `org.freedesktop.secrets` is served by the PAM-started `gnome-keyring-daemon` (the D-Bus-activated and socket-activated units stay inactive), the login collection's `Locked` property is `false`, and `secret-tool store`/`lookup` succeed with no password prompt.
 
 ## VM smoke test
 
+`VM_NAME` and `VM_USER` (default `vekrona-test` and `vekrona`) are validated
+by the Makefile against `[A-Za-z0-9._-]+`, starting with a letter or digit,
+before any target runs.
+
 ```
-make -C vm deps      # installs virt-install/virt-viewer/libvirt-client if missing, enables the virtqemud/virtnetworkd/virtstoraged sockets, starts and autostarts the libvirt "default" network, adds you to the libvirt group (log out and back in for that to take effect)
-make -C vm create     # generates vm/ks.cfg from vm/ks.cfg.in, substituting your SSH public key (first of ~/.ssh/id_ed25519.pub, id_rsa.pub, *.pub, or set VM_SSH_PUBKEY); virt-install: Fedora 44 Everything netinstall + that kickstart (btrfs autopart, NOPASSWD sudo, git + openssh-server); the kickstart shuts the VM down after %post, then this target boots it with `virsh start`
-make -C vm test       # waits for SSH, enables linger for the VM user, rsyncs the repo in (excluding .git), runs ./install.sh --skip 10-nvidia, vm/session-check.sh, a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for its boot ID to change over SSH, then vm/rollback-check.sh against that snapshot number
-make -C vm destroy    # virsh destroy, then virsh undefine --remove-all-storage
+make -C vm deps      # installs virt-install/virt-viewer/libvirt-client/inotify-tools/ImageMagick/python3-libvirt if missing, enables the virtqemud/virtnetworkd/virtstoraged sockets, starts and autostarts the libvirt "default" network, adds you to the libvirt group (log out and back in for that to take effect)
+make -C vm create     # generates vm/ks-$(VM_NAME).cfg from vm/ks.cfg.in (one generated kickstart per VM name, gitignored, so `make create VM_NAME=foo` next to an existing vekrona-test VM regenerates the right file instead of reusing a stale hostname), generating a dedicated harness SSH key pair at vm/.ssh/id_ed25519 (ed25519, no passphrase, gitignored) if it doesn't exist yet, and substituting your personal SSH public key (first of ~/.ssh/id_ed25519.pub, id_rsa.pub, *.pub, or set VM_SSH_PUBKEY), the harness key, and VM_NAME (as the guest hostname) into the kickstart; virt-install: Fedora Everything netinstall of the release set by FEDORA_RELEASE in vm/Makefile (currently 44), with vm/install-tree.sh resolving the Fedora geo-redirector to one concrete mirror and verifying it serves the install tree before virt-install ever touches it (no retries: a redirector that does not itself redirect is rejected outright), + that kickstart (btrfs autopart, NOPASSWD sudo, password `vekrona` for graphical login, `%packages` limited to what the harness itself needs before any stage has run: `@core rsync qemu-guest-agent`; openssh-server is already an @core mandatory package; both the harness key and your personal key are authorized for the VM user); the --os-variant hardware profile is fedora<release> when the host's osinfo database knows it, otherwise the newest known profile plus a warning naming `osinfo-db-import --user --latest`; the VM gets a virtio video device, a local-only SPICE display (`--graphics spice,listen=127.0.0.1`), and a guest-agent channel requested explicitly; the serial console is logged to `/var/log/libvirt/qemu/$(VM_NAME)-serial0.log` (root-owned, read it with sudo) so an install or boot failure can be diagnosed afterwards; the domain is marked as owned by this harness in its libvirt metadata (see `destroy` below); the kickstart shuts the VM down after %post, then this target boots it with `virsh start`
+make -C vm test       # connects only with the harness key (-i vm/.ssh/id_ed25519, IdentitiesOnly=yes, -F /dev/null and IdentityAgent=none so your ~/.ssh/config and any SSH agent, including 1Password, are never touched); waits for an IPv4 lease (vm/wait-for-ip.sh, event-driven: it watches the libvirt dnsmasq lease file with inotifywait rather than polling on a sleep), waits for SSH, enables linger for the VM user, rsyncs the repo in (excluding .git and vm/.ssh, so the harness key never leaves the host), runs ./install.sh --skip 10-nvidia (which installs everything the harness scripts below need: python3/inotify-tools are not in the kickstart, stage 30-packages installs them before session-check.sh ever runs; git is not installed by any stage or needed in the VM, since the repo arrives by rsync, not by clone), vm/session-check.sh, a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for it to actually reboot and for qemu-guest-agent to reconnect, both through libvirt domain events (vm/wait-for-reboot.py), then waits for SSH again, runs vm/rollback-check.sh against that snapshot number, requires `systemctl is-system-running --wait` to report `running` (a degraded boot, with any failed unit, fails the test and prints the failed units), and finally runs vm/login-manager-check.sh to prove the fresh-install login manager (stage 65-login-manager): greetd active, greetd enabled, default target graphical.target. One timed wall-clock wait remains, unlike every other wait here: SSH reachability itself, retried up to `SSH_CONNECT_ATTEMPTS` times, isolated in one `wait_for_ssh` helper in vm/Makefile (see TODO.md)
+make -C vm destroy    # refuses to act on a domain that is not marked as owned by this harness (see `create` above); virsh destroy if running, then virsh undefine --remove-all-storage, then removes the generated vm/ks-$(VM_NAME).cfg
+make -C vm adopt      # marks an existing domain as owned by this harness, for a domain `create` made before the ownership mark existed; requires its generated vm/ks-$(VM_NAME).cfg to already exist, as evidence this harness actually created it
+make -C vm screenshot OUT=path.png   # saves a PNG of the current VM display to OUT, which must be an absolute path (virsh screenshot to PPM, converted with ImageMagick); fails if OUT is unset, relative, or the VM is not running
+make -C vm viewer     # opens the VM display for a human with virt-viewer against qemu:///system
+make -C vm type TEXT='hello'   # types TEXT into the VM as keystrokes, mapped to keycodes by vm/keymap.sh (US layout) and sent with virsh send-key
+make -C vm key KEYS='KEY_LEFTMETA KEY_ENTER'   # sends one key combination to the VM with virsh send-key
 ```
+
+Automation (`test` and `ssh`) authenticates as the VM user `vekrona` with a
+throwaway harness key pair generated on demand at `vm/.ssh/id_ed25519`
+(gitignored, never committed) by `make create`; `test` and `ssh` fail with a
+clear message, instead of regenerating it, if that key pair is missing or
+only half present (one of the two files without the other). It never uses
+your personal key or any SSH agent. The kickstart also authorizes your
+personal public key (`VM_SSH_PUBKEY`) for the same user, so you can log in by
+hand at handover, and the password `vekrona` also works; this is a throwaway
+VM on the libvirt NAT network, so a shared plaintext password is fine.
+
+Four timeouts, all overridable on the `make` command line, bound the waits in
+`test`: `IP_WAIT_TIMEOUT` (default 120s, for the DHCP lease),
+`REBOOT_EVENT_TIMEOUT` (default 60s, for libvirt's reboot event),
+`AGENT_RECONNECT_TIMEOUT` (default 300s, for qemu-guest-agent to reconnect
+after reboot), and `SSH_CONNECT_ATTEMPTS` (default 60, retry count rather
+than a duration, for the one remaining timed SSH wait above).
 
 `vm/session-check.sh` starts a headless Sway session (`WLR_BACKENDS=headless`)
 under `systemd-run --user`, waits for the Sway IPC socket, confirms
@@ -340,8 +516,19 @@ under `systemd-run --user`, waits for the Sway IPC socket, confirms
 `xremap-wlroots --validate-config`. `vm/rollback-check.sh` then confirms the
 rollback left both `root` and a `root.old-*` subvolume at the top level, `/`
 mounted from `[/root]`, and the `/.vekrona-rolled-back-from-<N>` marker in
-place. `make -C vm console` and `make -C vm ssh` give interactive access to
-the VM in between.
+place. After the reboot that follows, `vm/login-manager-check.sh` confirms
+`systemctl is-active greetd`, `systemctl is-enabled greetd`, and
+`systemctl get-default` is `graphical.target`, proving the fresh-install
+login manager stage actually leaves the VM bootable straight into the
+greeter. `make -C vm console` and `make -C vm ssh` give interactive access to
+the VM in between, and `make -C vm viewer` gives graphical access.
+
+What the VM cannot smoke-test, because the VM has none of the hardware
+involved: the NVIDIA stage and every GPU feature that depends on it (stage
+`10-nvidia` is always skipped in `make -C vm test`), the named 4K 240 Hz
+output, Bluetooth, and anything that needs pointer input, such as an area
+screenshot or a screen-recording region selection, since `make -C vm type`
+and `make -C vm key` only send keystrokes.
 
 ## Decisions log
 

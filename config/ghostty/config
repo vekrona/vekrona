@@ -1,4 +1,4 @@
-theme = dankcolors
+config-file = vekrona-theme
 
 font-family = "JetBrainsMono Nerd Font"
 font-style = Regular

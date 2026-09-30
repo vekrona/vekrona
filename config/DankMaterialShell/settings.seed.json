@@ -5,7 +5,7 @@
   "lockBeforeSuspend": true,
   "loginctlLockIntegration": true,
   "currentThemeName": "custom",
-  "customThemeFile": "__HOME__/.config/DankMaterialShell/vekrona-themes/tokyo-night.json",
+  "customThemeFile": "__HOME__/.local/state/vekrona/active-theme.json",
   "monoFontFamily": "JetBrainsMono Nerd Font",
   "clockFormat": "24h"
 }
