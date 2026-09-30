@@ -207,6 +207,16 @@ bars = d.get('barConfigs', [])
 assert any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 "
 
+  check assert "vekronaAgent plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaAgent/plugin.json"
+  check assert "vekronaAgent plugin enabled" bash -c "jq -e '.vekronaAgent.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
+  check assert "vekronaAgent plugin placed in a DankBar widget list" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+bars = d.get('barConfigs', [])
+assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
+"
+  check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
+
   declare -A electron_apps=(
     [com.discordapp.Discord]=1
     [com.spotify.Client]=1

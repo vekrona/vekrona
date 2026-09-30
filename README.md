@@ -33,6 +33,9 @@ existing Fedora Workstation" below.
 | `fonts/` | vendored JetBrainsMono Nerd Font (OFL, v3.5.1), symlinked into `~/.local/share/fonts/vekrona` |
 | `config/fontconfig/conf.d/50-vekrona-fonts.conf` | fontconfig aliases: `sans-serif`/`system-ui` prefer Atkinson Hyperlegible Next then Inter (Atkinson has no Cyrillic, Inter covers it), `monospace` prefers JetBrainsMono Nerd Font; symlinked into `~/.config/fontconfig/conf.d/` |
 | `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/` | DMS DankBar plugin: always shows Sway workspaces 1-5 plus any existing 6-10, replacing the stock workspace switcher (see "The vekronaSwayWorkspaces DankBar plugin" below); stage `50-user` symlinks the whole `plugins/` directory into `~/.config/DankMaterialShell/plugins/` |
+| `config/DankMaterialShell/plugins/vekronaAgent/` | DMS DankBar plugin: agent-button icon with an unread-error badge, left click opens the default coding agent, right click opens the recorded-error picker (see "Agent button" below) |
+| `bin/vekrona-agent` | opens a configured coding agent harness (Claude Code, Codex, opencode, pi, or Cursor Agent) in a terminal, with default permission prompts and API-key env vars stripped; see "Agent button" below |
+| `bin/vekrona-rofi-theme` | prints a `rofi -theme-str` string from the active vekrona/DMS theme; shared by `vekrona-keybindings` and `vekrona-agent` so the rofi styling lives in one place |
 | `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, rollback, and login-manager checks |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (plain-QEMU install-and-boot test of a test ISO) |
 | `.github/workflows/iso.yml` | CI: builds the release and test ISOs in a Fedora 44 container, boots the test ISO under QEMU/KVM on the runner, and attaches the release ISO to tagged GitHub releases |
@@ -198,6 +201,8 @@ launch/focus layer on it:
 | Hyper+Escape | `dms ipc call lock lock` |
 | Hyper+BackSpace | `dms ipc call powermenu toggle` |
 | Hyper+slash | show the keybindings help panel (`vekrona-keybindings`) |
+| Hyper+a | open the coding agent (`vekrona-agent --pick`) |
+| Hyper+Shift+a | pick a recorded error and open the agent on it (`vekrona-error pick`) |
 | Hyper+1..9, Hyper+0 | switch to workspace 1 through 10 |
 | Hyper+h/j/k/l, arrow keys | focus left/down/up/right |
 | Hyper+r | enter resize mode (h/j/k/l or arrows resize, Return or Escape exits) |
@@ -463,6 +468,76 @@ widget, without touching any other bar customization; `settings.seed.json`
 already ships `vekronaSwayWorkspaces` in place of the stock widget for a
 fresh install. `70-verify` checks the plugin is linked, enabled, and placed
 in a bar widget list.
+
+## Agent button
+
+Omarchy-style "agent button": one keystroke or bar click opens a configured
+coding agent harness (Claude Code, Codex, opencode, pi, or Cursor Agent) in a
+new Ghostty window, or opens the agent on a specific recorded error.
+
+```
+Hyper+a         open the coding agent (vekrona-agent --pick)
+Hyper+Shift+a   pick a recorded error and open the agent on it (vekrona-error pick)
+```
+
+The DankBar plugin `config/DankMaterialShell/plugins/vekronaAgent/` shows the
+same two actions as a bar button: left click runs `vekrona-agent --pick`,
+right click runs `vekrona-error pick`. A small badge on the icon shows the
+unread recorded-error count
+(`${XDG_STATE_HOME:-~/.local/state}/vekrona/errors/unread`, watched
+event-driven via Quickshell's `FileView`) and hides when it is zero. Stage
+`50-user` symlinks the plugin directory in with the rest of
+`config/DankMaterialShell/plugins/`, enables it in `plugin_settings.json`,
+and inserts `vekronaAgent` into a bar's widget list (before
+`notificationButton`) if it is not already present, the same idempotent
+pattern used for `vekronaSwayWorkspaces`; `settings.seed.json` already ships
+it in place for a fresh install.
+
+`bin/vekrona-agent` resolves harnesses by name on `PATH` (`claude`, `codex`,
+`opencode`, `pi`, `cursor-agent`; `claude` is an RPM in `/usr/bin`, the rest
+are `mise` shims); a harness that is not installed fails with a clear error
+telling you to run `./install.sh 55-agents` or `vekrona-update`. Every
+harness launches with its own **default** permission prompts: there is no
+yolo/auto-approve flag anywhere in this path. Before launch, `vekrona-agent`
+strips every API-key-shaped environment variable (`ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`,
+`OPENAI_BASE_URL`, `CODEX_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`,
+`CURSOR_API_KEY`, `OPENROUTER_API_KEY`) so every harness authenticates
+through its own subscription login, never a stray API key left in the
+session environment:
+
+| Harness | Subscription |
+|---|---|
+| Claude Code (`claude`) | Claude Pro/Max, via Claude Code's own OAuth login |
+| Codex (`codex`) | ChatGPT |
+| opencode, pi | ChatGPT or GitHub Copilot, **not** a Claude subscription (Anthropic's terms only let a Claude subscription's OAuth token authenticate Claude Code itself, enforced since 2026-01-09) |
+| Cursor Agent (`cursor-agent`) | Cursor subscription |
+
+Run each harness once by hand first and log in; `vekrona-agent` never
+automates that.
+
+The default harness is a single id in
+`${XDG_CONFIG_HOME:-~/.config}/vekrona/agent`:
+
+```
+vekrona-agent set claude         # set the default harness
+vekrona-agent get                # print the default harness
+vekrona-agent list                # every known harness: installed? default?
+vekrona-agent choose              # always show the picker, set the default, then launch
+vekrona-agent                     # launch the default harness (dies with no default set)
+vekrona-agent --pick              # launch the default; with no default, show the picker, set it, then launch
+vekrona-agent --prompt "fix the build"
+vekrona-agent --error 42           # launch with the recorded error's prompt (vekrona-error prompt 42)
+vekrona-agent --dry-run ...        # print the final argv instead of launching, one element per line
+```
+
+`vekrona-agent` launches `ghostty --class=vekrona.agent
+--working-directory=<this repo>` (so a session opens in the vekrona checkout,
+not wherever the keybinding happened to fire from) `-e env -u <stripped
+vars...> <harness argv>`, detached from the caller (`setsid -f`) so the
+keybinding, bar click, or notification action never blocks; a failed launch
+still surfaces as a desktop notification (`notify-send -u critical -a
+vekrona`), the same as every other error from this tool.
 
 ## Update policy
 

@@ -130,6 +130,43 @@ PYEOF
   fi
 }
 
+ensure_dms_bar_widget_inserted_before() {
+  local widget_id="$1" before_id="$2"
+  local tmp
+  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
+  if ! python3 - "$dms_settings" "$widget_id" "$before_id" > "$tmp" <<'PYEOF'
+import json
+import sys
+
+path, widget_id, before_id = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(path) as f:
+    data = json.load(f)
+
+for bar in data.get("barConfigs", []):
+    for key in ("leftWidgets", "centerWidgets", "rightWidgets"):
+        widgets = bar.get(key)
+        if not isinstance(widgets, list) or widget_id in widgets:
+            continue
+        if before_id in widgets:
+            widgets.insert(widgets.index(before_id), widget_id)
+
+json.dump(data, sys.stdout, indent=2)
+sys.stdout.write("\n")
+PYEOF
+  then
+    rm -f "$tmp"
+    die "python3 failed to insert DMS bar widget: $widget_id"
+  fi
+  if cmp -s "$tmp" "$dms_settings"; then
+    rm -f "$tmp"
+    log "DMS bar widget already present or insertion point missing: $widget_id"
+  else
+    mv "$tmp" "$dms_settings"
+    log "inserted DMS bar widget: $widget_id before $before_id"
+  fi
+}
+
 ensure_dms_plugin_enabled() {
   local plugin_id="$1"
   local plugin_settings="$dms_settings_dir/plugin_settings.json"
@@ -219,6 +256,15 @@ bars = d.get('barConfigs', [])
 has_plugin = any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 has_stock = any('workspaceSwitcher' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 assert has_plugin or not has_stock, (has_plugin, has_stock)
+"
+
+ensure_dms_plugin_enabled vekronaAgent
+ensure_dms_bar_widget_inserted_before vekronaAgent notificationButton
+assert "DMS bar has the vekrona agent plugin placed in a widget list" python3 -c "
+import json
+d = json.load(open('$dms_settings'))
+bars = d.get('barConfigs', [])
+assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 "
 
 dms_changelog_seen="$(dirname "$dms_settings")/.changelog-$(dms_changelog_version)"

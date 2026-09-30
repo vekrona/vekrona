@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s inherit_errexit
+
+PROG="vekrona-agent"
+
+self="$(readlink -f "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
+
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+AGENT_CONFIG_DIR="$CONFIG_HOME/vekrona"
+AGENT_CONFIG_FILE="$AGENT_CONFIG_DIR/agent"
+
+AGENT_KNOWN_TOOLS=(claude codex opencode pi cursor-agent)
+
+STRIP_ENV_VARS=(
+  ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
+  OPENAI_API_KEY OPENAI_BASE_URL CODEX_API_KEY
+  GEMINI_API_KEY GOOGLE_API_KEY CURSOR_API_KEY OPENROUTER_API_KEY
+)
+
+die() {
+  printf '%s: %s\n' "$PROG" "$*" >&2
+  notify-send -u critical -a vekrona "$PROG" "$*" >/dev/null 2>&1 || true
+  exit 1
+}
+
+print_usage() {
+  cat <<EOF
+usage: $PROG [--pick] [--choose] [--prompt TEXT | --error ID] [--dry-run]
+       $PROG set <tool>
+       $PROG get
+       $PROG list
+       $PROG choose
+
+known tools: ${AGENT_KNOWN_TOOLS[*]}
+EOF
+}
+
+usage() {
+  print_usage >&2
+  exit 1
+}
+
+is_known_tool() {
+  local t="$1" known
+  for known in "${AGENT_KNOWN_TOOLS[@]}"; do
+    if [[ "$t" == "$known" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+read_default() {
+  [[ -f "$AGENT_CONFIG_FILE" ]] && cat "$AGENT_CONFIG_FILE"
+}
+
+write_default() {
+  local tool="$1" tmp
+  mkdir -p "$AGENT_CONFIG_DIR"
+  tmp="$(mktemp "$AGENT_CONFIG_DIR/.agent.XXXXXX")"
+  printf '%s\n' "$tool" > "$tmp"
+  mv -f "$tmp" "$AGENT_CONFIG_FILE"
+}
+
+agent_build_argv() {
+  local tool="$1" prompt="${2:-}"
+  AGENT_ENV_ASSIGN=()
+  case "$tool" in
+    claude)
+      AGENT_ARGV=(claude)
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=("$prompt"); fi
+      ;;
+    codex)
+      AGENT_ARGV=(codex -c check_for_update_on_startup=false)
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=("$prompt"); fi
+      ;;
+    opencode)
+      AGENT_ENV_ASSIGN=(OPENCODE_DISABLE_AUTOUPDATE=true)
+      AGENT_ARGV=(opencode)
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=(--prompt "$prompt"); fi
+      ;;
+    pi)
+      AGENT_ARGV=(pi)
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=("$prompt"); fi
+      ;;
+    cursor-agent)
+      AGENT_ARGV=(cursor-agent)
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=("$prompt"); fi
+      ;;
+    *)
+      die "unknown agent tool: $tool"
+      ;;
+  esac
+}
+
+pick_tool() {
+  command -v rofi >/dev/null 2>&1 || die "rofi not found (install the 'rofi' package)"
+  local theme_str
+  theme_str="$(vekrona-rofi-theme)" || die "vekrona-rofi-theme failed"
+
+  local lines=() t label
+  for t in "${AGENT_KNOWN_TOOLS[@]}"; do
+    if command -v "$t" >/dev/null 2>&1; then
+      label="$t (installed)"
+    else
+      label="$t (not installed)"
+    fi
+    lines+=("$label")
+  done
+
+  local chosen
+  chosen="$(printf '%s\n' "${lines[@]}" | rofi -dmenu -i -p "Coding agent" -theme-str "$theme_str")"
+  [[ -n "$chosen" ]] || return 1
+  printf '%s' "${chosen%% *}"
+}
+
+launch() {
+  local tool="$1" prompt="$2" dry_run="$3"
+
+  is_known_tool "$tool" || die "unknown agent tool: $tool"
+  command -v "$tool" >/dev/null 2>&1 || \
+    die "agent harness '$tool' is not installed; run './install.sh 55-agents' or 'vekrona-update'"
+  command -v ghostty >/dev/null 2>&1 || die "ghostty not found"
+
+  agent_build_argv "$tool" "$prompt"
+
+  local env_argv=(env)
+  local v
+  for v in "${STRIP_ENV_VARS[@]}"; do env_argv+=(-u "$v"); done
+
+  local full_argv=(
+    ghostty "--class=vekrona.agent" "--working-directory=$REPO_ROOT" -e
+    "${env_argv[@]}" "${AGENT_ENV_ASSIGN[@]}" "${AGENT_ARGV[@]}"
+  )
+
+  if [[ "$dry_run" == "1" ]]; then
+    printf '%s\n' "${full_argv[@]}"
+    return 0
+  fi
+
+  setsid -f bash -c '
+    shopt -s execfail
+    if ! exec "$@"; then
+      notify-send -u critical -a vekrona "vekrona-agent" "failed to launch: $*" >/dev/null 2>&1
+      exit 1
+    fi
+  ' bash "${full_argv[@]}" \
+    || die "failed to spawn ghostty for agent: $tool"
+}
+
+cmd_set() {
+  local tool="${1:-}"
+  [[ -n "$tool" ]] || die "usage: $PROG set <tool> (known: ${AGENT_KNOWN_TOOLS[*]})"
+  is_known_tool "$tool" || die "unknown agent tool: $tool (known: ${AGENT_KNOWN_TOOLS[*]})"
+  write_default "$tool"
+  echo "default agent: $tool"
+}
+
+cmd_get() {
+  local tool
+  tool="$(read_default || true)"
+  [[ -n "$tool" ]] || die "no default agent harness set; run '$PROG set <tool>' or '$PROG --pick'"
+  echo "$tool"
+}
+
+cmd_list() {
+  local current t installed default
+  current="$(read_default || true)"
+  for t in "${AGENT_KNOWN_TOOLS[@]}"; do
+    if command -v "$t" >/dev/null 2>&1; then installed="installed"; else installed="not installed"; fi
+    if [[ "$t" == "$current" ]]; then default="default"; else default="-"; fi
+    printf '%-14s %-13s %s\n' "$t" "$installed" "$default"
+  done
+}
+
+cmd_choose() {
+  local prompt="${1:-}" error_id="${2:-}" dry_run="${3:-0}" tool
+  tool="$(pick_tool)" || die "no agent tool selected"
+  write_default "$tool"
+  run_with_tool "$tool" "$prompt" "$error_id" "$dry_run"
+}
+
+run_with_tool() {
+  local tool="$1" prompt="$2" error_id="$3" dry_run="$4"
+  if [[ -n "$error_id" ]]; then
+    prompt="$(vekrona-error prompt "$error_id")" || die "vekrona-error prompt $error_id failed (unknown error id?)"
+  fi
+  launch "$tool" "$prompt" "$dry_run"
+}
+
+parse_flags() {
+  PICK=0; CHOOSE=0; DRY_RUN=0; PROMPT=""; ERROR_ID=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pick) PICK=1 ;;
+      --choose) CHOOSE=1 ;;
+      --prompt)
+        [[ $# -ge 2 ]] || die "--prompt requires an argument"
+        PROMPT="$2"; shift ;;
+      --error)
+        [[ $# -ge 2 ]] || die "--error requires an argument"
+        ERROR_ID="$2"; shift ;;
+      --dry-run) DRY_RUN=1 ;;
+      -h|--help) print_usage; exit 0 ;;
+      *) die "unknown argument: $1" ;;
+    esac
+    shift
+  done
+  if [[ -n "$PROMPT" && -n "$ERROR_ID" ]]; then
+    die "--prompt and --error are mutually exclusive"
+  fi
+}
+
+main() {
+  local choose_subcommand=0
+  case "${1:-}" in
+    set)
+      shift
+      cmd_set "${1:-}"
+      exit 0
+      ;;
+    get)
+      cmd_get
+      exit 0
+      ;;
+    list)
+      cmd_list
+      exit 0
+      ;;
+    choose)
+      shift
+      choose_subcommand=1
+      ;;
+  esac
+
+  parse_flags "$@"
+  if [[ "$choose_subcommand" == "1" ]]; then
+    CHOOSE=1
+  fi
+
+  if [[ "$CHOOSE" == "1" ]]; then
+    cmd_choose "$PROMPT" "$ERROR_ID" "$DRY_RUN"
+    return 0
+  fi
+
+  local tool
+  tool="$(read_default || true)"
+  if [[ -z "$tool" ]]; then
+    if [[ "$PICK" == "1" ]]; then
+      tool="$(pick_tool)" || die "no agent tool selected"
+      write_default "$tool"
+    else
+      die "no default agent harness set; run '$PROG set <tool>' or '$PROG --pick' (known: ${AGENT_KNOWN_TOOLS[*]})"
+    fi
+  fi
+
+  run_with_tool "$tool" "$PROMPT" "$ERROR_ID" "$DRY_RUN"
+}
+
+main "$@"
