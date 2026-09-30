@@ -821,7 +821,7 @@ before any target runs.
 ```
 make -C vm deps      # installs virt-install/virt-viewer/libvirt-client/inotify-tools/ImageMagick/python3-libvirt if missing, enables the virtqemud/virtnetworkd/virtstoraged sockets, starts and autostarts the libvirt "default" network, adds you to the libvirt group (log out and back in for that to take effect)
 make -C vm create     # generates vm/ks-$(VM_NAME).cfg from vm/ks.cfg.in (one generated kickstart per VM name, gitignored, so `make create VM_NAME=foo` next to an existing vekrona-test VM regenerates the right file instead of reusing a stale hostname), generating a dedicated harness SSH key pair at vm/.ssh/id_ed25519 (ed25519, no passphrase, gitignored) if it doesn't exist yet, and substituting your personal SSH public key (first of ~/.ssh/id_ed25519.pub, id_rsa.pub, *.pub, or set VM_SSH_PUBKEY), the harness key, and VM_NAME (as the guest hostname) into the kickstart; virt-install: Fedora Everything netinstall of the release set by FEDORA_RELEASE in vm/Makefile (currently 44), with vm/install-tree.sh resolving the Fedora geo-redirector to one concrete mirror and verifying it serves the install tree before virt-install ever touches it (no retries: a redirector that does not itself redirect is rejected outright), + that kickstart (btrfs autopart, NOPASSWD sudo, password `vekrona` for graphical login, system sleep disabled in the guest because virtio-gpu does not survive suspend and resume (DMS would otherwise suspend an idle VM after 30 min and wedge Sway on its display), `%packages` limited to what the harness itself needs before any stage has run: `@core rsync qemu-guest-agent`; openssh-server is already an @core mandatory package; both the harness key and your personal key are authorized for the VM user); the --os-variant hardware profile is fedora<release> when the host's osinfo database knows it, otherwise the newest known profile plus a warning naming `osinfo-db-import --user --latest`; the VM gets a virtio video device, a local-only SPICE display (`--graphics spice,listen=127.0.0.1`), and a guest-agent channel requested explicitly; the serial console is logged to `/var/log/libvirt/qemu/$(VM_NAME)-serial0.log` (root-owned, read it with sudo) so an install or boot failure can be diagnosed afterwards; the domain is marked as owned by this harness in its libvirt metadata (see `destroy` below); the kickstart shuts the VM down after %post, then this target boots it with `virsh start`
-make -C vm test       # connects only with the harness key (-i vm/.ssh/id_ed25519, IdentitiesOnly=yes, -F /dev/null and IdentityAgent=none so your ~/.ssh/config and any SSH agent, including 1Password, are never touched); waits for an IPv4 lease (vm/wait-for-ip.sh, event-driven: it watches the libvirt dnsmasq lease file with inotifywait rather than polling on a sleep), waits for SSH, enables linger for the VM user, rsyncs the repo in (excluding .git and vm/.ssh, so the harness key never leaves the host), runs ./install.sh --skip 10-nvidia (which installs everything the harness scripts below need: python3/inotify-tools are not in the kickstart, stage 30-packages installs them before session-check.sh ever runs; git is not installed by any stage or needed in the VM, since the repo arrives by rsync, not by clone), vm/session-check.sh, a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for it to actually reboot and for qemu-guest-agent to reconnect, both through libvirt domain events (vm/wait-for-reboot.py), then waits for SSH again, runs vm/rollback-check.sh against that snapshot number, requires `systemctl is-system-running --wait` to report `running` (a degraded boot, with any failed unit, fails the test and prints the failed units), and finally runs vm/login-manager-check.sh to prove the fresh-install login manager (stage 65-login-manager): greetd active, greetd enabled, default target graphical.target. One timed wall-clock wait remains, unlike every other wait here: SSH reachability itself, retried up to `SSH_CONNECT_ATTEMPTS` times, isolated in one `wait_for_ssh` helper in vm/Makefile (see TODO.md)
+make -C vm test       # connects only with the harness key (-i vm/.ssh/id_ed25519, IdentitiesOnly=yes, -F /dev/null and IdentityAgent=none so your ~/.ssh/config and any SSH agent, including 1Password, are never touched); waits for an IPv4 lease (vm/wait-for-ip.sh, event-driven: it watches the libvirt dnsmasq lease file with inotifywait rather than polling on a sleep), waits for SSH, enables linger for the VM user, rsyncs the repo in (excluding .git and vm/.ssh, so the harness key never leaves the host), runs ./install.sh --skip 10-nvidia (which installs everything the harness scripts below need: python3/inotify-tools are not in the kickstart, stage 30-packages installs them before session-check.sh ever runs; git is not installed by any stage or needed in the VM, since the repo arrives by rsync, not by clone), vm/session-check.sh (brings up one headless Sway session and leaves it running for the checks below, see "VM session lifecycle"), vm/agents-check.sh, vm/errors-check.sh, vm/agent-launch-check.sh, vm/session-teardown.sh (tears that session down cleanly), a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for it to actually reboot and for qemu-guest-agent to reconnect, both through libvirt domain events (vm/wait-for-reboot.py), then waits for SSH again, runs vm/rollback-check.sh against that snapshot number, requires `systemctl is-system-running --wait` to report `running` (a degraded boot, with any failed unit, fails the test and prints the failed units), and finally runs vm/login-manager-check.sh to prove the fresh-install login manager (stage 65-login-manager): greetd active, greetd enabled, default target graphical.target. One timed wall-clock wait remains, unlike every other wait here: SSH reachability itself, retried up to `SSH_CONNECT_ATTEMPTS` times, isolated in one `wait_for_ssh` helper in vm/Makefile (see TODO.md)
 make -C vm destroy    # refuses to act on a domain that is not marked as owned by this harness (see `create` above); virsh destroy if running, then virsh undefine --remove-all-storage, then removes the generated vm/ks-$(VM_NAME).cfg
 make -C vm adopt      # marks an existing domain as owned by this harness, for a domain `create` made before the ownership mark existed; requires its generated vm/ks-$(VM_NAME).cfg to already exist, as evidence this harness actually created it
 make -C vm screenshot OUT=path.png   # saves a PNG of the current VM display to OUT, which must be an absolute path (virsh screenshot to PPM, converted with ImageMagick); fails if OUT is unset, relative, or the VM is not running
@@ -847,11 +847,7 @@ Four timeouts, all overridable on the `make` command line, bound the waits in
 after reboot), and `SSH_CONNECT_ATTEMPTS` (default 60, retry count rather
 than a duration, for the one remaining timed SSH wait above).
 
-`vm/session-check.sh` starts a headless Sway session (`WLR_BACKENDS=headless`)
-under `systemd-run --user`, waits for the Sway IPC socket, confirms
-`sway-session.target` is active and starts `dms.service`, calls
-`dms ipc call lock status`, and validates the xremap config with
-`xremap-wlroots --validate-config`. `vm/rollback-check.sh` then confirms the
+`vm/rollback-check.sh` then confirms the
 rollback left both `root` and a `root.old-*` subvolume at the top level, `/`
 mounted from `[/root]`, and the `/.vekrona-rolled-back-from-<N>` marker in
 place. After the reboot that follows, `vm/login-manager-check.sh` confirms
@@ -867,6 +863,27 @@ involved: the NVIDIA stage and every GPU feature that depends on it (stage
 output, Bluetooth, and anything that needs pointer input, such as an area
 screenshot or a screen-recording region selection, since `make -C vm type`
 and `make -C vm key` only send keystrokes.
+
+### VM session lifecycle
+
+`vm/session-check.sh`, `vm/agents-check.sh`, `vm/errors-check.sh`, and
+`vm/agent-launch-check.sh` each run as their own `ssh` connection (a separate
+process with no shared shell state), but the last three need one live
+headless Sway session, not one each. `vm/session-lib.sh` is the one place
+that brings a session up (`session_bring_up`), finds the live one from a
+fresh connection (`session_resolve_swaysock`, a runtime-dir glob for the
+Sway IPC socket rather than an inherited `$SWAYSOCK`, since that would not
+survive a new `ssh` connection anyway), and tears it down
+(`session_teardown`); `vm/session-check.sh` sources it to start the session
+(`WLR_BACKENDS=headless` Sway under `systemd-run --user`, wait for the IPC
+socket, confirm `sway-session.target` is active, start `dms.service`, call
+`dms ipc call lock status`, validate the xremap config with
+`xremap-wlroots --validate-config`) and leaves it running; `vm/errors-check.sh`
+and `vm/agent-launch-check.sh` attach to that same session instead of
+starting their own; and `vm/session-teardown.sh`, run once after all three
+(wired into `vm/Makefile`), stops `sway-session.target` and the Sway unit
+together, so nothing (`dms.service`, `vekrona-errors.service`, …) is ever
+left running against a dead compositor.
 
 ## ISO and CI
 

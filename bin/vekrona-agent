@@ -11,6 +11,8 @@ CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 AGENT_CONFIG_DIR="$CONFIG_HOME/vekrona"
 AGENT_CONFIG_FILE="$AGENT_CONFIG_DIR/agent"
 
+MISE_SYSTEM_SHIMS_DIR="/usr/local/share/mise/shims"
+
 AGENT_KNOWN_TOOLS=(claude codex opencode pi cursor-agent)
 
 STRIP_ENV_VARS=(
@@ -50,6 +52,18 @@ is_known_tool() {
     fi
   done
   return 1
+}
+
+effective_path() {
+  local path="$PATH"
+  if [[ ":$path:" != *":$MISE_SYSTEM_SHIMS_DIR:"* ]]; then
+    path="$MISE_SYSTEM_SHIMS_DIR:$path"
+  fi
+  printf '%s' "$path"
+}
+
+tool_installed() {
+  PATH="$(effective_path)" command -v "$1" >/dev/null 2>&1
 }
 
 read_default() {
@@ -102,7 +116,7 @@ pick_tool() {
 
   local lines=() t label
   for t in "${AGENT_KNOWN_TOOLS[@]}"; do
-    if command -v "$t" >/dev/null 2>&1; then
+    if tool_installed "$t"; then
       label="$t (installed)"
     else
       label="$t (not installed)"
@@ -120,7 +134,11 @@ launch() {
   local tool="$1" prompt="$2" dry_run="$3"
 
   is_known_tool "$tool" || die "unknown agent tool: $tool"
-  command -v "$tool" >/dev/null 2>&1 || \
+
+  local launch_path
+  launch_path="$(effective_path)"
+
+  tool_installed "$tool" || \
     die "agent harness '$tool' is not installed; run './install.sh 55-agents' or 'vekrona-update'"
   command -v ghostty >/dev/null 2>&1 || die "ghostty not found"
   command -v systemd-run >/dev/null 2>&1 || die "systemd-run not found"
@@ -143,11 +161,7 @@ launch() {
     "--description=vekrona coding agent: $tool"
   )
 
-  local manager_path
-  manager_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')" || true
-  if [[ "$manager_path" != *"/usr/local/share/mise/shims"* ]]; then
-    systemd_run_argv+=("--setenv=PATH=$PATH")
-  fi
+  systemd_run_argv+=("--setenv=PATH=$launch_path")
 
   systemd_run_argv+=(-- "${full_argv[@]}")
 
@@ -179,7 +193,7 @@ cmd_list() {
   local current t installed default
   current="$(read_default || true)"
   for t in "${AGENT_KNOWN_TOOLS[@]}"; do
-    if command -v "$t" >/dev/null 2>&1; then installed="installed"; else installed="not installed"; fi
+    if tool_installed "$t"; then installed="installed"; else installed="not installed"; fi
     if [[ "$t" == "$current" ]]; then default="default"; else default="-"; fi
     printf '%-14s %-13s %s\n' "$t" "$installed" "$default"
   done

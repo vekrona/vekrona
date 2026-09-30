@@ -3,13 +3,14 @@ set -euo pipefail
 
 fail() { echo "errors-check FAILED: $*" >&2; exit 1; }
 
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/session-lib.sh"
+
 require_cmds() {
   local c
   for c in "$@"; do command -v "$c" >/dev/null 2>&1 || fail "$c not installed"; done
 }
 
 setup_env() {
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
   export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
   STORE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona/errors"
   MUTE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/vekrona/errors-mute"
@@ -28,11 +29,6 @@ cleanup() {
     grep -vxF "$MUTE_PATTERN" "$MUTE_FILE" > "$MUTE_FILE.tmp" 2>/dev/null || true
     mv "$MUTE_FILE.tmp" "$MUTE_FILE" 2>/dev/null || true
   fi
-  systemctl --user stop sway-session.target >/dev/null 2>&1 || true
-  if [[ -n "${SWAY_WATCH_PID:-}" ]]; then
-    kill "$SWAY_WATCH_PID" >/dev/null 2>&1 || true
-  fi
-  systemctl --user stop vekrona-sway-errors-check.service >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -54,29 +50,13 @@ find_record_by_marker() {
 
 record_field() { jq -r --arg k "$2" '.[$k]' "$STORE_DIR/$1/record.json"; }
 
-bring_up_headless_session() {
-  systemctl --user reset-failed vekrona-sway-errors-check.service >/dev/null 2>&1 || true
-  pgrep -x sway >/dev/null && fail "a sway process is already running"
-  find "$XDG_RUNTIME_DIR" -maxdepth 1 -regextype posix-extended \
-    -regex '.*/sway-ipc\.[0-9]+\.[0-9]+\.sock' -delete
-
-  coproc SWAY_WATCH {
-    inotifywait -e create --include 'sway-ipc\.[0-9]+\.[0-9]+\.sock$' \
-      --format '%f' -t 60 "$XDG_RUNTIME_DIR" 2>&1
-  }
-  IFS= read -r -u "${SWAY_WATCH[0]}" watch_line
-  [[ "$watch_line" == "Watches established." ]] || fail "could not set up the sway ipc socket watch"
-
-  systemd-run --user --unit vekrona-sway-errors-check \
-    --setenv=WLR_BACKENDS=headless --setenv=WLR_LIBINPUT_NO_DEVICES=1 \
-    -- sway -c "$HOME/.config/sway/config" --unsupported-gpu \
-    || fail "could not start sway via systemd-run"
-
-  IFS= read -r -u "${SWAY_WATCH[0]}" sockname || fail "sway ipc socket never appeared"
-  export SWAYSOCK="$XDG_RUNTIME_DIR/$sockname"
-  [[ -S "$SWAYSOCK" ]] || fail "sway ipc socket not found: $SWAYSOCK"
-
-  systemctl --user start sway-session.target || fail "sway-session.target did not become active"
+attach_to_live_session() {
+  SWAYSOCK="$(session_resolve_swaysock)" \
+    || fail "no live sway session found (expected session-check.sh to have brought one up already)"
+  export SWAYSOCK
+  swaymsg -t get_version >/dev/null 2>&1 || fail "swaymsg get_version failed against $SWAYSOCK"
+  [[ "$(systemctl --user is-active sway-session.target 2>/dev/null || true)" == active ]] \
+    || fail "sway-session.target is not active"
 }
 
 wait_for_watcher_active() {
@@ -244,7 +224,7 @@ main() {
   require_cmds inotifywait jq vekrona-error coredumpctl dbus-monitor logger
   setup_env
   TEST_START="$(date -Iseconds)"
-  bring_up_headless_session
+  attach_to_live_session
   wait_for_watcher_active
   check_manual_report
   check_root_report

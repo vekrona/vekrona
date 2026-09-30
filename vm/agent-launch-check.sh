@@ -3,13 +3,14 @@ set -euo pipefail
 
 fail() { echo "agent-launch-check FAILED: $*" >&2; exit 1; }
 
-XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-export XDG_RUNTIME_DIR
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/session-lib.sh"
 
 command -v vekrona-agent >/dev/null 2>&1 || fail "vekrona-agent not on PATH"
 command -v swaymsg >/dev/null 2>&1 || fail "swaymsg not on PATH"
 command -v inotifywait >/dev/null 2>&1 || fail "inotifywait not installed"
-[[ -n "${SWAYSOCK:-}" && -S "$SWAYSOCK" ]] || fail "SWAYSOCK not set to a live sway socket"
+SWAYSOCK="$(session_resolve_swaysock)" \
+  || fail "no live sway session found (expected session-check.sh to have brought one up already)"
+export SWAYSOCK
 swaymsg -t get_version >/dev/null 2>&1 || fail "swaymsg get_version failed (no live sway session)"
 
 AGENT_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -19,13 +20,8 @@ PREV_DEFAULT=""
 
 STUB_DIR="$(mktemp -d)"
 
-MUTATED_MANAGER_PATH=0
-
 cleanup() {
   swaymsg -- '[app_id="vekrona.agent"] kill' >/dev/null 2>&1 || true
-  if [[ "$MUTATED_MANAGER_PATH" == "1" ]]; then
-    systemctl --user set-environment "PATH=$manager_path" 2>/dev/null || true
-  fi
   if [[ -n "$PREV_DEFAULT" ]]; then
     printf '%s\n' "$PREV_DEFAULT" > "$AGENT_CONFIG_FILE"
   else
@@ -53,15 +49,11 @@ mapfile -t codex_argv < <(vekrona-agent --dry-run)
 printf '%s\n' "${codex_argv[@]}" | grep -qx "check_for_update_on_startup=false" \
   || fail "codex recipe missing check_for_update_on_startup=false"
 
-manager_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"
 mapfile -t setenv_check_argv < <(vekrona-agent --dry-run)
-if [[ "$manager_path" == *"/usr/local/share/mise/shims"* ]]; then
-  printf '%s\n' "${setenv_check_argv[@]}" | grep -q '^--setenv=PATH=' \
-    && fail "unexpected --setenv=PATH in dry-run argv (manager env already has the mise shims dir)"
-else
-  printf '%s\n' "${setenv_check_argv[@]}" | grep -q '^--setenv=PATH=' \
-    || fail "expected --setenv=PATH in dry-run argv (manager env lacks the mise shims dir)"
-fi
+setenv_path_line="$(printf '%s\n' "${setenv_check_argv[@]}" | grep '^--setenv=PATH=' || true)"
+[[ -n "$setenv_path_line" ]] || fail "expected --setenv=PATH in dry-run argv (vekrona-agent must always pass a PATH carrying the mise shims dir, since the spawning systemd user manager's own environment may lack it)"
+[[ "$setenv_path_line" == *"/usr/local/share/mise/shims"* ]] \
+  || fail "--setenv=PATH in dry-run argv does not carry the mise shims dir: $setenv_path_line"
 
 for tool_last2 in "claude:--" "codex:--" "pi:--" "cursor-agent:--" "opencode:--prompt"; do
   t="${tool_last2%%:*}"
@@ -94,12 +86,6 @@ cat > "$BIN_DIR/claude" <<STUB
 sleep 2
 STUB
 chmod +x "$BIN_DIR/claude"
-
-if [[ "$manager_path" == *"/usr/local/share/mise/shims"* ]]; then
-  systemctl --user set-environment "PATH=$BIN_DIR:$manager_path" \
-    || fail "could not set systemd --user manager PATH for the stub test"
-  MUTATED_MANAGER_PATH=1
-fi
 
 window_has_app_id() {
   swaymsg -t get_tree | python3 -c '
