@@ -1,0 +1,12 @@
+[Unit]
+Description=vekrona error watcher
+PartOf=sway-session.target
+After=sway-session.target
+OnFailure=vekrona-errors-failed.service
+
+[Service]
+ExecStart=%h/.local/bin/vekrona-error watch
+Restart=on-failure
+
+[Install]
+WantedBy=sway-session.target

@@ -1,0 +1,6 @@
+[Unit]
+Description=notify that the vekrona error watcher failed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/notify-send -u critical -a vekrona "vekrona error watcher failed" "journalctl --user -u vekrona-errors"

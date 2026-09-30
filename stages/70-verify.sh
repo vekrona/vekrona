@@ -176,6 +176,15 @@ if ran 50-user; then
   check assert "dms.service wanted by sway-session.target" file_exists "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
   check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
+  check assert "vekrona-errors.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors.service"
+  check assert "vekrona-errors-failed.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors-failed.service"
+  check assert "vekrona-errors.service enabled" user_unit_enabled vekrona-errors
+  for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
+    check assert "vekrona-diagnose skill linked: $skills_dir" file_exists "$skills_dir/vekrona-diagnose/SKILL.md"
+  done
+  check assert "python3-gobject installed" pkg_installed python3-gobject
+  check assert "vekrona-error --help runs" vekrona-error --help
+  check assert "logger --journald is available for vekrona-error report" bash -c "command -v logger >/dev/null"
   check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
   check assert "vekrona fontconfig linked" file_exists "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
   check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"
