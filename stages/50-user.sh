@@ -143,13 +143,18 @@ path, widget_id, before_id = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path) as f:
     data = json.load(f)
 
+keys = ("leftWidgets", "centerWidgets", "rightWidgets")
 for bar in data.get("barConfigs", []):
-    for key in ("leftWidgets", "centerWidgets", "rightWidgets"):
+    already_placed = any(widget_id in (bar.get(k) or []) for k in keys)
+    if already_placed:
+        continue
+    for key in keys:
         widgets = bar.get(key)
-        if not isinstance(widgets, list) or widget_id in widgets:
+        if not isinstance(widgets, list):
             continue
         if before_id in widgets:
             widgets.insert(widgets.index(before_id), widget_id)
+            break
 
 json.dump(data, sys.stdout, indent=2)
 sys.stdout.write("\n")

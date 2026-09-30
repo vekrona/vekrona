@@ -70,11 +70,11 @@ agent_build_argv() {
   case "$tool" in
     claude)
       AGENT_ARGV=(claude)
-      if [[ -n "$prompt" ]]; then AGENT_ARGV+=("$prompt"); fi
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=(-- "$prompt"); fi
       ;;
     codex)
       AGENT_ARGV=(codex -c check_for_update_on_startup=false)
-      if [[ -n "$prompt" ]]; then AGENT_ARGV+=("$prompt"); fi
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=(-- "$prompt"); fi
       ;;
     opencode)
       AGENT_ENV_ASSIGN=(OPENCODE_DISABLE_AUTOUPDATE=true)
@@ -83,11 +83,11 @@ agent_build_argv() {
       ;;
     pi)
       AGENT_ARGV=(pi)
-      if [[ -n "$prompt" ]]; then AGENT_ARGV+=("$prompt"); fi
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=(-- "$prompt"); fi
       ;;
     cursor-agent)
       AGENT_ARGV=(cursor-agent)
-      if [[ -n "$prompt" ]]; then AGENT_ARGV+=("$prompt"); fi
+      if [[ -n "$prompt" ]]; then AGENT_ARGV+=(-- "$prompt"); fi
       ;;
     *)
       die "unknown agent tool: $tool"
@@ -123,6 +123,7 @@ launch() {
   command -v "$tool" >/dev/null 2>&1 || \
     die "agent harness '$tool' is not installed; run './install.sh 55-agents' or 'vekrona-update'"
   command -v ghostty >/dev/null 2>&1 || die "ghostty not found"
+  command -v systemd-run >/dev/null 2>&1 || die "systemd-run not found"
 
   agent_build_argv "$tool" "$prompt"
 
@@ -135,19 +136,28 @@ launch() {
     "${env_argv[@]}" "${AGENT_ENV_ASSIGN[@]}" "${AGENT_ARGV[@]}"
   )
 
+  local unit="vekrona-agent-$$-$RANDOM"
+  local systemd_run_argv=(
+    systemd-run --user --collect
+    "--unit=$unit"
+    "--description=vekrona coding agent: $tool"
+  )
+
+  local manager_path
+  manager_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')" || true
+  if [[ "$manager_path" != *"/usr/local/share/mise/shims"* ]]; then
+    systemd_run_argv+=("--setenv=PATH=$PATH")
+  fi
+
+  systemd_run_argv+=(-- "${full_argv[@]}")
+
   if [[ "$dry_run" == "1" ]]; then
-    printf '%s\n' "${full_argv[@]}"
+    printf '%s\n' "${systemd_run_argv[@]}"
     return 0
   fi
 
-  setsid -f bash -c '
-    shopt -s execfail
-    if ! exec "$@"; then
-      notify-send -u critical -a vekrona "vekrona-agent" "failed to launch: $*" >/dev/null 2>&1
-      exit 1
-    fi
-  ' bash "${full_argv[@]}" \
-    || die "failed to spawn ghostty for agent: $tool"
+  "${systemd_run_argv[@]}" >/dev/null 2>&1 \
+    || die "failed to launch agent '$tool' (systemd-run --user --unit=$unit failed)"
 }
 
 cmd_set() {

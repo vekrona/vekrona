@@ -11,16 +11,29 @@ def die(msg):
     sys.exit(1)
 
 
+REQUIRED_COLOR_KEYS = (
+    "background", "backgroundText", "surfaceContainer", "surfaceText",
+    "outline", "outlineVariant", "surfaceContainerLow", "primary",
+    "primaryText", "secondary", "error", "errorText",
+)
+
+
 def load_theme_colors():
     state_home = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
     theme_file = os.path.join(state_home, "vekrona", "active-theme.json")
     if not os.path.isfile(theme_file):
         die(f"active theme file not found: {theme_file} (run vekrona-theme <name> first)")
-    with open(theme_file) as f:
-        data = json.load(f)
+    try:
+        with open(theme_file) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        die(f"could not read {theme_file}: {e}")
     dark = data.get("dark")
     if not dark:
         die(f"{theme_file} has no 'dark' section")
+    missing = [k for k in REQUIRED_COLOR_KEYS if k not in dark]
+    if missing:
+        die(f"{theme_file} 'dark' section is missing color keys: {', '.join(missing)}")
     return dark
 
 
