@@ -1,5 +1,6 @@
 import json
 import os
+import selectors
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,11 @@ done
 
 FAKE_LOGGING_TOOL = """#!/bin/sh
 printf '%s %s\\n' "$(basename "$0")" "$*" >> "$FAKE_LOG"
+"""
+
+FAKE_SYSTEMCTL = """#!/bin/sh
+printf 'systemctl %s\\n' "$*" >> "$FAKE_LOG"
+if [ -n "$FAKE_RELEASE" ]; then cat "$FAKE_RELEASE" > /dev/null; fi
 """
 
 FAKE_ROFI = """#!/bin/sh
@@ -133,7 +139,8 @@ class Sandbox:
         write_executable(os.path.join(self.bin, "vekrona-agent"), FAKE_LOGGING_TOOL)
         write_executable(os.path.join(self.fakes, "journalctl"), FAKE_JOURNALCTL)
         write_executable(os.path.join(self.fakes, "rofi"), FAKE_ROFI)
-        for name in ("systemctl", "coredumpctl", "notify-send"):
+        write_executable(os.path.join(self.fakes, "systemctl"), FAKE_SYSTEMCTL)
+        for name in ("coredumpctl", "notify-send"):
             write_executable(os.path.join(self.fakes, name), FAKE_LOGGING_TOOL)
         self.log = os.path.join(self.root, "calls.log")
         self.journal = os.path.join(self.root, "journal.jsonl")
@@ -169,11 +176,31 @@ class Sandbox:
         return subprocess.run([sys.executable, "-B", self.tool, *args], env=env,
                               capture_output=True, text=True, timeout=timeout)
 
-    def watch(self, entries):
+    def write_journal(self, entries):
         with open(self.journal, "w") as f:
             for entry in entries:
                 f.write((entry if isinstance(entry, str) else json.dumps(entry)) + "\n")
+
+    def watch(self, entries):
+        self.write_journal(entries)
         return self.run("watch")
+
+    def start_watch(self, entries, extra_env=None):
+        self.write_journal(entries)
+        proc = subprocess.Popen([sys.executable, "-B", self.tool, "watch"],
+                                env={**self.env, **(extra_env or {})},
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return proc
+
+    def next_notification(self, deadline=30):
+        ready = selectors.DefaultSelector()
+        ready.register(self.notification_server.stdout, selectors.EVENT_READ)
+        try:
+            if not ready.select(timeout=deadline):
+                raise AssertionError(f"no notification within {deadline}s")
+        finally:
+            ready.close()
+        return json.loads(self.notification_server.stdout.readline())
 
     def ingest_report(self, title, summary="", source="manual"):
         self.watch([report_entry(title, summary, source)])

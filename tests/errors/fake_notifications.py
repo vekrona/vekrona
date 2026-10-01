@@ -26,8 +26,10 @@ next_id = [1]
 
 def on_method_call(connection, sender, path, interface, method, params, invocation):
     app, _replaces, _icon, summary, body, actions, _hints, _timeout = params.unpack()
+    line = json.dumps({"app": app, "summary": summary, "body": body, "actions": actions})
     with open(log_path, "a") as f:
-        f.write(json.dumps({"app": app, "summary": summary, "body": body, "actions": actions}) + "\n")
+        f.write(line + "\n")
+    print(line, flush=True)
     notification_id = next_id[0]
     next_id[0] += 1
     invocation.return_value(GLib.Variant("(u)", (notification_id,)))

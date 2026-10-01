@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -28,6 +29,7 @@ DEDUPE_WINDOW = 600
 BURST_LIMIT = 5
 BURST_WINDOW = 30
 CURSOR_FLUSH_EVERY = 50
+CAPTURE_WORKERS = 4
 INTERNAL_TOAST_RATE_LIMIT = 60
 
 MESSAGE_ID_COREDUMP = "fc2e22bc6ee647b6b90729ab34a250b1"
@@ -498,9 +500,8 @@ def run_capture(cmd, timeout=15):
         return f"$ {' '.join(cmd)}\n(failed: {exc})"
 
 
-def write_context(error_id, classified):
-    parts = [run_capture(cmd) for cmd in capture_commands(classified)]
-    atomic_write(context_path(error_id), "\n\n".join(parts) + "\n")
+def capture_context(classified):
+    return "\n\n".join(run_capture(cmd) for cmd in capture_commands(classified)) + "\n"
 
 
 def sorted_records(include_muted):
@@ -821,6 +822,9 @@ def cmd_watch(args):
             self.burst_flush_scheduled = False
             self.lines_since_cursor_flush = 0
             self.last_cursor = None
+            self.capture_pool = ThreadPoolExecutor(max_workers=CAPTURE_WORKERS)
+            self.captures_pending = 0
+            self.journal_closed = False
             for rid in all_record_ids():
                 rec = load_record(rid, self._toast_once_quarantine)
                 if rec:
@@ -1076,14 +1080,39 @@ def cmd_watch(args):
                 "exe": classified.get("exe", ""), "pid": classified.get("pid", ""),
             }
             save_record(error_id, record)
-            write_context(error_id, classified)
             self.fingerprint_index[fingerprint] = error_id
             recompute_unread()
             for removed_id in prune_retention():
                 self.fingerprint_index = {
                     fp: rid for fp, rid in self.fingerprint_index.items() if rid != removed_id
                 }
-            self.send_error_toast(error_id, record)
+            self._capture_context_then_toast(error_id, classified)
+
+        def _capture_context_then_toast(self, error_id, classified):
+            self.captures_pending += 1
+            future = self.capture_pool.submit(capture_context, classified)
+            future.add_done_callback(
+                lambda done: GLib.idle_add(self._on_context_captured, error_id, done))
+
+        def _on_context_captured(self, error_id, future):
+            self.captures_pending -= 1
+            try:
+                context = future.result()
+            except Exception as exc:
+                warn(f"failed to capture the context of {error_id}: {exc}")
+                context = f"(failed to capture context: {exc})\n"
+            with store_lock():
+                record = load_record(error_id, self._toast_once_quarantine)
+                if record is not None:
+                    atomic_write(context_path(error_id), context)
+            if record is not None and record.get("status") != "muted":
+                self.send_error_toast(error_id, record)
+            self._quit_if_journal_closed_and_idle()
+            return False
+
+        def _quit_if_journal_closed_and_idle(self):
+            if self.journal_closed and self.captures_pending == 0:
+                self.loop.quit()
 
         def _persist_cursor(self, cursor):
             self.lines_since_cursor_flush = 0
@@ -1122,7 +1151,8 @@ def cmd_watch(args):
             warn("journalctl exited unexpectedly; exiting so systemd restarts the watcher")
             self.exit_code = 1
             self.flush_cursor_on_exit()
-            self.loop.quit()
+            self.journal_closed = True
+            self._quit_if_journal_closed_and_idle()
 
         def start_reading_stdout(self, proc):
             stream = Gio.DataInputStream.new(proc.get_stdout_pipe())
@@ -1206,6 +1236,7 @@ def cmd_watch(args):
     watcher.start_reading_stderr(proc)
 
     loop.run()
+    watcher.capture_pool.shutdown(wait=False, cancel_futures=True)
     watcher.flush_cursor_on_exit()
     sys.exit(watcher.exit_code)
 
