@@ -13,12 +13,13 @@ ensure_root_file "$ROOT/etc/yum.repos.d/mise.repo" /etc/yum.repos.d/mise.repo
 ensure_repo_enabled "$CLAUDE_CODE_REPO_ID" "$MISE_REPO_ID"
 
 ensure_pkg "${VEKRONA_AGENT_PKGS[@]}"
+assert_npm_supports_release_age
 
 ensure_root_file "$ROOT/etc/mise/config.toml" /etc/mise/config.toml
 ensure_root_file "$ROOT/etc/profile.d/vekrona-mise.sh" /etc/profile.d/vekrona-mise.sh
 
 log "mise system install"
-mise_system install
+mise_system_strict install
 mise_system reshim
 
 for t in "${VEKRONA_AGENT_TOOLS[@]}"; do

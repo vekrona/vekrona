@@ -34,10 +34,10 @@ log "=== flatpak update ==="
 root flatpak update --system -y --noninteractive
 
 log "=== mise system: checking for upgrades (minimum_release_age may hold some back) ==="
-mise_system upgrade --dry-run
+mise_system_strict upgrade --dry-run
 
 log "=== mise system: upgrading ==="
-mise_system upgrade
+mise_system_strict upgrade
 
 log "=== mise system: reshim ==="
 mise_system reshim

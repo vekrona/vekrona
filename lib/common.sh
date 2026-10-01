@@ -300,7 +300,7 @@ ensure_repo_key() {
 }
 
 # shellcheck disable=SC2034
-VEKRONA_AGENT_PKGS=(claude-code mise nodejs22-npm)
+VEKRONA_AGENT_PKGS=(claude-code mise nodejs24-npm)
 # shellcheck disable=SC2034
 VEKRONA_AGENT_TOOLS=(codex pi opencode cursor-agent)
 
@@ -308,6 +308,7 @@ MISE_SYSTEM_DATA_DIR=/usr/local/share/mise
 MISE_SYSTEM_CONFIG_DIR=/etc/mise
 MISE_SYSTEM_CACHE_DIR=/usr/local/share/mise/cache
 MISE_SYSTEM_STATE_DIR=/usr/local/share/mise/state
+MISE_NPM_MIN_RELEASE_AGE_VERSION=11.10.0
 
 mise_system() {
   # mise silently ignores /etc/mise/config.toml ("all tools are installed") while its HOME does not exist yet.
@@ -315,7 +316,7 @@ mise_system() {
   # mise --system only installs binary-download backends; overriding MISE_DATA_DIR/MISE_CONFIG_DIR
   # instead runs the normal (non-system) code path against root-owned dirs, which also covers our npm/aqua/http tools.
   # sudo resets HOME to /root; pin HOME and every cache path so npm/mise never write outside this tree.
-  root env \
+  root env -u MISE_MINIMUM_RELEASE_AGE \
     HOME="$MISE_SYSTEM_DATA_DIR" \
     MISE_DATA_DIR="$MISE_SYSTEM_DATA_DIR" \
     MISE_CONFIG_DIR="$MISE_SYSTEM_CONFIG_DIR" \
@@ -323,6 +324,27 @@ mise_system() {
     MISE_STATE_DIR="$MISE_SYSTEM_STATE_DIR" \
     npm_config_cache="$MISE_SYSTEM_DATA_DIR/npm-cache" \
     mise "$@"
+}
+
+mise_system_strict() {
+  local output status=0
+  output="$(mktemp)"
+  mise_system "$@" 2>&1 | tee "$output" >&2 || status=$?
+  if grep -q 'minimum_release_age is set for' "$output"; then
+    rm -f "$output"
+    die "mise $* cannot enforce minimum_release_age (see the warning above): the 1-day cooldown would not cover transitive dependencies"
+  fi
+  rm -f "$output"
+  [[ $status -eq 0 ]] || die "mise $* failed with exit status $status"
+}
+
+version_at_least() { [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$2" ]]; }
+
+assert_npm_supports_release_age() {
+  local version
+  version="$(npm --version)" || die "npm --version failed"
+  version_at_least "$version" "$MISE_NPM_MIN_RELEASE_AGE_VERSION" \
+    || die "npm $version is older than $MISE_NPM_MIN_RELEASE_AGE_VERSION, which mise needs to apply minimum_release_age to npm dependencies"
 }
 
 assert_tree_root_owned_not_writable() {

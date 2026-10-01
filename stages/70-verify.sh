@@ -376,6 +376,7 @@ if ran 55-agents; then
   done
   check assert_tree_root_owned_not_writable "$MISE_SYSTEM_DATA_DIR"
   check assert_tree_root_owned_not_writable "$MISE_SYSTEM_CONFIG_DIR"
+  check assert_npm_supports_release_age
   for name in claude "${VEKRONA_AGENT_TOOLS[@]}"; do
     warn_check "no user-local copy shadows $name on PATH" bash -c "[[ ! -e '$HOME/.local/bin/$name' ]]"
   done
