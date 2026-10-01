@@ -58,6 +58,8 @@ else
   ensure_pkg "${INSTALL_PKGS[@]}"
 fi
 
+ensure_pkg libva-nvidia-driver
+
 if pkg_installed cuda-toolkit; then
   root dnf upgrade -y cuda-toolkit
 fi

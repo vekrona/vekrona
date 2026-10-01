@@ -34,8 +34,79 @@ fi
 
 assert "scb runs (SCB_NOSCOPE smoke test)" env SCB_NOSCOPE=1 scb -- true
 
-for p in gamescope mangohud gamemode steam; do
+for p in gamescope mangohud gamemode steam python3-vdf; do
   assert "package present: $p" pkg_installed "$p"
 done
 
 log "Steam launch option: scb -- %command%"
+
+STEAM_CONFIG_VDF="$HOME/.local/share/Steam/config/config.vdf"
+
+steam_is_running() {
+  pgrep -u "$(id -u)" -x steam >/dev/null || pgrep -u "$(id -u)" -f steamwebhelper >/dev/null
+}
+
+ensure_steam_proton_for_all_titles() {
+  local config="$1" dir tmp
+  dir="$(dirname "$config")"
+  tmp="$(mktemp "$dir/.$(basename "$config").XXXXXX")"
+  if ! python3 - "$config" > "$tmp" <<'PYEOF'
+import sys
+import vdf
+
+path = sys.argv[1]
+
+
+def find_key(d, key):
+    if key in d:
+        return key
+    for k in d:
+        if isinstance(k, str) and k.lower() == key.lower():
+            return k
+    return None
+
+
+def child(d, key):
+    found = find_key(d, key)
+    if found is None:
+        d[key] = {}
+        return d[key]
+    value = d[found]
+    if not isinstance(value, dict):
+        raise SystemExit(f"expected a section at {key!r}, found {type(value).__name__}")
+    return value
+
+
+with open(path) as f:
+    data = vdf.load(f)
+
+node = data
+for key in ("InstallConfigStore", "Software", "Valve", "Steam", "CompatToolMapping"):
+    node = child(node, key)
+
+node["0"] = {"name": "proton_experimental", "config": "", "priority": "75"}
+
+vdf.dump(data, sys.stdout, pretty=True)
+PYEOF
+  then
+    rm -f "$tmp"
+    die "failed to update Steam config: $config"
+  fi
+  [[ -s "$tmp" ]] || { rm -f "$tmp"; die "empty output while updating Steam config: $config"; }
+  if cmp -s "$tmp" "$config"; then
+    rm -f "$tmp"
+    log "Steam Play for all titles already enabled"
+    return 0
+  fi
+  chmod --reference="$config" "$tmp"
+  mv "$tmp" "$config"
+  log "Steam Play for all titles enabled (proton_experimental)"
+}
+
+if [[ ! -f "$STEAM_CONFIG_VDF" ]]; then
+  log "Steam never launched: launch Steam once, quit it, then run ./install.sh 60 to enable Steam Play for all titles"
+elif steam_is_running; then
+  die "Steam is running; quit it, then re-run ./install.sh 60 (Steam overwrites config.vdf on exit)"
+else
+  ensure_steam_proton_for_all_titles "$STEAM_CONFIG_VDF"
+fi

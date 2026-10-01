@@ -51,6 +51,10 @@ bindsym $hyper+Escape exec dms ipc call lock lock
 bindsym $hyper+BackSpace exec dms ipc call powermenu toggle
 #: Show keybindings help
 bindsym $hyper+slash exec vekrona-keybindings
+#: Open the coding agent
+bindsym --to-code $hyper+a exec vekrona-agent --pick
+#: Pick a recorded error and open the agent on it
+bindsym --to-code $hyper+Shift+a exec vekrona-error pick
 
 #: Switch to workspace 1
 bindsym $hyper+1 workspace number 1

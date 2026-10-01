@@ -20,5 +20,10 @@ ensure_rpmfusion_release rpmfusion-free-release free
 ensure_rpmfusion_release rpmfusion-nonfree-release nonfree
 
 ensure_repo_enabled rpmfusion-free rpmfusion-nonfree rpmfusion-free-updates rpmfusion-nonfree-updates
+ensure_repo_enabled fedora-cisco-openh264
 
-ensure_copr blakegardner/xremap scottames/ghostty avengemedia/dms avengemedia/danklinux
+ensure_copr "${VEKRONA_COPRS[@]}"
+
+ensure_repo_key 1password
+ensure_1password_repo_file
+ensure_repo_enabled 1password

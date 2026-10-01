@@ -1,0 +1,12 @@
+{
+    "id": "vekronaAgent",
+    "name": "Vekrona Agent",
+    "description": "Launches the default coding agent harness (left click, pick a harness) or the recorded-error picker (right click), with a badge for unread recorded errors.",
+    "version": "1.0.0",
+    "author": "vekrona",
+    "type": "widget",
+    "capabilities": ["dankbar-widget"],
+    "component": "./VekronaAgent.qml",
+    "icon": "smart_toy",
+    "requires_dms": ">=1.6.0"
+}

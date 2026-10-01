@@ -5,9 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/lib/common.sh"
 FIXTURES="$ROOT/tests/fixtures"
 
-PLAIN_STAGES="00-repos 20-snapper 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify"
-MAC_STAGES="00-repos 20-snapper 15-mac 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify"
-NVIDIA_STAGES="00-repos 20-snapper 10-nvidia 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify"
+PLAIN_STAGES="00-repos 20-snapper 30-packages 40-system 45-auth 50-user 55-agents 60-gaming 65-login-manager 70-verify"
+MAC_STAGES="00-repos 20-snapper 15-mac 30-packages 40-system 45-auth 50-user 55-agents 60-gaming 65-login-manager 70-verify"
+NVIDIA_STAGES="00-repos 20-snapper 10-nvidia 30-packages 40-system 45-auth 50-user 55-agents 60-gaming 65-login-manager 70-verify"
 
 on_hardware() {
   local fixture="$1"; shift

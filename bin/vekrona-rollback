@@ -31,10 +31,6 @@ if [[ $confirm -eq 1 ]] && ! has_tty; then
   die "refusing to prompt without a controlling tty; re-run with --yes"
 fi
 
-device="$(findmnt -no SOURCE /)"
-device="${device%%\[*}"
-[[ -n "$device" ]] || die "could not determine btrfs device of /"
-
 mountpoint_dir="$(mktemp -d)"
 cleanup() {
   local umount_output
@@ -44,7 +40,7 @@ cleanup() {
   rmdir "$mountpoint_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
-mount -o subvolid=5 "$device" "$mountpoint_dir"
+mount_btrfs_top_level "$mountpoint_dir"
 
 snapshot_dir="$mountpoint_dir/root/.snapshots/$number/snapshot"
 [[ -d "$snapshot_dir" ]] || die "snapshot not found: $snapshot_dir"
@@ -60,6 +56,12 @@ for vmlinuz in /boot/vmlinuz-*; do
     kernel_mismatch=1
   fi
 done
+
+nix_fstab_missing=0
+if ! awk '$1 !~ /^#/ && NF >= 6 && $2 == "/nix" { found=1 } END { exit !found }' "$snapshot_dir/etc/fstab" 2>/dev/null; then
+  warn "snapshot $number's etc/fstab has no /nix entry (predates the /nix subvolume migration); after rebooting, run: ./install.sh 20"
+  nix_fstab_missing=1
+fi
 
 if [[ $confirm -eq 1 ]]; then
   read -r -p "Roll back / to snapshot $number? This renames the current root subvolume. [y/N] " answer < /dev/tty
@@ -84,11 +86,14 @@ fi
 mv "$mountpoint_dir/$backup/.snapshots" "$mountpoint_dir/root/.snapshots"
 
 marker="$mountpoint_dir/root/.vekrona-rolled-back-from-$number"
-: > "$marker"
-[[ -f "$marker" ]] || die "failed to write rollback marker: $marker"
+printf '%s\n' "$backup" > "$marker"
+[[ "$(< "$marker")" == "$backup" ]] || die "failed to write rollback marker: $marker"
 
 log "rollback complete: / now points at snapshot $number, previous root kept as $backup"
 log "reboot to boot into the restored root: systemctl reboot"
 if [[ $kernel_mismatch -eq 1 ]]; then
   warn "/boot is a separate filesystem and was NOT rolled back; the running kernel may be missing from the restored root, see warnings above"
+fi
+if [[ $nix_fstab_missing -eq 1 ]]; then
+  warn "restored root predates the /nix subvolume migration; after rebooting, run: ./install.sh 20"
 fi

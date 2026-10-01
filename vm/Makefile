@@ -46,6 +46,9 @@ HARNESS_METADATA_URI := urn:vekrona:harness
 HARNESS_METADATA_KEY := vekrona
 HARNESS_METADATA_XML := <harness xmlns="urn:vekrona:harness">vekrona-vm-makefile</harness>
 
+VM_MEMORY_MB ?= 8192
+VM_VCPUS ?= 4
+VM_DISK_GB ?= 40
 INSTALL_WAIT_MINUTES ?= 60
 IP_WAIT_TIMEOUT ?= 120
 REBOOT_EVENT_TIMEOUT ?= 60
@@ -98,9 +101,9 @@ create: $(KS)
 	virt-install \
 		--connect qemu:///system \
 		--name "$(VM_NAME)" \
-		--memory 8192 \
-		--vcpus 4 \
-		--disk size=40 \
+		--memory $(VM_MEMORY_MB) \
+		--vcpus $(VM_VCPUS) \
+		--disk size=$(VM_DISK_GB) \
 		--os-variant "$$os_variant" \
 		--network network=default \
 		--channel unix,target.type=virtio,target.name=org.qemu.guest_agent.0 \
@@ -203,9 +206,13 @@ test: require-harness-key
 	echo "vm ip: $$ip"; \
 	wait_for_ssh "$(VM_USER)@$$ip" || exit 1; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo loginctl enable-linger $(VM_USER)'; \
-	rsync -a --exclude=.git --exclude=vm/.ssh -e "ssh $(SSH_OPTS)" "$(REPO_ROOT)/" "$(VM_USER)@$$ip:vekrona/"; \
+	rsync -a --delete --exclude=.git --exclude=vm/.ssh -e "ssh $(SSH_OPTS)" "$(REPO_ROOT)/" "$(VM_USER)@$$ip:vekrona/"; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'cd vekrona && ./install.sh --skip 10-nvidia'; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/session-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agents-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/errors-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agent-launch-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/session-teardown.sh'; \
 	snap_n="$$(ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo /home/$(VM_USER)/.local/bin/vekrona-snapshot vm-test')"; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" "sudo /home/$(VM_USER)/.local/bin/vekrona-rollback --yes $$snap_n"; \
 	python3 "$(WAIT_FOR_REBOOT_SCRIPT)" "$(VM_NAME)" $(REBOOT_EVENT_TIMEOUT) $(AGENT_RECONNECT_TIMEOUT); \
