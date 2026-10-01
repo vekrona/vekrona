@@ -8,8 +8,8 @@ __all__ = ["DeviceScan", "HintCode"]
 
 class HintCode:
     OK = "ok"
-    NO_USB_DEVICE = "no_usb_device"
-    USB_SEEN_BUT_UNUSABLE = "usb_seen_but_unusable"
+    NO_DEVICE = "no_device"
+    DEVICE_UNUSABLE = "device_unusable"
     ACCESS_DENIED = "access_denied"
     LIBRARY_MISSING = "library_missing"
 
@@ -21,7 +21,7 @@ class DeviceScan(DBusData):
         self._devices = []
         self._problem = ""
         self._usb_seen = []
-        self._hint_code = HintCode.NO_USB_DEVICE
+        self._hint_code = HintCode.NO_DEVICE
 
     @property
     def devices(self) -> List[Structure]:

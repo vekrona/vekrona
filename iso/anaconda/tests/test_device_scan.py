@@ -98,14 +98,13 @@ class SecurityKeyScanTest(UsbFixtureCase):
 
     def test_nothing_plugged_in_is_no_usb_device_without_a_problem(self):
         scan = self.scan([], {})
-        self.assertEqual((scan.hint_code, scan.problem, scan.usb_seen), (HintCode.NO_USB_DEVICE, "", []))
+        self.assertEqual((scan.hint_code, scan.problem, scan.usb_seen), (HintCode.NO_DEVICE, "", []))
         self.assertEqual(scan.devices, [])
 
-    def test_usb_device_that_is_no_security_key_is_reported_as_unusable(self):
+    def test_usb_device_that_is_no_security_key_is_no_device_without_a_problem(self):
         self.usb.add("1-3", idVendor="046d", idProduct="c52b", manufacturer="Logitech", product="Receiver")
         scan = self.scan(["/dev/hidraw0"], {"/dev/hidraw0": ValueError("not CTAP")})
-        self.assertEqual(scan.hint_code, HintCode.USB_SEEN_BUT_UNUSABLE)
-        self.assertIn("none is a security key", scan.problem)
+        self.assertEqual((scan.hint_code, scan.problem), (HintCode.NO_DEVICE, ""))
         self.assertEqual(scan.usb_seen, ["046d:c52b Logitech Receiver"])
 
     def test_permission_error_is_access_denied_and_names_the_node(self):
@@ -118,7 +117,7 @@ class SecurityKeyScanTest(UsbFixtureCase):
     def test_other_failure_is_recorded_not_swallowed(self):
         self.add_yubikey()
         scan = self.scan(["/dev/hidraw3"], {"/dev/hidraw3": OSError(25, "Inappropriate ioctl")})
-        self.assertEqual(scan.hint_code, HintCode.USB_SEEN_BUT_UNUSABLE)
+        self.assertEqual(scan.hint_code, HintCode.DEVICE_UNUSABLE)
         self.assertIn("Inappropriate ioctl", scan.problem)
 
     def test_failure_on_one_node_does_not_hide_a_working_key(self):
@@ -178,7 +177,7 @@ class FingerprintScanTest(UsbFixtureCase):
     def test_no_reader_is_no_usb_device_even_with_other_usb_devices_present(self):
         self.add_yubikey()
         scan = self.scan(lambda: FakeFPrint())
-        self.assertEqual((scan.hint_code, scan.problem), (HintCode.NO_USB_DEVICE, ""))
+        self.assertEqual((scan.hint_code, scan.problem), (HintCode.NO_DEVICE, ""))
         self.assertEqual(scan.usb_seen, ["1050:0407 Yubico YubiKey OTP+FIDO+CCID"])
 
     def test_missing_library_is_reported_with_the_import_error(self):
@@ -198,7 +197,7 @@ class FingerprintScanTest(UsbFixtureCase):
     def test_context_failure_is_recorded_not_swallowed(self):
         self.add_yubikey()
         scan = self.scan(lambda: FakeFPrint(error=RuntimeError("usb context failed")))
-        self.assertEqual(scan.hint_code, HintCode.USB_SEEN_BUT_UNUSABLE)
+        self.assertEqual(scan.hint_code, HintCode.DEVICE_UNUSABLE)
         self.assertIn("usb context failed", scan.problem)
 
 

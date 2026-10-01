@@ -57,12 +57,9 @@ def scan_security_keys(
     elif any(isinstance(error, PermissionError) for _, error in problems):
         hint = HintCode.ACCESS_DENIED
     elif problems:
-        hint = HintCode.USB_SEEN_BUT_UNUSABLE
-    elif usb_seen:
-        hint = HintCode.USB_SEEN_BUT_UNUSABLE
-        problem = f"{len(hidraw_paths)} HID nodes inspected; none is a security key."
+        hint = HintCode.DEVICE_UNUSABLE
     else:
-        hint = HintCode.NO_USB_DEVICE
+        hint = HintCode.NO_DEVICE
     return DeviceScan.create(devices, problem, usb_seen, hint)
 
 

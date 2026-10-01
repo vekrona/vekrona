@@ -55,10 +55,10 @@ def scan_readers(sysfs_root=SYSFS_USB, load_fprint=_fprint):
     except Exception as error:
         return DeviceScan.create(
             [], f"libfprint could not list readers. {describe_exception(error)}",
-            usb_seen, HintCode.USB_SEEN_BUT_UNUSABLE,
+            usb_seen, HintCode.DEVICE_UNUSABLE,
         )
     devices = [DeviceDescription.create(reader.get_device_id(), reader.get_name()) for reader in readers]
-    return DeviceScan.create(devices, "", usb_seen, HintCode.OK if devices else HintCode.NO_USB_DEVICE)
+    return DeviceScan.create(devices, "", usb_seen, HintCode.OK if devices else HintCode.NO_DEVICE)
 
 
 def find_reader(devices, device_id):

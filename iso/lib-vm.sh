@@ -390,6 +390,10 @@ vm_prepare_installer() {
     bash "$VM_ISO_DIR/anaconda/pack-updates.sh" "$serve_dir/updates.img"
 }
 
+vm_usb_device_id() {
+  echo "hostusb-${1//:/-}"
+}
+
 vm_usb_host_device_args() {
   local spec vid pid dev found bus devnum node
   for spec in ${VEKRONA_DEV_USB:-}; do
@@ -410,7 +414,7 @@ vm_usb_host_device_args() {
     [[ -r "$node" && -w "$node" ]] \
       || vm_die "no read/write access to $node ($spec); run: sudo setfacl -m u:$USER:rw $node"
     echo "-device"
-    echo "usb-host,vendorid=0x${vid},productid=0x${pid}"
+    echo "usb-host,vendorid=0x${vid},productid=0x${pid},id=$(vm_usb_device_id "$spec")"
   done
 }
 

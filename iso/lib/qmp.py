@@ -235,6 +235,26 @@ def command_click(args):
     connection.close()
 
 
+def command_usb_detach(args):
+    connection = connect_negotiated(args.sock)
+    connection.execute("device_del", {"id": args.device_id})
+    connection.close()
+
+
+def command_usb_attach(args):
+    connection = connect_negotiated(args.sock)
+    connection.execute(
+        "device_add",
+        {
+            "driver": "usb-host",
+            "id": args.device_id,
+            "vendorid": int(args.vendor_id, 16),
+            "productid": int(args.product_id, 16),
+        },
+    )
+    connection.close()
+
+
 def command_wait_pid(args):
     try:
         pidfd = os.pidfd_open(args.pid)
@@ -320,6 +340,16 @@ def build_parser():
     click.add_argument("--button", choices=["left", "right", "middle"], default="left")
     click.add_argument("--double", action="store_true")
     click.set_defaults(run=command_click)
+
+    usb_detach = commands.add_parser("usb-detach")
+    usb_detach.add_argument("device_id")
+    usb_detach.set_defaults(run=command_usb_detach)
+
+    usb_attach = commands.add_parser("usb-attach")
+    usb_attach.add_argument("device_id")
+    usb_attach.add_argument("vendor_id")
+    usb_attach.add_argument("product_id")
+    usb_attach.set_defaults(run=command_usb_attach)
 
     wait_pid = commands.add_parser("wait-pid")
     wait_pid.add_argument("pid", type=int)

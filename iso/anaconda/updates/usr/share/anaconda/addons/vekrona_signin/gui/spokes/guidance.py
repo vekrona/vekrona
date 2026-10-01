@@ -19,7 +19,6 @@ KEY_WHAT = N_("A security key is a small USB stick, for example a YubiKey. You t
 KEY_USE = N_("It can unlock the disk when the computer starts, and confirm administrator actions (sudo) and login. The password still always works.")
 KEY_STEPS = N_("Plug in the key. Enter its PIN, or choose one if it has none. A PIN is a short code that protects the key; it is not your password. Then tap the key when it blinks, three times in total.")
 KEY_NONE = N_("No security key found. Plug it in and wait a moment. If nothing appears, unplug it and plug it in again, or use Check again.")
-KEY_NONE_USB_SEEN = N_("A USB device is plugged in, but it is not a security key this installer can use. See the details below.")
 KEY_FOUND = N_("Found: {name}")
 KEY_DONE = N_("Security key registered. It will unlock the disk and confirm administrator actions and login.")
 
@@ -30,6 +29,7 @@ ERR_PIN_EMPTY = N_("Enter the PIN of the security key.")
 ERR_PIN_SHORT = N_("The PIN must be at least {n} characters.")
 ERR_PIN_MISMATCH = N_("The two PINs are different.")
 
+PROBLEM_UNUSABLE = N_("The installer found a device but cannot use it. See the details below.")
 PROBLEM_ACCESS = N_("The installer could not read the device. See the details below.")
 PROBLEM_LIBRARY = N_("The installer is missing a component needed for this. See the details below.")
 SCAN_FAILED = N_("Looking for devices failed: {error}")
@@ -101,11 +101,11 @@ def password_state_error(state, min_length):
     raise ValueError(f"Unknown password state: {state}")
 
 
-def _hint_text(hint_code, no_device_text, usb_seen_text):
+def _hint_text(hint_code, no_device_text):
     texts = {
         HintCode.OK: None,
-        HintCode.NO_USB_DEVICE: no_device_text,
-        HintCode.USB_SEEN_BUT_UNUSABLE: usb_seen_text,
+        HintCode.NO_DEVICE: no_device_text,
+        HintCode.DEVICE_UNUSABLE: PROBLEM_UNUSABLE,
         HintCode.ACCESS_DENIED: PROBLEM_ACCESS,
         HintCode.LIBRARY_MISSING: PROBLEM_LIBRARY,
     }
@@ -116,8 +116,8 @@ def _hint_text(hint_code, no_device_text, usb_seen_text):
 
 
 def device_scan_hint_to_key_text(hint_code):
-    return _hint_text(hint_code, KEY_NONE, KEY_NONE_USB_SEEN)
+    return _hint_text(hint_code, KEY_NONE)
 
 
 def device_scan_hint_to_fp_text(hint_code):
-    return _hint_text(hint_code, FP_NONE, FP_NONE)
+    return _hint_text(hint_code, FP_NONE)

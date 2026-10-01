@@ -30,7 +30,7 @@ class ScanLoggingTest(unittest.TestCase):
 
     def test_successful_scan_logs_nothing(self):
         service = VekronaSignInService()
-        ok = DeviceScan.create([], "", [], HintCode.NO_USB_DEVICE)
+        ok = DeviceScan.create([], "", [], HintCode.NO_DEVICE)
         with mock.patch.object(service_module.fprint, "scan_readers", return_value=ok):
             with self.assertNoLogs(service_module.log, "WARNING"):
                 service.scan_fingerprint_readers()

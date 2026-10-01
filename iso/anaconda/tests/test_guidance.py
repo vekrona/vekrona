@@ -5,8 +5,8 @@ import _paths
 from vekrona_signin.gui.spokes.guidance import (
     INTRO, PASSWORD_LABEL, CONFIRM_LABEL, PASSWORD_HINT, ERR_PASSWORD_EMPTY,
     ERR_PASSWORD_SHORT, ERR_PASSWORD_MISMATCH, KEY_TITLE, KEY_WHAT, KEY_USE,
-    KEY_STEPS, KEY_NONE, KEY_NONE_USB_SEEN, KEY_FOUND, KEY_DONE,
-    PROBLEM_ACCESS, PROBLEM_LIBRARY, FP_TITLE, FP_WHAT, FP_USE, FP_STEPS,
+    KEY_STEPS, KEY_NONE, KEY_FOUND, KEY_DONE,
+    PROBLEM_ACCESS, PROBLEM_LIBRARY, PROBLEM_UNUSABLE, FP_TITLE, FP_WHAT, FP_USE, FP_STEPS,
     FP_NONE, FP_FOUND, FP_DONE, DETAILS_TITLE, DETAILS_NO_USB,
     DISABLED_NO_ACCOUNT, NEED_PASSWORD_FIRST, USER_CHANGED, WATCH_UNAVAILABLE,
     STATUS_SET_PASSWORD, STATUS_PASSWORD_ONLY, STATUS_WITH_METHODS,
@@ -26,8 +26,8 @@ class ConstantsTest(unittest.TestCase):
             INTRO, PASSWORD_LABEL, CONFIRM_LABEL, PASSWORD_HINT,
             ERR_PASSWORD_EMPTY, ERR_PASSWORD_SHORT, ERR_PASSWORD_MISMATCH,
             KEY_TITLE, KEY_WHAT, KEY_USE, KEY_STEPS, KEY_NONE,
-            KEY_NONE_USB_SEEN, KEY_FOUND, KEY_DONE, PROBLEM_ACCESS,
-            PROBLEM_LIBRARY, FP_TITLE, FP_WHAT, FP_USE, FP_STEPS, FP_NONE,
+            KEY_FOUND, KEY_DONE, PROBLEM_ACCESS,
+            PROBLEM_LIBRARY, PROBLEM_UNUSABLE, FP_TITLE, FP_WHAT, FP_USE, FP_STEPS, FP_NONE,
             FP_FOUND, FP_DONE, DETAILS_TITLE, DETAILS_NO_USB,
             DISABLED_NO_ACCOUNT, NEED_PASSWORD_FIRST, USER_CHANGED,
             WATCH_UNAVAILABLE, STATUS_SET_PASSWORD, STATUS_PASSWORD_ONLY,
@@ -128,13 +128,16 @@ class DeviceScanHintKeyTest(unittest.TestCase):
         self.assertIsNone(device_scan_hint_to_key_text(HintCode.OK))
 
     def test_every_problem_hint_has_a_text(self):
-        for hint in (HintCode.NO_USB_DEVICE, HintCode.USB_SEEN_BUT_UNUSABLE,
+        for hint in (HintCode.NO_DEVICE, HintCode.DEVICE_UNUSABLE,
                      HintCode.ACCESS_DENIED, HintCode.LIBRARY_MISSING):
             with self.subTest(hint):
                 self.assertTrue(device_scan_hint_to_key_text(hint))
 
-    def test_a_usb_device_that_is_no_key_is_explained(self):
-        self.assertEqual(device_scan_hint_to_key_text(HintCode.USB_SEEN_BUT_UNUSABLE), KEY_NONE_USB_SEEN)
+    def test_no_device_is_the_plain_no_key_text(self):
+        self.assertEqual(device_scan_hint_to_key_text(HintCode.NO_DEVICE), KEY_NONE)
+
+    def test_a_failing_key_candidate_is_explained(self):
+        self.assertEqual(device_scan_hint_to_key_text(HintCode.DEVICE_UNUSABLE), PROBLEM_UNUSABLE)
 
     def test_unknown_hint_raises_value_error(self):
         with self.assertRaises(ValueError):
@@ -145,11 +148,15 @@ class DeviceScanHintFpTest(unittest.TestCase):
     def test_ok_needs_no_hint(self):
         self.assertIsNone(device_scan_hint_to_fp_text(HintCode.OK))
 
-    def test_a_usb_device_that_is_no_reader_says_no_reader_was_found(self):
-        self.assertEqual(device_scan_hint_to_fp_text(HintCode.USB_SEEN_BUT_UNUSABLE), FP_NONE)
+    def test_no_device_is_the_plain_no_reader_text(self):
+        self.assertEqual(device_scan_hint_to_fp_text(HintCode.NO_DEVICE), FP_NONE)
+
+    def test_a_failing_reader_is_explained(self):
+        self.assertEqual(device_scan_hint_to_fp_text(HintCode.DEVICE_UNUSABLE), PROBLEM_UNUSABLE)
 
     def test_every_problem_hint_has_a_text(self):
-        for hint in (HintCode.NO_USB_DEVICE, HintCode.ACCESS_DENIED, HintCode.LIBRARY_MISSING):
+        for hint in (HintCode.NO_DEVICE, HintCode.DEVICE_UNUSABLE,
+                     HintCode.ACCESS_DENIED, HintCode.LIBRARY_MISSING):
             with self.subTest(hint):
                 self.assertTrue(device_scan_hint_to_fp_text(hint))
 
