@@ -79,10 +79,36 @@ Reboot, then log in through the greeter (tuigreet, running `start-sway`).
 
 Instead of installing plain Fedora minimal by hand and cloning this repo
 yourself, `iso/build.sh` bakes both into a Fedora 44 Everything netinstall
-ISO: Anaconda still asks for a disk and a user (btrfs autopart preset), then
-a first-boot service clones this repo to the new user's home and runs
-`./install.sh` unattended, ending at the same greetd login prompt. See "ISO
-and CI" below for how the ISO is built, what first boot does, and how it is
+ISO, plus a small Anaconda addon (`iso/anaconda/updates/`, shipped as an
+`updates.img`) that replaces Anaconda's own user-creation, root-password and
+time & date screens with a single "VEKRONA ACCOUNT" screen, shown first on
+the hub:
+
+- **Full name** (optional), **username**, **password** (typed twice). This
+  one password becomes both the account password and the disk encryption
+  passphrase — there is no separate LUKS passphrase to remember. The account
+  is always an administrator (`wheel`); root is always locked, with no root
+  password to set.
+- **Hostname**, defaulting to `vekrona`.
+- **Timezone**, a type-to-search field (e.g. typing "berlin" narrows to
+  `Europe/Berlin`) defaulting to whatever Anaconda's own geolocation already
+  resolved, or UTC if that is unavailable.
+
+Anaconda itself still handles everything storage- and network-related:
+**Installation Destination** always needs a visit (disk selection, reclaim
+space for dual-boot, or custom partitioning), and it defaults to
+automatic btrfs partitioning with encryption already turned on. Because the
+vekrona screen already supplied the passphrase, the standard "Disk Encryption
+Passphrase" dialog that Anaconda pops up when you accept automatic
+partitioning appears pre-filled — one click on "Save Passphrase" instead of
+typing it again. **Network & Host Name** (including Wi-Fi) is Anaconda's own
+screen, unchanged.
+
+Once the install finishes and the machine reboots, GRUB will ask for that
+same password to unlock the encrypted root before Anaconda's first-boot
+service clones this repo to the new user's home and runs `./install.sh`
+unattended, ending at the same greetd login prompt. See "ISO and CI" below
+for how the ISO and addon are built, what first boot does, and how it is
 tested.
 
 ### Migrating an existing Fedora Workstation
@@ -641,6 +667,19 @@ and tag:
   the official Fedora Everything netinstall ISO for `<release>`, printing its
   path; a verified file already in `<dest-dir>` is reused instead of
   re-downloaded.
+- `iso/anaconda/updates/` is the vekrona Anaconda addon's filesystem layout
+  verbatim (`etc/anaconda/conf.d/90-vekrona.conf`,
+  `usr/share/anaconda/addons/vekrona_account/...`,
+  `usr/share/anaconda/dbus/{services,confs}/...`): a DBus-module-plus-GUI-spoke
+  addon in the same shape as Fedora's own in-tree `com_redhat_kdump` addon.
+  `iso/build.sh` packs that tree into a gzip'd `newc` cpio (`updates.img`,
+  built with `cpio --reproducible` and a sorted file list for a
+  deterministic archive) and passes it to `mkksiso -u` for **both** the
+  release and test ISOs, so there is exactly one addon source of truth for
+  every variant. The addon's own module (`vekrona_account`) holds no account
+  data itself; its GUI spoke reads and writes the Users, Timezone, Network
+  and Storage DBus modules directly, exactly as Anaconda's own hidden
+  spokes would have.
 - `iso/build.sh --netinst <iso> --out <iso>` refuses to run against a dirty
   working tree (the ISO embeds a `git clone` of HEAD, so uncommitted changes
   would silently be missing from it) — commit or stash first. It points the
@@ -648,14 +687,24 @@ and tag:
   the installed system can `git pull` for real, and every kickstart `%post`
   uses `--erroronfail` so a failing step aborts the install instead of
   continuing silently. It then runs `mkksiso` (Fedora 44 host, `lorax`
-  installed) to produce the release ISO: interactive on boot, Anaconda asks
-  for a disk and a user; with no `timezone` line, the installer defaults to
-  `America/New_York` and shows a non-blocking warning on the hub, clearable
-  by visiting Time & Date during install. With `--test-ssh-pubkey <file>` it
-  instead produces a fully unattended test ISO: wipes the disk, installs
-  btrfs, creates user `vekrona` (password `vekrona`, in `wheel`), enables
-  sshd with that key authorized, boots with `console=ttyS0`, and reboots
-  when Anaconda finishes. `mkksiso` rebuilds the ISO's EFI boot image
+  installed) to produce the release ISO: interactive on boot, with no
+  storage, user, root-password or timezone kickstart commands at all, so
+  Installation Destination and the vekrona account spoke both always need a
+  visit; with `--test-ssh-pubkey <file>` it instead produces a fully
+  unattended test ISO: wipes the disk, installs btrfs with LUKS2 encryption
+  (kickstart `autopart --type=btrfs --encrypted --luks-version=luks2
+  --passphrase=vekrona`, so the vekrona spoke's own `completed` check — which
+  reads the same Storage/Users/Timezone/Network module state the spoke would
+  otherwise have written — is already satisfied and the hub is skipped
+  entirely), creates user `vekrona` (password `vekrona`, in `wheel`), enables
+  sshd with that key authorized, boots with `console=ttyS0` and the
+  installed system's own GRUB with `console=ttyS0 console=tty0` (so the LUKS
+  unlock prompt is visible on the logged serial console too), and reboots
+  when Anaconda finishes. The vekrona anaconda.conf drop-in also disables
+  `can_copy_input_kickstart`, `can_save_output_kickstart` and
+  `can_save_installation_logs`, since none of Anaconda's own kickstart or
+  log persistence redacts the plaintext LUKS passphrase before writing it to
+  the installed system. `mkksiso` rebuilds the ISO's EFI boot image
   (`mkefiboot`), which loop-mounts a small FAT image, so the container this
   runs in needs `/dev/loop-control` plus `--cap-add SYS_ADMIN --cap-add
   MKNOD --device /dev/loop-control --device-cgroup-rule='b 7:* rmw'
@@ -672,10 +721,25 @@ and tag:
   `firstboot.failed` and reboots into `greetd` on success.
 - `iso/qemu-test.sh <test.iso>` boots that test ISO under plain
   `qemu-system-x86_64` with KVM (UEFI via OVMF, 8 GiB RAM, 4 vCPUs, a 40G
-  qcow2 disk, user-mode networking with an SSH port forward, and the serial
-  console logged to a file). It runs the install once with `-no-reboot` so
-  QEMU exits when Anaconda reboots, then boots the installed disk on its
-  own; waits for SSH with the matching test private key
+  qcow2 disk, user-mode networking with an SSH port forward). It runs the
+  install once with `-no-reboot` and the serial console logged to a plain
+  file (no LUKS prompt during install: the target disk is not encrypted
+  until Anaconda partitions it), so QEMU exits when Anaconda reboots. It then
+  boots the installed disk on its own, this time over a bidirectional QEMU
+  chardev socket (`-chardev socket,...,logfile=...` plus `-serial
+  chardev:serial0`) with a background watcher (`tail -F` piped through a
+  loop, `socat` writing the passphrase into the socket) that types
+  `vekrona` into the LUKS prompt every time the boot log shows "Please enter
+  passphrase" — once for the first boot, again after the firstboot reboot,
+  and again after the rollback reboot, all inside the same long-running QEMU
+  process. Once SSH is up it first asserts the installed-system account
+  invariants: root is on a LUKS2 mapper device (`findmnt`/`lsblk`
+  TYPE=`crypt`, `cryptsetup luksDump` Version 2), `vekrona` is in `wheel`,
+  root is locked (`passwd -S root` reports `L`), the hostname is `vekrona`,
+  the timezone is `UTC`, and none of `/root/anaconda-ks.cfg`,
+  `/root/original-ks.cfg` or `/var/log/anaconda` exist on the installed
+  system (the plaintext LUKS passphrase would otherwise end up in one of
+  them). Then it waits for SSH with the matching test private key
   (`VEKRONA_TEST_SSH_KEY`), then for the firstboot completion marker
   (printing `firstboot.failed` plus `journalctl -u vekrona-firstboot` and
   failing if firstboot failed), then for the post-firstboot reboot and SSH
@@ -688,7 +752,7 @@ and tag:
   /dev/null`, `IdentityAgent=none`, no known-hosts file). Every wait is
   polled with a bounded, env-overridable timeout rather than a fixed sleep;
   on any failure it prints the serial console log tail before cleaning up
-  its QEMU processes and temp files.
+  its QEMU and LUKS-watcher processes and temp files.
 
 The `iso.yml` workflow has three jobs: `build` (Fedora 44 container, caches
 the downloaded netinstall ISO by release, builds both the release and a
