@@ -1,5 +1,7 @@
 # TODO
 
+- `https://vekrona.com` (the GitHub Pages custom domain for `vekrona.github.io`) serves a stale "Site under construction" placeholder, not this repo's `index.html`, and its TLS certificate is GitHub's wildcard `*.github.io` cert (no SAN for `vekrona.com`), so `https://vekrona.com` fails certificate verification entirely; plain `http://vekrona.com` does serve the placeholder without a redirect to HTTPS. Found while reshooting the website's screenshots/video (`vekrona.github.io/capture/`): the capture pipeline's background-pane Firefox window now points at a local `file://` copy of the site instead of the live domain, so this did not block that work, but the real `vekrona.com` is currently broken for actual visitors and needs the GitHub Pages custom-domain HTTPS/deployment set up for real.
+
 - `stages/10-nvidia.sh`'s `REMOVE_GLOBS` includes the glob `libnvidia-*`, which is removed in the same transaction as the cuda-repo driver whenever `cuda_driver_installed` is true. This glob also matches CUDA runtime libraries unrelated to the display driver itself (e.g. `libnvidia-ml`, `libnvidia-container`), so a host that has those installed for other reasons could have them removed as a side effect of this stage. Narrow the glob to the driver-specific packages it actually targets.
 - Nested btrfs subvolume for /var/lib/libvirt/images so snapshots do not pin VM images. `btrfs_migrate_dir_into_subvolume` in `lib/common.sh` can be reused (nested, no fstab line needed).
 - DMS bar indicator for vekrona-caffeine (plugin API unverified).
