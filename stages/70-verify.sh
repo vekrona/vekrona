@@ -226,6 +226,8 @@ fi
 
 if ran 40-system; then
   check assert_file_contains /etc/greetd/config.toml 'user = "greetd"'
+  check assert "greetd creates /var/cache/tuigreet on start" file_exists /etc/systemd/system/greetd.service.d/vekrona-tuigreet-cache.conf
+  check assert "no tmpfiles.d entry for greetd's cache dir (dracut copies it into an initramfs without the user)" file_absent /etc/tmpfiles.d/vekrona-tuigreet.conf
   check assert "/var/cache/tuigreet exists" dir_exists /var/cache/tuigreet
   check assert "/var/cache/tuigreet owned by greetd" owned_by /var/cache/tuigreet greetd
   check assert "logind inhibit-delay drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf

@@ -6,8 +6,16 @@ source "$ROOT/lib/common.sh"
 
 ensure_root_file "$VEKRONA_ROOT/etc/greetd/config.toml" /etc/greetd/config.toml
 
-ensure_root_file "$VEKRONA_ROOT/etc/tmpfiles.d/vekrona-tuigreet.conf" /etc/tmpfiles.d/vekrona-tuigreet.conf
-root systemd-tmpfiles --create /etc/tmpfiles.d/vekrona-tuigreet.conf
+STALE_TUIGREET_TMPFILES=/etc/tmpfiles.d/vekrona-tuigreet.conf
+if [[ -e "$STALE_TUIGREET_TMPFILES" ]]; then
+  ensure_root_file_absent "$STALE_TUIGREET_TMPFILES"
+  log "regenerating initramfs images: dracut copies /etc/tmpfiles.d into them"
+  root dracut --force --regenerate-all
+fi
+
+ensure_root_file "$VEKRONA_ROOT/etc/systemd/system/greetd.service.d/vekrona-tuigreet-cache.conf" /etc/systemd/system/greetd.service.d/vekrona-tuigreet-cache.conf
+root systemctl daemon-reload
+root install -d -m 0755 -o greetd -g greetd /var/cache/tuigreet
 assert "tuigreet cache dir exists" test -d /var/cache/tuigreet
 
 ensure_root_file "$VEKRONA_ROOT/etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf" /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
