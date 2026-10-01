@@ -162,7 +162,13 @@ error_dry_run_output="$(vekrona-agent --error "$REAL_ERROR_ID" --dry-run | tr '\
 error_skill_path="$(grep -oE '/[^ ]*/config/agents/skills/vekrona-diagnose/SKILL\.md' <<<"$error_dry_run_output" | head -1)"
 [[ -n "$error_skill_path" ]] || fail "vekrona-agent --error $REAL_ERROR_ID prompt did not name a SKILL.md path"
 [[ -f "$error_skill_path" ]] || fail "the skill path named in the --error prompt does not exist: $error_skill_path"
-vekrona-error rm "$REAL_ERROR_ID" >/dev/null 2>&1 || true
+assert_error_status() {
+  local expected="$1" actual
+  actual="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["status"])' "$ERROR_STORE_DIR/$REAL_ERROR_ID/record.json")" \
+    || fail "could not read the status of error $REAL_ERROR_ID"
+  [[ "$actual" == "$expected" ]] || fail "error $REAL_ERROR_ID has status '$actual', expected '$expected' ($2)"
+}
+assert_error_status new "after vekrona-agent --error --dry-run, which must not mark anything"
 echo "ok: vekrona-agent --error $REAL_ERROR_ID resolved its prompt via vekrona-error prompt, naming a real $error_skill_path"
 
 PICKER_STUB_DIR="$STUB_DIR/picker-bin"
@@ -346,5 +352,11 @@ for v in "${SCRIPT_ENV_VARS[@]}"; do
   done
 done
 printf '%s\n' "${stub_env[@]}" | grep -qx -- "$KEPT_ENV_VAR=keep" || fail "unrelated variable $KEPT_ENV_VAR was stripped from the harness environment"
+
+vekrona-agent --error "$REAL_ERROR_ID" >/dev/null || fail "vekrona-agent --error $REAL_ERROR_ID failed to launch the agent"
+assert_error_status launched "after a successful vekrona-agent --error launch"
+swaymsg -- '[app_id="vekrona.agent"] kill' >/dev/null || fail "could not close the real agent window"
+vekrona-error rm "$REAL_ERROR_ID" >/dev/null || fail "vekrona-error rm $REAL_ERROR_ID failed"
+echo "ok: vekrona-agent --error marked the record launched after a real launch, and left it new after --dry-run"
 
 echo "agent-launch-check OK"

@@ -179,6 +179,10 @@ launch() {
 
   "${systemd_run_argv[@]}" >/dev/null 2>&1 \
     || die "failed to launch agent '$tool' (systemd-run --user --unit=$unit failed)"
+
+  if [[ -n "$ERROR_ID" ]]; then
+    vekrona-error mark-launched "$ERROR_ID" >/dev/null || die "agent '$tool' started but 'vekrona-error mark-launched $ERROR_ID' failed"
+  fi
 }
 
 close_notification_center() {
