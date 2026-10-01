@@ -6,6 +6,7 @@ fail() { echo "agent-launch-check FAILED: $*" >&2; exit 1; }
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/session-lib.sh"
 
 command -v vekrona-agent >/dev/null 2>&1 || fail "vekrona-agent not on PATH"
+command -v vekrona-error >/dev/null 2>&1 || fail "vekrona-error not on PATH"
 command -v swaymsg >/dev/null 2>&1 || fail "swaymsg not on PATH"
 command -v inotifywait >/dev/null 2>&1 || fail "inotifywait not installed"
 session_attach_existing \
@@ -71,6 +72,32 @@ if vekrona-agent --error vekrona-agent-test-unknown-id --dry-run >/dev/null 2>"$
   fail "vekrona-agent --error with an unknown id unexpectedly succeeded"
 fi
 [[ -s "$STUB_DIR/error.err" ]] || fail "vekrona-agent --error with an unknown id produced no error message"
+
+ERROR_STORE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona/errors"
+ERROR_MARKER="vekrona-agent-launch-check-$RANDOM$RANDOM"
+vekrona-error report --title "$ERROR_MARKER" --source manual || fail "vekrona-error report failed"
+
+REAL_ERROR_ID=""
+error_record_deadline=$((SECONDS + 30))
+while [[ -z "$REAL_ERROR_ID" ]]; do
+  REAL_ERROR_ID="$(grep -rl -F -- "$ERROR_MARKER" "$ERROR_STORE_DIR"/*/record.json 2>/dev/null \
+    | head -1 | xargs -r dirname | xargs -r basename)"
+  [[ -n "$REAL_ERROR_ID" ]] && break
+  (( SECONDS < error_record_deadline )) || fail "vekrona-error report never produced a record for --error end-to-end test"
+  inotifywait -qq -t 1 -e create,modify,moved_to,close_write "$ERROR_STORE_DIR" >/dev/null 2>&1 || true
+done
+
+error_dry_run_output="$(vekrona-agent --error "$REAL_ERROR_ID" --dry-run)" \
+  || fail "vekrona-agent --error $REAL_ERROR_ID --dry-run failed"
+[[ "$error_dry_run_output" == *"vekrona error $REAL_ERROR_ID"* ]] \
+  || fail "vekrona-agent --error $REAL_ERROR_ID prompt did not include the error id (vekrona-error prompt not called correctly)"
+[[ "$error_dry_run_output" == *"vekrona-diagnose"* ]] \
+  || fail "vekrona-agent --error $REAL_ERROR_ID prompt did not mention the vekrona-diagnose skill"
+error_skill_path="$(grep -oE '/[^ ]*/config/agents/skills/vekrona-diagnose/SKILL\.md' <<<"$error_dry_run_output" | head -1)"
+[[ -n "$error_skill_path" ]] || fail "vekrona-agent --error $REAL_ERROR_ID prompt did not name a SKILL.md path"
+[[ -f "$error_skill_path" ]] || fail "the skill path named in the --error prompt does not exist: $error_skill_path"
+vekrona-error rm "$REAL_ERROR_ID" >/dev/null 2>&1 || true
+echo "ok: vekrona-agent --error $REAL_ERROR_ID resolved its prompt via vekrona-error prompt, naming a real $error_skill_path"
 
 BIN_DIR="$STUB_DIR/bin"
 mkdir -p "$BIN_DIR"
