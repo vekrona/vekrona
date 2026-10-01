@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/authselect-vekrona.sh"
 source "$ROOT/lib/luks-fido2.sh"
+source "$ROOT/lib/facetimehd.sh"
+source "$ROOT/lib/display-scale.sh"
 
 [[ "${1:-}" == "--all" ]] && VEKRONA_VERIFY_ALL=1
 VEKRONA_VERIFY_ALL="${VEKRONA_VERIFY_ALL:-0}"
@@ -39,6 +41,7 @@ ge() { [[ "$1" -ge "$2" ]]; }
 contains() { [[ "$2" == *"$1"* ]]; }
 not_contains() { [[ "$2" != *"$1"* ]]; }
 file_exists() { [[ -e "$1" ]]; }
+fprintd_sees_reader() { fprintd-list "$VEKRONA_USER" >/dev/null 2>&1; }
 file_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 file_lacks_qsg_backend() { ! grep -q '^QSG_RHI_BACKEND=' "$1" 2>/dev/null; }
 dir_exists() { [[ -d "$1" ]]; }
@@ -52,6 +55,8 @@ unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; 
 user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" enabled; }
 pkg_absent() { ! pkg_installed "$1"; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
+file_executable() { [[ -x "$1" ]]; }
+module_loaded() { [[ -d "/sys/module/$1" ]]; }
 module_built_for_running_kernel() { modinfo -k "$(uname -r)" "$1" >/dev/null 2>&1; }
 nvidia_module_present_for() { modinfo -k "$1" nvidia >/dev/null 2>&1; }
 root_files_equal() { root cmp -s "$1" "$2"; }
@@ -195,6 +200,7 @@ if ran 45-auth; then
     check assert "both pam_u2f lines pinned to pam://vekrona in $f" vekrona_pam_u2f_lines_ok "$f"
   done
   check assert "dankshell-u2f equals the repo file" root_files_equal "$VEKRONA_ROOT/etc/pam.d/dankshell-u2f" /etc/pam.d/dankshell-u2f
+  warn_check "fprintd sees a fingerprint reader (with-fingerprint is enabled regardless; none present, plug in a USB reader)" fprintd_sees_reader
 
   crypttab_content="$(read_crypttab)"
   fido2_tokens="$(crypttab_fido2_tokens "$crypttab_content")"
@@ -233,11 +239,21 @@ if ran 15-mac; then
   check assert "broadcom-wl modprobe drop-in iff Broadcom wl Wi-Fi present" present_iff has_broadcom_wl_wifi file_exists /etc/modprobe.d/vekrona-broadcom-wl.conf
   check assert "apple-gmux modprobe drop-in iff Apple dual-GPU" present_iff has_apple_gmux_dual_gpu file_exists /etc/modprobe.d/vekrona-apple-gmux.conf
   check assert "facetimehd module built for the running kernel iff FaceTime HD camera present" present_iff has_facetime_hd_camera module_built_for_running_kernel facetimehd
+  if has_facetime_hd_camera; then
+    check assert "facetimehd firmware.bin matches the pinned sha256" facetimehd_firmware_is_current
+  fi
+  check assert "libva-intel-driver installed" pkg_installed libva-intel-driver
+  check assert "mbp12 audio modprobe drop-in iff MacBookPro12,1" present_iff is_macbookpro12_1 file_exists /etc/modprobe.d/vekrona-mbp12-audio.conf
+  check assert "brcmfmac resume hook iff BCM43602 Wi-Fi" present_iff has_brcmfmac_43602 file_executable /etc/systemd/system-sleep/vekrona-brcmfmac-resume
+  if has_broadcom_wl_wifi; then
+    warn_check "wl module loaded (reboot pending if wl was just built)" module_loaded wl
+  fi
 fi
 
 if ran 50-user; then
   check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
+  check assert "sway panel scale drop-in present iff an internal panel is connected" present_iff has_internal_panel file_exists "$SWAY_PANEL_SCALE_DROPIN"
   check assert "xremap config validates" xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml"
   check assert "sway keybindings all described" vekrona-keybindings --check
   check assert "vekrona-keybindings --list has workspace 10 bindings" bash -c "vekrona-keybindings --list | grep -qF 'workspace 1…10'"

@@ -17,25 +17,31 @@ facetimehd_source_is_current() {
   [[ -f "$FACETIMEHD_SRC_STAMP" && "$(<"$FACETIMEHD_SRC_STAMP")" == "$FACETIMEHD_SHA256" ]]
 }
 
-ensure_facetimehd_source() {
-  facetimehd_source_is_current && { log "up to date: $FACETIMEHD_SRC_DIR"; return 0; }
-  local tmp unpacked dkms_version
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
+facetimehd_dkms_registered() {
+  [[ -n "$(dkms status -m facetimehd -v "$FACETIMEHD_DKMS_VERSION")" ]]
+}
+
+install_facetimehd_source() {
+  local tmp="$1" unpacked dkms_version
   fetch_pinned "$FACETIMEHD_URL" "$FACETIMEHD_SHA256" "$tmp/src.tar.gz"
   tar -xzf "$tmp/src.tar.gz" -C "$tmp"
   unpacked="$tmp/facetimehd-$FACETIMEHD_VERSION"
   dkms_version="$(sed -n 's/^PACKAGE_VERSION=//p' "$unpacked/dkms.conf")"
   [[ "$dkms_version" == "$FACETIMEHD_DKMS_VERSION" ]] \
     || die "facetimehd $FACETIMEHD_VERSION declares dkms version '$dkms_version', expected $FACETIMEHD_DKMS_VERSION"
-  if [[ -e "$FACETIMEHD_SRC_DIR" ]]; then
-    root dkms remove -m facetimehd -v "$FACETIMEHD_DKMS_VERSION" --all >/dev/null 2>&1 || true
-    root rm -rf "$FACETIMEHD_SRC_DIR"
+  if facetimehd_dkms_registered; then
+    root dkms remove -m facetimehd -v "$FACETIMEHD_DKMS_VERSION" --all
   fi
+  root rm -rf "$FACETIMEHD_SRC_DIR"
   log "installing: $FACETIMEHD_SRC_DIR"
   root cp -a "$unpacked" "$FACETIMEHD_SRC_DIR"
   printf '%s\n' "$FACETIMEHD_SHA256" | root tee "$FACETIMEHD_SRC_STAMP" >/dev/null
   facetimehd_source_is_current || die "facetimehd source stamp not written: $FACETIMEHD_SRC_STAMP"
+}
+
+ensure_facetimehd_source() {
+  facetimehd_source_is_current && { log "up to date: $FACETIMEHD_SRC_DIR"; return 0; }
+  with_scratch_dir install_facetimehd_source
 }
 
 facetimehd_dkms_status() {
@@ -44,8 +50,10 @@ facetimehd_dkms_status() {
 
 ensure_facetimehd_dkms_built() {
   local kver="$1" status
-  status="$(facetimehd_dkms_status "$kver")"
-  [[ "$status" == *"$kver"* ]] || { log "dkms add: facetimehd $FACETIMEHD_DKMS_VERSION"; root dkms add -m facetimehd -v "$FACETIMEHD_DKMS_VERSION"; }
+  if ! facetimehd_dkms_registered; then
+    log "dkms add: facetimehd $FACETIMEHD_DKMS_VERSION"
+    root dkms add -m facetimehd -v "$FACETIMEHD_DKMS_VERSION"
+  fi
   status="$(facetimehd_dkms_status "$kver")"
   [[ "$status" == *": installed"* ]] && { log "ok: facetimehd dkms installed for $kver"; return 0; }
   log "dkms build/install: facetimehd for $kver"
@@ -55,11 +63,13 @@ ensure_facetimehd_dkms_built() {
   [[ "$status" == *": installed"* ]] || die "facetimehd dkms module not installed for $kver: $status"
 }
 
-ensure_facetimehd_firmware() {
-  [[ -f "$FACETIMEHD_FIRMWARE_BIN" ]] && { log "up to date: $FACETIMEHD_FIRMWARE_BIN"; return 0; }
-  local tmp built actual
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
+facetimehd_firmware_is_current() {
+  [[ -f "$FACETIMEHD_FIRMWARE_BIN" ]] \
+    && [[ "$(sha256sum "$FACETIMEHD_FIRMWARE_BIN" | awk '{print $1}')" == "$FACETIMEHD_FIRMWARE_BIN_SHA256" ]]
+}
+
+install_facetimehd_firmware() {
+  local tmp="$1" built actual
   fetch_pinned "$FACETIMEHD_FIRMWARE_URL" "$FACETIMEHD_FIRMWARE_SHA256" "$tmp/firmware.tar.gz"
   tar -xzf "$tmp/firmware.tar.gz" -C "$tmp"
   built="$tmp/facetimehd-firmware-$FACETIMEHD_FIRMWARE_COMMIT"
@@ -69,7 +79,15 @@ ensure_facetimehd_firmware() {
   [[ "$actual" == "$FACETIMEHD_FIRMWARE_BIN_SHA256" ]] \
     || die "extracted firmware.bin sha256 mismatch (expected $FACETIMEHD_FIRMWARE_BIN_SHA256, got $actual)"
   root make -C "$built" install
-  [[ -f "$FACETIMEHD_FIRMWARE_BIN" ]] || die "firmware missing after install: $FACETIMEHD_FIRMWARE_BIN"
+  facetimehd_firmware_is_current || die "firmware missing or wrong sha256 after install: $FACETIMEHD_FIRMWARE_BIN"
+}
+
+ensure_facetimehd_firmware() {
+  facetimehd_firmware_is_current && { log "up to date: $FACETIMEHD_FIRMWARE_BIN"; return 0; }
+  if [[ -e "$FACETIMEHD_FIRMWARE_BIN" ]]; then
+    warn "replacing $FACETIMEHD_FIRMWARE_BIN: sha256 differs from the pinned $FACETIMEHD_FIRMWARE_BIN_SHA256"
+  fi
+  with_scratch_dir install_facetimehd_firmware
 }
 
 ensure_facetimehd() {
