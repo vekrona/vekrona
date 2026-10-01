@@ -13,6 +13,7 @@ if HAS_GLIB:
     from pyanaconda.core.constants import THREAD_STORAGE_WATCHER
     from pyanaconda.core.threads import thread_manager
 
+    from vekrona_signin.gui.coalesced_refresh import CoalescedRefresh
     from vekrona_signin.gui.stock_storage import wait_for_stock_storage
 
 
@@ -60,3 +61,44 @@ class WaitForStockStorageTest(unittest.TestCase):
         gate.set()
         waiter.join(WATCHDOG_SEC)
         self.assertEqual(["storage", "worker"], finished)
+
+
+@unittest.skipUnless(HAS_GLIB, "PyGObject is not installed on this host")
+class StorageSignalsDuringAWaitTest(unittest.TestCase):
+    def serve_main_loop_until(self, done):
+        expired = threading.Event()
+        watchdog = threading.Timer(WATCHDOG_SEC, lambda: (expired.set(), GLib.idle_add(lambda: False)))
+        watchdog.start()
+        self.addCleanup(watchdog.cancel)
+        context = GLib.MainContext.default()
+        while not done() and not expired.is_set():
+            context.iteration(True)
+
+    def storage_busy_until_signals_arrive(self, on_signals):
+        release = threading.Event()
+
+        def storage_thread():
+            def signals_arrive():
+                on_signals()
+                release.set()
+                return False
+
+            GLib.idle_add(signals_arrive)
+            release.wait()
+
+        thread_manager.add_thread(name=THREAD_STORAGE_WATCHER, target=storage_thread)
+
+    def test_signals_arriving_during_a_wait_are_served_after_it_and_never_inside_it(self):
+        runs = []
+
+        def refresh():
+            runs.append("start")
+            if len(runs) == 1:
+                self.storage_busy_until_signals_arrive(lambda: (refresher.request(), refresher.request()))
+            wait_for_stock_storage()
+            runs.append("end")
+
+        refresher = CoalescedRefresh(GLib.idle_add, refresh)
+        refresher.request()
+        self.serve_main_loop_until(lambda: len(runs) >= 4)
+        self.assertEqual(["start", "end", "start", "end"], runs)

@@ -2,6 +2,7 @@ import hmac
 
 from dasbus.client.proxy import get_object_path
 from dasbus.error import DBusError
+from gi.repository import GLib
 
 from pyanaconda.anaconda_loggers import get_module_logger
 from pyanaconda.core.constants import PASSWORD_POLICY_LUKS
@@ -30,6 +31,7 @@ from vekrona_signin.core.diagnose import describe_exception
 from vekrona_signin.core.encrypted_storage import apply_encrypted, read_state
 from vekrona_signin.core.password_policy import PasswordState, minimum_length, validate
 from vekrona_signin.core.secret import Secret
+from vekrona_signin.gui.coalesced_refresh import CoalescedRefresh
 from vekrona_signin.gui.panel_view import FINGERPRINT_PANEL, KEY_PANEL, PanelInput, panel_view, pin_form
 from vekrona_signin.gui.signin_state import (
     EncryptionGuard,
@@ -116,6 +118,8 @@ class VekronaSignInSpoke(NormalSpoke):
         self._key_pin_device = None
         self._min_length = 0
         self._disk_secret = None
+        self._applied_changed = False
+        self._changes = CoalescedRefresh(GLib.idle_add, self._process_changes)
 
     def initialize(self):
         NormalSpoke.initialize(self)
@@ -294,28 +298,31 @@ class VekronaSignInSpoke(NormalSpoke):
             self._refresh_snapshot()
 
     def _on_storage_properties_changed(self, _interface, changed, _invalidated):
-        if "AppliedPartitioning" not in changed:
-            return
+        if "AppliedPartitioning" in changed:
+            self._applied_changed = True
+            self._changes.request()
+
+    def _on_disk_selection_changed(self, _interface, changed, _invalidated):
+        if "SelectedDisks" in changed:
+            self._changes.request()
+
+    def _on_users_changed(self, _interface, changed, _invalidated):
+        if "Users" in changed:
+            self._changes.request()
+
+    def _process_changes(self):
+        applied_changed, self._applied_changed = self._applied_changed, False
         self._refresh_snapshot()
+        self._forget_registrations_of_other_user()
+        if not applied_changed:
+            self._notify_hub()
+            return
         reaction = self._guard.react_to_storage_change(self._snapshot)
         log.info("The applied disk setup changed: %s; %s.", self._snapshot.storage_state.value, reaction.value)
         if reaction is StorageReaction.RECONCILE:
             self._start_encryption()
-        elif reaction is StorageReaction.REEVALUATE:
+        else:
             self._notify_hub()
-
-    def _on_disk_selection_changed(self, _interface, changed, _invalidated):
-        if "SelectedDisks" not in changed:
-            return
-        self._refresh_snapshot()
-        self._notify_hub()
-
-    def _on_users_changed(self, _interface, changed, _invalidated):
-        if "Users" not in changed:
-            return
-        self._refresh_snapshot()
-        self._forget_registrations_of_other_user()
-        self._notify_hub()
 
     def refresh(self):
         self._refresh_snapshot()
@@ -383,7 +390,7 @@ class VekronaSignInSpoke(NormalSpoke):
                 return False
             self._guard.account_error = ""
             self._guard.accept_password(password)
-            log.info("The account password was set; an automatic disk setup uses it as the passphrase.")
+            log.info("The account password was set; an automatic disk setup is encrypted with it.")
         return True
 
     def _disk_passphrase_state(self):
