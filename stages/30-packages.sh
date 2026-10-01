@@ -19,6 +19,7 @@ for pkg in "${VEKRONA_DESKTOP_PKGS[@]}"; do
   [[ -n "${VEKRONA_PINNED_PKGS[$pkg]+x}" ]] || desktop_pkgs_except_pinned+=("$pkg")
 done
 ensure_pkg "${desktop_pkgs_except_pinned[@]}"
+ensure_1password_repo_file
 
 declare -a desktop_pkgs
 read_pkg_list desktop_pkgs vekrona_desktop_pkgs

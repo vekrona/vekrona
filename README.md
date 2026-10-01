@@ -670,6 +670,12 @@ the pin, installs it root-owned, checks the installed copy again, and only
 then runs `rpm --import`. `70-verify` re-checks the installed files and the
 rpm keyring against the same pins.
 
+The 1Password RPM's `%post` rewrites `/etc/yum.repos.d/1password.repo` on
+every install and upgrade (with `gpgkey=` pointing at its HTTPS URL and
+`repo_gpgcheck` commented out). `ensure_1password_repo_file` puts the
+repo's file back right after stage `30-packages` installs the package and
+right after the `dnf upgrade` in `vekrona-update`.
+
 When a vendor rotates its signing key, the stage dies naming the expected and
 the found fingerprints. Verify the new fingerprint with the vendor out of
 band, then replace the vendored file and update the pin in

@@ -25,5 +25,5 @@ ensure_repo_enabled fedora-cisco-openh264
 ensure_copr "${VEKRONA_COPRS[@]}"
 
 ensure_repo_key 1password
-ensure_root_file "$ROOT/etc/yum.repos.d/1password.repo" /etc/yum.repos.d/1password.repo
+ensure_1password_repo_file
 ensure_repo_enabled 1password

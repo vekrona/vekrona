@@ -282,6 +282,10 @@ assert_repo_key_trusted() {
   repo_key_in_rpm_keyring "$repo" || die "rpm keyring lacks the pinned gpg key for repo '$repo': ${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]}"
 }
 
+ensure_1password_repo_file() {
+  ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" /etc/yum.repos.d/1password.repo
+}
+
 ensure_repo_key() {
   local repo="$1" src dst
   ensure_pkg gnupg2

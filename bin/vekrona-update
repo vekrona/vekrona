@@ -36,6 +36,7 @@ log "pre-update snapshot: $pre_number"
 
 log "=== dnf upgrade ==="
 root dnf upgrade --refresh -y
+ensure_1password_repo_file
 
 log "=== flatpak update ==="
 root flatpak update --system -y --noninteractive
