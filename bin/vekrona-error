@@ -64,10 +64,6 @@ def repo_root():
     return vekrona_cli.repo_root(__file__)
 
 
-def sibling_bin(name):
-    return vekrona_cli.sibling_bin(__file__, name)
-
-
 def resolve_tool(name):
     return vekrona_cli.resolve_tool(__file__, name)
 
