@@ -30,194 +30,53 @@
             <property name="position">0</property>
           </packing>
         </child>
-        <child>
-          <object class="GtkScrolledWindow">
-            <property name="visible">True</property>
-            <property name="can-focus">True</property>
-            <property name="hscrollbar-policy">never</property>
-            <property name="shadow-type">none</property>
-            <child>
-              <object class="GtkBox" id="mainBox">
-                <property name="visible">True</property>
+        <child internal-child="alignment">
+          <object class="GtkAlignment" id="AnacondaSpokeWindow-alignment1">
+            <property name="can-focus">False</property>
+            <child internal-child="action_area">
+              <object class="GtkBox" id="AnacondaSpokeWindow-action_area1">
                 <property name="can-focus">False</property>
                 <property name="orientation">vertical</property>
-                <property name="margin-left">36</property>
-                <property name="margin-right">36</property>
-                <property name="margin-top">12</property>
-                <property name="margin-bottom">24</property>
-                <property name="spacing">12</property>
                 <child>
-                  <object class="GtkLabel" id="disabledLabel">
-                    <property name="visible">False</property>
-                    <property name="no-show-all">True</property>
-                    <property name="label" translatable="yes">Fill in VEKRONA ACCOUNT first.</property>
-                    <property name="wrap">True</property>
-                    <property name="max-width-chars">70</property>
-                    <property name="xalign">0</property>
-                  </object>
-                  <packing>
-                    <property name="expand">False</property>
-                    <property name="fill">True</property>
-                  </packing>
-                </child>
-                <child>
-                  <object class="GtkBox" id="contentBox">
+                  <object class="GtkScrolledWindow">
                     <property name="visible">True</property>
-                    <property name="no-show-all">True</property>
-                    <property name="orientation">vertical</property>
-                    <property name="spacing">18</property>
+                    <property name="can-focus">True</property>
+                    <property name="hscrollbar-policy">never</property>
+                    <property name="shadow-type">none</property>
                     <child>
-                      <object class="GtkLabel" id="introLabel">
+                      <object class="GtkBox" id="mainBox">
                         <property name="visible">True</property>
-                        <property name="label" translatable="yes">Choose one password.</property>
-                        <property name="wrap">True</property>
-                        <property name="max-width-chars">70</property>
-                        <property name="xalign">0</property>
-                      </object>
-                      <packing>
-                        <property name="expand">False</property>
-                        <property name="fill">True</property>
-                      </packing>
-                    </child>
-                    <child>
-                      <object class="GtkFrame" id="passwordFrame">
-                        <property name="visible">True</property>
-                        <property name="label-xalign">0</property>
-                        <child type="label">
-                          <object class="GtkLabel">
-                            <property name="visible">True</property>
-                            <property name="label" translatable="yes">Password</property>
-                            <attributes>
-                              <attribute name="weight" value="bold"/>
-                            </attributes>
+                        <property name="can-focus">False</property>
+                        <property name="orientation">vertical</property>
+                        <property name="margin-left">36</property>
+                        <property name="margin-right">36</property>
+                        <property name="margin-top">12</property>
+                        <property name="margin-bottom">24</property>
+                        <property name="spacing">12</property>
+                        <child>
+                          <object class="GtkLabel" id="disabledLabel">
+                            <property name="visible">False</property>
+                            <property name="no-show-all">True</property>
+                            <property name="label" translatable="yes">Fill in VEKRONA ACCOUNT first.</property>
+                            <property name="wrap">True</property>
+                            <property name="max-width-chars">70</property>
+                            <property name="xalign">0</property>
                           </object>
+                          <packing>
+                            <property name="expand">False</property>
+                            <property name="fill">True</property>
+                          </packing>
                         </child>
                         <child>
-                          <object class="GtkGrid">
+                          <object class="GtkBox" id="contentBox">
                             <property name="visible">True</property>
-                            <property name="row-spacing">6</property>
-                            <property name="column-spacing">12</property>
-                            <property name="margin-left">12</property>
-                            <property name="margin-right">12</property>
-                            <property name="margin-top">8</property>
-                            <property name="margin-bottom">12</property>
-                            <child>
-                              <object class="GtkLabel" id="passwordLabel">
-                                <property name="visible">True</property>
-                                <property name="label" translatable="yes">Password</property>
-                                <property name="xalign">1</property>
-                              </object>
-                              <packing>
-                                <property name="left-attach">0</property>
-                                <property name="top-attach">0</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkEntry" id="passwordEntry">
-                                <property name="visible">True</property>
-                                <property name="can-focus">True</property>
-                                <property name="hexpand">True</property>
-                                <property name="visibility">False</property>
-                                <property name="input-purpose">password</property>
-                                <signal name="changed" handler="on_password_changed" swapped="no"/>
-                              </object>
-                              <packing>
-                                <property name="left-attach">1</property>
-                                <property name="top-attach">0</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="confirmLabel">
-                                <property name="visible">True</property>
-                                <property name="label" translatable="yes">Repeat the password</property>
-                                <property name="xalign">1</property>
-                              </object>
-                              <packing>
-                                <property name="left-attach">0</property>
-                                <property name="top-attach">1</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkEntry" id="confirmEntry">
-                                <property name="visible">True</property>
-                                <property name="can-focus">True</property>
-                                <property name="hexpand">True</property>
-                                <property name="visibility">False</property>
-                                <property name="input-purpose">password</property>
-                                <signal name="changed" handler="on_password_changed" swapped="no"/>
-                              </object>
-                              <packing>
-                                <property name="left-attach">1</property>
-                                <property name="top-attach">1</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="passwordHint">
-                                <property name="visible">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                              </object>
-                              <packing>
-                                <property name="left-attach">1</property>
-                                <property name="top-attach">2</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="passwordError">
-                                <property name="visible">False</property>
-                                <property name="no-show-all">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                                <attributes>
-                                  <attribute name="foreground" value="#a40000"/>
-                                </attributes>
-                                <style>
-                                  <class name="error"/>
-                                </style>
-                              </object>
-                              <packing>
-                                <property name="left-attach">1</property>
-                                <property name="top-attach">3</property>
-                              </packing>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                      <packing>
-                        <property name="expand">False</property>
-                        <property name="fill">True</property>
-                      </packing>
-                    </child>
-                    <child>
-                      <object class="GtkFrame" id="keyFrame">
-                        <property name="visible">True</property>
-                        <property name="label-xalign">0</property>
-                        <child type="label">
-                          <object class="GtkLabel">
-                            <property name="visible">True</property>
-                            <property name="label" translatable="yes">Security key</property>
-                            <attributes>
-                              <attribute name="weight" value="bold"/>
-                            </attributes>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="visible">True</property>
+                            <property name="no-show-all">True</property>
                             <property name="orientation">vertical</property>
-                            <property name="spacing">8</property>
-                            <property name="margin-left">12</property>
-                            <property name="margin-right">12</property>
-                            <property name="margin-top">8</property>
-                            <property name="margin-bottom">12</property>
+                            <property name="spacing">18</property>
                             <child>
-                              <object class="GtkLabel" id="keyWhatLabel">
+                              <object class="GtkLabel" id="introLabel">
                                 <property name="visible">True</property>
-                                <property name="label"></property>
+                                <property name="label" translatable="yes">Choose one password.</property>
                                 <property name="wrap">True</property>
                                 <property name="max-width-chars">70</property>
                                 <property name="xalign">0</property>
@@ -228,354 +87,111 @@
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkLabel" id="keyUseLabel">
+                              <object class="GtkFrame" id="passwordFrame">
                                 <property name="visible">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="keyStepsLabel">
-                                <property name="visible">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="keyStateLabel">
-                                <property name="visible">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkBox">
-                                <property name="visible">True</property>
-                                <property name="spacing">12</property>
-                                <child>
-                                  <object class="GtkComboBoxText" id="keyCombo">
+                                <property name="label-xalign">0</property>
+                                <child type="label">
+                                  <object class="GtkLabel">
                                     <property name="visible">True</property>
-                                    <property name="hexpand">True</property>
-                                    <signal name="changed" handler="on_key_combo_changed" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">True</property>
-                                    <property name="fill">True</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkButton" id="keyCheckButton">
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="label" translatable="yes">Check again</property>
-                                    <signal name="clicked" handler="on_key_check_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                  </packing>
-                                </child>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkGrid" id="keySetupBox">
-                                <property name="visible">True</property>
-                                <property name="no-show-all">True</property>
-                                <property name="row-spacing">6</property>
-                                <property name="column-spacing">12</property>
-                                <child>
-                                  <object class="GtkLabel" id="keyPinLabel">
-                                    <property name="visible">True</property>
-                                    <property name="label" translatable="yes">PIN</property>
-                                    <property name="xalign">1</property>
-                                  </object>
-                                  <packing>
-                                    <property name="left-attach">0</property>
-                                    <property name="top-attach">0</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkEntry" id="keyPinEntry">
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="hexpand">True</property>
-                                    <property name="visibility">False</property>
-                                    <property name="input-purpose">password</property>
-                                    <signal name="changed" handler="on_key_pin_changed" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="left-attach">1</property>
-                                    <property name="top-attach">0</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkLabel" id="keyConfirmLabel">
-                                    <property name="visible">True</property>
-                                    <property name="no-show-all">True</property>
-                                    <property name="label" translatable="yes">Repeat the PIN</property>
-                                    <property name="xalign">1</property>
-                                  </object>
-                                  <packing>
-                                    <property name="left-attach">0</property>
-                                    <property name="top-attach">1</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkEntry" id="keyConfirmEntry">
-                                    <property name="visible">True</property>
-                                    <property name="no-show-all">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="hexpand">True</property>
-                                    <property name="visibility">False</property>
-                                    <property name="input-purpose">password</property>
-                                    <signal name="changed" handler="on_key_pin_changed" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="left-attach">1</property>
-                                    <property name="top-attach">1</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkLabel" id="keyPinHint">
-                                    <property name="visible">True</property>
-                                    <property name="no-show-all">True</property>
-                                    <property name="label"></property>
-                                    <property name="wrap">True</property>
-                                    <property name="max-width-chars">70</property>
-                                    <property name="xalign">0</property>
-                                  </object>
-                                  <packing>
-                                    <property name="left-attach">1</property>
-                                    <property name="top-attach">2</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkButton" id="keyRegisterButton">
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="label" translatable="yes">Register key</property>
-                                    <property name="halign">start</property>
-                                    <signal name="clicked" handler="on_key_register_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="left-attach">1</property>
-                                    <property name="top-attach">3</property>
-                                  </packing>
-                                </child>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkBox" id="keyRegisteredBox">
-                                <property name="visible">False</property>
-                                <property name="no-show-all">True</property>
-                                <property name="spacing">12</property>
-                                <child>
-                                  <object class="GtkButton" id="keyRemoveButton">
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="label" translatable="yes">Remove</property>
-                                    <signal name="clicked" handler="on_key_remove_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                  </packing>
-                                </child>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkProgressBar" id="keyProgress">
-                                <property name="visible">False</property>
-                                <property name="no-show-all">True</property>
-                                <property name="show-text">True</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="keyError">
-                                <property name="visible">False</property>
-                                <property name="no-show-all">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                                <attributes>
-                                  <attribute name="foreground" value="#a40000"/>
-                                </attributes>
-                                <style>
-                                  <class name="error"/>
-                                </style>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkExpander" id="keyDetails">
-                                <property name="visible">True</property>
-                                <property name="can-focus">True</property>
-                                <property name="label" translatable="yes">Details for troubleshooting</property>
-                                <child>
-                                  <object class="GtkLabel" id="keyDetailsLabel">
-                                    <property name="visible">True</property>
-                                    <property name="label"></property>
-                                    <property name="wrap">True</property>
-                                    <property name="max-width-chars">70</property>
-                                    <property name="xalign">0</property>
-                                    <property name="selectable">True</property>
+                                    <property name="label" translatable="yes">Password</property>
                                     <attributes>
-                                      <attribute name="font-desc" value="monospace"/>
+                                      <attribute name="weight" value="bold"/>
                                     </attributes>
                                   </object>
                                 </child>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                      <packing>
-                        <property name="expand">False</property>
-                        <property name="fill">True</property>
-                      </packing>
-                    </child>
-                    <child>
-                      <object class="GtkFrame" id="fpFrame">
-                        <property name="visible">True</property>
-                        <property name="label-xalign">0</property>
-                        <child type="label">
-                          <object class="GtkLabel">
-                            <property name="visible">True</property>
-                            <property name="label" translatable="yes">Fingerprint</property>
-                            <attributes>
-                              <attribute name="weight" value="bold"/>
-                            </attributes>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="visible">True</property>
-                            <property name="orientation">vertical</property>
-                            <property name="spacing">8</property>
-                            <property name="margin-left">12</property>
-                            <property name="margin-right">12</property>
-                            <property name="margin-top">8</property>
-                            <property name="margin-bottom">12</property>
-                            <child>
-                              <object class="GtkLabel" id="fpWhatLabel">
-                                <property name="visible">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="fpUseLabel">
-                                <property name="visible">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="fpStepsLabel">
-                                <property name="visible">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="fpStateLabel">
-                                <property name="visible">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkBox">
-                                <property name="visible">True</property>
-                                <property name="spacing">12</property>
                                 <child>
-                                  <object class="GtkComboBoxText" id="readerCombo">
+                                  <object class="GtkGrid">
                                     <property name="visible">True</property>
-                                    <property name="hexpand">True</property>
-                                    <signal name="changed" handler="on_reader_combo_changed" swapped="no"/>
+                                    <property name="row-spacing">6</property>
+                                    <property name="column-spacing">12</property>
+                                    <property name="margin-left">12</property>
+                                    <property name="margin-right">12</property>
+                                    <property name="margin-top">8</property>
+                                    <property name="margin-bottom">12</property>
+                                    <child>
+                                      <object class="GtkLabel" id="passwordLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label" translatable="yes">Password</property>
+                                        <property name="xalign">1</property>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">0</property>
+                                        <property name="top-attach">0</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkEntry" id="passwordEntry">
+                                        <property name="visible">True</property>
+                                        <property name="can-focus">True</property>
+                                        <property name="hexpand">True</property>
+                                        <property name="visibility">False</property>
+                                        <property name="input-purpose">password</property>
+                                        <signal name="changed" handler="on_password_changed" swapped="no"/>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">1</property>
+                                        <property name="top-attach">0</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="confirmLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label" translatable="yes">Repeat the password</property>
+                                        <property name="xalign">1</property>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">0</property>
+                                        <property name="top-attach">1</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkEntry" id="confirmEntry">
+                                        <property name="visible">True</property>
+                                        <property name="can-focus">True</property>
+                                        <property name="hexpand">True</property>
+                                        <property name="visibility">False</property>
+                                        <property name="input-purpose">password</property>
+                                        <signal name="changed" handler="on_password_changed" swapped="no"/>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">1</property>
+                                        <property name="top-attach">1</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="passwordHint">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">1</property>
+                                        <property name="top-attach">2</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="passwordError">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                        <attributes>
+                                          <attribute name="foreground" value="#a40000"/>
+                                        </attributes>
+                                        <style>
+                                          <class name="error"/>
+                                        </style>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">1</property>
+                                        <property name="top-attach">3</property>
+                                      </packing>
+                                    </child>
                                   </object>
-                                  <packing>
-                                    <property name="expand">True</property>
-                                    <property name="fill">True</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkButton" id="fpCheckButton">
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="label" translatable="yes">Check again</property>
-                                    <signal name="clicked" handler="on_fp_check_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                  </packing>
                                 </child>
                               </object>
                               <packing>
@@ -584,111 +200,510 @@
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkBox">
+                              <object class="GtkFrame" id="keyFrame">
                                 <property name="visible">True</property>
-                                <property name="spacing">12</property>
-                                <child>
-                                  <object class="GtkComboBoxText" id="fingerCombo">
+                                <property name="label-xalign">0</property>
+                                <child type="label">
+                                  <object class="GtkLabel">
                                     <property name="visible">True</property>
-                                    <property name="no-show-all">True</property>
-                                    <property name="hexpand">True</property>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">True</property>
-                                    <property name="fill">True</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkButton" id="fpEnrollButton">
-                                    <property name="visible">True</property>
-                                    <property name="no-show-all">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="label" translatable="yes">Enroll fingerprint</property>
-                                    <signal name="clicked" handler="on_fp_enroll_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                  </packing>
-                                </child>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkBox" id="fpRegisteredBox">
-                                <property name="visible">False</property>
-                                <property name="no-show-all">True</property>
-                                <property name="spacing">12</property>
-                                <child>
-                                  <object class="GtkButton" id="fpRemoveButton">
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="label" translatable="yes">Remove</property>
-                                    <signal name="clicked" handler="on_fp_remove_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                  </packing>
-                                </child>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkProgressBar" id="fpProgress">
-                                <property name="visible">False</property>
-                                <property name="no-show-all">True</property>
-                                <property name="show-text">True</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="fpError">
-                                <property name="visible">False</property>
-                                <property name="no-show-all">True</property>
-                                <property name="label"></property>
-                                <property name="wrap">True</property>
-                                <property name="max-width-chars">70</property>
-                                <property name="xalign">0</property>
-                                <attributes>
-                                  <attribute name="foreground" value="#a40000"/>
-                                </attributes>
-                                <style>
-                                  <class name="error"/>
-                                </style>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkExpander" id="fpDetails">
-                                <property name="visible">True</property>
-                                <property name="can-focus">True</property>
-                                <property name="label" translatable="yes">Details for troubleshooting</property>
-                                <child>
-                                  <object class="GtkLabel" id="fpDetailsLabel">
-                                    <property name="visible">True</property>
-                                    <property name="label"></property>
-                                    <property name="wrap">True</property>
-                                    <property name="max-width-chars">70</property>
-                                    <property name="xalign">0</property>
-                                    <property name="selectable">True</property>
+                                    <property name="label" translatable="yes">Security key</property>
                                     <attributes>
-                                      <attribute name="font-desc" value="monospace"/>
+                                      <attribute name="weight" value="bold"/>
                                     </attributes>
                                   </object>
                                 </child>
+                                <child>
+                                  <object class="GtkBox">
+                                    <property name="visible">True</property>
+                                    <property name="orientation">vertical</property>
+                                    <property name="spacing">8</property>
+                                    <property name="margin-left">12</property>
+                                    <property name="margin-right">12</property>
+                                    <property name="margin-top">8</property>
+                                    <property name="margin-bottom">12</property>
+                                    <child>
+                                      <object class="GtkLabel" id="keyWhatLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="keyUseLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="keyStepsLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="keyStateLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkBox">
+                                        <property name="visible">True</property>
+                                        <property name="spacing">12</property>
+                                        <child>
+                                          <object class="GtkComboBoxText" id="keyCombo">
+                                            <property name="visible">True</property>
+                                            <property name="hexpand">True</property>
+                                            <signal name="changed" handler="on_key_combo_changed" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">True</property>
+                                            <property name="fill">True</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkButton" id="keyCheckButton">
+                                            <property name="visible">True</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="label" translatable="yes">Check again</property>
+                                            <signal name="clicked" handler="on_key_check_clicked" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">True</property>
+                                          </packing>
+                                        </child>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkGrid" id="keySetupBox">
+                                        <property name="visible">True</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="row-spacing">6</property>
+                                        <property name="column-spacing">12</property>
+                                        <child>
+                                          <object class="GtkLabel" id="keyPinLabel">
+                                            <property name="visible">True</property>
+                                            <property name="label" translatable="yes">PIN</property>
+                                            <property name="xalign">1</property>
+                                          </object>
+                                          <packing>
+                                            <property name="left-attach">0</property>
+                                            <property name="top-attach">0</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkEntry" id="keyPinEntry">
+                                            <property name="visible">True</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="hexpand">True</property>
+                                            <property name="visibility">False</property>
+                                            <property name="input-purpose">password</property>
+                                            <signal name="changed" handler="on_key_pin_changed" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="left-attach">1</property>
+                                            <property name="top-attach">0</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkLabel" id="keyConfirmLabel">
+                                            <property name="visible">True</property>
+                                            <property name="no-show-all">True</property>
+                                            <property name="label" translatable="yes">Repeat the PIN</property>
+                                            <property name="xalign">1</property>
+                                          </object>
+                                          <packing>
+                                            <property name="left-attach">0</property>
+                                            <property name="top-attach">1</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkEntry" id="keyConfirmEntry">
+                                            <property name="visible">True</property>
+                                            <property name="no-show-all">True</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="hexpand">True</property>
+                                            <property name="visibility">False</property>
+                                            <property name="input-purpose">password</property>
+                                            <signal name="changed" handler="on_key_pin_changed" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="left-attach">1</property>
+                                            <property name="top-attach">1</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkLabel" id="keyPinHint">
+                                            <property name="visible">True</property>
+                                            <property name="no-show-all">True</property>
+                                            <property name="label"></property>
+                                            <property name="wrap">True</property>
+                                            <property name="max-width-chars">70</property>
+                                            <property name="xalign">0</property>
+                                          </object>
+                                          <packing>
+                                            <property name="left-attach">1</property>
+                                            <property name="top-attach">2</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkButton" id="keyRegisterButton">
+                                            <property name="visible">True</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="label" translatable="yes">Register key</property>
+                                            <property name="halign">start</property>
+                                            <signal name="clicked" handler="on_key_register_clicked" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="left-attach">1</property>
+                                            <property name="top-attach">3</property>
+                                          </packing>
+                                        </child>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkBox" id="keyRegisteredBox">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="spacing">12</property>
+                                        <child>
+                                          <object class="GtkButton" id="keyRemoveButton">
+                                            <property name="visible">True</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="label" translatable="yes">Remove</property>
+                                            <signal name="clicked" handler="on_key_remove_clicked" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">True</property>
+                                          </packing>
+                                        </child>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkProgressBar" id="keyProgress">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="show-text">True</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="keyError">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                        <attributes>
+                                          <attribute name="foreground" value="#a40000"/>
+                                        </attributes>
+                                        <style>
+                                          <class name="error"/>
+                                        </style>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkExpander" id="keyDetails">
+                                        <property name="visible">True</property>
+                                        <property name="can-focus">True</property>
+                                        <property name="label" translatable="yes">Details for troubleshooting</property>
+                                        <child>
+                                          <object class="GtkLabel" id="keyDetailsLabel">
+                                            <property name="visible">True</property>
+                                            <property name="label"></property>
+                                            <property name="wrap">True</property>
+                                            <property name="max-width-chars">70</property>
+                                            <property name="xalign">0</property>
+                                            <property name="selectable">True</property>
+                                            <attributes>
+                                              <attribute name="font-desc" value="monospace"/>
+                                            </attributes>
+                                          </object>
+                                        </child>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                  </object>
+                                </child>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkFrame" id="fpFrame">
+                                <property name="visible">True</property>
+                                <property name="label-xalign">0</property>
+                                <child type="label">
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Fingerprint</property>
+                                    <attributes>
+                                      <attribute name="weight" value="bold"/>
+                                    </attributes>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkBox">
+                                    <property name="visible">True</property>
+                                    <property name="orientation">vertical</property>
+                                    <property name="spacing">8</property>
+                                    <property name="margin-left">12</property>
+                                    <property name="margin-right">12</property>
+                                    <property name="margin-top">8</property>
+                                    <property name="margin-bottom">12</property>
+                                    <child>
+                                      <object class="GtkLabel" id="fpWhatLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="fpUseLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="fpStepsLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="fpStateLabel">
+                                        <property name="visible">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkBox">
+                                        <property name="visible">True</property>
+                                        <property name="spacing">12</property>
+                                        <child>
+                                          <object class="GtkComboBoxText" id="readerCombo">
+                                            <property name="visible">True</property>
+                                            <property name="hexpand">True</property>
+                                            <signal name="changed" handler="on_reader_combo_changed" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">True</property>
+                                            <property name="fill">True</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkButton" id="fpCheckButton">
+                                            <property name="visible">True</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="label" translatable="yes">Check again</property>
+                                            <signal name="clicked" handler="on_fp_check_clicked" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">True</property>
+                                          </packing>
+                                        </child>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkBox">
+                                        <property name="visible">True</property>
+                                        <property name="spacing">12</property>
+                                        <child>
+                                          <object class="GtkComboBoxText" id="fingerCombo">
+                                            <property name="visible">True</property>
+                                            <property name="no-show-all">True</property>
+                                            <property name="hexpand">True</property>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">True</property>
+                                            <property name="fill">True</property>
+                                          </packing>
+                                        </child>
+                                        <child>
+                                          <object class="GtkButton" id="fpEnrollButton">
+                                            <property name="visible">True</property>
+                                            <property name="no-show-all">True</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="label" translatable="yes">Enroll fingerprint</property>
+                                            <signal name="clicked" handler="on_fp_enroll_clicked" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">True</property>
+                                          </packing>
+                                        </child>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkBox" id="fpRegisteredBox">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="spacing">12</property>
+                                        <child>
+                                          <object class="GtkButton" id="fpRemoveButton">
+                                            <property name="visible">True</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="label" translatable="yes">Remove</property>
+                                            <signal name="clicked" handler="on_fp_remove_clicked" swapped="no"/>
+                                          </object>
+                                          <packing>
+                                            <property name="expand">False</property>
+                                            <property name="fill">True</property>
+                                          </packing>
+                                        </child>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkProgressBar" id="fpProgress">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="show-text">True</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="fpError">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                        <attributes>
+                                          <attribute name="foreground" value="#a40000"/>
+                                        </attributes>
+                                        <style>
+                                          <class name="error"/>
+                                        </style>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkExpander" id="fpDetails">
+                                        <property name="visible">True</property>
+                                        <property name="can-focus">True</property>
+                                        <property name="label" translatable="yes">Details for troubleshooting</property>
+                                        <child>
+                                          <object class="GtkLabel" id="fpDetailsLabel">
+                                            <property name="visible">True</property>
+                                            <property name="label"></property>
+                                            <property name="wrap">True</property>
+                                            <property name="max-width-chars">70</property>
+                                            <property name="xalign">0</property>
+                                            <property name="selectable">True</property>
+                                            <attributes>
+                                              <attribute name="font-desc" value="monospace"/>
+                                            </attributes>
+                                          </object>
+                                        </child>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                  </object>
+                                </child>
                               </object>
                               <packing>
                                 <property name="expand">False</property>
@@ -696,27 +711,23 @@
                               </packing>
                             </child>
                           </object>
+                          <packing>
+                            <property name="expand">False</property>
+                            <property name="fill">True</property>
+                          </packing>
                         </child>
                       </object>
-                      <packing>
-                        <property name="expand">False</property>
-                        <property name="fill">True</property>
-                      </packing>
                     </child>
                   </object>
                   <packing>
-                    <property name="expand">False</property>
+                    <property name="expand">True</property>
                     <property name="fill">True</property>
+                    <property name="position">1</property>
                   </packing>
                 </child>
               </object>
             </child>
           </object>
-          <packing>
-            <property name="expand">True</property>
-            <property name="fill">True</property>
-            <property name="position">1</property>
-          </packing>
         </child>
       </object>
     </child>

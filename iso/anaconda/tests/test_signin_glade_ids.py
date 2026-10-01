@@ -10,6 +10,8 @@ SPOKE_WINDOW_IDS = {
     "AnacondaSpokeWindow-main_box1",
     "AnacondaSpokeWindow-nav_box1",
     "AnacondaSpokeWindow-nav_area1",
+    "AnacondaSpokeWindow-alignment1",
+    "AnacondaSpokeWindow-action_area1",
 }
 
 CONTRACT_IDS = {

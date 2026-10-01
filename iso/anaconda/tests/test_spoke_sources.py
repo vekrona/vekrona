@@ -66,6 +66,18 @@ class SpokeMatchesItsGladeTest(unittest.TestCase):
                 self.assertIn(class_constant(class_node, "mainWidgetName"), ids)
                 self.assertLessEqual(set(class_constant(class_node, "builderObjects")), ids)
 
+    def test_content_sits_in_the_spoke_window_action_area(self):
+        for class_name in SPOKES:
+            with self.subTest(class_name):
+                root = glade_of(class_name)
+                action_area = next(
+                    child.find("object")
+                    for child in root.iter("child")
+                    if child.get("internal-child") == "action_area"
+                )
+                content = {obj.get("id") for obj in action_area.iter("object")}
+                self.assertTrue({"mainGrid", "mainBox"} & content)
+
 
 class SpokeImportsExistTest(unittest.TestCase):
     def test_every_name_imported_from_a_module_available_here_exists(self):

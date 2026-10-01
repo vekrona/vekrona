@@ -30,116 +30,127 @@
             <property name="position">0</property>
           </packing>
         </child>
-        <child>
-          <object class="GtkGrid" id="mainGrid">
-            <property name="visible">True</property>
+        <child internal-child="alignment">
+          <object class="GtkAlignment" id="AnacondaSpokeWindow-alignment1">
             <property name="can-focus">False</property>
-            <property name="margin-left">72</property>
-            <property name="margin-right">72</property>
-            <property name="margin-top">24</property>
-            <property name="row-spacing">6</property>
-            <property name="column-spacing">12</property>
+            <child internal-child="action_area">
+              <object class="GtkBox" id="AnacondaSpokeWindow-action_area1">
+                <property name="can-focus">False</property>
+                <property name="orientation">vertical</property>
+                <child>
+                  <object class="GtkGrid" id="mainGrid">
+                    <property name="visible">True</property>
+                    <property name="can-focus">False</property>
+                    <property name="margin-left">72</property>
+                    <property name="margin-right">72</property>
+                    <property name="margin-top">24</property>
+                    <property name="row-spacing">6</property>
+                    <property name="column-spacing">12</property>
 
-            <child>
-              <object class="GtkLabel" id="fullNameLabel">
-                <property name="visible">True</property>
-                <property name="label" translatable="yes">Full name</property>
-                <property name="xalign">1</property>
-              </object>
-              <packing><property name="left-attach">0</property><property name="top-attach">0</property></packing>
-            </child>
-            <child>
-              <object class="GtkEntry" id="fullNameEntry">
-                <property name="visible">True</property>
-                <property name="can-focus">True</property>
-                <property name="hexpand">True</property>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">0</property></packing>
-            </child>
+                    <child>
+                      <object class="GtkLabel" id="fullNameLabel">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">Full name</property>
+                        <property name="xalign">1</property>
+                      </object>
+                      <packing><property name="left-attach">0</property><property name="top-attach">0</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkEntry" id="fullNameEntry">
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="hexpand">True</property>
+                      </object>
+                      <packing><property name="left-attach">1</property><property name="top-attach">0</property></packing>
+                    </child>
 
-            <child>
-              <object class="GtkLabel" id="usernameLabel">
-                <property name="visible">True</property>
-                <property name="label" translatable="yes">Username</property>
-                <property name="xalign">1</property>
-              </object>
-              <packing><property name="left-attach">0</property><property name="top-attach">1</property></packing>
-            </child>
-            <child>
-              <object class="GtkEntry" id="usernameEntry">
-                <property name="visible">True</property>
-                <property name="can-focus">True</property>
-                <property name="hexpand">True</property>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">1</property></packing>
-            </child>
-            <child>
-              <object class="GtkLabel" id="usernameError">
-                <property name="visible">False</property>
-                <property name="no-show-all">True</property>
-                <property name="xalign">0</property>
-                <attributes><attribute name="foreground" value="#a40000"/></attributes>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">2</property></packing>
-            </child>
+                    <child>
+                      <object class="GtkLabel" id="usernameLabel">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">Username</property>
+                        <property name="xalign">1</property>
+                      </object>
+                      <packing><property name="left-attach">0</property><property name="top-attach">1</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkEntry" id="usernameEntry">
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="hexpand">True</property>
+                      </object>
+                      <packing><property name="left-attach">1</property><property name="top-attach">1</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="usernameError">
+                        <property name="visible">False</property>
+                        <property name="no-show-all">True</property>
+                        <property name="xalign">0</property>
+                        <attributes><attribute name="foreground" value="#a40000"/></attributes>
+                      </object>
+                      <packing><property name="left-attach">1</property><property name="top-attach">2</property></packing>
+                    </child>
 
-            <child>
-              <object class="GtkLabel" id="hostnameLabel">
-                <property name="visible">True</property>
-                <property name="label" translatable="yes">Hostname</property>
-                <property name="xalign">1</property>
-              </object>
-              <packing><property name="left-attach">0</property><property name="top-attach">3</property></packing>
-            </child>
-            <child>
-              <object class="GtkEntry" id="hostnameEntry">
-                <property name="visible">True</property>
-                <property name="can-focus">True</property>
-                <property name="hexpand">True</property>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">3</property></packing>
-            </child>
-            <child>
-              <object class="GtkLabel" id="hostnameError">
-                <property name="visible">False</property>
-                <property name="no-show-all">True</property>
-                <property name="xalign">0</property>
-                <attributes><attribute name="foreground" value="#a40000"/></attributes>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">4</property></packing>
-            </child>
+                    <child>
+                      <object class="GtkLabel" id="hostnameLabel">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">Hostname</property>
+                        <property name="xalign">1</property>
+                      </object>
+                      <packing><property name="left-attach">0</property><property name="top-attach">3</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkEntry" id="hostnameEntry">
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="hexpand">True</property>
+                      </object>
+                      <packing><property name="left-attach">1</property><property name="top-attach">3</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="hostnameError">
+                        <property name="visible">False</property>
+                        <property name="no-show-all">True</property>
+                        <property name="xalign">0</property>
+                        <attributes><attribute name="foreground" value="#a40000"/></attributes>
+                      </object>
+                      <packing><property name="left-attach">1</property><property name="top-attach">4</property></packing>
+                    </child>
 
-            <child>
-              <object class="GtkLabel" id="timezoneLabel">
-                <property name="visible">True</property>
-                <property name="label" translatable="yes">Timezone</property>
-                <property name="xalign">1</property>
+                    <child>
+                      <object class="GtkLabel" id="timezoneLabel">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">Timezone</property>
+                        <property name="xalign">1</property>
+                      </object>
+                      <packing><property name="left-attach">0</property><property name="top-attach">5</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkEntry" id="timezoneEntry">
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="hexpand">True</property>
+                      </object>
+                      <packing><property name="left-attach">1</property><property name="top-attach">5</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="timezoneError">
+                        <property name="visible">False</property>
+                        <property name="no-show-all">True</property>
+                        <property name="xalign">0</property>
+                        <attributes><attribute name="foreground" value="#a40000"/></attributes>
+                      </object>
+                      <packing><property name="left-attach">1</property><property name="top-attach">6</property></packing>
+                    </child>
+                  </object>
+                  <packing>
+                    <property name="expand">True</property>
+                    <property name="fill">True</property>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
               </object>
-              <packing><property name="left-attach">0</property><property name="top-attach">5</property></packing>
-            </child>
-            <child>
-              <object class="GtkEntry" id="timezoneEntry">
-                <property name="visible">True</property>
-                <property name="can-focus">True</property>
-                <property name="hexpand">True</property>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">5</property></packing>
-            </child>
-            <child>
-              <object class="GtkLabel" id="timezoneError">
-                <property name="visible">False</property>
-                <property name="no-show-all">True</property>
-                <property name="xalign">0</property>
-                <attributes><attribute name="foreground" value="#a40000"/></attributes>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">6</property></packing>
             </child>
           </object>
-          <packing>
-            <property name="expand">True</property>
-            <property name="fill">True</property>
-            <property name="position">1</property>
-          </packing>
         </child>
       </object>
     </child>
