@@ -170,8 +170,17 @@ launch() {
     return 0
   fi
 
+  close_notification_center
+
   "${systemd_run_argv[@]}" >/dev/null 2>&1 \
     || die "failed to launch agent '$tool' (systemd-run --user --unit=$unit failed)"
+}
+
+close_notification_center() {
+  command -v dms >/dev/null 2>&1 || return 0
+  dms ipc call notifications close >/dev/null 2>&1 && return 0
+  printf '%s: WARN: could not close the DMS notification center\n' "$PROG" >&2
+  notify-send -a vekrona "$PROG" "could not close the DMS notification center" >/dev/null 2>&1 || true
 }
 
 cmd_set() {
