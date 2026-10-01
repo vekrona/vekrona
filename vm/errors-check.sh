@@ -148,6 +148,20 @@ check_unread_tracks() {
   echo "ok: unread file tracks new/ack transitions"
 }
 
+check_ack_all_clears_unread() {
+  local marker id
+  marker="vekrona-errors-check-ack-all-$RANDOM$RANDOM"
+  logger -p user.err "$marker"
+  id="$(find_record_by_marker "$marker" 30)" || fail "an ack-all entry did not produce a record"
+  CREATED_IDS+=("$id")
+  wait_until 10 bash -c "[[ \"\$(cat '$STORE_DIR/unread')\" -gt 0 ]]" \
+    || fail "the unread count did not rise above 0 for a new error"
+  vekrona-error ack --all
+  [[ "$(cat "$STORE_DIR/unread")" == 0 ]] || fail "unread is not 0 after ack --all"
+  [[ "$(record_field "$id" status)" == seen ]] || fail "ack --all did not set status=seen"
+  echo "ok: ack --all marks every new error seen and resets unread to 0"
+}
+
 check_cursor_resume() {
   local marker id
   systemctl --user stop vekrona-errors
@@ -227,6 +241,7 @@ main() {
   check_repeat_bumps_count
   check_mute_suppresses
   check_unread_tracks
+  check_ack_all_clears_unread
   check_cursor_resume
   check_notify_fix_action
   check_no_notify_failures_logged
