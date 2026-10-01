@@ -18,6 +18,7 @@ root systemctl daemon-reload
 root install -d -m 0755 -o greetd -g greetd /var/cache/tuigreet
 assert "tuigreet cache dir exists" test -d /var/cache/tuigreet
 
+ensure_root_file "$VEKRONA_ROOT/etc/vekrona/errors-mute.d/10-vendor-noise.conf" /etc/vekrona/errors-mute.d/10-vendor-noise.conf
 ensure_root_file "$VEKRONA_ROOT/etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf" /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
 ensure_root_file "$VEKRONA_ROOT/etc/systemd/oomd.conf.d/vekrona.conf" /etc/systemd/oomd.conf.d/vekrona.conf
 USB_AUTOSUSPEND_DROPIN=/etc/modprobe.d/vekrona-usb-autosuspend.conf

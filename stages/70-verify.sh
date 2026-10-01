@@ -230,6 +230,7 @@ if ran 40-system; then
   check assert "no tmpfiles.d entry for greetd's cache dir (dracut copies it into an initramfs without the user)" file_absent /etc/tmpfiles.d/vekrona-tuigreet.conf
   check assert "/var/cache/tuigreet exists" dir_exists /var/cache/tuigreet
   check assert "/var/cache/tuigreet owned by greetd" owned_by /var/cache/tuigreet greetd
+  check assert "default error mutes installed" file_exists /etc/vekrona/errors-mute.d/10-vendor-noise.conf
   check assert "logind inhibit-delay drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
   check assert "oomd drop-in present" file_exists /etc/systemd/oomd.conf.d/vekrona.conf
   check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf

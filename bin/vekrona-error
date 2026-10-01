@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -82,6 +83,10 @@ def config_dir():
 
 def mute_file():
     return os.path.join(config_dir(), "errors-mute")
+
+
+def default_mutes_dir():
+    return os.environ.get("VEKRONA_ERRORS_MUTE_DIR") or "/etc/vekrona/errors-mute.d"
 
 
 def cursor_file():
@@ -292,6 +297,54 @@ def load_mute_patterns(cache=None):
 def mute_matches(fingerprint, title, cache=None):
     patterns = load_mute_patterns(cache)
     return any(p.search(fingerprint) or p.search(title) for p in patterns)
+
+
+class DefaultMute:
+    def __init__(self, identifier, message, reason):
+        self.identifier = identifier
+        self.message = re.compile(message)
+        self.reason = reason
+
+    def matches(self, classified):
+        return (classified["source"] == "journal"
+                and classified["identifier"] == self.identifier
+                and self.message.fullmatch(classified["summary"]) is not None)
+
+
+def parse_default_mute(entry):
+    if not isinstance(entry, dict):
+        raise ValueError("must be a [[mute]] table")
+    fields = {name: entry.get(name) for name in ("identifier", "message", "reason")}
+    missing = [name for name, value in fields.items() if not isinstance(value, str) or not value]
+    if missing:
+        raise ValueError(f"needs a non-empty string for: {', '.join(missing)}")
+    return DefaultMute(**fields)
+
+
+def load_default_mutes():
+    mutes = []
+    invalid = []
+    directory = default_mutes_dir()
+    if not os.path.isdir(directory):
+        return mutes, invalid
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".conf"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            with open(path, "rb") as f:
+                entries = tomllib.load(f).get("mute", [])
+            if not isinstance(entries, list):
+                raise ValueError("'mute' must be an array of [[mute]] tables")
+        except (OSError, ValueError) as exc:
+            invalid.append((path, str(exc)))
+            continue
+        for index, entry in enumerate(entries, 1):
+            try:
+                mutes.append(parse_default_mute(entry))
+            except (ValueError, re.error) as exc:
+                invalid.append((f"{path} [[mute]] #{index}", str(exc)))
+    return mutes, invalid
 
 
 def apply_mute(rec):
@@ -825,6 +878,7 @@ def cmd_watch(args):
             self.notif_map = {}
             self.mute_cache = {}
             self.toasted_invalid_mute_lines = set()
+            self.default_mutes, self.invalid_default_mutes = load_default_mutes()
             self.quarantine_toasted = set()
             self.error_toast_times = {}
             self.error_toast_suppressed = {}
@@ -1034,7 +1088,7 @@ def cmd_watch(args):
             return (now - old).total_seconds() > DEDUPE_WINDOW
 
         def _check_invalid_mute_lines(self):
-            invalid = self.mute_cache.get("invalid") or []
+            invalid = (self.mute_cache.get("invalid") or []) + self.invalid_default_mutes
             for line, reason in invalid:
                 if line in self.toasted_invalid_mute_lines:
                     continue
@@ -1057,6 +1111,8 @@ def cmd_watch(args):
 
             muted = mute_matches(fingerprint, title, self.mute_cache)
             self._check_invalid_mute_lines()
+            if any(mute.matches(classified) for mute in self.default_mutes):
+                return
 
             existing_id = self.fingerprint_index.get(fingerprint)
 

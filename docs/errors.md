@@ -59,7 +59,34 @@ record `launched`; the latter appends the error's fingerprint to
 `~/.config/vekrona/errors-mute` (one regex per line, matched against both the
 fingerprint and the title; an unparseable line is toasted once by name rather
 than silently ignored) and marks it muted, so a matching error is dropped
-silently from then on, no record, no toast. More than 5 toasts within 30
+silently from then on, no record, no toast. Mutes the repo itself ships live in `/etc/vekrona/errors-mute.d/*.conf`
+(sources: `etc/vekrona/errors-mute.d/`, installed by stage `40-system`), for
+vendor log lines that are priority `err` but harmless on every install. Each
+file is TOML with one `[[mute]]` table per rule, and the reason is a field of
+the rule, not a comment:
+
+```toml
+[[mute]]
+identifier = "kernel"
+message = 'virt/tdx: TDX not supported by the host platform'
+reason = "Missing optional CPU feature, not a fault."
+```
+
+A rule matches only a plain journal entry (not a coredump, unit failure, OOM
+kill or report) whose `SYSLOG_IDENTIFIER` equals `identifier` exactly and
+whose whole message matches the `message` regex (`fullmatch`, so it is
+anchored at both ends). `identifier`, `message` and `reason` are all
+required. A matching entry produces no record and no toast, the same as a
+user mute; any other error from the same identifier still surfaces. A file
+that is not valid TOML, or a rule that is incomplete or has a bad regex, is
+ignored and toasted once by name, like an invalid line in the user file.
+The files are read when `vekrona-errors.service` starts. Shipped rules cover
+the TDX kernel line and `greetd`'s `gkr-pam: unable to locate daemon control
+file` (see `docs/known-issues.md`); add a rule here, with its reason, rather
+than muting per machine. `VEKRONA_ERRORS_MUTE_DIR` overrides the directory
+(the tests use it).
+
+More than 5 toasts within 30
 seconds collapse into one "N new errors" toast instead, whose action opens a
 picker rather than any single error. The watcher remembers which notification
 id belongs to which error only while the same notification daemon (D-Bus

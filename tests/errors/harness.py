@@ -154,7 +154,9 @@ class Sandbox:
         self.notifications = os.path.join(self.root, "notifications.jsonl")
         for path in (self.log, self.journal, self.notifications):
             open(path, "w").close()
+        self.default_mutes_dir = os.path.join(self.root, "errors-mute.d")
         self.env = {
+            "VEKRONA_ERRORS_MUTE_DIR": self.default_mutes_dir,
             "PATH": f"{self.fakes}:/usr/bin:/bin",
             "HOME": os.path.join(self.root, "home"),
             "XDG_STATE_HOME": os.path.join(self.root, "state"),
@@ -181,6 +183,11 @@ class Sandbox:
         env = {**self.env, **(extra_env or {})}
         return subprocess.run([sys.executable, "-B", self.tool, *args], env=env,
                               capture_output=True, text=True, timeout=timeout)
+
+    def install_default_mutes(self, text, name="10-test.conf"):
+        os.makedirs(self.default_mutes_dir, exist_ok=True)
+        with open(os.path.join(self.default_mutes_dir, name), "w") as f:
+            f.write(text)
 
     def write_journal(self, entries):
         with open(self.journal, "w") as f:
