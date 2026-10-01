@@ -18,6 +18,7 @@ from vekrona_account.account_settings import (
 )
 from vekrona_account.categories.vekrona import VekronaCategory
 from vekrona_account.constants import DEFAULT_HOSTNAME, DEFAULT_TIMEZONE
+from vekrona_account.field_feedback import FieldFeedback
 from vekrona_account.wheel_user import read_wheel_user
 
 __all__ = ["VekronaAccountSpoke"]
@@ -47,6 +48,7 @@ class VekronaAccountSpoke(NormalSpoke):
         self._timezone_proxy = TIMEZONE.get_proxy()
         self._network_proxy = NETWORK.get_proxy()
         self._ready = False
+        self._feedback = FieldFeedback()
 
     def initialize(self):
         NormalSpoke.initialize(self)
@@ -54,11 +56,13 @@ class VekronaAccountSpoke(NormalSpoke):
 
         self._full_name_entry = self.builder.get_object("fullNameEntry")
         self._username_entry = self.builder.get_object("usernameEntry")
-        self._username_error = self.builder.get_object("usernameError")
         self._hostname_entry = self.builder.get_object("hostnameEntry")
-        self._hostname_error = self.builder.get_object("hostnameError")
         self._timezone_entry = self.builder.get_object("timezoneEntry")
-        self._timezone_error = self.builder.get_object("timezoneError")
+        self._error_labels = {
+            "username": self.builder.get_object("usernameError"),
+            "hostname": self.builder.get_object("hostnameError"),
+            "timezone": self.builder.get_object("timezoneError"),
+        }
 
         store = Gtk.ListStore(str)
         for tz in sorted(all_timezones()):
@@ -71,11 +75,11 @@ class VekronaAccountSpoke(NormalSpoke):
         completion.set_match_func(self._timezone_match_func)
         self._timezone_entry.set_completion(completion)
 
-        for entry in (
-            self._full_name_entry, self._username_entry,
-            self._hostname_entry, self._timezone_entry,
+        for field, entry in (
+            ("full_name", self._full_name_entry), ("username", self._username_entry),
+            ("hostname", self._hostname_entry), ("timezone", self._timezone_entry),
         ):
-            entry.connect("changed", self.on_field_changed)
+            entry.connect("changed", self.on_field_changed, field)
 
         self.initialize_done()
         self._ready = True
@@ -86,7 +90,8 @@ class VekronaAccountSpoke(NormalSpoke):
         value = completion.get_model()[tree_iter][0]
         return key.lower() in value.lower()
 
-    def on_field_changed(self, _entry):
+    def on_field_changed(self, _entry, field):
+        self._feedback.edited(field)
         self._validate()
 
     def refresh(self):
@@ -99,20 +104,19 @@ class VekronaAccountSpoke(NormalSpoke):
         if not self._timezone_entry.get_text():
             tz = self._timezone_proxy.Timezone
             self._timezone_entry.set_text(tz if is_valid_timezone(tz) else DEFAULT_TIMEZONE)
+        self._feedback.reset()
         self._validate()
 
     def _validate(self):
         errors = {
-            self._username_error: validate_username(self._username_entry.get_text()),
-            self._hostname_error: validate_hostname(self._hostname_entry.get_text()),
-            self._timezone_error: validate_timezone(self._timezone_entry.get_text()),
+            "username": validate_username(self._username_entry.get_text()),
+            "hostname": validate_hostname(self._hostname_entry.get_text()),
+            "timezone": validate_timezone(self._timezone_entry.get_text()),
         }
-        for label, message in errors.items():
-            if message:
-                label.set_text(message)
-                label.set_visible(True)
-            else:
-                label.set_visible(False)
+        for field, message in self._feedback.visible_errors(errors).items():
+            label = self._error_labels[field]
+            label.set_text(message or "")
+            label.set_visible(bool(message))
         hubQ.send_ready(self.__class__.__name__)
         return not any(errors.values())
 
@@ -134,6 +138,7 @@ class VekronaAccountSpoke(NormalSpoke):
         return _("{} (admin), {}").format(user.name, self._timezone_proxy.Timezone)
 
     def on_back_clicked(self, button):
+        self._feedback.leave_attempted()
         if not self._validate():
             self.show_warning_message(_("Correct the marked fields before leaving this screen."))
             return
