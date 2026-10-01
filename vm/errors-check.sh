@@ -42,10 +42,11 @@ wait_until() {
   done
 }
 
+marker_matches() { grep -rl -F -- "$1" "$STORE_DIR"/*/record.json >/dev/null 2>&1; }
+
 find_record_by_marker() {
   local marker="$1" timeout="${2:-30}"
-  marker_matches() { grep -rl -F -- "$marker" "$STORE_DIR"/*/record.json >/dev/null 2>&1; }
-  wait_until "$timeout" marker_matches || return 1
+  wait_until "$timeout" marker_matches "$marker" || return 1
   grep -rl -F -- "$marker" "$STORE_DIR"/*/record.json 2>/dev/null | head -1 | xargs dirname | xargs basename
 }
 
