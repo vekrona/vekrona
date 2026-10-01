@@ -327,23 +327,6 @@ def fingerprint_for(source, identifier, message):
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-UNIT_FAILURE_BOILERPLATE_RE = re.compile(
-    r"^(Failed with result|Scheduled restart job|Main process exited|Consumed .* CPU time)")
-
-
-def unit_failure_detail(unit, user_flag):
-    try:
-        result = subprocess.run(
-            ["journalctl", *user_flag, "-u", unit, "-n", "20", "-o", "cat", "--no-pager"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5)
-    except Exception:
-        return ""
-    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    useful = [line for line in lines if not UNIT_FAILURE_BOILERPLATE_RE.match(line)]
-    chosen = useful[-3:] if useful else lines[-1:]
-    return " / ".join(chosen)[:300]
-
-
 def from_system_manager(entry):
     return (field_str(entry.get("_PID")) == "1"
             and field_str(entry.get("_UID")) == "0"
@@ -388,17 +371,45 @@ def classify_coredump(entry):
     }
 
 
-def classify_unit_failure(entry):
+class UnitExitMemory:
+    CAPACITY = 256
+
+    def __init__(self):
+        self.details = {}
+
+    def remember(self, entry):
+        unit_and_scope = trusted_unit(entry)
+        if unit_and_scope is None:
+            return
+        code = field_str(entry.get("EXIT_CODE"))
+        status = field_str(entry.get("EXIT_STATUS"))
+        if not code:
+            return
+        self.details.pop(unit_and_scope, None)
+        self.details[unit_and_scope] = f"{code} (status {status})" if status else code
+        while len(self.details) > self.CAPACITY:
+            del self.details[next(iter(self.details))]
+
+    def take(self, unit_and_scope):
+        return self.details.pop(unit_and_scope, "")
+
+
+def unit_failure_summary(unit, result, main_process_exit):
+    summary = f"{unit} failed"
+    if result:
+        summary += f" with result '{result}'"
+    if main_process_exit:
+        summary += f"; main process {main_process_exit}"
+    return summary
+
+
+def classify_unit_failure(entry, unit_exits):
     unit_and_scope = trusted_unit(entry)
     if unit_and_scope is None:
         return None
     unit, is_user_unit = unit_and_scope
-    result = field_str(entry.get("UNIT_RESULT"))
-    detail = unit_failure_detail(unit, ["--user"] if is_user_unit else [])
-    if detail and result:
-        summary = f"{detail} (result={result})"
-    else:
-        summary = detail or (f"result={result}" if result else field_str(entry.get("MESSAGE")))
+    summary = unit_failure_summary(
+        unit, field_str(entry.get("UNIT_RESULT")), unit_exits.take(unit_and_scope))
     return {
         "source": "unit", "title": f"{unit} failed", "summary": summary,
         "identifier": unit, "unit": unit, "exe": "", "pid": "",
@@ -406,7 +417,7 @@ def classify_unit_failure(entry):
     }
 
 
-def classify(entry):
+def classify(entry, unit_exits):
     message_id = entry.get("MESSAGE_ID")
     message = field_str(entry.get("MESSAGE"))
     syslog_id = field_str(entry.get("SYSLOG_IDENTIFIER"))
@@ -424,7 +435,7 @@ def classify(entry):
             return classified
 
     if message_id == MESSAGE_ID_UNIT_FAILED:
-        classified = classify_unit_failure(entry)
+        classified = classify_unit_failure(entry, unit_exits)
         if classified:
             return classified
 
@@ -802,6 +813,7 @@ def cmd_watch(args):
             self.quarantine_toasted = set()
             self.error_toast_times = {}
             self.error_toast_suppressed = {}
+            self.unit_exits = UnitExitMemory()
             self.notify_fail_count = 0
             self.burst_window_start = None
             self.burst_count = 0
@@ -1089,7 +1101,9 @@ def cmd_watch(args):
             cursor = entry.get("__CURSOR")
             classified = None
             try:
-                classified = classify(entry)
+                if entry.get("MESSAGE_ID") == MESSAGE_ID_UNIT_PROCESS_EXITED:
+                    self.unit_exits.remember(entry)
+                classified = classify(entry, self.unit_exits)
                 if classified is not None:
                     self.ingest(classified)
             except Exception as exc:
