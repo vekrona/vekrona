@@ -7,7 +7,7 @@ command -v inotifywait >/dev/null 2>&1 || fail "inotifywait not installed"
 
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/session-lib.sh"
 
-session_bring_up || fail "could not bring up the headless sway session"
+session_ensure_up || fail "could not bring up or attach to a sway session"
 
 systemctl --user start dms.service || fail "dms.service did not become active"
 

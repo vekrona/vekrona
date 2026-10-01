@@ -50,15 +50,6 @@ find_record_by_marker() {
 
 record_field() { jq -r --arg k "$2" '.[$k]' "$STORE_DIR/$1/record.json"; }
 
-attach_to_live_session() {
-  SWAYSOCK="$(session_resolve_swaysock)" \
-    || fail "no live sway session found (expected session-check.sh to have brought one up already)"
-  export SWAYSOCK
-  swaymsg -t get_version >/dev/null 2>&1 || fail "swaymsg get_version failed against $SWAYSOCK"
-  [[ "$(systemctl --user is-active sway-session.target 2>/dev/null || true)" == active ]] \
-    || fail "sway-session.target is not active"
-}
-
 wait_for_watcher_active() {
   wait_until 30 systemctl --user is-active vekrona-errors \
     || fail "vekrona-errors.service did not become active"
@@ -224,7 +215,8 @@ main() {
   require_cmds inotifywait jq vekrona-error coredumpctl dbus-monitor logger
   setup_env
   TEST_START="$(date -Iseconds)"
-  attach_to_live_session
+  session_attach_existing \
+    || fail "no live sway session found (expected session-check.sh to have brought one up already)"
   wait_for_watcher_active
   check_manual_report
   check_root_report

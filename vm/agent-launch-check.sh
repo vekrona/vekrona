@@ -8,10 +8,8 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/session-lib.sh"
 command -v vekrona-agent >/dev/null 2>&1 || fail "vekrona-agent not on PATH"
 command -v swaymsg >/dev/null 2>&1 || fail "swaymsg not on PATH"
 command -v inotifywait >/dev/null 2>&1 || fail "inotifywait not installed"
-SWAYSOCK="$(session_resolve_swaysock)" \
+session_attach_existing \
   || fail "no live sway session found (expected session-check.sh to have brought one up already)"
-export SWAYSOCK
-swaymsg -t get_version >/dev/null 2>&1 || fail "swaymsg get_version failed (no live sway session)"
 
 AGENT_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 AGENT_CONFIG_FILE="$AGENT_CONFIG_HOME/vekrona/agent"

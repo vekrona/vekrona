@@ -869,21 +869,31 @@ and `make -C vm key` only send keystrokes.
 `vm/session-check.sh`, `vm/agents-check.sh`, `vm/errors-check.sh`, and
 `vm/agent-launch-check.sh` each run as their own `ssh` connection (a separate
 process with no shared shell state), but the last three need one live
-headless Sway session, not one each. `vm/session-lib.sh` is the one place
-that brings a session up (`session_bring_up`), finds the live one from a
-fresh connection (`session_resolve_swaysock`, a runtime-dir glob for the
-Sway IPC socket rather than an inherited `$SWAYSOCK`, since that would not
-survive a new `ssh` connection anyway), and tears it down
-(`session_teardown`); `vm/session-check.sh` sources it to start the session
-(`WLR_BACKENDS=headless` Sway under `systemd-run --user`, wait for the IPC
-socket, confirm `sway-session.target` is active, start `dms.service`, call
-`dms ipc call lock status`, validate the xremap config with
-`xremap-wlroots --validate-config`) and leaves it running; `vm/errors-check.sh`
-and `vm/agent-launch-check.sh` attach to that same session instead of
-starting their own; and `vm/session-teardown.sh`, run once after all three
-(wired into `vm/Makefile`), stops `sway-session.target` and the Sway unit
-together, so nothing (`dms.service`, `vekrona-errors.service`, …) is ever
-left running against a dead compositor.
+headless Sway session, not one each, and the VM itself can be shared with a
+human or another check already logged in and watching it (over
+`virt-viewer`/SPICE), so a check must never start a second compositor or
+stop a session it did not start. `vm/session-lib.sh` is the one place that
+reconciles this: `session_attach_existing` finds whatever session is
+already live from a fresh connection (`session_resolve_swaysock`, a
+runtime-dir glob for the Sway IPC socket rather than an inherited
+`$SWAYSOCK`, since that would not survive a new `ssh` connection anyway, plus
+a liveness and `sway-session.target` check), `session_ensure_up` attaches to
+one if it finds it live and otherwise starts a fresh headless one (marking
+it, in a `$XDG_RUNTIME_DIR` file, as owned by this test run), and
+`session_teardown` only stops `sway-session.target` and the Sway unit when
+that marker says this test run started them — a session it merely attached
+to is left running. `vm/session-check.sh` calls `session_ensure_up`
+(`WLR_BACKENDS=headless` Sway under `systemd-run --user` when nothing is
+live yet; wait for the IPC socket, confirm `sway-session.target` is active,
+start `dms.service`, call `dms ipc call lock status`, validate the xremap
+config with `xremap-wlroots --validate-config`) and leaves the session
+running either way; `vm/errors-check.sh` and `vm/agent-launch-check.sh` call
+`session_attach_existing` to use that same session instead of starting
+their own; and `vm/session-teardown.sh`, run once after all three (wired
+into `vm/Makefile`), applies the ownership rule above, so nothing
+(`dms.service`, `vekrona-errors.service`, …) is ever left running against a
+dead compositor, and nothing this test run did not start is ever torn down
+out from under someone else.
 
 ## ISO and CI
 
