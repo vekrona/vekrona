@@ -29,19 +29,25 @@ install_profile() {
   root diff -r "$rendered" "$PROFILE_DIR" >/dev/null || die "profile content mismatch after install: $PROFILE_DIR"
 }
 
+profile_matches_rendered() {
+  render_profile "$1"
+  [[ -d "$PROFILE_DIR" ]] && root diff -r "$1" "$PROFILE_DIR" >/dev/null
+}
+
+render_and_install_profile() {
+  render_profile "$1"
+  install_profile "$1"
+}
+
 ensure_profile_files() {
-  local rendered
-  rendered="$(mktemp -d)"
-  render_profile "$rendered"
-  if [[ -d "$PROFILE_DIR" ]] && root diff -r "$rendered" "$PROFILE_DIR" >/dev/null; then
+  if with_scratch_dir profile_matches_rendered; then
     log "authselect profile up to date: $PROFILE_ID"
     profile_files_changed=0
   else
     log "writing authselect profile: $PROFILE_ID"
-    install_profile "$rendered"
+    with_scratch_dir render_and_install_profile
     profile_files_changed=1
   fi
-  rm -rf "$rendered"
 }
 
 current_authselect_selection() {
@@ -91,12 +97,14 @@ rebuild_initramfs() {
   root dracut -f "$img" "$kver"
 }
 
+install_crypttab_from() {
+  local content="$1" scratch="$2"
+  printf '%s\n' "$content" >"$scratch/crypttab"
+  root install -m 0644 "$scratch/crypttab" "$CRYPTTAB"
+}
+
 install_crypttab() {
-  local out
-  out="$(mktemp)"
-  printf '%s\n' "$1" >"$out"
-  root install -m 0644 "$out" "$CRYPTTAB"
-  rm -f "$out"
+  with_scratch_dir install_crypttab_from "$1"
 }
 
 ensure_luks_fido2_unlock() {
