@@ -10,8 +10,8 @@ from vekrona_signin.gui.spokes.guidance import (
     FP_NONE, FP_FOUND, FP_DONE, DETAILS_TITLE, DETAILS_NO_USB,
     DISABLED_NO_ACCOUNT, NEED_PASSWORD_FIRST, USER_CHANGED, WATCH_UNAVAILABLE,
     STATUS_SET_PASSWORD, STATUS_PASSWORD_ONLY, STATUS_WITH_METHODS,
-    STATUS_STORAGE_CHANGED, STATUS_ENCRYPTION_FAILED, STATUS_APPLYING, STATUS_CHOOSE_DISK,
-    STATUS_DISK_NOT_SET_UP, STATUS_PASSWORD_NOT_SAVED, STATUS_STATE_UNREADABLE, DEFAULT_FINGER, password_state_error, device_scan_hint_to_key_text,
+    STATUS_STORAGE_CHANGED, STATUS_ENCRYPTION_FAILED, STATUS_APPLYING, STATUS_CHOOSE_DISK_FIRST,
+    STATUS_ENTER_DISK_PASSPHRASE, STATUS_DISK_PASSPHRASE_NOT_SAVED, STATUS_PASSWORD_NOT_SAVED, STATUS_STATE_UNREADABLE, DEFAULT_FINGER, password_state_error, device_scan_hint_to_key_text,
     device_scan_hint_to_fp_text, finger_choices,
 )
 from vekrona_signin.core.device_scan import HintCode
@@ -77,8 +77,9 @@ class HubTileStatusTest(unittest.TestCase):
             "storage changed": STATUS_STORAGE_CHANGED,
             "encryption failed": STATUS_ENCRYPTION_FAILED,
             "applying": STATUS_APPLYING,
-            "choose disk": STATUS_CHOOSE_DISK,
-            "disk not set up": STATUS_DISK_NOT_SET_UP,
+            "choose disk first": STATUS_CHOOSE_DISK_FIRST,
+            "enter disk passphrase": STATUS_ENTER_DISK_PASSPHRASE,
+            "disk passphrase not saved": STATUS_DISK_PASSPHRASE_NOT_SAVED,
             "password not saved": STATUS_PASSWORD_NOT_SAVED,
             "state unreadable": STATUS_STATE_UNREADABLE,
             "no account": DISABLED_NO_ACCOUNT,

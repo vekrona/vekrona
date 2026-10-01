@@ -18,6 +18,8 @@ CONTRACT_IDS = {
     "mainBox", "disabledLabel", "contentBox", "introLabel", "noticeLabel",
     "passwordFrame", "passwordLabel", "passwordEntry", "confirmLabel", "confirmEntry",
     "passwordHint", "passwordError",
+    "diskFrame", "diskNoteLabel", "diskPassphraseLabel", "diskPassphraseEntry",
+    "diskConfirmLabel", "diskConfirmEntry", "diskError",
     "keyFrame", "keyWhatLabel", "keyUseLabel", "keyStepsLabel", "keyStateLabel",
     "keyNeedPassword", "keyCombo", "keyCheckButton",
     "keySetupBox", "keyPinLabel", "keyPinEntry", "keyConfirmLabel", "keyConfirmEntry",
@@ -34,24 +36,25 @@ HANDLERS = {
     "on_password_changed", "on_key_check_clicked", "on_key_register_clicked",
     "on_key_remove_clicked", "on_key_pin_changed", "on_fp_check_clicked",
     "on_fp_enroll_clicked", "on_fp_remove_clicked", "on_key_combo_changed",
-    "on_reader_combo_changed",
+    "on_reader_combo_changed", "on_disk_passphrase_changed",
 }
 SPOKE_WINDOW_HANDLERS = {"on_back_clicked"}
 
 LONG_TEXT_LABEL_IDS = {
-    "disabledLabel", "introLabel", "noticeLabel", "passwordHint", "passwordError",
+    "disabledLabel", "introLabel", "noticeLabel", "passwordHint", "passwordError", "diskNoteLabel", "diskError",
     "keyWhatLabel", "keyUseLabel", "keyStepsLabel", "keyStateLabel", "keyNeedPassword", "keyPinHint",
     "keyError", "keyDetailsLabel",
     "fpWhatLabel", "fpUseLabel", "fpStepsLabel", "fpStateLabel", "fpNeedPassword",
     "fpError", "fpDetailsLabel",
 }
-ERROR_LABEL_IDS = {"noticeLabel", "passwordError", "keyError", "fpError"}
-FRAME_IDS = {"passwordFrame", "keyFrame", "fpFrame"}
+ERROR_LABEL_IDS = {"noticeLabel", "passwordError", "diskError", "keyError", "fpError"}
+FRAME_IDS = {"passwordFrame", "diskFrame", "keyFrame", "fpFrame"}
 
 
 HIDDEN_UNTIL_NEEDED_IDS = {
     "keyCombo", "readerCombo", "fpSetupBox", "keySetupBox", "keyNeedPassword", "fpNeedPassword",
-    "keyRegisteredBox", "fpRegisteredBox",
+    "keyRegisteredBox", "fpRegisteredBox", "diskFrame", "diskNoteLabel", "diskPassphraseLabel",
+    "diskPassphraseEntry", "diskConfirmLabel", "diskConfirmEntry", "diskError",
 }
 
 
@@ -112,6 +115,7 @@ class SignInGladeTest(unittest.TestCase):
         pairs = {
             "passwordLabel": "passwordEntry", "confirmLabel": "confirmEntry",
             "keyPinLabel": "keyPinEntry", "keyConfirmLabel": "keyConfirmEntry",
+            "diskPassphraseLabel": "diskPassphraseEntry", "diskConfirmLabel": "diskConfirmEntry",
         }
         for label_id, entry_id in pairs.items():
             with self.subTest(label_id):
@@ -129,7 +133,7 @@ class SignInGladeTest(unittest.TestCase):
                 self.assertTrue(names[0].text)
 
     def test_password_entries_hide_their_text(self):
-        for widget_id in ("passwordEntry", "confirmEntry", "keyPinEntry", "keyConfirmEntry"):
+        for widget_id in ("passwordEntry", "confirmEntry", "diskPassphraseEntry", "diskConfirmEntry", "keyPinEntry", "keyConfirmEntry"):
             with self.subTest(widget_id):
                 properties = self.properties(widget_id)
                 self.assertEqual(properties.get("visibility"), "False")

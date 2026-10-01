@@ -11,6 +11,8 @@ SPOKES = {
     "VekronaSignInSpoke": _paths.ADDONS_DIR / "vekrona_signin/gui/spokes/vekrona_signin.py",
 }
 INHERITED_HANDLERS = {"on_back_clicked"}
+STOCK_SYSTEM_CATEGORY_ORDER = 300
+STOCK_USER_SETTINGS_CATEGORY_ORDER = 400
 MODULES_MISSING_ON_THIS_HOST = ("pyanaconda.ui.gui", "gi")
 
 
@@ -107,6 +109,15 @@ class HubOrderTest(unittest.TestCase):
             for spoke in (account, signin)
         }
         self.assertEqual(categories, {"VekronaCategory"})
+
+    def test_the_category_follows_the_stock_system_category_and_precedes_user_settings(self):
+        tree = ast.parse((_paths.ADDONS_DIR / "vekrona_account/categories/vekrona.py").read_text())
+        sort_order = next(
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "get_sort_order"
+        )
+        value = ast.literal_eval(sort_order.body[-1].value)
+        self.assertGreater(value, STOCK_SYSTEM_CATEGORY_ORDER)
+        self.assertLess(value, STOCK_USER_SETTINGS_CATEGORY_ORDER)
 
     def test_sign_in_is_mandatory(self):
         _, signin = spoke_class("VekronaSignInSpoke")

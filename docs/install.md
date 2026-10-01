@@ -51,7 +51,9 @@ Instead of installing plain Fedora minimal by hand and cloning this repo
 yourself, `iso/build.sh` bakes both into a Fedora 44 Everything netinstall
 ISO, plus two small Anaconda add-ons (`iso/anaconda/updates/`, shipped as an
 `updates.img`) that replace Anaconda's own user-creation, root-password and
-time & date screens with two screens at the top of the hub:
+time & date screens with two screens in a VEKRONA category on the hub, right
+after the stock System category (Installation Destination, Network & Host
+Name), so the disk is set up before the password is applied to it:
 
 - **VEKRONA ACCOUNT**: **full name** (optional), **username** and
   **hostname** (default `vekrona`), and the **time zone**, a type-to-search
@@ -59,18 +61,36 @@ time & date screens with two screens at the top of the hub:
   whatever Anaconda's own geolocation already resolved, or UTC if that is
   unavailable. The account is always an administrator (`wheel`); root is always
   locked, with no root password to set.
-- **VEKRONA SIGN-IN**: the **password** (typed twice). This one password
-  becomes both the account password and the disk encryption passphrase, so
-  there is no separate LUKS passphrase to remember. A security key and a
-  fingerprint reader can be enrolled here too (see [Sign-in methods](sign-in.md)).
+- **VEKRONA SIGN-IN**: the **password** (typed twice). It stays greyed out,
+  saying "Set up INSTALLATION DESTINATION first", until a disk setup has been
+  applied. With the automatic layout, this one password becomes both the
+  account password and the disk encryption passphrase, so there is no separate
+  LUKS passphrase to remember. A security key and a fingerprint reader can be
+  enrolled here too (see [Sign-in methods](sign-in.md)).
 
-Anaconda itself still handles everything storage- and network-related:
+Anaconda itself still handles everything storage- and network-related.
 **Installation Destination** always needs a visit (disk selection, reclaim
-space for dual-boot). Custom and Blivet-GUI partitioning are hidden, because
-the disk must end up as btrfs on LUKS2 with the sign-in password. The sign-in
-screen verifies the layout Anaconda actually applied and, when it is not
-encrypted with that password, re-applies an encrypted automatic partitioning
-itself, so the standard "Disk Encryption Passphrase" dialog is not needed.
+space for dual-boot), and then offers two ways:
+
+- **Automatic** (the default): btrfs on LUKS2 with the sign-in password. The
+  sign-in screen verifies the layout Anaconda actually applied and, when it is
+  not encrypted with that password (for example after you revisit Installation
+  Destination and click Done), re-applies an encrypted automatic partitioning
+  itself, so the standard "Disk Encryption Passphrase" dialog is not needed.
+  Known limitation: after a revisit, the stock "Encrypt my data" checkbox shows
+  unticked, and a passphrase typed in its dialog is replaced by the sign-in
+  password. The sign-in screen says so while the layout is automatic, and shows
+  a notice when it actually replaced another passphrase. To keep your own
+  passphrase, use custom partitioning.
+- **Custom** and **Blivet-GUI** partitioning: your layout is taken as it is.
+  Encrypting is your choice, and the passphrase is the one you set in
+  Anaconda's own dialog, which the sign-in password does not replace. If you
+  also enroll a security key and the layout has an encrypted device, the
+  sign-in screen asks you to type that passphrase twice, because it is needed
+  to add the key to the disk. The device must be LUKS2; the installation
+  fails with a message naming the device otherwise. If the layout is not encrypted, the screen says the
+  key cannot unlock the disk (it still works for sudo and login).
+
 **Network & Host Name** (including Wi-Fi) is Anaconda's own screen, unchanged.
 
 The ISO sets no language or keyboard layout, so Anaconda shows its Welcome

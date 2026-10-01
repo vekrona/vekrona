@@ -222,6 +222,128 @@
                               </packing>
                             </child>
                             <child>
+                              <object class="GtkFrame" id="diskFrame">
+                                <property name="visible">False</property>
+                                <property name="no-show-all">True</property>
+                                <property name="label-xalign">0</property>
+                                <child type="label">
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Disk</property>
+                                    <attributes>
+                                      <attribute name="weight" value="bold"/>
+                                    </attributes>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkGrid">
+                                    <property name="visible">True</property>
+                                    <property name="row-spacing">6</property>
+                                    <property name="column-spacing">12</property>
+                                    <property name="margin-left">12</property>
+                                    <property name="margin-right">12</property>
+                                    <property name="margin-top">8</property>
+                                    <property name="margin-bottom">12</property>
+                                    <child>
+                                      <object class="GtkLabel" id="diskNoteLabel">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">0</property>
+                                        <property name="top-attach">0</property>
+                                        <property name="width">2</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="diskPassphraseLabel">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label" translatable="yes">Disk passphrase</property>
+                                        <property name="xalign">1</property>
+                                        <property name="mnemonic-widget">diskPassphraseEntry</property>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">0</property>
+                                        <property name="top-attach">1</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkEntry" id="diskPassphraseEntry">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="can-focus">True</property>
+                                        <property name="hexpand">True</property>
+                                        <property name="visibility">False</property>
+                                        <property name="input-purpose">password</property>
+                                        <signal name="changed" handler="on_disk_passphrase_changed" swapped="no"/>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">1</property>
+                                        <property name="top-attach">1</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="diskConfirmLabel">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label" translatable="yes">Repeat the disk passphrase</property>
+                                        <property name="xalign">1</property>
+                                        <property name="mnemonic-widget">diskConfirmEntry</property>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">0</property>
+                                        <property name="top-attach">2</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkEntry" id="diskConfirmEntry">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="can-focus">True</property>
+                                        <property name="hexpand">True</property>
+                                        <property name="visibility">False</property>
+                                        <property name="input-purpose">password</property>
+                                        <signal name="changed" handler="on_disk_passphrase_changed" swapped="no"/>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">1</property>
+                                        <property name="top-attach">2</property>
+                                      </packing>
+                                    </child>
+                                    <child>
+                                      <object class="GtkLabel" id="diskError">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                        <attributes>
+                                          <attribute name="foreground" value="#a40000"/>
+                                        </attributes>
+                                        <style>
+                                          <class name="error"/>
+                                        </style>
+                                      </object>
+                                      <packing>
+                                        <property name="left-attach">1</property>
+                                        <property name="top-attach">3</property>
+                                      </packing>
+                                    </child>
+                                  </object>
+                                </child>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                              </packing>
+                            </child>
+                            <child>
                               <object class="GtkFrame" id="keyFrame">
                                 <property name="visible">True</property>
                                 <property name="label-xalign">0</property>

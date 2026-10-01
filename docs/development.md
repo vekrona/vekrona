@@ -163,6 +163,12 @@ and tag:
   `usr/share/anaconda/addons/{vekrona_account,vekrona_signin}/...`,
   `usr/share/anaconda/dbus/{services,confs}/...`): DBus-module-plus-GUI-spoke
   add-ons in the same shape as Fedora's own in-tree `com_redhat_kdump` addon.
+  The `VekronaCategory` sorts at 350, right after Anaconda's System category
+  (300) and before User settings (400): Installation Destination comes first,
+  and VEKRONA SIGN-IN is insensitive until a partitioning is applied. Custom and
+  Blivet-GUI partitioning are not hidden (`blivet-gui` is in the Fedora 44
+  Everything netinst `install.img`): their layout is classified `MANUAL_PLAIN` or
+  `MANUAL_LUKS` and used as it is, never re-applied.
   `iso/anaconda/bundle.list` pins the extra RPMs (`python3-fido2`,
   `python3-cryptography`, `libfprint`) that `pack-updates.sh` layers into the
   image.

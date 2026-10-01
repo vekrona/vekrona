@@ -3,7 +3,7 @@ from pyanaconda.core.i18n import N_, _
 from vekrona_signin.core.device_scan import HintCode
 from vekrona_signin.core.password_policy import PasswordState
 
-INTRO = N_("Choose one password. It unlocks your disk when the computer starts and it is the password for your account. You can add a security key or a fingerprint below. Both are optional.")
+INTRO = N_("Choose one password. It is the password for your account. When the installer encrypts the disk for you, it unlocks the disk when the computer starts too. You can add a security key or a fingerprint below. Both are optional.")
 
 PASSWORD_LABEL = N_("Password")
 PASSWORD_FIELD_LABEL = N_("_Password")
@@ -60,13 +60,24 @@ STATUS_METHOD_KEY = N_("security key")
 STATUS_METHOD_FINGERPRINT = N_("fingerprint")
 STATUS_STORAGE_CHANGED = N_("Disk setup changed. Confirm your password.")
 STATUS_ENCRYPTION_FAILED = N_("Disk encryption failed. Open this screen.")
-NOTICE_ENCRYPTION_FAILED = N_("Disk encryption failed: {error} Open Installation Destination and click Done; it is already set to encrypt with your password.")
+NOTICE_ENCRYPTION_FAILED = N_("Disk encryption failed: {error} Click Done to try again, or change the disk setup in Installation Destination.")
 STATUS_STORAGE_STILL_PLAIN = N_("The disk setup was applied, but it is still not encrypted with this password.")
 STATUS_APPLYING = N_("Setting up disk encryption...")
-STATUS_CHOOSE_DISK = N_("Password set. Choose the disk to install on.")
-STATUS_DISK_NOT_SET_UP = N_("Password set. Open Installation Destination.")
+STATUS_CHOOSE_DISK_FIRST = N_("Set up INSTALLATION DESTINATION first")
+STATUS_ENTER_DISK_PASSPHRASE = N_("Enter the disk passphrase")
+DISK_TITLE = N_("Disk")
+DISK_PASSPHRASE_LABEL = N_("_Disk passphrase")
+DISK_CONFIRM_LABEL = N_("Repeat the disk _passphrase")
+ERR_DISK_PASSPHRASE_EMPTY = N_("Enter the disk passphrase.")
+ERR_DISK_PASSPHRASE_MISMATCH = N_("The two disk passphrases are different.")
+DISK_NOTE_PASSPHRASE = N_("You encrypted the disk yourself in Installation Destination. To unlock it with the security key, enter the passphrase you chose there. It must be exactly the same, or the installation fails when it adds the key.")
+DISK_NOTE_AUTOMATIC = N_("The disk is encrypted with this password. A passphrase typed on Installation Destination is replaced by it. To keep your own passphrase, choose custom partitioning there.")
+NOTICE_PASSPHRASE_REPLACED = N_("The disk was set up with another passphrase on Installation Destination. It was replaced by your password, which now unlocks the disk.")
+DISK_NOTE_UNENCRYPTED = N_("The disk setup you chose is not encrypted, so a security key cannot unlock the disk. The key still works for administrator actions (sudo) and login.")
 STATUS_PASSWORD_NOT_SAVED = N_("Cannot set the password")
 NOTICE_PASSWORD_NOT_SAVED = N_("Cannot set the password: {error}")
+STATUS_DISK_PASSPHRASE_NOT_SAVED = N_("Cannot set the disk passphrase")
+NOTICE_DISK_PASSPHRASE_NOT_SAVED = N_("Cannot set the disk passphrase: {error}")
 STATUS_STATE_UNREADABLE = N_("Cannot read the installer state")
 NOTICE_STATE_UNREADABLE = N_("Cannot read the installer state: {error}")
 
@@ -99,6 +110,16 @@ def password_state_error(state, min_length):
     if state is PasswordState.VALID:
         return ""
     raise ValueError(f"Unknown password state: {state}")
+
+
+def disk_passphrase_state_error(state):
+    if state is PasswordState.EMPTY:
+        return _(ERR_DISK_PASSPHRASE_EMPTY)
+    if state is PasswordState.MISMATCH:
+        return _(ERR_DISK_PASSPHRASE_MISMATCH)
+    if state is PasswordState.VALID:
+        return ""
+    raise ValueError(f"Unsupported disk passphrase state: {state}")
 
 
 def _hint_text(hint_code, no_device_text):

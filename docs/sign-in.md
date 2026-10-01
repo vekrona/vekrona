@@ -9,6 +9,13 @@ includes the system stack (unverified, see below), the login greeter, with
 your password always available as a fallback.
 
 **Security key (FIDO2, PIN + touch):** unlocks the disk at boot and signs you in.
+- Disk unlock needs an encrypted disk. With the automatic layout the installer
+  already encrypts it with your password. With a custom or Blivet-GUI layout
+  that has an encrypted device, the screen asks you to retype the passphrase
+  you chose when partitioning, because adding the key to the disk needs it; a
+  mistyped passphrase makes the installation fail with a message naming it.
+  With a custom layout that is not encrypted, the key does not unlock the disk
+  (the screen says so) but still works for sudo and login.
 - The installer asks for three touches, all during the install: one to
   create the credential for the disk, one to answer a challenge that derives
   the disk secret (stored in a `systemd-fido2` token keyslot), and one to

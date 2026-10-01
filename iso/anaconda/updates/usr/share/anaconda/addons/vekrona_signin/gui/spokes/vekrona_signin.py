@@ -29,6 +29,7 @@ from vekrona_signin.core.device_scan import DeviceScan
 from vekrona_signin.core.diagnose import describe_exception
 from vekrona_signin.core.encrypted_storage import apply_encrypted, read_state
 from vekrona_signin.core.password_policy import PasswordState, minimum_length, validate
+from vekrona_signin.core.secret import Secret
 from vekrona_signin.gui.panel_view import FINGERPRINT_PANEL, KEY_PANEL, PanelInput, panel_view, pin_form
 from vekrona_signin.gui.signin_state import (
     EncryptionGuard,
@@ -36,6 +37,9 @@ from vekrona_signin.gui.signin_state import (
     HubView,
     Snapshot,
     StorageReaction,
+    disk_leave_blocker,
+    disk_passphrase_feedback,
+    disk_view,
     hub_signal,
     hub_status,
     leave_blocker,
@@ -45,7 +49,6 @@ from vekrona_signin.gui.signin_state import (
 from vekrona_signin.gui.spokes import guidance
 from vekrona_signin.gui.spokes.devwatch import DeviceWatcher
 from vekrona_signin.gui.stock_storage import wait_for_stock_storage
-from vekrona_signin.gui.storage_link import STORAGE_SPOKE_NAME, find_storage_spoke, seed_storage_spoke
 
 log = get_module_logger(__name__)
 
@@ -112,6 +115,7 @@ class VekronaSignInSpoke(NormalSpoke):
         self._key_has_pin = True
         self._key_pin_device = None
         self._min_length = 0
+        self._disk_secret = None
 
     def initialize(self):
         NormalSpoke.initialize(self)
@@ -123,6 +127,13 @@ class VekronaSignInSpoke(NormalSpoke):
         self._password_entry = self.builder.get_object("passwordEntry")
         self._confirm_entry = self.builder.get_object("confirmEntry")
         self._password_error = self.builder.get_object("passwordError")
+        self._disk_frame = self.builder.get_object("diskFrame")
+        self._disk_note = self.builder.get_object("diskNoteLabel")
+        self._disk_passphrase_label = self.builder.get_object("diskPassphraseLabel")
+        self._disk_passphrase_entry = self.builder.get_object("diskPassphraseEntry")
+        self._disk_confirm_label = self.builder.get_object("diskConfirmLabel")
+        self._disk_confirm_entry = self.builder.get_object("diskConfirmEntry")
+        self._disk_error = self.builder.get_object("diskError")
         self._key_setup = self.builder.get_object("keySetupBox")
         self._key_pin_label = self.builder.get_object("keyPinLabel")
         self._key_pin_entry = self.builder.get_object("keyPinEntry")
@@ -172,7 +183,7 @@ class VekronaSignInSpoke(NormalSpoke):
         self._disk_selection_proxy.PropertiesChanged.connect(self._on_disk_selection_changed)
         self._users_proxy.PropertiesChanged.connect(self._on_users_changed)
 
-        self._snapshot = self._read_snapshot()
+        self._refresh_snapshot()
         self._initialized = True
         self._shown = self._hub_view()
         self.initialize_done()
@@ -189,11 +200,14 @@ class VekronaSignInSpoke(NormalSpoke):
             self.builder.get_object("passwordFrame").get_label_widget(): guidance.PASSWORD_LABEL,
             self.builder.get_object("keyFrame").get_label_widget(): guidance.KEY_TITLE,
             self.builder.get_object("fpFrame").get_label_widget(): guidance.FP_TITLE,
+            self._disk_frame.get_label_widget(): guidance.DISK_TITLE,
         }
         for label, text in texts.items():
             label.set_text(_(text))
         self.builder.get_object("passwordLabel").set_text_with_mnemonic(_(guidance.PASSWORD_FIELD_LABEL))
         self.builder.get_object("confirmLabel").set_text_with_mnemonic(_(guidance.CONFIRM_LABEL))
+        self._disk_passphrase_label.set_text_with_mnemonic(_(guidance.DISK_PASSPHRASE_LABEL))
+        self._disk_confirm_label.set_text_with_mnemonic(_(guidance.DISK_CONFIRM_LABEL))
         self.builder.get_object("passwordHint").set_text(
             _(guidance.PASSWORD_HINT).format(n=self._min_length)
         )
@@ -210,11 +224,7 @@ class VekronaSignInSpoke(NormalSpoke):
 
     @property
     def sensitive(self):
-        try:
-            return read_wheel_user(self._users_proxy) is not None
-        except DBusError as error:
-            log.error("Reading the account failed: %s", error)
-            return False
+        return self._snapshot.sensitive
 
     @property
     def completed(self):
@@ -225,7 +235,9 @@ class VekronaSignInSpoke(NormalSpoke):
         return hub_status(self._snapshot, self._guard)
 
     def _hub_view(self):
-        return HubView(ready=self.ready, completed=self.completed, status=self.status)
+        return HubView(
+            ready=self.ready, sensitive=self.sensitive, completed=self.completed, status=self.status
+        )
 
     def _notify_hub(self):
         current = self._hub_view()
@@ -246,8 +258,6 @@ class VekronaSignInSpoke(NormalSpoke):
     def _read_snapshot(self):
         try:
             user = read_wheel_user(self._users_proxy)
-            if user is None:
-                return Snapshot()
             storage_state = read_state(
                 self._passphrase_matches,
                 wait_until_idle=wait_for_stock_storage,
@@ -257,12 +267,13 @@ class VekronaSignInSpoke(NormalSpoke):
                 disk_selection=self._disk_selection_proxy,
             )
             return Snapshot(
-                username=user.name,
-                has_password=bool(user.password),
+                username=user.name if user else "",
+                has_password=bool(user and user.password),
                 storage_state=storage_state,
                 applied_path=self._storage_proxy.AppliedPartitioning,
                 key_registered=self._signin_proxy.SecurityKeyRegistered,
                 finger_enrolled=self._signin_proxy.FingerprintEnrolled,
+                disk_passphrase_entered=self._disk_secret is not None,
             )
         except DBusError as error:
             log.error("Reading the account and disk state failed: %s", error)
@@ -280,12 +291,12 @@ class VekronaSignInSpoke(NormalSpoke):
         if forgotten:
             log.info("The username changed; the registered sign-in methods were forgotten.")
             self._user_changed = True
-            self._snapshot = self._read_snapshot()
+            self._refresh_snapshot()
 
     def _on_storage_properties_changed(self, _interface, changed, _invalidated):
         if "AppliedPartitioning" not in changed:
             return
-        self._snapshot = self._read_snapshot()
+        self._refresh_snapshot()
         reaction = self._guard.react_to_storage_change(self._snapshot)
         log.info("The applied disk setup changed: %s; %s.", self._snapshot.storage_state.value, reaction.value)
         if reaction is StorageReaction.RECONCILE:
@@ -296,18 +307,18 @@ class VekronaSignInSpoke(NormalSpoke):
     def _on_disk_selection_changed(self, _interface, changed, _invalidated):
         if "SelectedDisks" not in changed:
             return
-        self._snapshot = self._read_snapshot()
+        self._refresh_snapshot()
         self._notify_hub()
 
     def _on_users_changed(self, _interface, changed, _invalidated):
         if "Users" not in changed:
             return
-        self._snapshot = self._read_snapshot()
+        self._refresh_snapshot()
         self._forget_registrations_of_other_user()
         self._notify_hub()
 
     def refresh(self):
-        self._snapshot = self._read_snapshot()
+        self._refresh_snapshot()
         self._forget_registrations_of_other_user()
         has_account = self._snapshot.has_account
         self._disabled_label.set_text(
@@ -318,6 +329,9 @@ class VekronaSignInSpoke(NormalSpoke):
         if self._guard.password is not None:
             self._password_entry.set_text(self._guard.password)
             self._confirm_entry.set_text(self._guard.password)
+        entered = "" if self._disk_secret is None else self._disk_secret.reveal()
+        self._disk_passphrase_entry.set_text(entered)
+        self._disk_confirm_entry.set_text(entered)
         self._update_password_feedback()
         if has_account:
             self._scan(self._key)
@@ -350,7 +364,10 @@ class VekronaSignInSpoke(NormalSpoke):
         ):
             self._notify_hub()
             return
-        self._snapshot = self._read_snapshot()
+        if not self._accept_disk_passphrase(self._disk_passphrase_to_send()):
+            self._notify_hub()
+            return
+        self._refresh_snapshot()
         if self._guard.should_encrypt(self._snapshot.storage_state):
             self._start_encryption()
         else:
@@ -366,20 +383,42 @@ class VekronaSignInSpoke(NormalSpoke):
                 return False
             self._guard.account_error = ""
             self._guard.accept_password(password)
-            log.info("The account password was set; it is also the disk passphrase.")
-        self._seed_storage_spoke()
+            log.info("The account password was set; an automatic disk setup uses it as the passphrase.")
         return True
 
-    def _seed_storage_spoke(self):
-        storage_spoke = find_storage_spoke(self)
-        if storage_spoke is not None:
-            seed_storage_spoke(storage_spoke, self._guard.password)
-        return storage_spoke
+    def _disk_passphrase_state(self):
+        return validate(self._disk_passphrase_entry.get_text(), self._disk_confirm_entry.get_text(), 1)
+
+    def _disk_passphrase_to_send(self):
+        if self._snapshot.needs_disk_passphrase and self._disk_passphrase_state() is PasswordState.VALID:
+            return self._disk_passphrase_entry.get_text()
+        return ""
+
+    def _accept_disk_passphrase(self, passphrase):
+        current = "" if self._disk_secret is None else self._disk_secret.reveal()
+        if passphrase == current:
+            return True
+        try:
+            self._signin_proxy.SetDiskPassphrase(passphrase)
+        except DBusError as error:
+            log.error("Passing the disk passphrase to the installer failed: %s", error)
+            self._guard.disk_passphrase_error = str(error)
+            return False
+        self._guard.disk_passphrase_error = ""
+        self._disk_secret = Secret(passphrase) if passphrase else None
+        log.info("The disk passphrase of the manual layout was %s.", "entered" if passphrase else "cleared")
+        return True
+
+    def _refresh_snapshot(self):
+        self._snapshot = self._read_snapshot()
+        if self._disk_secret is not None and not self._snapshot.needs_disk_passphrase:
+            if self._accept_disk_passphrase(""):
+                self._snapshot = self._read_snapshot()
 
     def _start_encryption(self):
         log.info("Encrypting the disk setup with the account password; it was %s.",
                  self._snapshot.storage_state.value)
-        self._guard.begin()
+        self._guard.begin(self._snapshot.storage_state)
         self._render()
         self._notify_hub()
         thread_manager.add_thread(
@@ -412,15 +451,12 @@ class VekronaSignInSpoke(NormalSpoke):
         )
 
     def _on_encryption_done(self, error, warnings, applied_by_us):
-        self._snapshot = self._read_snapshot()
+        self._refresh_snapshot()
         reaction = self._guard.finish(self._snapshot, error, applied_by_us)
         if reaction is StorageReaction.ENCRYPTED:
             log.info("The disk setup is encrypted with the account password.")
             StorageCheckHandler.errors = []
             StorageCheckHandler.warnings = warnings
-            storage_spoke = self._seed_storage_spoke()
-            if storage_spoke is not None and storage_spoke.ready:
-                hubQ.send_ready(STORAGE_SPOKE_NAME)
         elif self._guard.failure:
             log.error("The disk setup is not encrypted with the account password: %s", self._guard.failure)
         else:
@@ -434,6 +470,13 @@ class VekronaSignInSpoke(NormalSpoke):
     def on_back_clicked(self, button):
         blocker = leave_blocker(
             self._password_state(), self._password_entry.get_text(), self._confirm_entry.get_text(), self._min_length
+        ) or (
+            self._snapshot.needs_disk_passphrase
+            and disk_leave_blocker(
+                self._disk_passphrase_state(),
+                self._disk_passphrase_entry.get_text(),
+                self._disk_confirm_entry.get_text(),
+            )
         )
         if blocker:
             self.show_warning_message(blocker)
@@ -443,6 +486,9 @@ class VekronaSignInSpoke(NormalSpoke):
 
     def on_password_changed(self, _entry):
         self._update_password_feedback()
+        self._render()
+
+    def on_disk_passphrase_changed(self, _entry):
         self._render()
 
     def _scan(self, panel):
@@ -469,9 +515,26 @@ class VekronaSignInSpoke(NormalSpoke):
     def _render(self):
         notice = screen_notice(self._snapshot, self._guard) if self._snapshot.has_account else ""
         self._show_message(self._notice, notice)
+        self._render_disk()
         self._render_panel(self._key)
         self._render_panel(self._fp)
         self._update_sensitivity()
+
+    def _render_disk(self):
+        view = disk_view(self._snapshot)
+        self._disk_frame.set_visible(view.visible)
+        self._disk_note.set_text(view.note)
+        self._disk_note.set_visible(view.visible)
+        self._disk_passphrase_label.set_visible(view.ask_passphrase)
+        self._disk_passphrase_entry.set_visible(view.ask_passphrase)
+        self._disk_confirm_label.set_visible(view.ask_passphrase)
+        self._disk_confirm_entry.set_visible(view.ask_passphrase)
+        feedback = (
+            disk_passphrase_feedback(self._disk_passphrase_state(), self._disk_confirm_entry.get_text())
+            if view.ask_passphrase
+            else ""
+        )
+        self._show_message(self._disk_error, feedback)
 
     def _panel_input(self, panel):
         registered = self._snapshot.key_registered if panel is self._key else self._snapshot.finger_enrolled
@@ -540,6 +603,8 @@ class VekronaSignInSpoke(NormalSpoke):
         idle = not self._task_running and not self._guard.applying
         self._password_entry.set_sensitive(idle)
         self._confirm_entry.set_sensitive(idle)
+        self._disk_passphrase_entry.set_sensitive(idle)
+        self._disk_confirm_entry.set_sensitive(idle)
 
     def _refresh_key_pin_mode(self):
         device_id = self._key.combo.get_active_id()
@@ -634,7 +699,7 @@ class VekronaSignInSpoke(NormalSpoke):
     def _forget(self, method, panel):
         panel.failure = ""
         self._call(panel, method)
-        self._snapshot = self._read_snapshot()
+        self._refresh_snapshot()
         self._render()
         self._notify_hub()
 
@@ -677,6 +742,6 @@ class VekronaSignInSpoke(NormalSpoke):
     def _task_done(self, panel):
         self._task_running = False
         panel.progress.set_visible(False)
-        self._snapshot = self._read_snapshot()
+        self._refresh_snapshot()
         self._render()
         self._notify_hub()
