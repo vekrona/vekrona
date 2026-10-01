@@ -208,6 +208,7 @@ test: require-harness-key
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo loginctl enable-linger $(VM_USER)'; \
 	rsync -a --delete --exclude=.git --exclude=vm/.ssh -e "ssh $(SSH_OPTS)" "$(REPO_ROOT)/" "$(VM_USER)@$$ip:vekrona/"; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'cd vekrona && ./install.sh --skip 10-nvidia'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo systemctl restart "user@$$(id -u).service"'; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/session-check.sh'; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agents-check.sh'; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/errors-check.sh'; \
