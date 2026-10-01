@@ -1,3 +1,5 @@
+lang en_US.UTF-8
+keyboard --vckeymap=us --xlayouts='us'
 graphical
 zerombr
 clearpart --all --initlabel

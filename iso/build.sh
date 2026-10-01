@@ -88,9 +88,17 @@ fi
 updates_img="$workdir/updates.img"
 bash "$repo_root/iso/anaconda/pack-updates.sh" "$updates_img"
 
-volid="VEKRONA-44"
-mkksiso_args=(-a "$payload_dir" -u "$updates_img" -V "$volid")
-[[ "$variant" == test ]] && mkksiso_args+=(-c "console=ttyS0")
+volid="VEKRONA"
+mkksiso_args=(
+  -a "$payload_dir" -u "$updates_img" -V "$volid"
+  -R "Fedora 44" "Vekrona"
+  -R "Rescue a Fedora system" "Rescue a Vekrona system"
+)
+if [[ "$variant" == test ]]; then
+  mkksiso_args+=(-c "console=ttyS0")
+else
+  mkksiso_args+=(-c "inst.geoloc-use-with-ks")
+fi
 
 mkdir -p "$(dirname "$out")"
 mkksiso "${mkksiso_args[@]}" "$ks_file" "$netinst" "$out"

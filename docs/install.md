@@ -73,6 +73,14 @@ encrypted with that password, re-applies an encrypted automatic partitioning
 itself, so the standard "Disk Encryption Passphrase" dialog is not needed.
 **Network & Host Name** (including Wi-Fi) is Anaconda's own screen, unchanged.
 
+The ISO sets no language or keyboard layout, so Anaconda shows its Welcome
+language screen and picks defaults from the network location when it can
+(the boot entries pass `inst.geoloc-use-with-ks`, because Anaconda otherwise
+skips geolocation whenever a kickstart is present). The **Keyboard** screen
+therefore needs one visit to confirm the layout. The installed desktop follows
+the layouts chosen there (with several, Left Alt + Right Alt switches between
+them); see [Keyboard](keyboard.md) for how, and how to change them later.
+
 Once the install finishes and the machine reboots, the disk prompt will ask for
 that same password (or the security key, if you registered one) to unlock the
 encrypted root before vekrona's first-boot
