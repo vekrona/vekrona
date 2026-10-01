@@ -17,6 +17,7 @@ run_suite() {
 run_suite "error pipeline" python3 -B -m unittest discover -v -s tests/errors -p 'test_*.py'
 run_suite "stage helpers" bash tests/stages/run.sh
 run_suite "Anaconda add-ons" python3 -B -m unittest discover -v -s iso/anaconda/tests
+run_suite "VM serial helpers" python3 -B -m unittest discover -v -s tests/vm
 
 if [[ ${#failed[@]} -gt 0 ]]; then
   echo "FAILED suites: ${failed[*]}" >&2

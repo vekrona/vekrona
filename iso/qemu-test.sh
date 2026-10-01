@@ -1,172 +1,161 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ISO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=lib-vm.sh source-path=SCRIPTDIR
+source "$ISO_DIR/lib-vm.sh"
+
 usage() {
-  echo "usage: $(basename "$0") <test.iso>" >&2
-  exit 1
+  cat <<EOF >&2
+usage: $(basename "$0") [--print] <test.iso>
+
+Installs the test ISO unattended under QEMU/KVM, boots the installed disk
+(typing the LUKS passphrase on the serial console), then asserts over SSH.
+Both phases run through iso/lib-vm.sh: one transient systemd user unit each,
+with a memory cap, a hard runtime limit and binding to this script's pid.
+--print shows the QEMU command line of both phases and starts nothing.
+Set VEKRONA_VM_COEXIST="NAME ..." to acknowledge foreign VMs that may keep running.
+EOF
+  exit "${1:-2}"
 }
 
-[[ $# -eq 1 ]] || usage
-TEST_ISO="$1"
-[[ -r "$TEST_ISO" ]] || { echo "test ISO not readable: $TEST_ISO" >&2; exit 1; }
-
-ISO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+print_only=0
+TEST_ISO=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --print) print_only=1; shift ;;
+    -h|--help) usage 0 ;;
+    -*) usage ;;
+    *) [[ -z "$TEST_ISO" ]] || usage; TEST_ISO="$1"; shift ;;
+  esac
+done
+[[ -n "$TEST_ISO" ]] || usage
 
 log()  { printf '[qemu-test] %s\n' "$*" >&2; }
 fail() { printf '[qemu-test] FAILED: %s\n' "$*" >&2; exit 1; }
 
-command -v qemu-system-x86_64 >/dev/null 2>&1 || fail "qemu-system-x86_64 not installed"
-command -v qemu-img >/dev/null 2>&1 || fail "qemu-img not installed"
-command -v ssh >/dev/null 2>&1 || fail "ssh not installed"
-command -v python3 >/dev/null 2>&1 || fail "python3 not installed (needed to pick a free SSH forwarding port)"
-command -v socat >/dev/null 2>&1 || fail "socat not installed (needed to type the LUKS passphrase into the installed disk's serial console)"
+[[ -r "$TEST_ISO" ]] || fail "test ISO not readable: $TEST_ISO"
+vm_require_commands ssh
 
-[[ -e /dev/kvm ]] || fail "/dev/kvm does not exist; KVM is required (enable virtualization in firmware, load the kvm module, and on CI runners enable nested virtualization)"
-[[ -r /dev/kvm && -w /dev/kvm ]] || fail "/dev/kvm exists but is not accessible (permission denied); add this user to the kvm group and re-login, or on CI install the 99-kvm4all udev rule"
+VM_NAME=qemu-test
+VM_ISO="$(readlink -f "$TEST_ISO")"
+VM_RAM_MB="${VEKRONA_QEMU_RAM_MB:-4096}"
+VM_VCPUS="${VEKRONA_QEMU_VCPUS:-4}"
+VM_DISK_GB="${VEKRONA_QEMU_DISK_GB:-40}"
+VM_DISPLAY="${VEKRONA_QEMU_DISPLAY:-none}"
+VM_OWNER_PID="$$"
+VM_ARGV="$(basename "$0") $*"
+read -ra VM_COEXIST <<<"${VEKRONA_VM_COEXIST:-}"
 
-RAM_MB="${VEKRONA_QEMU_RAM_MB:-8192}"
-VCPUS="${VEKRONA_QEMU_VCPUS:-4}"
-DISK_GB="${VEKRONA_QEMU_DISK_GB:-40}"
-SSH_KEY="${VEKRONA_TEST_SSH_KEY:-$ISO_DIR/.ssh/id_ed25519}"
-DISPLAY_MODE="${VEKRONA_QEMU_DISPLAY:-none}"
-VNC_DISPLAY="${VEKRONA_QEMU_VNC_DISPLAY:-0}"
 INSTALL_TIMEOUT="${VEKRONA_INSTALL_TIMEOUT:-3600}"
 SSH_TIMEOUT="${VEKRONA_SSH_TIMEOUT:-300}"
 FIRSTBOOT_TIMEOUT="${VEKRONA_FIRSTBOOT_TIMEOUT:-2400}"
 REBOOT_TIMEOUT="${VEKRONA_REBOOT_TIMEOUT:-180}"
-POLL_INTERVAL="${VEKRONA_POLL_INTERVAL:-3}"
-VM_USER="vekrona"
+ASSERTIONS_MARGIN_SEC=1800
+INSTALL_TTL_SEC=$(( INSTALL_TIMEOUT + ASSERTIONS_MARGIN_SEC ))
+INSTALLED_TTL_SEC=$(( 3 * REBOOT_TIMEOUT + 3 * SSH_TIMEOUT + FIRSTBOOT_TIMEOUT + ASSERTIONS_MARGIN_SEC ))
+SSH_KEY="${VEKRONA_TEST_SSH_KEY:-$ISO_DIR/.ssh/id_ed25519}"
+export VEKRONA_TEST_SSH_KEY="$SSH_KEY"
+
 LUKS_PASSPHRASE="vekrona"
+LUKS_PROMPT_REGEX="Please enter passphrase"
+LUKS_ATTEMPTS=3
+FIRSTBOOT_STATE_DIR=/var/lib/vekrona
+FIRSTBOOT_DONE=$FIRSTBOOT_STATE_DIR/firstboot.done
+FIRSTBOOT_FAILED=$FIRSTBOOT_STATE_DIR/firstboot.failed
+FIRSTBOOT_WATCH_RECHECK_SEC=300
+SSH_CONNECTION_LOST_STATUS=255
+VM_USER="vekrona"
+
+phase_options() {
+  VM_PROFILE="$1"
+  VM_FRESH_DISK="$2"
+  VM_TTL_SEC="$3"
+  VM_IDLE_SEC="$3"
+}
+
+if (( print_only )); then
+  phase_options iso 1 "$INSTALL_TTL_SEC"
+  vm_validate_up_options
+  log "phase 1 (unattended install from the test ISO):"
+  vm_print_command
+  phase_options disk 0 "$INSTALLED_TTL_SEC"
+  vm_validate_up_options
+  log "phase 2 (boot of the installed disk, same disk image and UEFI variables):"
+  vm_print_command
+  exit 0
+fi
 
 [[ -r "$SSH_KEY" ]] || fail "test SSH private key not readable: $SSH_KEY (set VEKRONA_TEST_SSH_KEY to the private half of the key passed to iso/build.sh --test-ssh-pubkey)"
 
-free_port() {
-  python3 -c '
-import socket
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind(("127.0.0.1", 0))
-print(s.getsockname()[1])
-s.close()
-'
-}
-SSH_PORT="${VEKRONA_SSH_PORT:-$(free_port)}"
-
-source "$ISO_DIR/lib-qemu.sh"
-
-WORKDIR="$(mktemp -d -t vekrona-qemu-test.XXXXXX)"
-DISK_IMG="$WORKDIR/disk.qcow2"
-VARS_COPY="$WORKDIR/OVMF_VARS.fd"
-OVMF_CODE="$(init_ovmf "$VARS_COPY")" || fail "OVMF setup failed"
-
 LOG_DIR="${VEKRONA_QEMU_LOG_DIR:-$(mktemp -d -t vekrona-qemu-test-logs.XXXXXX)}"
 mkdir -p "$LOG_DIR"
-SERIAL_INSTALL_LOG="$LOG_DIR/serial-install.log"
-SERIAL_RUN_LOG="$LOG_DIR/serial-run.log"
-SERIAL_RUN_SOCK="$WORKDIR/serial-run.sock"
 log "serial console logs: $LOG_DIR"
 
-QEMU_PID=""
-LUKS_WATCHER_PID=""
+save_serial_log() {
+  local phase="$1" serial_log
+  serial_log="$(vm_serial_log)"
+  [[ ! -e "$serial_log" ]] || cp "$serial_log" "$LOG_DIR/serial-$phase.log"
+}
+
 cleanup() {
   local rc=$?
+  local serial_log
   if [[ $rc -ne 0 ]]; then
-    local f
-    for f in "$SERIAL_INSTALL_LOG" "$SERIAL_RUN_LOG"; do
-      [[ -e "$f" ]] || continue
-      echo "---- serial console log: $f (tail) ----" >&2
-      tail -n 200 "$f" >&2 || true
-      echo "---- end $f ----" >&2
+    save_serial_log "$current_phase"
+    for serial_log in "$LOG_DIR"/serial-*.log; do
+      [[ -e "$serial_log" ]] || continue
+      echo "---- serial console log: $serial_log (tail) ----" >&2
+      tail -n 200 "$serial_log" >&2
+      echo "---- end $serial_log ----" >&2
     done
   fi
-  if [[ -n "$LUKS_WATCHER_PID" ]] && kill -0 "$LUKS_WATCHER_PID" 2>/dev/null; then
-    kill "$LUKS_WATCHER_PID" 2>/dev/null || true
-    wait "$LUKS_WATCHER_PID" 2>/dev/null || true
-  fi
-  if [[ -n "$QEMU_PID" ]] && kill -0 "$QEMU_PID" 2>/dev/null; then
-    kill "$QEMU_PID" 2>/dev/null || true
-    wait "$QEMU_PID" 2>/dev/null || true
-  fi
-  rm -rf "$WORKDIR"
-}
-trap cleanup EXIT
-
-start_luks_watcher() {
-  local log_file="$1" sock="$2"
-  until [[ -S "$sock" ]]; do sleep 0.2; done
-  tail -n0 -F "$log_file" 2>/dev/null \
-    | awk -v RS=':' '/Please enter passphrase/ { print "prompt"; fflush() }' \
-    | while read -r _; do
-        printf '%s\n' "$LUKS_PASSPHRASE" | socat -t2 - "UNIX-CONNECT:$sock" >/dev/null || echo "[qemu-test] could not send the LUKS passphrase to $sock" >&2
-      done &
-  LUKS_WATCHER_PID=$!
+  vm_purge "$VM_NAME"
 }
 
-qemu-img create -f qcow2 "$DISK_IMG" "${DISK_GB}G" >/dev/null
+start_phase() {
+  vm_up
+  current_phase="$1"
+  trap cleanup EXIT
+  vm_load_meta "$VM_NAME"
+  vm_ssh_command
+}
 
-common_qemu_args=(
-  -enable-kvm
-  -machine q35
-  -cpu host
-  -m "$RAM_MB"
-  -smp "$VCPUS"
-  -no-user-config
-  -nodefaults
-  -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE"
-  -drive "if=pflash,format=raw,file=$VARS_COPY"
-  -drive "file=$DISK_IMG,format=qcow2,if=virtio,cache=writeback"
-  -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
-  -device "virtio-net-pci,netdev=net0"
-)
-case "$DISPLAY_MODE" in
-  none) common_qemu_args+=(-display none) ;;
-  vnc) common_qemu_args+=(-display "vnc=127.0.0.1:${VNC_DISPLAY}") ;;
-  *) fail "unknown VEKRONA_QEMU_DISPLAY: $DISPLAY_MODE (use 'none' or 'vnc')" ;;
-esac
+ssh_guest() { "${VM_SSH_COMMAND[@]}" -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_SEC" "$@"; }
 
-log "phase 1: booting the test ISO to install (ssh forwarded to 127.0.0.1:$SSH_PORT, install timeout ${INSTALL_TIMEOUT}s)"
-qemu-system-x86_64 "${common_qemu_args[@]}" \
-  -drive "file=$TEST_ISO,media=cdrom,if=ide,readonly=on" \
-  -boot order=d,menu=off \
-  -serial "file:$SERIAL_INSTALL_LOG" \
-  -no-reboot &
-QEMU_PID=$!
+unlock_and_wait_for_ssh() {
+  local wait_from="$1" prompt_seen_at status attempt
+  for (( attempt = 1; attempt <= LUKS_ATTEMPTS; attempt++ )); do
+    vm_wait_serial "$LUKS_PROMPT_REGEX" "$REBOOT_TIMEOUT" "$wait_from"
+    prompt_seen_at="$(vm_serial_offset)"
+    vm_serial_send "$LUKS_PASSPHRASE"
+    status=0
+    vm_wait_ssh "$SSH_TIMEOUT" "$LUKS_PROMPT_REGEX" "$prompt_seen_at" || status=$?
+    if (( status == 0 )); then
+      boot_serial_start="$prompt_seen_at"
+      return 0
+    fi
+    (( status == WAIT_SERIAL_REPROMPT_STATUS )) || fail "waiting for ssh failed with status $status"
+    log "LUKS prompt came back (attempt $attempt of $LUKS_ATTEMPTS)"
+    wait_from="$prompt_seen_at"
+  done
+  fail "the installed disk did not unlock after $LUKS_ATTEMPTS passphrase attempts"
+}
 
-deadline=$((SECONDS + INSTALL_TIMEOUT))
-while kill -0 "$QEMU_PID" 2>/dev/null; do
-  (( SECONDS < deadline )) || { kill "$QEMU_PID" 2>/dev/null || true; fail "install did not finish within ${INSTALL_TIMEOUT}s (qemu still running)"; }
-  sleep "$POLL_INTERVAL"
-done
-wait "$QEMU_PID"
-install_rc=$?
-QEMU_PID=""
-[[ $install_rc -eq 0 ]] || fail "qemu exited with status $install_rc during install (expected 0: -no-reboot makes qemu exit cleanly instead of rebooting when Anaconda finishes)"
+log "phase 1: booting the test ISO to install (install timeout ${INSTALL_TIMEOUT}s)"
+phase_options iso 1 "$INSTALL_TTL_SEC"
+start_phase install
+vm_wait_exit "$INSTALL_TIMEOUT"
+install_status="$(vm_exit_status)"
+save_serial_log install
+vm_down "$VM_NAME"
+[[ "$install_status" == 0 ]] || fail "qemu exited with status $install_status during install (expected 0: -no-reboot makes qemu exit cleanly instead of rebooting when Anaconda finishes)"
 log "phase 1 done: installer finished and qemu exited"
 
 log "phase 2: booting the installed disk (cdrom detached, LUKS-encrypted root)"
-qemu-system-x86_64 "${common_qemu_args[@]}" \
-  -boot order=c,menu=off \
-  -chardev "socket,id=serial0,path=$SERIAL_RUN_SOCK,server=on,wait=off,logfile=$SERIAL_RUN_LOG" \
-  -serial chardev:serial0 &
-QEMU_PID=$!
-start_luks_watcher "$SERIAL_RUN_LOG" "$SERIAL_RUN_SOCK"
-
-SSH_OPTS=(-F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "$SSH_PORT")
-ssh_guest() { ssh "${SSH_OPTS[@]}" "$VM_USER@127.0.0.1" "$@"; }
-
-poll_until() {
-  local timeout="$1" desc="$2"; shift 2
-  local deadline=$((SECONDS + timeout))
-  until "$@" >/dev/null 2>&1; do
-    if [[ -n "$QEMU_PID" ]] && ! kill -0 "$QEMU_PID" 2>/dev/null; then
-      fail "qemu process exited unexpectedly while waiting for: $desc"
-    fi
-    (( SECONDS < deadline )) || fail "timed out after ${timeout}s waiting for: $desc"
-    sleep "$POLL_INTERVAL"
-  done
-}
-
-log "waiting for SSH (timeout ${SSH_TIMEOUT}s)"
-poll_until "$SSH_TIMEOUT" "ssh reachable" ssh_guest true
+phase_options disk 0 "$INSTALLED_TTL_SEC"
+start_phase run
+unlock_and_wait_for_ssh 0
 
 log "checking the installed system: LUKS2 root, wheel membership, locked root, hostname, timezone, no leaked passphrase"
 root_source="$(ssh_guest "findmnt -no SOURCE /" | sed 's/\[.*//')"
@@ -178,7 +167,8 @@ root_pkname="$(ssh_guest "lsblk -no PKNAME '$root_source'")"
 luks_version="$(ssh_guest "sudo cryptsetup luksDump '/dev/$root_pkname'" | awk '/^Version:/ {print $2}')"
 [[ "$luks_version" == "2" ]] || fail "root partition is not LUKS2 (luksDump Version=$luks_version)"
 
-ssh_guest "id -nG $VM_USER" | grep -qw wheel || fail "$VM_USER is not in the wheel group"
+user_groups="$(ssh_guest "id -nG $VM_USER")"
+grep -qw wheel <<<"$user_groups" || fail "$VM_USER is not in the wheel group"
 root_status="$(ssh_guest 'sudo passwd -S root' | awk '{print $2}')"
 [[ "$root_status" == "L" ]] || fail "root account is not locked (passwd -S root: $root_status)"
 
@@ -194,36 +184,41 @@ done
 log "installed-system checks passed"
 
 boot_id_before="$(ssh_guest 'cat /proc/sys/kernel/random/boot_id')"
-reboot_happened() {
-  local id
-  id="$(ssh_guest 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null)" || return 1
-  [[ -n "$id" && "$id" != "$boot_id_before" ]]
+assert_rebooted() {
+  local boot_id_after
+  boot_id_after="$(ssh_guest 'cat /proc/sys/kernel/random/boot_id')"
+  [[ -n "$boot_id_after" && "$boot_id_after" != "$boot_id_before" ]] || fail "guest answered over ssh but its boot_id did not change: it did not reboot"
 }
 
-REPO_DIR="$(ssh_guest 'find "$HOME" -maxdepth 4 -type f -name install.sh 2>/dev/null | head -n1 | xargs -r dirname')"
+REPO_DIR="$(ssh_guest "find \"\$HOME\" -maxdepth 4 -type f -name install.sh 2>/dev/null | head -n1 | xargs -r dirname")"
 [[ -n "$REPO_DIR" ]] || fail "could not find the vekrona repo checkout (install.sh) under the guest user's home"
 log "found repo checkout at $REPO_DIR"
 
-FIRSTBOOT_DONE=/var/lib/vekrona/firstboot.done
-FIRSTBOOT_FAILED=/var/lib/vekrona/firstboot.failed
-firstboot_settled() { ssh_guest "test -e $FIRSTBOOT_DONE -o -e $FIRSTBOOT_FAILED"; }
-
 log "waiting for vekrona-firstboot to finish (timeout ${FIRSTBOOT_TIMEOUT}s)"
-poll_until "$FIRSTBOOT_TIMEOUT" "vekrona-firstboot completion marker" firstboot_settled
+firstboot_settled_status=0
+ssh_guest "command -v inotifywait >/dev/null && timeout $FIRSTBOOT_TIMEOUT bash -c 'until test -e $FIRSTBOOT_DONE -o -e $FIRSTBOOT_FAILED; do inotifywait -qq -t $FIRSTBOOT_WATCH_RECHECK_SEC -e create,moved_to $FIRSTBOOT_STATE_DIR; s=\$?; [ \$s -eq 0 -o \$s -eq 2 ] || exit \$s; done'" \
+  || firstboot_settled_status=$?
+case "$firstboot_settled_status" in
+  0) ;;
+  "$SSH_CONNECTION_LOST_STATUS") log "ssh connection dropped while waiting: the guest is probably rebooting after firstboot" ;;
+  124) fail "vekrona-firstboot did not settle within ${FIRSTBOOT_TIMEOUT}s" ;;
+  *) fail "waiting for the vekrona-firstboot marker failed with status $firstboot_settled_status" ;;
+esac
 
-if ssh_guest "test -e $FIRSTBOOT_FAILED"; then
+if (( firstboot_settled_status == 0 )) && ssh_guest "test -e $FIRSTBOOT_FAILED"; then
   echo "---- $FIRSTBOOT_FAILED ----" >&2
   ssh_guest "cat $FIRSTBOOT_FAILED" >&2 || true
   echo "---- journalctl -u vekrona-firstboot ----" >&2
   ssh_guest "journalctl -u vekrona-firstboot --no-pager" >&2 || true
   fail "vekrona-firstboot failed (see output above)"
 fi
-log "vekrona-firstboot finished successfully"
 
-log "waiting for the post-firstboot reboot"
-poll_until "$REBOOT_TIMEOUT" "post-firstboot reboot" reboot_happened
-log "guest rebooted; waiting for SSH again (timeout ${SSH_TIMEOUT}s)"
-poll_until "$SSH_TIMEOUT" "ssh reachable after reboot" ssh_guest true
+log "waiting for the post-firstboot reboot, the LUKS prompt and SSH again"
+unlock_and_wait_for_ssh "$boot_serial_start"
+assert_rebooted
+ssh_guest "test -e $FIRSTBOOT_DONE" || fail "firstboot did not leave $FIRSTBOOT_DONE"
+ssh_guest "test ! -e $FIRSTBOOT_FAILED" || fail "firstboot left $FIRSTBOOT_FAILED"
+log "vekrona-firstboot finished successfully"
 
 log "checking systemctl is-system-running"
 state="$(ssh_guest 'systemctl is-system-running --wait' 2>/dev/null || true)"
@@ -256,15 +251,16 @@ snap_n="$(ssh_guest "sudo '$REPO_DIR/bin/vekrona-snapshot' qemu-test | tail -n1"
 ssh_guest "sudo '$REPO_DIR/bin/vekrona-rollback' --yes $snap_n" || fail "vekrona-rollback failed"
 
 boot_id_before="$(ssh_guest 'cat /proc/sys/kernel/random/boot_id')"
+rollback_reboot_from="$(vm_serial_offset)"
 ssh_guest 'sudo systemctl reboot' || true
-log "waiting for the rollback reboot"
-poll_until "$REBOOT_TIMEOUT" "rollback reboot" reboot_happened
-log "guest rebooted; waiting for SSH again (timeout ${SSH_TIMEOUT}s)"
-poll_until "$SSH_TIMEOUT" "ssh reachable after rollback reboot" ssh_guest true
+log "waiting for the rollback reboot, the LUKS prompt and SSH again"
+unlock_and_wait_for_ssh "$rollback_reboot_from"
+assert_rebooted
 
 ssh_guest "sudo bash '$REPO_DIR/vm/rollback-check.sh' $snap_n" || fail "rollback-check.sh failed"
 
 state="$(ssh_guest 'systemctl is-system-running --wait' 2>/dev/null || true)"
 [[ "$state" == running ]] || fail "system did not reach 'running' after the rollback reboot: state=$state"
 
+save_serial_log run
 log "all checks passed"

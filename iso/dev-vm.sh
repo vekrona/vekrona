@@ -6,8 +6,6 @@ ISO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$ISO_DIR/lib-vm.sh"
 
 DEFAULT_WAIT_TIMEOUT_SEC=600
-SSH_CONNECT_TIMEOUT_SEC=5
-SSH_RETRY_BACKSTOP_SEC=3
 
 usage() {
   cat <<'USAGE' >&2
@@ -27,7 +25,7 @@ owner pid, its idle lease (re-armed by every subcommand) or its hard TTL.
   shot ABSOLUTE_OUT.png        screenshot; prints the path
   ssh [-- CMD...]              ssh to the guest through the forwarded port
   wait serial=REGEX | ssh | exit [--timeout SEC]
-                               serial: waits on the serial log; exit: waits on the qemu pid;
+                               serial: waits on the serial log (Python regex, also matches a prompt without trailing newline); exit: waits on the qemu pid;
                                ssh: no event source tells when guest sshd listens (user-mode port
                                forwarding accepts, then drops the connection, and ssh does not retry
                                that), so it retries whenever the guest writes to its serial console,
@@ -37,15 +35,6 @@ owner pid, its idle lease (re-armed by every subcommand) or its hard TTL.
 USAGE
   exit "${1:-2}"
 }
-
-SSH_OPTIONS=(
-  -F /dev/null
-  -o IdentitiesOnly=yes
-  -o IdentityAgent=none
-  -o LogLevel=ERROR
-  -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
-)
 
 need_value() { [[ $# -ge 2 ]] || { vm_log "$1 needs a value"; usage; }; }
 
@@ -116,55 +105,11 @@ cmd_shot() {
   vm_qmp "$VM_NAME" shot "$1"
 }
 
-ssh_user_for_profile() {
-  if [[ "$META_PROFILE" == installer ]]; then echo root; else echo vekrona; fi
-}
-
-ssh_command() {
-  SSH_COMMAND=(ssh "${SSH_OPTIONS[@]}" -p "$META_SSH_PORT" "$(ssh_user_for_profile)@127.0.0.1")
-  if [[ -r "${VEKRONA_TEST_SSH_KEY:-$ISO_DIR/.ssh/id_ed25519}" ]]; then
-    SSH_COMMAND+=(-i "${VEKRONA_TEST_SSH_KEY:-$ISO_DIR/.ssh/id_ed25519}")
-  fi
-}
-
 cmd_ssh() {
   [[ "${1:-}" != -- ]] || shift
   vm_touch "$VM_NAME"
-  ssh_command
-  exec "${SSH_COMMAND[@]}" "$@"
-}
-
-wait_serial() {
-  local regex="$1" timeout_sec="$2" log match_status=0 tail_status=0
-  log="$(vm_state_dir "$VM_NAME")/serial.log"
-  coproc SERIAL_TAIL { exec timeout "$timeout_sec" tail -n +1 -F --pid="$(vm_qemu_pid "$VM_NAME")" "$log"; }
-  grep -m1 -E -- "$regex" <&"${SERIAL_TAIL[0]}" || match_status=$?
-  [[ ! -d "/proc/$SERIAL_TAIL_PID" ]] || kill "$SERIAL_TAIL_PID"
-  wait "$SERIAL_TAIL_PID" || tail_status=$?
-  (( match_status == 0 )) || {
-    (( tail_status == 124 )) && vm_die "serial output did not match /$regex/ within ${timeout_sec}s; log: $log"
-    vm_die "VM exited before serial output matched /$regex/; log: $log"
-  }
-}
-
-wait_ssh() {
-  local timeout_sec="$1" serial_log last_error status
-  serial_log="$(vm_state_dir "$VM_NAME")/serial.log"
-  ssh_command
-  local deadline=$(( SECONDS + timeout_sec ))
-  until last_error="$("${SSH_COMMAND[@]}" -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_SEC" true 2>&1)"; do
-    (( SECONDS < deadline )) || vm_die "ssh to '$VM_NAME' not ready within ${timeout_sec}s; last error: $last_error"
-    status=0
-    inotifywait -qq -e modify -t "$SSH_RETRY_BACKSTOP_SEC" "$serial_log" || status=$?
-    (( status == 0 || status == 2 )) || vm_die "inotifywait failed on $serial_log (exit $status)"
-  done
-}
-
-wait_exit() {
-  local pidfile
-  pidfile="$(vm_state_dir "$VM_NAME")/qemu.pid"
-  [[ ! -r "$pidfile" ]] || python3 -B "$VM_QMP_PY" wait-pid "$(<"$pidfile")" --timeout "$1"
-  vm_stop_unit "$(vm_service "$VM_NAME")"
+  vm_ssh_command
+  exec "${VM_SSH_COMMAND[@]}" "$@"
 }
 
 cmd_wait() {
@@ -182,9 +127,9 @@ cmd_wait() {
   fi
   vm_touch "$VM_NAME" "$timeout_sec"
   case "$what" in
-    serial=*) wait_serial "${what#serial=}" "$timeout_sec" ;;
-    ssh) wait_ssh "$timeout_sec" ;;
-    exit) wait_exit "$timeout_sec" ;;
+    serial=*) vm_wait_serial "${what#serial=}" "$timeout_sec" ;;
+    ssh) vm_wait_ssh "$timeout_sec" ;;
+    exit) vm_wait_exit "$timeout_sec" ;;
     *) usage ;;
   esac
 }

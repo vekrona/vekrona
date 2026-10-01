@@ -14,6 +14,9 @@ VM_MEMORY_HEADROOM_MB=4096
 VM_CGROUP_OVERHEAD_MB=1536
 VM_LIBVIRT_URI=qemu:///system
 SYSTEMCTL_EXIT_UNIT_NOT_LOADED=5
+SSH_CONNECT_TIMEOUT_SEC=5
+SSH_RETRY_BACKSTOP_SEC=3
+WAIT_SERIAL_REPROMPT_STATUS=2
 
 VM_NAME=auth-1
 VM_PROFILE=installer
@@ -275,6 +278,84 @@ vm_qemu_pid() {
   cat "$pidfile"
 }
 
+vm_purge() {
+  vm_down "$1"
+  rm -rf "$(vm_dev_dir "$1")"
+}
+
+vm_serial_log() { echo "$(vm_state_dir "$VM_NAME")/serial.log"; }
+
+vm_serial_offset() { stat -c %s "$(vm_serial_log)"; }
+
+vm_serial_send() {
+  python3 -B "$VM_QMP_PY" --sock "$(vm_state_dir "$VM_NAME")/serial.sock" serial-send --enter "$1"
+}
+
+vm_wait_serial() {
+  local regex="$1" timeout_sec="$2" offset="${3:-0}"
+  python3 -B "$VM_QMP_PY" wait-serial --log "$(vm_serial_log)" --pid "$(vm_qemu_pid "$VM_NAME")" \
+    --offset "$offset" --timeout "$timeout_sec" "$regex" \
+    || vm_die "serial wait failed (see the message above)"
+}
+
+vm_serial_matches() {
+  local regex="$1" offset="$2"
+  grep -qaE -- "$regex" < <(tail -c "+$(( offset + 1 ))" "$(vm_serial_log)")
+}
+
+VM_SSH_OPTIONS=(
+  -F /dev/null
+  -o IdentitiesOnly=yes
+  -o IdentityAgent=none
+  -o LogLevel=ERROR
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+)
+
+vm_ssh_user() {
+  if [[ "$META_PROFILE" == installer ]]; then echo root; else echo vekrona; fi
+}
+
+vm_ssh_command() {
+  local key="${VEKRONA_TEST_SSH_KEY:-$VM_ISO_DIR/.ssh/id_ed25519}"
+  VM_SSH_COMMAND=(ssh "${VM_SSH_OPTIONS[@]}" -p "$META_SSH_PORT" "$(vm_ssh_user)@127.0.0.1")
+  if [[ -r "$key" ]]; then
+    VM_SSH_COMMAND+=(-i "$key")
+  fi
+}
+
+vm_wait_ssh() {
+  local timeout_sec="$1" reprompt_regex="${2:-}" reprompt_offset="${3:-0}" last_error status
+  local serial_log
+  serial_log="$(vm_serial_log)"
+  vm_ssh_command
+  local deadline=$(( SECONDS + timeout_sec ))
+  until last_error="$("${VM_SSH_COMMAND[@]}" -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_SEC" true 2>&1)"; do
+    if [[ -n "$reprompt_regex" ]] && vm_serial_matches "$reprompt_regex" "$reprompt_offset"; then
+      return "$WAIT_SERIAL_REPROMPT_STATUS"
+    fi
+    (( SECONDS < deadline )) || vm_die "ssh to '$VM_NAME' not ready within ${timeout_sec}s; last error: $last_error"
+    status=0
+    inotifywait -qq -e modify -t "$SSH_RETRY_BACKSTOP_SEC" "$serial_log" || status=$?
+    (( status == 0 || status == 2 )) || vm_die "inotifywait failed on $serial_log (exit $status)"
+  done
+}
+
+vm_wait_exit() {
+  local pidfile
+  pidfile="$(vm_state_dir "$VM_NAME")/qemu.pid"
+  [[ ! -r "$pidfile" ]] || python3 -B "$VM_QMP_PY" wait-pid "$(<"$pidfile")" --timeout "$1" \
+    || vm_die "VM '$VM_NAME' did not exit within ${1}s"
+  vm_stop_unit "$(vm_service "$VM_NAME")"
+}
+
+vm_exit_status() {
+  local exited
+  exited="$(vm_state_dir "$VM_NAME")/exited"
+  [[ -r "$exited" ]] || vm_die "VM '$VM_NAME' left no exit status ($exited)"
+  cat "$exited"
+}
+
 vm_extract_from_iso() {
   local iso_path="$1" dest="$2" partial
   if [[ ! -s "$dest" || "$VM_ISO" -nt "$dest" ]]; then
@@ -395,6 +476,9 @@ vm_build_qemu_command() {
   while IFS= read -r usb_arg; do
     [[ -z "$usb_arg" ]] || VM_QEMU_CMD+=("$usb_arg")
   done < <(vm_usb_host_device_args)
+  if [[ "$VM_PROFILE" == iso ]]; then
+    VM_QEMU_CMD+=(-no-reboot)
+  fi
   if [[ "$VM_PROFILE" == installer ]]; then
     VM_QEMU_CMD+=(
       -kernel "$dev_dir/vmlinuz"

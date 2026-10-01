@@ -123,7 +123,13 @@ jobs:
       - name: Install QEMU and OVMF
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf socat
+          sudo apt-get install -y qemu-system-x86 ovmf inotify-tools
+
+      - name: Start the systemd user manager that iso/lib-vm.sh runs QEMU units in
+        run: |
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
 
       - name: Download test ISO and throwaway key
         uses: actions/download-artifact@v4

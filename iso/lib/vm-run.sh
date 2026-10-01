@@ -7,7 +7,7 @@ source "$1"
 
 : "${STATE_DIR:?}" "${QMP_PY:?}" "${QEMU_CMD:?}"
 
-trap ': > "$STATE_DIR/exited"' EXIT
+trap 'echo "$?" > "$STATE_DIR/exited"' EXIT
 
 if [[ -n "${HTTP_PORT:-}" ]]; then
   coproc HTTP_SERVER { exec python3 -u -m http.server "$HTTP_PORT" --bind 127.0.0.1 --directory "$SERVE_DIR"; }

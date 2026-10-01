@@ -44,7 +44,7 @@ existing Fedora Workstation" below.
 | `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, agents, error-pipeline, agent-launch, rollback, and login-manager checks |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (install-and-boot test of a test ISO), `lib-vm.sh` + `dev-vm.sh` (the QEMU VM lifetime library and its REPL CLI), `dev-installer.sh` (installer window with a freshly packed `updates.img`), `firstboot/`, `kickstart/` |
 | `iso/anaconda/` | the two Anaconda add-ons (`updates/`: `vekrona_account`, `vekrona_signin`, `90-vekrona.conf`), `pack-updates.sh` (builds `updates.img`), `bundle.list` (pinned RPMs layered into it) and `tests/` (add-on unit tests) |
-| `tests/` | `run.sh` (single entry point for every headless suite), `errors/` (error pipeline), `stages/` (hardware predicates, stage list, panel scale), `fixtures/` (sysfs trees of MacBooks, a desktop and a laptop, used through `VEKRONA_SYSFS_ROOT`) |
+| `tests/` | `run.sh` (single entry point for every headless suite), `errors/` (error pipeline), `stages/` (hardware predicates, stage list, panel scale), `vm/` (serial-console helpers), `fixtures/` (sysfs trees of MacBooks, a desktop and a laptop, used through `VEKRONA_SYSFS_ROOT`) |
 | `.github/workflows/iso.yml` | CI: runs `tests/run.sh`, builds the release and test ISOs in a Fedora 44 container, boots the test ISO under QEMU/KVM on the runner, and attaches the release ISO to tagged GitHub releases |
 | `docs/PLAN.md` | the design record: decisions, verified machine facts, rollout, verification, known issues |
 | `TODO.md` | open follow-ups not yet folded into a stage |
@@ -1080,9 +1080,9 @@ sudo dnf upgrade qt6-qtbase
 
 ## Tests
 
-`bash tests/run.sh` is the single entry point: it runs all three headless
+`bash tests/run.sh` is the single entry point: it runs all headless
 suites, keeps going after a failing one and exits non-zero if any failed.
-They need no VM, desktop session or root. CI runs the same command in a
+They need no VM, desktop session or root. There are four suites. CI runs the same command in a
 Fedora container (job `unit-tests` in `.github/workflows/iso.yml`), and the
 ISO build waits for it.
 
@@ -1095,6 +1095,9 @@ ISO build waits for it.
 - `iso/anaconda/tests/` (`python3 -B -m unittest discover -s
   iso/anaconda/tests`): the Anaconda add-ons. Needs `python3-dasbus`,
   `python3-fido2` and `anaconda-core`.
+- `tests/vm/` (Python `unittest`): the serial-console helpers of
+  `iso/lib/qmp.py` that `iso/lib-vm.sh` uses to wait for a prompt and type
+  into the console.
 
 ## VM smoke test
 
@@ -1258,40 +1261,52 @@ and tag:
   it runs `./install.sh` as the `vekrona` user (skipping `10-nvidia` when
   there is no NVIDIA GPU), then writes `/var/lib/vekrona/firstboot.done` or
   `firstboot.failed` and reboots into `greetd` on success.
-- `iso/qemu-test.sh <test.iso>` boots that test ISO under plain
-  `qemu-system-x86_64` with KVM (UEFI via OVMF, 8 GiB RAM, 4 vCPUs, a 40G
-  qcow2 disk, user-mode networking with an SSH port forward). It runs the
-  install once with `-no-reboot` and the serial console logged to a plain
-  file (no LUKS prompt during install: the target disk is not encrypted
-  until Anaconda partitions it), so QEMU exits when Anaconda reboots. It then
-  boots the installed disk on its own, this time over a bidirectional QEMU
-  chardev socket (`-chardev socket,...,logfile=...` plus `-serial
-  chardev:serial0`) with a background watcher (`tail -F` piped through a
-  loop, `socat` writing the passphrase into the socket) that types
-  `vekrona` into the LUKS prompt every time the boot log shows "Please enter
-  passphrase" — once for the first boot, again after the firstboot reboot,
-  and again after the rollback reboot, all inside the same long-running QEMU
-  process. Once SSH is up it first asserts the installed-system account
+- `iso/qemu-test.sh [--print] <test.iso>` boots that test ISO under QEMU/KVM
+  (UEFI via OVMF, 4 GiB RAM by default, 4 vCPUs, a 40G qcow2 disk, user-mode
+  networking with an SSH port forward). Both phases run through
+  `iso/lib-vm.sh`, the library behind `iso/dev-vm.sh`: QEMU lives in a
+  transient systemd user unit with a memory cap, a hard runtime limit and
+  binding to the test's pid, so the VM disappears even when the test is killed
+  with SIGKILL. The library's single-VM guard refuses to start next to other
+  VMs; `VEKRONA_VM_COEXIST="name ..."` acknowledges foreign ones that may keep
+  running. `--print` shows both QEMU command lines and starts nothing.
+  Phase 1 installs from the ISO with `-no-reboot`, so QEMU exits when Anaconda
+  reboots, and the test checks that its exit status is 0. Phase 2 boots the
+  installed disk (same disk image and UEFI variables), whose serial console is
+  a socket. Whenever the serial log shows "Please enter passphrase" the test
+  writes `vekrona` into that socket, at most 3 times per boot, and a prompt that
+  comes back after the typed passphrase counts as an attempt. That happens
+  three times: the first boot, the boot after the firstboot reboot, and the
+  boot after the rollback. Waits use events: the serial log (a stream follower
+  that also matches a prompt without trailing newline), the QEMU pid, and
+  `inotifywait` on the guest for the firstboot marker. The only polling is
+  the SSH readiness check, because nothing tells the host when the guest's
+  sshd listens (it retries on every serial output plus a 3-second backstop).
+  Once SSH is up it first asserts the installed-system account
   invariants: root is on a LUKS2 mapper device (`findmnt`/`lsblk`
   TYPE=`crypt`, `cryptsetup luksDump` Version 2), `vekrona` is in `wheel`,
   root is locked (`passwd -S root` reports `L`), the hostname is `vekrona`,
   the timezone is `UTC`, and none of `/root/anaconda-ks.cfg`,
   `/root/original-ks.cfg` or `/var/log/anaconda` exist on the installed
   system (the plaintext LUKS passphrase would otherwise end up in one of
-  them). Then it waits for SSH with the matching test private key
-  (`VEKRONA_TEST_SSH_KEY`), then for the firstboot completion marker
+  them). It authenticates with the matching test private key
+  (`VEKRONA_TEST_SSH_KEY`), waits for the firstboot completion marker
   (printing `firstboot.failed` plus `journalctl -u vekrona-firstboot` and
   failing if firstboot failed), then for the post-firstboot reboot and SSH
-  again; and finally asserts `systemctl is-system-running --wait` is
+  again (the guest's `boot_id` must have changed); and finally asserts
+  `systemctl is-system-running --wait` is
   `running` (printing failed units otherwise), `greetd` is active, and runs
   `vm/session-check.sh`, `vm/login-manager-check.sh`, `./install.sh --skip
   10-nvidia 70` (verify: warnings allowed, no `FAIL:`), and a
   `vekrona-snapshot`/`vekrona-rollback` round trip, over SSH with the same
   options as `vm/Makefile` (harness key only, `IdentitiesOnly`, `-F
-  /dev/null`, `IdentityAgent=none`, no known-hosts file). Every wait is
-  polled with a bounded, env-overridable timeout rather than a fixed sleep;
-  on any failure it prints the serial console log tail before cleaning up
-  its QEMU and LUKS-watcher processes and temp files.
+  /dev/null`, `IdentityAgent=none`, no known-hosts file). Timeouts are
+  env-overridable (`VEKRONA_INSTALL_TIMEOUT`, `VEKRONA_SSH_TIMEOUT`,
+  `VEKRONA_FIRSTBOOT_TIMEOUT`, `VEKRONA_REBOOT_TIMEOUT`, and
+  `VEKRONA_QEMU_RAM_MB`, `VEKRONA_QEMU_VCPUS`, `VEKRONA_QEMU_DISK_GB`,
+  `VEKRONA_QEMU_DISPLAY=none|gtk`); on any failure it prints the serial
+  console log tail (also kept in `VEKRONA_QEMU_LOG_DIR`) before tearing the VM
+  and its disk down through the library.
 
 ### Installer REPL
 

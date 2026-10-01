@@ -2,14 +2,19 @@
 import argparse
 import json
 import os
+import re
 import select
 import socket
 import struct
+import subprocess
 import sys
+import time
 
 QMP_ABS_MAX = 32767
 GREETING_TIMEOUT_SEC = 30
 COMMAND_TIMEOUT_SEC = 30
+SERIAL_MATCH_WINDOW_BYTES = 65536
+SERIAL_READ_BYTES = 65536
 
 KEY_ALIASES = {
     "enter": "ret",
@@ -245,8 +250,51 @@ def command_wait_pid(args):
         raise QmpError(f"pid {args.pid} still running after {args.timeout}s")
 
 
+def command_serial_send(args):
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(COMMAND_TIMEOUT_SEC)
+    try:
+        sock.connect(args.sock)
+        sock.sendall(args.text.encode() + (b"\n" if args.enter else b""))
+    except OSError as err:
+        raise QmpError(f"cannot write to serial socket {args.sock}: {err}") from err
+    finally:
+        sock.close()
+
+
+def command_wait_serial(args):
+    try:
+        pattern = re.compile(args.regex.encode())
+    except re.error as err:
+        raise QmpError(f"invalid regex {args.regex!r}: {err}") from err
+    deadline = None if args.timeout is None else time.monotonic() + args.timeout
+    follower = subprocess.Popen(
+        ["tail", "-c", f"+{args.offset + 1}", "-F", f"--pid={args.pid}", args.log],
+        stdout=subprocess.PIPE,
+    )
+    window = b""
+    try:
+        while True:
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            ready, _, _ = select.select([follower.stdout], [], [], remaining)
+            if not ready:
+                raise QmpError(f"serial output did not match /{args.regex}/ within {args.timeout}s; log: {args.log}")
+            chunk = os.read(follower.stdout.fileno(), SERIAL_READ_BYTES)
+            if not chunk:
+                raise QmpError(f"VM exited before serial output matched /{args.regex}/; log: {args.log}")
+            window = (window + chunk)[-SERIAL_MATCH_WINDOW_BYTES:]
+            found = pattern.search(window)
+            if found:
+                print(found.group(0).decode(errors="replace"))
+                return
+    finally:
+        follower.kill()
+        follower.wait()
+        follower.stdout.close()
+
+
 def build_parser():
-    parser = argparse.ArgumentParser(description="Minimal QMP client for headless QEMU VMs")
+    parser = argparse.ArgumentParser(description="Minimal QMP and serial client for headless QEMU VMs")
     parser.add_argument("--sock")
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -277,12 +325,25 @@ def build_parser():
     wait_pid.add_argument("pid", type=int)
     wait_pid.add_argument("--timeout", type=float, default=None)
     wait_pid.set_defaults(run=command_wait_pid)
+
+    serial_send = commands.add_parser("serial-send")
+    serial_send.add_argument("--enter", action="store_true")
+    serial_send.add_argument("text")
+    serial_send.set_defaults(run=command_serial_send)
+
+    wait_serial = commands.add_parser("wait-serial")
+    wait_serial.add_argument("--log", required=True)
+    wait_serial.add_argument("--pid", type=int, required=True)
+    wait_serial.add_argument("--offset", type=int, default=0)
+    wait_serial.add_argument("--timeout", type=float, default=None)
+    wait_serial.add_argument("regex")
+    wait_serial.set_defaults(run=command_wait_serial)
     return parser
 
 
 def main():
     args = build_parser().parse_args()
-    needs_sock = args.command != "wait-pid" and not (args.command == "type" and args.print_keys)
+    needs_sock = args.command not in ("wait-pid", "wait-serial") and not (args.command == "type" and args.print_keys)
     if needs_sock and args.sock is None:
         print("qmp.py: --sock is required", file=sys.stderr)
         return 2
