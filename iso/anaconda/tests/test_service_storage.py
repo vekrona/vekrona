@@ -14,8 +14,9 @@ from vekrona_signin.service.installation import find_luks_backing_paths, find_lu
 APPLIED_PATH = "/org/fedoraproject/Anaconda/Modules/Storage/Partitioning/2"
 
 
-def partitioning_with(passphrase):
+def partitioning_with(passphrase, encrypted=True):
     request = PartitioningRequest()
+    request.encrypted = encrypted
     request.passphrase = passphrase
     return mock.Mock(Request=PartitioningRequest.to_structure(request))
 
@@ -30,6 +31,11 @@ class LuksPassphraseTest(unittest.TestCase):
         proxies = {APPLIED_PATH: partitioning_with("secret-passphrase")}
         result = find_luks_passphrase(FakeStorage(APPLIED_PATH), proxies.__getitem__)
         self.assertEqual(result, "secret-passphrase")
+
+    def test_unencrypted_applied_partitioning_is_rejected(self):
+        proxies = {APPLIED_PATH: partitioning_with("secret-passphrase", encrypted=False)}
+        with self.assertRaisesRegex(SignInError, "not encrypted"):
+            find_luks_passphrase(FakeStorage(APPLIED_PATH), proxies.__getitem__)
 
     def test_missing_applied_partitioning_is_reported(self):
         with self.assertRaisesRegex(SignInError, "No partitioning has been applied"):

@@ -2,14 +2,13 @@ from pathlib import Path
 
 from pyanaconda.anaconda_loggers import get_module_logger
 from pyanaconda.core import util
-from pyanaconda.core.configuration.anaconda import conf
 from pyanaconda.modules.common.constants.objects import DEVICE_TREE
 from pyanaconda.modules.common.constants.services import STORAGE
-from pyanaconda.modules.common.structures.partitioning import PartitioningRequest
 from pyanaconda.modules.common.structures.storage import DeviceData, DeviceFormatData
 from pyanaconda.modules.common.task import Task
 
 from vekrona_signin.core import luks
+from vekrona_signin.core.encrypted_storage import applied_request
 from vekrona_signin.core.errors import SignInError
 from vekrona_signin.core.fprint import storage_path
 from vekrona_signin.core.passwd import parse_account
@@ -45,10 +44,9 @@ def find_luks_backing_paths(device_tree):
 
 
 def find_luks_passphrase(storage, get_partitioning_proxy):
-    object_path = storage.AppliedPartitioning
-    if not object_path:
-        raise SignInError("No partitioning has been applied; cannot take the LUKS passphrase.")
-    request = PartitioningRequest.from_structure(get_partitioning_proxy(object_path).Request)
+    request = applied_request(storage, get_partitioning_proxy)
+    if not request.encrypted:
+        raise SignInError("The applied partitioning is not encrypted.")
     if not request.passphrase:
         raise SignInError("The applied partitioning has no LUKS passphrase.")
     return request.passphrase
