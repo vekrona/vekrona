@@ -67,6 +67,9 @@ vekrona_pam_u2f_lines_ok() {
   total="$(count_occurrences "$content" "pam_u2f.so")"
   [[ "$pinned" -eq "$2" && "$total" -eq "$2" ]]
 }
+tailscale_prefs() { root tailscale debug prefs; }
+tailscale_logged_out() { [[ "$(tailscale_prefs | jq -r '.LoggedOut')" == true ]]; }
+tailscale_operator_is_user() { [[ "$(tailscale_prefs | jq -r '.OperatorUser // ""')" == "$VEKRONA_USER" ]]; }
 authselect_selection_ok() {
   local want have
   want="$(printf '%s\n' custom/vekrona with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f | sort | paste -sd' ')"
@@ -237,8 +240,11 @@ if ran 40-system; then
     check assert "$u active" unit_active "$u"
   done
 
-  tailscale_operator="$(root tailscale debug prefs | jq -r '.OperatorUser // ""')"
-  check assert "tailscale operator is $VEKRONA_USER" eq "$tailscale_operator" "$VEKRONA_USER"
+  if tailscale_logged_out; then
+    warn_check "tailscale operator is $VEKRONA_USER (tailscaled forgets it across restarts until the first login: run 'tailscale up', then ./install.sh 40)" tailscale_operator_is_user
+  else
+    check assert "tailscale operator is $VEKRONA_USER" tailscale_operator_is_user
+  fi
 fi
 
 if ran 45-auth; then
