@@ -296,6 +296,23 @@ def fingerprint_for(source, identifier, message):
     return hashlib.sha256(key.encode()).hexdigest()
 
 
+UNIT_FAILURE_BOILERPLATE_RE = re.compile(
+    r"^(Failed with result|Scheduled restart job|Main process exited|Consumed .* CPU time)")
+
+
+def unit_failure_detail(unit, user_flag):
+    try:
+        result = subprocess.run(
+            ["journalctl", *user_flag, "-u", unit, "-n", "20", "-o", "cat", "--no-pager"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5)
+    except Exception:
+        return ""
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    useful = [line for line in lines if not UNIT_FAILURE_BOILERPLATE_RE.match(line)]
+    chosen = useful[-3:] if useful else lines[-1:]
+    return " / ".join(chosen)[:300]
+
+
 def classify(entry):
     message_id = entry.get("MESSAGE_ID")
     message = field_str(entry.get("MESSAGE"))
@@ -326,7 +343,11 @@ def classify(entry):
         unit = user_unit or system_unit
         result = field_str(entry.get("UNIT_RESULT"))
         title = f"{unit} failed" if unit else "a unit failed"
-        summary = f"result={result}" if result else message
+        detail = unit_failure_detail(unit, ["--user"] if user_unit else []) if unit else ""
+        if detail and result:
+            summary = f"{detail} (result={result})"
+        else:
+            summary = detail or (f"result={result}" if result else message)
         return {
             "source": "unit", "title": title, "summary": summary,
             "identifier": unit, "unit": unit, "exe": "", "pid": "",
