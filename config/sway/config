@@ -6,7 +6,6 @@ include /usr/share/sway-systemd/95-xdg-desktop-autostart.conf
 include ~/.config/sway/config.d/*.conf
 
 output DP-7 mode 3840x2160@240Hz adaptive_sync on scale 1.5
-output eDP-1 scale 2
 
 font pango:Atkinson Hyperlegible Next 10
 
@@ -27,6 +26,7 @@ input "type:touchpad" {
     tap enabled
     natural_scroll enabled
     dwt enabled
+    click_method clickfinger
 }
 
 floating_modifier Mod4 normal
@@ -169,6 +169,10 @@ bindsym XF86AudioMute exec dms ipc call audio mute
 bindsym XF86MonBrightnessUp exec dms ipc call brightness increment 5 ""
 #: Brightness down
 bindsym XF86MonBrightnessDown exec dms ipc call brightness decrement 5 ""
+#: Keyboard backlight up
+bindsym XF86KbdBrightnessUp exec brightnessctl --device='smc::kbd_backlight' set 10%+
+#: Keyboard backlight down
+bindsym XF86KbdBrightnessDown exec brightnessctl --device='smc::kbd_backlight' set 10%-
 
 mode "resize" {
     #: Resize: shrink width

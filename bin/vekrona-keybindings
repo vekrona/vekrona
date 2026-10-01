@@ -45,6 +45,8 @@ KEY_MAP = {
     "XF86AudioMute": "Mute",
     "XF86MonBrightnessUp": "Brightness Up",
     "XF86MonBrightnessDown": "Brightness Down",
+    "XF86KbdBrightnessUp": "Keyboard Backlight Up",
+    "XF86KbdBrightnessDown": "Keyboard Backlight Down",
 }
 
 MOD_MAP = {

@@ -3,10 +3,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
+source "$ROOT/lib/display-scale.sh"
 
 VEKRONA_RESET_DMS_SETTINGS="${VEKRONA_RESET_DMS_SETTINGS:-0}"
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/sway" "$HOME/.config/sway"
+ensure_internal_panel_scale
 ensure_symlink "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$HOME/.config/environment.d/vekrona.conf"
 
 gpu_env_file="$HOME/.config/environment.d/vekrona-gpu.conf"
