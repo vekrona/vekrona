@@ -10,6 +10,7 @@ from pyanaconda.ui.communication import hubQ
 from pyanaconda.ui.gui.spokes import NormalSpoke
 
 from vekrona_account.account_settings import (
+    account_status,
     apply_account,
     is_account_complete,
     validate_hostname,
@@ -106,6 +107,7 @@ class VekronaAccountSpoke(NormalSpoke):
             self._timezone_entry.set_text(tz if is_valid_timezone(tz) else DEFAULT_TIMEZONE)
         self._feedback.reset()
         self._validate()
+        self._full_name_entry.grab_focus()
 
     def _validate(self):
         errors = {
@@ -131,11 +133,9 @@ class VekronaAccountSpoke(NormalSpoke):
     @property
     def status(self):
         user = read_wheel_user(self._users_proxy)
-        if user is None:
-            return _("not set")
-        if not self.completed:
-            return _("incomplete")
-        return _("{} (admin), {}").format(user.name, self._timezone_proxy.Timezone)
+        return account_status(
+            None if user is None else user.name, self.completed, self._timezone_proxy.Timezone
+        )
 
     def on_back_clicked(self, button):
         self._feedback.leave_attempted()

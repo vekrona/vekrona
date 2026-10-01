@@ -5,6 +5,7 @@ import _paths
 from pyanaconda.modules.common.structures.user import UserData
 
 from vekrona_account.account_settings import (
+    account_status,
     apply_account,
     is_account_complete,
     validate_hostname,
@@ -101,6 +102,17 @@ class ApplyTest(unittest.TestCase):
         users = FakeUsers(root_locked=False)
         network, timezone = self.apply(users)
         self.assertTrue(is_account_complete(users, network, timezone))
+
+
+class AccountStatusTest(unittest.TestCase):
+    def test_missing_account_is_not_set_up(self):
+        self.assertEqual(account_status(None, False, "UTC"), "Not set up")
+
+    def test_unfinished_account_says_so(self):
+        self.assertEqual(account_status("bob", False, "UTC"), "Not finished")
+
+    def test_complete_account_names_user_and_timezone(self):
+        self.assertEqual(account_status("bob", True, "Europe/Kyiv"), "bob (admin), Europe/Kyiv")
 
 
 class ValidationTest(unittest.TestCase):

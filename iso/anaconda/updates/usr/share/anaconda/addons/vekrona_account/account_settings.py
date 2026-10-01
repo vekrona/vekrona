@@ -8,6 +8,7 @@ from pyanaconda.timezone import is_valid_timezone
 from vekrona_account.wheel_user import read_wheel_user, write_wheel_identity
 
 __all__ = [
+    "account_status",
     "apply_account",
     "is_account_complete",
     "validate_hostname",
@@ -52,6 +53,14 @@ def is_account_complete(users_proxy, network_proxy, timezone_proxy):
         and bool(network_proxy.Hostname)
         and is_valid_timezone(timezone_proxy.Timezone)
     )
+
+
+def account_status(user_name, complete, timezone):
+    if user_name is None:
+        return _("Not set up")
+    if not complete:
+        return _("Not finished")
+    return _("{name} (admin), {timezone}").format(name=user_name, timezone=timezone)
 
 
 def apply_account(users_proxy, network_proxy, timezone_proxy, name, gecos, hostname, timezone):
