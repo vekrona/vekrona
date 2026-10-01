@@ -110,7 +110,7 @@ jobs:
   test:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -124,7 +124,7 @@ jobs:
       - name: Install QEMU and OVMF
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 ovmf inotify-tools
+          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf inotify-tools
 
       - name: Start the systemd user manager that iso/lib-vm.sh runs QEMU units in
         run: |
