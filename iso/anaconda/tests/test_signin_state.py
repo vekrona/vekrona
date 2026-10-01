@@ -14,6 +14,7 @@ from vekrona_signin.gui.signin_state import (
     hub_status,
     leave_blocker,
     password_feedback,
+    screen_notice,
 )
 from vekrona_signin.gui.spokes import guidance
 
@@ -73,14 +74,14 @@ class EncryptAfterPasswordTest(unittest.TestCase):
 
     def test_no_second_encryption_while_one_runs(self):
         guard = guard_with_password()
-        guard.begin(StorageState.NOT_APPLIED)
+        guard.begin()
         self.assertFalse(guard.should_encrypt(StorageState.NOT_APPLIED))
 
 
 class StockSpokeReactionTest(unittest.TestCase):
     def test_own_apply_never_triggers_a_reconcile(self):
         guard = guard_with_password()
-        guard.begin(StorageState.NOT_APPLIED)
+        guard.begin()
         for state in StorageState:
             with self.subTest(state):
                 self.assertIs(guard.react_to_storage_change(snapshot(state, OUR_PATH)), StorageReaction.IGNORE)
@@ -106,13 +107,13 @@ class StockSpokeReactionTest(unittest.TestCase):
 
     def test_failed_reconcile_is_not_retried_for_the_same_layout_and_password(self):
         guard = guard_with_password()
-        guard.begin(StorageState.MISMATCH)
+        guard.begin()
         self.assertIs(guard.finish(snapshot(StorageState.MISMATCH), "not enough space", ""), StorageReaction.REEVALUATE)
         self.assertIs(guard.react_to_storage_change(snapshot(StorageState.MISMATCH)), StorageReaction.REEVALUATE)
 
     def test_failed_reconcile_is_retried_when_the_stock_spoke_applies_a_new_layout(self):
         guard = guard_with_password()
-        guard.begin(StorageState.MISMATCH)
+        guard.begin()
         guard.finish(snapshot(StorageState.MISMATCH), "not enough space", "")
         self.assertIs(
             guard.react_to_storage_change(snapshot(StorageState.MISMATCH, NEWER_STOCK_PATH)),
@@ -121,14 +122,14 @@ class StockSpokeReactionTest(unittest.TestCase):
 
     def test_failed_reconcile_is_retried_after_a_new_password(self):
         guard = guard_with_password()
-        guard.begin(StorageState.MISMATCH)
+        guard.begin()
         guard.finish(snapshot(StorageState.MISMATCH), "not enough space", "")
         guard.accept_password("another password")
         self.assertIs(guard.react_to_storage_change(snapshot(StorageState.MISMATCH)), StorageReaction.RECONCILE)
 
     def test_apply_that_still_leaves_the_layout_plain_counts_as_failed(self):
         guard = guard_with_password()
-        guard.begin(StorageState.MISMATCH)
+        guard.begin()
         self.assertIs(guard.finish(snapshot(StorageState.MISMATCH, OUR_PATH), "", OUR_PATH), StorageReaction.REEVALUATE)
         self.assertEqual(guard.failure, guidance.STATUS_STORAGE_STILL_PLAIN)
         self.assertIs(
@@ -141,7 +142,7 @@ class VisitOrderTest(unittest.TestCase):
         guard = EncryptionGuard()
         guard.accept_password(PASSWORD)
         self.assertTrue(guard.should_encrypt(StorageState.NOT_APPLIED))
-        guard.begin(StorageState.NOT_APPLIED)
+        guard.begin()
         self.assertIs(guard.finish(snapshot(StorageState.MATCH, OUR_PATH), "", OUR_PATH), StorageReaction.ENCRYPTED)
         stock_done = snapshot(StorageState.MATCH, NEWER_STOCK_PATH)
         self.assertIs(guard.react_to_storage_change(stock_done), StorageReaction.REEVALUATE)
@@ -154,37 +155,37 @@ class VisitOrderTest(unittest.TestCase):
         self.assertIs(guard.react_to_storage_change(plain), StorageReaction.REEVALUATE)
         guard.accept_password(PASSWORD)
         self.assertTrue(guard.should_encrypt(StorageState.MISMATCH))
-        guard.begin(StorageState.MISMATCH)
+        guard.begin()
         self.assertIs(guard.react_to_storage_change(snapshot(StorageState.MATCH, OUR_PATH)), StorageReaction.IGNORE)
         encrypted = snapshot(StorageState.MATCH, OUR_PATH)
         self.assertIs(guard.finish(encrypted, "", OUR_PATH), StorageReaction.ENCRYPTED)
-        self.assertEqual(
-            hub_status(encrypted, guard),
-            guidance.STATUS_STORAGE_REAPPLIED.format(status=guidance.STATUS_PASSWORD_ONLY),
-        )
+        self.assertEqual(hub_status(encrypted, guard), guidance.STATUS_PASSWORD_ONLY)
 
-    def test_unticked_encryption_in_the_stock_spoke_is_reapplied(self):
+    def test_status_after_a_reapply_describes_the_matching_layout_only(self):
         guard = guard_with_password()
-        guard.begin(StorageState.NOT_APPLIED)
+        guard.begin()
         guard.finish(snapshot(StorageState.MATCH, OUR_PATH), "", OUR_PATH)
         unticked = snapshot(StorageState.MISMATCH, NEWER_STOCK_PATH)
         self.assertIs(guard.react_to_storage_change(unticked), StorageReaction.RECONCILE)
-        guard.begin(unticked.storage_state)
-        guard.finish(snapshot(StorageState.MATCH, NEWER_STOCK_PATH), "", NEWER_STOCK_PATH)
-        self.assertTrue(guard.reapplied)
+        guard.begin()
+        reapplied = snapshot(StorageState.MATCH, NEWER_STOCK_PATH, key_registered=True)
+        guard.finish(reapplied, "", NEWER_STOCK_PATH)
+        self.assertEqual(
+            hub_status(reapplied, guard), guidance.STATUS_WITH_METHODS.format(methods="security key")
+        )
 
 
 class StockApplyDuringOursTest(unittest.TestCase):
     def test_stock_layout_landing_after_ours_is_reconciled_instead_of_failing(self):
         guard = guard_with_password()
-        guard.begin(StorageState.MISMATCH)
+        guard.begin()
         reaction = guard.finish(snapshot(StorageState.MISMATCH, NEWER_STOCK_PATH), "", OUR_PATH)
         self.assertIs(reaction, StorageReaction.RECONCILE)
         self.assertEqual(guard.failure, "")
 
     def test_matching_stock_layout_landing_after_ours_is_accepted(self):
         guard = guard_with_password()
-        guard.begin(StorageState.MISMATCH)
+        guard.begin()
         reaction = guard.finish(snapshot(StorageState.MATCH, NEWER_STOCK_PATH), "", OUR_PATH)
         self.assertIs(reaction, StorageReaction.REEVALUATE)
 
@@ -233,12 +234,13 @@ class HubStatusTest(unittest.TestCase):
         self.assertEqual(hub_status(Snapshot(), EncryptionGuard()), guidance.DISABLED_NO_ACCOUNT)
 
     def test_unreadable_state_shows_the_error(self):
-        status = hub_status(Snapshot(error="org.freedesktop.DBus.Error.NoReply"), EncryptionGuard())
-        self.assertIn("NoReply", status)
+        unreadable = Snapshot(error="org.freedesktop.DBus.Error.NoReply")
+        self.assertEqual(hub_status(unreadable, EncryptionGuard()), guidance.STATUS_STATE_UNREADABLE)
+        self.assertIn("NoReply", screen_notice(unreadable, EncryptionGuard()))
 
     def test_running_encryption_is_shown(self):
         guard = guard_with_password()
-        guard.begin(StorageState.NOT_APPLIED)
+        guard.begin()
         self.assertEqual(hub_status(snapshot(StorageState.NOT_APPLIED), guard), guidance.STATUS_APPLYING)
 
     def test_account_without_password_asks_for_one(self):
@@ -253,15 +255,31 @@ class HubStatusTest(unittest.TestCase):
 
     def test_failed_encryption_shows_its_error(self):
         guard = guard_with_password()
-        guard.begin(StorageState.MISMATCH)
+        guard.begin()
         guard.finish(snapshot(StorageState.MISMATCH), "Not enough space on the selected disks.", "")
-        status = hub_status(snapshot(StorageState.MISMATCH), guard)
-        self.assertEqual(status, guidance.STATUS_STORAGE_FAILED.format(error="Not enough space on the selected disks."))
+        self.assertEqual(hub_status(snapshot(StorageState.MISMATCH), guard), guidance.STATUS_ENCRYPTION_FAILED)
+
+    def test_failed_encryption_explains_itself_on_the_screen(self):
+        guard = guard_with_password()
+        guard.begin()
+        guard.finish(snapshot(StorageState.MISMATCH), "Not enough space on the selected disks.", "")
+        notice = screen_notice(snapshot(StorageState.MISMATCH), guard)
+        self.assertEqual(notice, guidance.NOTICE_ENCRYPTION_FAILED.format(error="Not enough space on the selected disks."))
+
+    def test_failure_notice_ends_once_the_layout_matches(self):
+        guard = guard_with_password()
+        guard.begin()
+        guard.finish(snapshot(StorageState.MISMATCH), "Not enough space on the selected disks.", "")
+        self.assertEqual(screen_notice(snapshot(StorageState.MATCH), guard), "")
+
+    def test_healthy_screen_has_no_notice(self):
+        self.assertEqual(screen_notice(snapshot(StorageState.MATCH), guard_with_password()), "")
 
     def test_failed_password_write_is_shown_until_a_write_succeeds(self):
         guard = guard_with_password()
         guard.account_error = "org.freedesktop.DBus.Error.NoReply"
-        self.assertIn("NoReply", hub_status(snapshot(StorageState.MATCH), guard))
+        self.assertEqual(hub_status(snapshot(StorageState.MATCH), guard), guidance.STATUS_PASSWORD_NOT_SAVED)
+        self.assertIn("NoReply", screen_notice(snapshot(StorageState.MATCH), guard))
 
     def test_missing_disk_tells_the_user_to_choose_one(self):
         status = hub_status(snapshot(StorageState.NO_DISK), guard_with_password())

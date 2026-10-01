@@ -87,6 +87,26 @@
                               </packing>
                             </child>
                             <child>
+                              <object class="GtkLabel" id="noticeLabel">
+                                <property name="visible">False</property>
+                                <property name="no-show-all">True</property>
+                                <property name="label"></property>
+                                <property name="wrap">True</property>
+                                <property name="max-width-chars">70</property>
+                                <property name="xalign">0</property>
+                                <attributes>
+                                  <attribute name="foreground" value="#a40000"/>
+                                </attributes>
+                                <style>
+                                  <class name="error"/>
+                                </style>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                              </packing>
+                            </child>
+                            <child>
                               <object class="GtkFrame" id="passwordFrame">
                                 <property name="visible">True</property>
                                 <property name="label-xalign">0</property>

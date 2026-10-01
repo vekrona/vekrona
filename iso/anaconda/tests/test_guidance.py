@@ -10,7 +10,8 @@ from vekrona_signin.gui.spokes.guidance import (
     FP_NONE, FP_FOUND, FP_DONE, DETAILS_TITLE, DETAILS_NO_USB,
     DISABLED_NO_ACCOUNT, NEED_PASSWORD_FIRST, USER_CHANGED, WATCH_UNAVAILABLE,
     STATUS_SET_PASSWORD, STATUS_PASSWORD_ONLY, STATUS_WITH_METHODS,
-    STATUS_STORAGE_CHANGED, DEFAULT_FINGER, password_state_error, device_scan_hint_to_key_text,
+    STATUS_STORAGE_CHANGED, STATUS_ENCRYPTION_FAILED, STATUS_APPLYING, STATUS_CHOOSE_DISK,
+    STATUS_DISK_NOT_SET_UP, STATUS_PASSWORD_NOT_SAVED, STATUS_STATE_UNREADABLE, DEFAULT_FINGER, password_state_error, device_scan_hint_to_key_text,
     device_scan_hint_to_fp_text, finger_choices,
 )
 from vekrona_signin.core.device_scan import HintCode
@@ -61,6 +62,29 @@ class ConstantsTest(unittest.TestCase):
 
     def test_fingerprint_texts_say_it_cannot_unlock_disk(self):
         self.assertIn("cannot unlock the disk", FP_USE.lower())
+
+
+HUB_TILE_MAX_CHARS = 48
+
+
+class HubTileStatusTest(unittest.TestCase):
+    def test_every_status_fits_the_two_line_hub_tile(self):
+        statuses = {
+            "set password": STATUS_SET_PASSWORD,
+            "password only": STATUS_PASSWORD_ONLY,
+            "all methods": STATUS_WITH_METHODS.format(methods="security key + fingerprint"),
+            "storage changed": STATUS_STORAGE_CHANGED,
+            "encryption failed": STATUS_ENCRYPTION_FAILED,
+            "applying": STATUS_APPLYING,
+            "choose disk": STATUS_CHOOSE_DISK,
+            "disk not set up": STATUS_DISK_NOT_SET_UP,
+            "password not saved": STATUS_PASSWORD_NOT_SAVED,
+            "state unreadable": STATUS_STATE_UNREADABLE,
+            "no account": DISABLED_NO_ACCOUNT,
+        }
+        for name, text in statuses.items():
+            with self.subTest(name):
+                self.assertLessEqual(len(text), HUB_TILE_MAX_CHARS)
 
 
 class PasswordStateTest(unittest.TestCase):

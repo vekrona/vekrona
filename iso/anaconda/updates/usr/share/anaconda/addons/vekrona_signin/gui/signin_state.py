@@ -17,6 +17,7 @@ __all__ = [
     "hub_status",
     "leave_blocker",
     "password_feedback",
+    "screen_notice",
 ]
 
 
@@ -52,17 +53,14 @@ class EncryptionGuard:
         self.account_error = ""
         self.applying = False
         self.failure = ""
-        self.reapplied = False
         self._generation = 0
         self._failed_on = None
-        self._replacing_layout = False
 
     def accept_password(self, password):
         self.password = password
         self._generation += 1
         self.failure = ""
         self._failed_on = None
-        self.reapplied = False
 
     def should_encrypt(self, storage_state):
         return (
@@ -82,9 +80,8 @@ class EncryptionGuard:
             return StorageReaction.RECONCILE
         return StorageReaction.REEVALUATE
 
-    def begin(self, storage_state):
+    def begin(self):
         self.applying = True
-        self._replacing_layout = storage_state in (StorageState.MISMATCH, StorageState.NOT_AUTOMATIC)
 
     def finish(self, snapshot, error, applied_by_us):
         self.applying = False
@@ -95,11 +92,9 @@ class EncryptionGuard:
         if error:
             self.failure = error
             self._failed_on = (snapshot.applied_path, self._generation)
-            self.reapplied = False
             return StorageReaction.REEVALUATE
         self.failure = ""
         self._failed_on = None
-        self.reapplied = self._replacing_layout
         return StorageReaction.ENCRYPTED
 
 
@@ -117,11 +112,53 @@ def _methods_status(snapshot):
     return _(guidance.STATUS_WITH_METHODS).format(methods=" + ".join(methods))
 
 
-def hub_status(snapshot, guard):
+class Problem(Enum):
+    PASSWORD_NOT_SAVED = "password_not_saved"
+    STATE_UNREADABLE = "state_unreadable"
+    ENCRYPTION_FAILED = "encryption_failed"
+
+
+def _problem(snapshot, guard):
     if guard.account_error:
-        return _(guidance.STATUS_ERROR).format(error=guard.account_error)
+        return Problem.PASSWORD_NOT_SAVED
     if snapshot.error:
-        return _(guidance.STATUS_ERROR).format(error=snapshot.error)
+        return Problem.STATE_UNREADABLE
+    if (
+        snapshot.has_account
+        and snapshot.has_password
+        and not guard.applying
+        and snapshot.storage_state is not StorageState.MATCH
+        and guard.failure
+    ):
+        return Problem.ENCRYPTION_FAILED
+    return None
+
+
+def _problem_detail(problem, snapshot, guard):
+    return {
+        Problem.PASSWORD_NOT_SAVED: guard.account_error,
+        Problem.STATE_UNREADABLE: snapshot.error,
+        Problem.ENCRYPTION_FAILED: guard.failure,
+    }[problem]
+
+
+_PROBLEM_STATUS = {
+    Problem.PASSWORD_NOT_SAVED: guidance.STATUS_PASSWORD_NOT_SAVED,
+    Problem.STATE_UNREADABLE: guidance.STATUS_STATE_UNREADABLE,
+    Problem.ENCRYPTION_FAILED: guidance.STATUS_ENCRYPTION_FAILED,
+}
+
+_PROBLEM_NOTICE = {
+    Problem.PASSWORD_NOT_SAVED: guidance.NOTICE_PASSWORD_NOT_SAVED,
+    Problem.STATE_UNREADABLE: guidance.NOTICE_STATE_UNREADABLE,
+    Problem.ENCRYPTION_FAILED: guidance.NOTICE_ENCRYPTION_FAILED,
+}
+
+
+def hub_status(snapshot, guard):
+    problem = _problem(snapshot, guard)
+    if problem is not None:
+        return _(_PROBLEM_STATUS[problem])
     if not snapshot.has_account:
         return _(guidance.DISABLED_NO_ACCOUNT)
     if guard.applying:
@@ -129,17 +166,19 @@ def hub_status(snapshot, guard):
     if not snapshot.has_password:
         return _(guidance.STATUS_SET_PASSWORD)
     if snapshot.storage_state is StorageState.MATCH:
-        status = _methods_status(snapshot)
-        if guard.reapplied:
-            return _(guidance.STATUS_STORAGE_REAPPLIED).format(status=status)
-        return status
-    if guard.failure:
-        return _(guidance.STATUS_STORAGE_FAILED).format(error=guard.failure)
+        return _methods_status(snapshot)
     if snapshot.storage_state is StorageState.NO_DISK:
         return _(guidance.STATUS_CHOOSE_DISK)
     if snapshot.storage_state is StorageState.NOT_APPLIED:
         return _(guidance.STATUS_DISK_NOT_SET_UP)
     return _(guidance.STATUS_STORAGE_CHANGED)
+
+
+def screen_notice(snapshot, guard):
+    problem = _problem(snapshot, guard)
+    if problem is None:
+        return ""
+    return _(_PROBLEM_NOTICE[problem]).format(error=_problem_detail(problem, snapshot, guard))
 
 
 def password_feedback(state, confirm, min_length):

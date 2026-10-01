@@ -45,6 +45,7 @@ from vekrona_signin.gui.signin_state import (
     hub_status,
     leave_blocker,
     password_feedback,
+    screen_notice,
 )
 from vekrona_signin.gui.spokes import guidance
 from vekrona_signin.gui.spokes.devwatch import DeviceWatcher
@@ -127,6 +128,7 @@ class VekronaSignInSpoke(NormalSpoke):
 
         self._disabled_label = self.builder.get_object("disabledLabel")
         self._content = self.builder.get_object("contentBox")
+        self._notice = self.builder.get_object("noticeLabel")
         self._password_entry = self.builder.get_object("passwordEntry")
         self._confirm_entry = self.builder.get_object("confirmEntry")
         self._password_error = self.builder.get_object("passwordError")
@@ -314,7 +316,9 @@ class VekronaSignInSpoke(NormalSpoke):
         self._snapshot = self._read_snapshot()
         self._forget_registrations_of_other_user()
         has_account = self._snapshot.has_account
-        self._disabled_label.set_text(hub_status(self._snapshot, self._guard))
+        self._disabled_label.set_text(
+            screen_notice(self._snapshot, self._guard) or hub_status(self._snapshot, self._guard)
+        )
         self._disabled_label.set_visible(not has_account)
         self._content.set_visible(has_account)
         if self._guard.password is not None:
@@ -380,7 +384,7 @@ class VekronaSignInSpoke(NormalSpoke):
     def _start_encryption(self):
         log.info("Encrypting the disk setup with the account password; it was %s.",
                  self._snapshot.storage_state.value)
-        self._guard.begin(self._snapshot.storage_state)
+        self._guard.begin()
         self._render()
         self._notify_hub()
         thread_manager.add_thread(
@@ -468,6 +472,8 @@ class VekronaSignInSpoke(NormalSpoke):
             self._refresh_key_pin_mode()
 
     def _render(self):
+        notice = screen_notice(self._snapshot, self._guard) if self._snapshot.has_account else ""
+        self._show_message(self._notice, notice)
         self._render_panel(self._key)
         self._render_panel(self._fp)
         self._update_sensitivity()

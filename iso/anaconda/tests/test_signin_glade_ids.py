@@ -15,7 +15,7 @@ SPOKE_WINDOW_IDS = {
 }
 
 CONTRACT_IDS = {
-    "mainBox", "disabledLabel", "contentBox", "introLabel",
+    "mainBox", "disabledLabel", "contentBox", "introLabel", "noticeLabel",
     "passwordFrame", "passwordLabel", "passwordEntry", "confirmLabel", "confirmEntry",
     "passwordHint", "passwordError",
     "keyFrame", "keyWhatLabel", "keyUseLabel", "keyStepsLabel", "keyStateLabel",
@@ -39,13 +39,13 @@ HANDLERS = {
 SPOKE_WINDOW_HANDLERS = {"on_back_clicked"}
 
 LONG_TEXT_LABEL_IDS = {
-    "disabledLabel", "introLabel", "passwordHint", "passwordError",
+    "disabledLabel", "introLabel", "noticeLabel", "passwordHint", "passwordError",
     "keyWhatLabel", "keyUseLabel", "keyStepsLabel", "keyStateLabel", "keyPinHint",
     "keyError", "keyDetailsLabel",
     "fpWhatLabel", "fpUseLabel", "fpStepsLabel", "fpStateLabel",
     "fpError", "fpDetailsLabel",
 }
-ERROR_LABEL_IDS = {"passwordError", "keyError", "fpError"}
+ERROR_LABEL_IDS = {"noticeLabel", "passwordError", "keyError", "fpError"}
 FRAME_IDS = {"passwordFrame", "keyFrame", "fpFrame"}
 
 
