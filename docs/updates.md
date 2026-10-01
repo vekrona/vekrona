@@ -80,14 +80,15 @@ vekrona-snapshot "before F<N> upgrade"
 sudo dnf versionlock clear
 sudo dnf system-upgrade download --releasever=<N>
 sudo dnf system-upgrade reboot
-./install.sh 70
-./install.sh 10 30
+./install.sh
 ```
 
 Clearing the lock before the upgrade lets dnf actually move the locked
-packages forward with everything else. `./install.sh 70` after the reboot
-checks the result; `./install.sh 10 30` re-applies the two locked sets
-against whatever versions the new release installed.
+packages forward with everything else. After the reboot, `./install.sh` runs
+the stages that apply to the machine: `10-nvidia` (NVIDIA GPU, not a Mac) or
+`15-mac` (Mac) rebuild the kernel modules for the new kernel, `30-packages`
+re-applies the locked sets against whatever versions the new release
+installed, and `70-verify` checks the result.
 
 The Qt lock alone withholds roughly 44 `qt6-*` package updates on an
 otherwise fully-updated system. Check what is being withheld with:

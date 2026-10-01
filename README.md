@@ -66,7 +66,7 @@ You need:
   [Everything netinstall](https://fedoraproject.org/misc/#everything) with only
   `@core` (Minimal Install) selected.
 - A Btrfs root on a subvolume named `root`, `/home` on a subvolume of the same
-  filesystem, and `/boot` on its own partition.
+  filesystem, and `/boot` on its own filesystem (the installer's default layout).
 - Network access, and a user with sudo. `install.sh` refuses to run as root.
 
 Then:
@@ -79,8 +79,8 @@ cd ~/wrk/vekrona
 ```
 
 Reboot and log in at the greeter. `./install.sh --list` shows the stages that
-apply to your machine: `10-nvidia` runs only with an NVIDIA GPU, `15-mac` only
-on a Mac.
+apply to your machine: `10-nvidia` runs only with an NVIDIA GPU outside a Mac,
+`15-mac` only on a Mac.
 
 On hardware other than mine:
 

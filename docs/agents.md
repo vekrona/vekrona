@@ -6,8 +6,11 @@ How the coding-agent CLIs are installed, updated, restricted to subscription log
 
 Five coding-agent CLIs run on this desktop, each launched by name from Sway
 (the launcher itself is a separate concern from this repo): Claude Code,
-Codex, OpenCode, Pi, and Cursor. All five are subscription-login tools; no
-API keys are configured or stored by vekrona. Stage `55-agents` installs
+Codex, OpenCode, Pi, and Cursor. All five are meant for subscription logins and vekrona
+configures and stores no API keys. Only Claude Code and Codex are enforced
+by policy files; for the other three `vekrona-agent` only strips API-key
+environment variables, so a key stored inside the tool still works
+([details](#subscription-only-enforcement-per-tool)). Stage `55-agents` installs
 them through exactly two package managers, so there is no per-tool lockfile
 or hash management to maintain:
 

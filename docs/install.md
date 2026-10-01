@@ -10,7 +10,9 @@ Prerequisites:
   selected: text console, `multi-user.target`, no desktop, no display
   manager.
 - Network access.
-- Btrfs root subvolume, with `/boot` on its own filesystem. Stage
+- Btrfs root subvolume, with `/boot` on its own filesystem (the installer's default layout;
+  nothing checks it, and `bin/vekrona-rollback` only warns when `/boot` holds
+  a kernel the restored root has no modules for). Stage
   `20-snapper` and `bin/vekrona-rollback` assume btrfs and snapper.
   The root subvolume must be named `root` (`vekrona-rollback` renames and
   replaces it), and `/home` must be a subvolume on the same Btrfs filesystem
