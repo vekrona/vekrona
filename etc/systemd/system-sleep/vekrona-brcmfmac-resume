@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+[[ "${1:-}" == post ]] || exit 0
+
+if ! output="$(modprobe -r brcmfmac_wcc brcmfmac 2>&1 && modprobe brcmfmac 2>&1)"; then
+  logger --priority daemon.err --tag vekrona-brcmfmac "reloading brcmfmac after ${2:-sleep} failed, Wi-Fi stays down: $output"
+  exit 1
+fi
+logger --priority daemon.info --tag vekrona-brcmfmac "reloaded brcmfmac after ${2:-sleep}"

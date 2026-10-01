@@ -199,9 +199,11 @@ ensure_user_in_group() {
   getent group "$group" | grep -q "\b$VEKRONA_USER\b" || die "user not added to $group"
 }
 
+vekrona_sysfs() { printf '%s' "${VEKRONA_SYSFS_ROOT:-}/sys"; }
+
 pci_has_id() {
   local want="$1" dev
-  for dev in /sys/bus/pci/devices/*/; do
+  for dev in "$(vekrona_sysfs)"/bus/pci/devices/*/; do
     [[ -r "$dev/vendor" && -r "$dev/device" ]] || continue
     [[ "$(<"$dev/vendor"):$(<"$dev/device")" == "0x${want%%:*}:0x${want##*:}" ]] && return 0
   done
@@ -210,14 +212,14 @@ pci_has_id() {
 
 pci_display_vendors() {
   local dev
-  for dev in /sys/bus/pci/devices/*/; do
+  for dev in "$(vekrona_sysfs)"/bus/pci/devices/*/; do
     [[ -r "$dev/vendor" && -r "$dev/class" ]] || continue
     [[ "$(<"$dev/class")" == 0x03* ]] && cat "$dev/vendor"
   done
   return 0
 }
 
-dmi_field() { cat "/sys/class/dmi/id/$1" 2>/dev/null || true; }
+dmi_field() { cat "$(vekrona_sysfs)/class/dmi/id/$1" 2>/dev/null || true; }
 
 has_nvidia_gpu() {
   local vendors
@@ -227,7 +229,11 @@ has_nvidia_gpu() {
 
 is_apple_mac() { [[ "$(dmi_field sys_vendor)" == "Apple Inc." ]]; }
 
-has_broadcom_wl_wifi() { pci_has_id 14e4:43a0 || pci_has_id 14e4:4331; }
+has_broadcom_wl_wifi() { pci_has_id 14e4:43a0; }
+
+has_brcmfmac_43602() { pci_has_id 14e4:43ba; }
+
+is_macbookpro12_1() { [[ "$(dmi_field product_name)" == "MacBookPro12,1" ]]; }
 
 has_facetime_hd_camera() { pci_has_id 14e4:1570; }
 
@@ -283,6 +289,14 @@ build_akmods_for_target_kernel() {
   ensure_target_kernel_devel
   log "rebuilding akmods for $target_kver"
   root akmods --force --kernels "$target_kver"
+}
+
+with_scratch_dir() {
+  (
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    "$@" "$scratch"
+  )
 }
 
 fetch_pinned() {
