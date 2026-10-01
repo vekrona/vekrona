@@ -129,6 +129,20 @@ def atomic_write(path, text):
         raise
 
 
+ERROR_ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$")
+
+
+def error_id_arg(text):
+    if not ERROR_ID_RE.fullmatch(text):
+        raise argparse.ArgumentTypeError(
+            f"not an error id (expected YYYYMMDDTHHMMSS-xxxxxxxx, see 'vekrona-error list'): {text!r}")
+    return text
+
+
+def new_error_id(now, fingerprint):
+    return f"{now.strftime('%Y%m%dT%H%M%S')}-{fingerprint[:8]}"
+
+
 def record_dir(error_id):
     return os.path.join(store_dir(), error_id)
 
@@ -992,7 +1006,7 @@ def cmd_watch(args):
                         self.send_error_toast(existing_id, rec)
                     return
 
-            error_id = f"{now.strftime('%Y%m%dT%H%M%S')}-{fingerprint[:8]}"
+            error_id = new_error_id(now, fingerprint)
             record = {
                 "id": error_id, "source": source, "title": title, "summary": summary,
                 "fingerprint": fingerprint, "first_seen": now_iso, "last_seen": now_iso,
@@ -1150,27 +1164,27 @@ def build_parser():
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser("show", help="print one error's record and captured context")
-    p.add_argument("id")
+    p.add_argument("id", type=error_id_arg)
     p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("prompt", help="print an agent prompt for one error, marking it launched")
-    p.add_argument("id")
+    p.add_argument("id", type=error_id_arg)
     p.set_defaults(func=cmd_prompt)
 
     p = sub.add_parser("pick", help="pick an error from a rofi menu and launch the agent on it")
     p.set_defaults(func=cmd_pick)
 
     p = sub.add_parser("mute", help="mute an error's fingerprint")
-    p.add_argument("id")
+    p.add_argument("id", type=error_id_arg)
     p.set_defaults(func=cmd_mute)
 
     p = sub.add_parser("ack", help="acknowledge one error, or every new error with --all")
-    p.add_argument("id", nargs="?")
+    p.add_argument("id", nargs="?", type=error_id_arg)
     p.add_argument("--all", action="store_true")
     p.set_defaults(func=cmd_ack)
 
     p = sub.add_parser("rm", help="delete one error's record (cleanup helper)")
-    p.add_argument("id")
+    p.add_argument("id", type=error_id_arg)
     p.set_defaults(func=cmd_rm)
 
     return parser
