@@ -43,7 +43,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Install build dependencies
-        run: dnf install -y lorax xorriso gnupg2 git rsync openssh-clients python3 \
+        run: |
+          dnf install -y lorax xorriso gnupg2 git rsync openssh-clients python3 \
             rpm cpio gzip coreutils dnf-plugins-core curl
 
       - name: Checkout
