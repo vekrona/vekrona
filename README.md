@@ -518,6 +518,7 @@ vekrona-error list [--all]     # table of recorded errors, newest first (--all i
 vekrona-error show <id>        # one error's record plus its captured context
 vekrona-error mute <id>        # mute this error's fingerprint
 vekrona-error ack <id>|--all   # mark handled
+vekrona-error rm <id>          # delete one error's record outright (not mute: it can come back on a repeat)
 vekrona-error pick             # rofi picker (bound to Hyper+Shift+A by another stream) -> launches the agent on the pick
 ```
 

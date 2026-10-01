@@ -183,6 +183,12 @@ if ran 50-user; then
   done
   check assert "python3-gobject installed" pkg_installed python3-gobject
   check assert "vekrona-error --help runs" vekrona-error --help
+  errors_store_dir="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona/errors"
+  if [[ -d "$errors_store_dir" ]]; then
+    check assert "error store directory mode is 0700" dir_mode_is "$errors_store_dir" 700
+  else
+    log "error store directory not created yet (vekrona-errors.service has not run in a live session), skipping its mode check"
+  fi
   check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
   check assert "vekrona fontconfig linked" file_exists "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
   check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"
@@ -306,6 +312,8 @@ fi
 if ran 55-agents; then
   check assert "repo enabled: $CLAUDE_CODE_REPO_ID" repo_enabled "$CLAUDE_CODE_REPO_ID"
   check assert "repo enabled: $MISE_REPO_ID" repo_enabled "$MISE_REPO_ID"
+  check assert "/etc/yum.repos.d/claude-code.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/claude-code.repo" /etc/yum.repos.d/claude-code.repo
+  check assert "/etc/yum.repos.d/mise.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/mise.repo" /etc/yum.repos.d/mise.repo
   check assert "gpg key imported: claude-code" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$CLAUDE_CODE_GPG_FINGERPRINT")"
   check assert "gpg key imported: mise" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$MISE_GPG_FINGERPRINT")"
   for p in "${VEKRONA_AGENT_PKGS[@]}"; do
@@ -328,6 +336,7 @@ if ran 55-agents; then
     check assert_file_contains "$f" "$mise_shims_dir"
     check assert_file_contains "$f" 'OPENCODE_DISABLE_AUTOUPDATE=true'
   done
+  check assert_file_contains "$VEKRONA_ROOT/bin/vekrona-agent" "$mise_shims_dir"
 fi
 
 if ran 60-gaming; then

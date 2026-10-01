@@ -206,6 +206,7 @@ ensure_user_in_group() {
 }
 
 owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
+dir_mode_is() { [[ "$(stat -c '%a' "$1" 2>/dev/null)" == "$2" ]]; }
 
 gpg_key_fingerprint_file() {
   # --dry-run --show-only still needs a writable GNUPGHOME to open a keybox in, so use a scratch one
