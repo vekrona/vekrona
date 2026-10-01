@@ -1,3 +1,4 @@
+graphical
 zerombr
 clearpart --all --initlabel
 bootloader --append="console=ttyS0 console=tty0"
