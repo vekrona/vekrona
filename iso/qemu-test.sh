@@ -115,10 +115,11 @@ trap cleanup EXIT
 start_luks_watcher() {
   local log_file="$1" sock="$2"
   until [[ -S "$sock" ]]; do sleep 0.2; done
-  tail -n0 -F "$log_file" 2>/dev/null | while IFS= read -r line; do
-    [[ "$line" == *"Please enter passphrase"* ]] || continue
-    printf '%s\n' "$LUKS_PASSPHRASE" | socat -t2 - "UNIX-CONNECT:$sock" >/dev/null 2>&1 || true
-  done &
+  tail -n0 -F "$log_file" 2>/dev/null \
+    | awk -v RS=':' '/Please enter passphrase/ { print "prompt"; fflush() }' \
+    | while read -r _; do
+        printf '%s\n' "$LUKS_PASSPHRASE" | socat -t2 - "UNIX-CONNECT:$sock" >/dev/null || echo "[qemu-test] could not send the LUKS passphrase to $sock" >&2
+      done &
   LUKS_WATCHER_PID=$!
 }
 
