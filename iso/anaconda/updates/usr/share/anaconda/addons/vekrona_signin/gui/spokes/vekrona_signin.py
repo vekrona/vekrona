@@ -65,10 +65,11 @@ def wait_for_stock_storage():
 
 
 class _Panel:
-    def __init__(self, kind, *, state_label, combo, check_button, registered_box, remove_button,
+    def __init__(self, kind, *, state_label, password_hint, combo, check_button, registered_box, remove_button,
                  progress, error_label, details, details_label):
         self.kind = kind
         self.state_label = state_label
+        self.password_hint = password_hint
         self.combo = combo
         self.check_button = check_button
         self.registered_box = registered_box
@@ -139,11 +140,13 @@ class VekronaSignInSpoke(NormalSpoke):
         self._key_confirm_entry = self.builder.get_object("keyConfirmEntry")
         self._key_pin_hint = self.builder.get_object("keyPinHint")
         self._key_register = self.builder.get_object("keyRegisterButton")
+        self._fp_setup = self.builder.get_object("fpSetupBox")
         self._finger_combo = self.builder.get_object("fingerCombo")
         self._fp_enroll = self.builder.get_object("fpEnrollButton")
         self._key = _Panel(
             KEY_PANEL,
             state_label=self.builder.get_object("keyStateLabel"),
+            password_hint=self.builder.get_object("keyNeedPassword"),
             combo=self.builder.get_object("keyCombo"),
             check_button=self.builder.get_object("keyCheckButton"),
             registered_box=self.builder.get_object("keyRegisteredBox"),
@@ -156,6 +159,7 @@ class VekronaSignInSpoke(NormalSpoke):
         self._fp = _Panel(
             FINGERPRINT_PANEL,
             state_label=self.builder.get_object("fpStateLabel"),
+            password_hint=self.builder.get_object("fpNeedPassword"),
             combo=self.builder.get_object("readerCombo"),
             check_button=self.builder.get_object("fpCheckButton"),
             registered_box=self.builder.get_object("fpRegisteredBox"),
@@ -497,8 +501,10 @@ class VekronaSignInSpoke(NormalSpoke):
             self._fill_combo(panel, view.devices)
             view = panel_view(panel.kind, self._panel_input(panel))
         panel.state_label.set_text(view.state_text)
+        self._show_message(panel.password_hint, view.password_hint)
         panel.details_label.set_text(view.details_text)
         panel.registered_box.set_visible(view.show_registered)
+        panel.combo.set_visible(view.show_setup)
         panel.combo.set_sensitive(view.choose_sensitive)
         panel.check_button.set_sensitive(view.check_sensitive)
         panel.remove_button.set_sensitive(view.remove_sensitive)
@@ -534,8 +540,7 @@ class VekronaSignInSpoke(NormalSpoke):
         self._show_message(self._key.error_label, self._key.failure or form.error)
 
     def _render_fingerprint_setup(self, view):
-        self._finger_combo.set_visible(view.show_setup)
-        self._fp_enroll.set_visible(view.show_setup)
+        self._fp_setup.set_visible(view.show_setup)
         self._finger_combo.set_sensitive(view.enroll_sensitive)
         self._fp_enroll.set_sensitive(view.enroll_sensitive)
         self._show_message(self._fp.error_label, self._fp.failure)

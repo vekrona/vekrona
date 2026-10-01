@@ -71,6 +71,29 @@ class EmptyResultsAreExplainedTest(unittest.TestCase):
         self.assertIn(guidance.WATCH_UNAVAILABLE, view.state_text)
 
 
+class ControlsAppearWithTheDeviceTest(unittest.TestCase):
+    def test_without_a_device_no_setup_control_is_shown(self):
+        for panel in (KEY_PANEL, FINGERPRINT_PANEL):
+            with self.subTest(panel):
+                view = panel_view(panel, ready_input(scan=scan()))
+                self.assertFalse(view.show_setup)
+                self.assertFalse(view.show_registered)
+
+    def test_while_scanning_no_setup_control_is_shown(self):
+        self.assertFalse(panel_view(KEY_PANEL, ready_input()).show_setup)
+
+    def test_a_found_device_shows_the_setup_controls(self):
+        self.assertTrue(panel_view(KEY_PANEL, ready_input(scan=found_key())).show_setup)
+
+    def test_password_reminder_is_irrelevant_without_a_device(self):
+        view = panel_view(KEY_PANEL, ready_input(scan=scan(), password_valid=False))
+        self.assertEqual(view.password_hint, "")
+
+    def test_password_reminder_is_irrelevant_once_registered(self):
+        view = panel_view(KEY_PANEL, ready_input(scan=found_key(), registered=True, password_valid=False))
+        self.assertEqual(view.password_hint, "")
+
+
 class SecurityKeyPanelTest(unittest.TestCase):
     def test_found_key_is_named_and_listed(self):
         view = panel_view(KEY_PANEL, ready_input(scan=found_key(), selected_id=YUBIKEY.id))
@@ -81,7 +104,8 @@ class SecurityKeyPanelTest(unittest.TestCase):
     def test_registration_needs_a_valid_password_first(self):
         view = panel_view(KEY_PANEL, ready_input(scan=found_key(), selected_id=YUBIKEY.id, password_valid=False))
         self.assertFalse(view.enroll_sensitive)
-        self.assertIn(guidance.NEED_PASSWORD_FIRST, view.state_text)
+        self.assertEqual(view.password_hint, guidance.NEED_PASSWORD_FIRST)
+        self.assertNotIn(guidance.NEED_PASSWORD_FIRST, view.state_text)
 
     def test_registration_needs_a_selected_device(self):
         view = panel_view(KEY_PANEL, ready_input(scan=found_key(), selected_id=None))
@@ -91,7 +115,7 @@ class SecurityKeyPanelTest(unittest.TestCase):
     def test_valid_password_and_selected_key_allow_registration(self):
         view = panel_view(KEY_PANEL, ready_input(scan=found_key(), selected_id=YUBIKEY.id))
         self.assertTrue(view.enroll_sensitive)
-        self.assertNotIn(guidance.NEED_PASSWORD_FIRST, view.state_text)
+        self.assertEqual(view.password_hint, "")
 
     def test_running_task_locks_every_control(self):
         view = panel_view(KEY_PANEL, ready_input(scan=found_key(), selected_id=YUBIKEY.id, busy=True))

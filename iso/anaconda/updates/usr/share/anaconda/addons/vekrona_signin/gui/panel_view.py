@@ -58,6 +58,7 @@ class PanelInput:
 @dataclass(frozen=True)
 class PanelView:
     state_text: str
+    password_hint: str
     details_text: str
     devices: tuple
     show_setup: bool
@@ -96,11 +97,15 @@ def _state_text(kind, panel_input, devices):
     if panel_input.user_changed:
         lines.append(_(guidance.USER_CHANGED))
     lines.append(_device_state(kind, panel_input, devices))
-    if not panel_input.registered and not panel_input.password_valid:
-        lines.append(_(guidance.NEED_PASSWORD_FIRST))
     if not panel_input.watch_available:
         lines.append(_(guidance.WATCH_UNAVAILABLE))
     return "\n".join(lines)
+
+
+def _password_hint(panel_input, devices):
+    if devices and not panel_input.registered and not panel_input.password_valid:
+        return _(guidance.NEED_PASSWORD_FIRST)
+    return ""
 
 
 def _details_text(panel_input):
@@ -126,9 +131,10 @@ def panel_view(kind, panel_input):
     has_selection = panel_input.selected_id in dict(devices)
     return PanelView(
         state_text=_state_text(kind, panel_input, devices),
+        password_hint=_password_hint(panel_input, devices),
         details_text=_details_text(panel_input),
         devices=devices,
-        show_setup=not panel_input.registered,
+        show_setup=not panel_input.registered and bool(devices),
         show_registered=panel_input.registered,
         choose_sensitive=can_set_up and bool(devices),
         enroll_sensitive=can_set_up and panel_input.password_valid and has_selection,

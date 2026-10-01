@@ -294,12 +294,27 @@
                                       </packing>
                                     </child>
                                     <child>
+                                      <object class="GtkLabel" id="keyNeedPassword">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
                                       <object class="GtkBox">
                                         <property name="visible">True</property>
                                         <property name="spacing">12</property>
                                         <child>
                                           <object class="GtkComboBoxText" id="keyCombo">
-                                            <property name="visible">True</property>
+                                            <property name="visible">False</property>
+                                            <property name="no-show-all">True</property>
                                             <property name="hexpand">True</property>
                                             <signal name="changed" handler="on_key_combo_changed" swapped="no"/>
                                           </object>
@@ -328,7 +343,7 @@
                                     </child>
                                     <child>
                                       <object class="GtkGrid" id="keySetupBox">
-                                        <property name="visible">True</property>
+                                        <property name="visible">False</property>
                                         <property name="no-show-all">True</property>
                                         <property name="row-spacing">6</property>
                                         <property name="column-spacing">12</property>
@@ -578,12 +593,27 @@
                                       </packing>
                                     </child>
                                     <child>
+                                      <object class="GtkLabel" id="fpNeedPassword">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
+                                        <property name="label"></property>
+                                        <property name="wrap">True</property>
+                                        <property name="max-width-chars">70</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                      </packing>
+                                    </child>
+                                    <child>
                                       <object class="GtkBox">
                                         <property name="visible">True</property>
                                         <property name="spacing">12</property>
                                         <child>
                                           <object class="GtkComboBoxText" id="readerCombo">
-                                            <property name="visible">True</property>
+                                            <property name="visible">False</property>
+                                            <property name="no-show-all">True</property>
                                             <property name="hexpand">True</property>
                                             <signal name="changed" handler="on_reader_combo_changed" swapped="no"/>
                                           </object>
@@ -611,13 +641,13 @@
                                       </packing>
                                     </child>
                                     <child>
-                                      <object class="GtkBox">
-                                        <property name="visible">True</property>
+                                      <object class="GtkBox" id="fpSetupBox">
+                                        <property name="visible">False</property>
+                                        <property name="no-show-all">True</property>
                                         <property name="spacing">12</property>
                                         <child>
                                           <object class="GtkComboBoxText" id="fingerCombo">
                                             <property name="visible">True</property>
-                                            <property name="no-show-all">True</property>
                                             <property name="hexpand">True</property>
                                           </object>
                                           <packing>
@@ -628,7 +658,6 @@
                                         <child>
                                           <object class="GtkButton" id="fpEnrollButton">
                                             <property name="visible">True</property>
-                                            <property name="no-show-all">True</property>
                                             <property name="can-focus">True</property>
                                             <property name="label" translatable="yes">Enroll fingerprint</property>
                                             <signal name="clicked" handler="on_fp_enroll_clicked" swapped="no"/>

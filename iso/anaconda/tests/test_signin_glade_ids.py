@@ -19,13 +19,13 @@ CONTRACT_IDS = {
     "passwordFrame", "passwordLabel", "passwordEntry", "confirmLabel", "confirmEntry",
     "passwordHint", "passwordError",
     "keyFrame", "keyWhatLabel", "keyUseLabel", "keyStepsLabel", "keyStateLabel",
-    "keyCombo", "keyCheckButton",
+    "keyNeedPassword", "keyCombo", "keyCheckButton",
     "keySetupBox", "keyPinLabel", "keyPinEntry", "keyConfirmLabel", "keyConfirmEntry",
     "keyPinHint", "keyRegisterButton",
     "keyRegisteredBox", "keyRemoveButton",
     "keyProgress", "keyError", "keyDetails", "keyDetailsLabel",
-    "fpFrame", "fpWhatLabel", "fpUseLabel", "fpStepsLabel", "fpStateLabel",
-    "readerCombo", "fpCheckButton", "fingerCombo", "fpEnrollButton",
+    "fpFrame", "fpWhatLabel", "fpUseLabel", "fpStepsLabel", "fpStateLabel", "fpNeedPassword",
+    "fpNeedPassword", "readerCombo", "fpCheckButton", "fpSetupBox", "fingerCombo", "fpEnrollButton",
     "fpRegisteredBox", "fpRemoveButton",
     "fpProgress", "fpError", "fpDetails", "fpDetailsLabel",
 }
@@ -40,13 +40,19 @@ SPOKE_WINDOW_HANDLERS = {"on_back_clicked"}
 
 LONG_TEXT_LABEL_IDS = {
     "disabledLabel", "introLabel", "noticeLabel", "passwordHint", "passwordError",
-    "keyWhatLabel", "keyUseLabel", "keyStepsLabel", "keyStateLabel", "keyPinHint",
+    "keyWhatLabel", "keyUseLabel", "keyStepsLabel", "keyStateLabel", "keyNeedPassword", "keyPinHint",
     "keyError", "keyDetailsLabel",
-    "fpWhatLabel", "fpUseLabel", "fpStepsLabel", "fpStateLabel",
+    "fpWhatLabel", "fpUseLabel", "fpStepsLabel", "fpStateLabel", "fpNeedPassword",
     "fpError", "fpDetailsLabel",
 }
 ERROR_LABEL_IDS = {"noticeLabel", "passwordError", "keyError", "fpError"}
 FRAME_IDS = {"passwordFrame", "keyFrame", "fpFrame"}
+
+
+HIDDEN_UNTIL_NEEDED_IDS = {
+    "keyCombo", "readerCombo", "fpSetupBox", "keySetupBox", "keyNeedPassword", "fpNeedPassword",
+    "keyRegisteredBox", "fpRegisteredBox",
+}
 
 
 class SignInGladeTest(unittest.TestCase):
@@ -86,6 +92,13 @@ class SignInGladeTest(unittest.TestCase):
             with self.subTest(widget_id):
                 classes = [c.get("name") for c in self.objects[widget_id].iter("class")]
                 self.assertIn("error", classes)
+                properties = self.properties(widget_id)
+                self.assertEqual(properties.get("no-show-all"), "True")
+                self.assertEqual(properties.get("visible"), "False")
+
+    def test_device_controls_start_hidden(self):
+        for widget_id in HIDDEN_UNTIL_NEEDED_IDS:
+            with self.subTest(widget_id):
                 properties = self.properties(widget_id)
                 self.assertEqual(properties.get("no-show-all"), "True")
                 self.assertEqual(properties.get("visible"), "False")
