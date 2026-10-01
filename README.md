@@ -501,7 +501,7 @@ dismisses the popup on a body click rather than running its first action;
 `70-verify` asserts it stays `true`. This is a DMS-wide setting, not specific
 to vekrona's own toasts: a body click on *any* application's notification
 popup runs that notification's first action the same way, once this is set):
-the former launches `vekrona-agent --error <id>` as a monitored child (its failure
+the former launches `vekrona-agent --pick --error <id>` as a monitored child (its failure
 or non-zero exit is itself toasted, not swallowed), the coding agent launcher
 built by another stream, which calls `vekrona-error prompt <id>` to get its
 brief (see `config/agents/skills/vekrona-diagnose/SKILL.md`, symlinked into
@@ -689,7 +689,7 @@ vekrona-agent choose              # always show the picker, set the default, the
 vekrona-agent                     # launch the default harness (dies with no default set)
 vekrona-agent --pick              # launch the default; with no default, show the picker, set it, then launch
 vekrona-agent --prompt "fix the build"
-vekrona-agent --error 42           # launch with the recorded error's prompt (vekrona-error prompt 42)
+vekrona-agent --pick --error 42    # launch with the recorded error's prompt (vekrona-error prompt 42), opening the picker if no default harness is set
 vekrona-agent --dry-run ...        # print the final argv instead of launching, one element per line
 ```
 

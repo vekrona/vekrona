@@ -631,7 +631,7 @@ def cmd_pick(args):
     agent_bin = resolve_tool("vekrona-agent")
     if not agent_bin:
         die("vekrona-agent not found on PATH")
-    os.execvp(agent_bin, [agent_bin, "--error", error_id])
+    os.execvp(agent_bin, [agent_bin, "--pick", "--error", error_id])
 
 
 def cmd_mute(args):
@@ -884,7 +884,7 @@ def cmd_watch(args):
             if not agent_bin:
                 self.send_plain_toast("vekrona", "failed to launch agent: vekrona-agent not found on PATH")
                 return
-            self._spawn_and_watch([agent_bin, "--error", error_id])
+            self._spawn_and_watch([agent_bin, "--pick", "--error", error_id])
 
         def launch_pick(self):
             self._spawn_and_watch([os.path.realpath(__file__), "pick"])
