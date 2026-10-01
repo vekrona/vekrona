@@ -16,7 +16,7 @@ VM_LIBVIRT_URI=qemu:///system
 SYSTEMCTL_EXIT_UNIT_NOT_LOADED=5
 SSH_CONNECT_TIMEOUT_SEC=5
 SSH_RETRY_BACKSTOP_SEC=3
-WAIT_SERIAL_REPROMPT_STATUS=2
+WAIT_SSH_ABORTED_STATUS=2
 
 VM_NAME=auth-1
 VM_PROFILE=installer
@@ -329,14 +329,14 @@ vm_ssh_command() {
 }
 
 vm_wait_ssh() {
-  local timeout_sec="$1" reprompt_regex="${2:-}" reprompt_offset="${3:-0}" last_error status
+  local timeout_sec="$1" abort_regex="${2:-}" abort_offset="${3:-0}" last_error status
   local serial_log
   serial_log="$(vm_serial_log)"
   vm_ssh_command
   local deadline=$(( SECONDS + timeout_sec ))
   until last_error="$("${VM_SSH_COMMAND[@]}" -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_SEC" true 2>&1)"; do
-    if [[ -n "$reprompt_regex" ]] && vm_serial_matches "$reprompt_regex" "$reprompt_offset"; then
-      return "$WAIT_SERIAL_REPROMPT_STATUS"
+    if [[ -n "$abort_regex" ]] && vm_serial_matches "$abort_regex" "$abort_offset"; then
+      return "$WAIT_SSH_ABORTED_STATUS"
     fi
     (( SECONDS < deadline )) || vm_die "ssh to '$VM_NAME' not ready within ${timeout_sec}s; last error: $last_error"
     status=0

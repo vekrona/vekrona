@@ -15,6 +15,8 @@ Both phases run through iso/lib-vm.sh: one transient systemd user unit each,
 with a memory cap, a hard runtime limit and binding to this script's pid.
 --print shows the QEMU command line of both phases and starts nothing.
 Set VEKRONA_VM_COEXIST="NAME ..." to acknowledge foreign VMs that may keep running.
+Set VEKRONA_QEMU_KEEP_DISK_ON_FAILURE=1 to keep the VM's disk (iso/dev/qemu-test) when a
+check fails; boot it by hand with: iso/dev-vm.sh up --name qemu-test --profile disk
 EOF
   exit "${1:-2}"
 }
@@ -59,7 +61,7 @@ export VEKRONA_TEST_SSH_KEY="$SSH_KEY"
 
 LUKS_PASSPHRASE="vekrona"
 LUKS_PROMPT_REGEX="Please enter passphrase"
-LUKS_ATTEMPTS=3
+LUKS_REJECTED_REGEX="Passphrase incorrect|Failed to activate"
 FIRSTBOOT_STATE_DIR=/var/lib/vekrona
 FIRSTBOOT_DONE=$FIRSTBOOT_STATE_DIR/firstboot.done
 FIRSTBOOT_FAILED=$FIRSTBOOT_STATE_DIR/firstboot.failed
@@ -110,7 +112,12 @@ cleanup() {
       echo "---- end $serial_log ----" >&2
     done
   fi
-  vm_purge "$VM_NAME"
+  if [[ $rc -ne 0 && "${VEKRONA_QEMU_KEEP_DISK_ON_FAILURE:-0}" == 1 ]]; then
+    vm_down "$VM_NAME"
+    log "kept the disk in $(vm_dev_dir "$VM_NAME"); boot it with: iso/dev-vm.sh up --name $VM_NAME --profile disk"
+  else
+    vm_purge "$VM_NAME"
+  fi
 }
 
 start_phase() {
@@ -124,22 +131,13 @@ start_phase() {
 ssh_guest() { "${VM_SSH_COMMAND[@]}" -o BatchMode=yes -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_SEC" "$@"; }
 
 unlock_and_wait_for_ssh() {
-  local wait_from="$1" prompt_seen_at status attempt
-  for (( attempt = 1; attempt <= LUKS_ATTEMPTS; attempt++ )); do
-    vm_wait_serial "$LUKS_PROMPT_REGEX" "$REBOOT_TIMEOUT" "$wait_from"
-    prompt_seen_at="$(vm_serial_offset)"
-    vm_serial_send "$LUKS_PASSPHRASE"
-    status=0
-    vm_wait_ssh "$SSH_TIMEOUT" "$LUKS_PROMPT_REGEX" "$prompt_seen_at" || status=$?
-    if (( status == 0 )); then
-      boot_serial_start="$prompt_seen_at"
-      return 0
-    fi
-    (( status == WAIT_SERIAL_REPROMPT_STATUS )) || fail "waiting for ssh failed with status $status"
-    log "LUKS prompt came back (attempt $attempt of $LUKS_ATTEMPTS)"
-    wait_from="$prompt_seen_at"
-  done
-  fail "the installed disk did not unlock after $LUKS_ATTEMPTS passphrase attempts"
+  local wait_from="$1" prompt_seen_at status=0
+  vm_wait_serial "$LUKS_PROMPT_REGEX" "$REBOOT_TIMEOUT" "$wait_from"
+  prompt_seen_at="$(vm_serial_offset)"
+  vm_serial_send "$LUKS_PASSPHRASE"
+  vm_wait_ssh "$SSH_TIMEOUT" "$LUKS_REJECTED_REGEX" "$prompt_seen_at" || status=$?
+  (( status != WAIT_SSH_ABORTED_STATUS )) || fail "the installed disk rejected the LUKS passphrase"
+  (( status == 0 )) || fail "waiting for ssh failed with status $status"
 }
 
 log "phase 1: booting the test ISO to install (install timeout ${INSTALL_TIMEOUT}s)"
@@ -162,9 +160,9 @@ root_source="$(ssh_guest "findmnt -no SOURCE /" | sed 's/\[.*//')"
 [[ -n "$root_source" ]] || fail "could not resolve the root filesystem's source device"
 root_type="$(ssh_guest "lsblk -no TYPE '$root_source'")"
 [[ "$root_type" == "crypt" ]] || fail "root filesystem is not on a LUKS mapper device (lsblk TYPE=$root_type)"
-root_pkname="$(ssh_guest "lsblk -no PKNAME '$root_source'")"
-[[ -n "$root_pkname" ]] || fail "could not resolve the LUKS mapper device's parent partition"
-luks_version="$(ssh_guest "sudo cryptsetup luksDump '/dev/$root_pkname'" | awk '/^Version:/ {print $2}')"
+luks_device="$(ssh_guest "sudo cryptsetup status '$root_source'" | awk '$1 == "device:" {print $2}')"
+[[ -n "$luks_device" ]] || fail "could not resolve the LUKS mapper device's backing partition"
+luks_version="$(ssh_guest "sudo cryptsetup luksDump '$luks_device'" | awk '/^Version:/ {print $2}')"
 [[ "$luks_version" == "2" ]] || fail "root partition is not LUKS2 (luksDump Version=$luks_version)"
 
 user_groups="$(ssh_guest "id -nG $VM_USER")"
@@ -204,6 +202,7 @@ case "$firstboot_settled_status" in
   124) fail "vekrona-firstboot did not settle within ${FIRSTBOOT_TIMEOUT}s" ;;
   *) fail "waiting for the vekrona-firstboot marker failed with status $firstboot_settled_status" ;;
 esac
+firstboot_reboot_from="$(vm_serial_offset)"
 
 if (( firstboot_settled_status == 0 )) && ssh_guest "test -e $FIRSTBOOT_FAILED"; then
   echo "---- $FIRSTBOOT_FAILED ----" >&2
@@ -214,7 +213,7 @@ if (( firstboot_settled_status == 0 )) && ssh_guest "test -e $FIRSTBOOT_FAILED";
 fi
 
 log "waiting for the post-firstboot reboot, the LUKS prompt and SSH again"
-unlock_and_wait_for_ssh "$boot_serial_start"
+unlock_and_wait_for_ssh "$firstboot_reboot_from"
 assert_rebooted
 ssh_guest "test -e $FIRSTBOOT_DONE" || fail "firstboot did not leave $FIRSTBOOT_DONE"
 ssh_guest "test ! -e $FIRSTBOOT_FAILED" || fail "firstboot left $FIRSTBOOT_FAILED"
