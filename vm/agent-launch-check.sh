@@ -113,6 +113,36 @@ exec tail -f /dev/null
 STUB
 chmod +x "$BIN_DIR/claude"
 
+PICKER_STUB_DIR="$STUB_DIR/picker-bin"
+mkdir -p "$PICKER_STUB_DIR"
+NOTIFY_LOG="$STUB_DIR/notify.log"
+cat > "$PICKER_STUB_DIR/notify-send" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$NOTIFY_LOG"
+STUB
+cat > "$PICKER_STUB_DIR/rofi" <<'STUB'
+#!/usr/bin/env bash
+cat > /dev/null
+exit "${STUB_ROFI_STATUS:?}"
+STUB
+chmod +x "$PICKER_STUB_DIR/notify-send" "$PICKER_STUB_DIR/rofi"
+
+rm -f "$AGENT_CONFIG_FILE"
+for pick_argv in "--pick" "choose"; do
+  : > "$NOTIFY_LOG"
+  PATH="$PICKER_STUB_DIR:$PATH" STUB_ROFI_STATUS=1 vekrona-agent "$pick_argv" >/dev/null 2>"$STUB_DIR/cancel.err" \
+    || fail "cancelling the rofi picker (vekrona-agent $pick_argv) must exit 0"
+  [[ ! -s "$STUB_DIR/cancel.err" ]] || fail "cancelling the rofi picker (vekrona-agent $pick_argv) printed an error: $(cat "$STUB_DIR/cancel.err")"
+  [[ ! -s "$NOTIFY_LOG" ]] || fail "cancelling the rofi picker (vekrona-agent $pick_argv) raised a notification: $(cat "$NOTIFY_LOG")"
+  [[ ! -e "$AGENT_CONFIG_FILE" ]] || fail "cancelling the rofi picker (vekrona-agent $pick_argv) wrote a default harness"
+
+  if PATH="$PICKER_STUB_DIR:$PATH" STUB_ROFI_STATUS=2 vekrona-agent "$pick_argv" >/dev/null 2>"$STUB_DIR/crash.err"; then
+    fail "a crashing rofi picker (vekrona-agent $pick_argv) unexpectedly succeeded"
+  fi
+  grep -q "rofi exited with status 2" "$STUB_DIR/crash.err" || fail "a crashing rofi picker (vekrona-agent $pick_argv) was not reported: $(cat "$STUB_DIR/crash.err")"
+done
+vekrona-agent set claude || fail "vekrona-agent set claude (after picker checks) failed"
+
 window_has_app_id() {
   swaymsg -t get_tree | python3 -c '
 import json, sys

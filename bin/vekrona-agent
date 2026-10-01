@@ -124,10 +124,15 @@ pick_tool() {
     lines+=("$label")
   done
 
-  local chosen
-  chosen="$(printf '%s\n' "${lines[@]}" | rofi -dmenu -i -p "Coding agent" -theme-str "$theme_str")"
-  [[ -n "$chosen" ]] || return 1
-  printf '%s' "${chosen%% *}"
+  local chosen rofi_status=0
+  chosen="$(printf '%s\n' "${lines[@]}" | rofi -dmenu -i -p "Coding agent" -theme-str "$theme_str")" || rofi_status=$?
+  case "$rofi_status" in
+    0) ;;
+    1) exit 0 ;;
+    *) die "rofi exited with status $rofi_status" ;;
+  esac
+  [[ -n "$chosen" ]] || exit 0
+  PICKED_TOOL="${chosen%% *}"
 }
 
 launch() {
@@ -210,7 +215,8 @@ cmd_list() {
 
 cmd_choose() {
   local prompt="${1:-}" error_id="${2:-}" dry_run="${3:-0}" tool
-  tool="$(pick_tool)" || die "no agent tool selected"
+  pick_tool
+  tool="$PICKED_TOOL"
   write_default "$tool"
   run_with_tool "$tool" "$prompt" "$error_id" "$dry_run"
 }
@@ -282,7 +288,8 @@ main() {
   tool="$(read_default || true)"
   if [[ -z "$tool" ]]; then
     if [[ "$PICK" == "1" ]]; then
-      tool="$(pick_tool)" || die "no agent tool selected"
+      pick_tool
+      tool="$PICKED_TOOL"
       write_default "$tool"
     else
       die "no default agent harness set; run '$PROG set <tool>' or '$PROG --pick' (known: ${AGENT_KNOWN_TOOLS[*]})"

@@ -624,8 +624,10 @@ def cmd_pick(args):
         ["rofi", "-dmenu", "-i", "-p", "Errors", "-format", "i", "-theme-str", theme_str],
         input="\n".join(lines), capture_output=True, text=True,
     )
-    if result.returncode != 0 or not result.stdout.strip():
+    if result.returncode == 1 or (result.returncode == 0 and not result.stdout.strip()):
         return
+    if result.returncode != 0:
+        die(f"rofi exited with status {result.returncode}: {(result.stderr or '').strip()}")
     index = int(result.stdout.strip())
     error_id = records[index]["id"]
     agent_bin = resolve_tool("vekrona-agent")
