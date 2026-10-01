@@ -27,7 +27,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Install build dependencies
-        run: dnf install -y lorax xorriso gnupg2 git rsync openssh-clients python3
+        run: dnf install -y lorax xorriso gnupg2 git rsync openssh-clients python3 \
+            rpm cpio gzip coreutils dnf-plugins-core curl \
+            python3-dasbus python3-fido2 anaconda-core
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,6 +38,17 @@ jobs:
 
       - name: Trust the checkout ownership inside the container
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache anaconda add-on RPM bundle
+        uses: actions/cache@v4
+        with:
+          path: iso/anaconda/.cache
+          key: anaconda-bundle-${{ hashFiles('iso/anaconda/bundle.list') }}
+
+      - name: Run add-on and stage unit tests
+        run: |
+          python3 -m unittest discover -s iso/anaconda/tests
+          bash tests/stages/run.sh
 
       - name: Cache Fedora netinstall ISO
         uses: actions/cache@v4

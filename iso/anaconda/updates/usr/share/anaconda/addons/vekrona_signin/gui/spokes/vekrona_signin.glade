@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="vekrona-signin-anaconda-addon">
+  <requires lib="gtk+" version="3.6"/>
+  <requires lib="AnacondaWidgets" version="1.0"/>
+  <object class="AnacondaSpokeWindow" id="VekronaSignInWindow">
+    <property name="can-focus">False</property>
+    <property name="window-name" translatable="yes">SIGN-IN METHODS</property>
+    <signal name="button-clicked" handler="on_back_clicked" swapped="no"/>
+    <child internal-child="main_box">
+      <object class="GtkBox" id="AnacondaSpokeWindow-main_box1">
+        <property name="can-focus">False</property>
+        <property name="orientation">vertical</property>
+        <property name="spacing">6</property>
+        <child internal-child="nav_box">
+          <object class="GtkEventBox" id="AnacondaSpokeWindow-nav_box1">
+            <property name="can-focus">False</property>
+            <child internal-child="nav_area">
+              <object class="GtkGrid" id="AnacondaSpokeWindow-nav_area1">
+                <property name="can-focus">False</property>
+                <property name="double-buffered">False</property>
+                <property name="margin-left">6</property>
+                <property name="margin-right">6</property>
+                <property name="margin-top">6</property>
+              </object>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="position">0</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkBox" id="mainBox">
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
+            <property name="orientation">vertical</property>
+            <property name="margin-left">72</property>
+            <property name="margin-right">72</property>
+            <property name="margin-top">24</property>
+            <property name="spacing">18</property>
+
+            <child>
+              <object class="GtkLabel" id="disabledLabel">
+                <property name="visible">False</property>
+                <property name="no-show-all">True</property>
+                <property name="label" translatable="yes">Set up your account in VEKRONA ACCOUNT first. Sign-in methods are added to that account.</property>
+                <property name="wrap">True</property>
+                <property name="xalign">0</property>
+              </object>
+              <packing><property name="expand">False</property><property name="fill">True</property></packing>
+            </child>
+
+            <child>
+              <object class="GtkBox" id="contentBox">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">24</property>
+
+                <child>
+                  <object class="GtkBox" id="keySection">
+                    <property name="visible">True</property>
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkLabel" id="keyHeader">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">Security key</property>
+                        <property name="xalign">0</property>
+                        <attributes><attribute name="weight" value="bold"/></attributes>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="keyDescription">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">The key will unlock the disk (PIN + touch) and sign you in to sudo and the desktop. Your password always keeps working.</property>
+                        <property name="wrap">True</property>
+                        <property name="xalign">0</property>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkGrid" id="keySetupBox">
+                        <property name="visible">True</property>
+                        <property name="row-spacing">6</property>
+                        <property name="column-spacing">12</property>
+                        <child>
+                          <object class="GtkLabel" id="keyDeviceLabel">
+                            <property name="visible">True</property>
+                            <property name="label" translatable="yes">Device</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing><property name="left-attach">0</property><property name="top-attach">0</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkComboBoxText" id="keyCombo">
+                            <property name="visible">True</property>
+                            <property name="hexpand">True</property>
+                          </object>
+                          <packing><property name="left-attach">1</property><property name="top-attach">0</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="keyRefreshButton">
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="label" translatable="yes">Refresh</property>
+                          </object>
+                          <packing><property name="left-attach">2</property><property name="top-attach">0</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="keyPinHint">
+                            <property name="visible">False</property>
+                            <property name="no-show-all">True</property>
+                            <property name="label" translatable="yes">Set a PIN for this key</property>
+                            <property name="xalign">0</property>
+                          </object>
+                          <packing><property name="left-attach">1</property><property name="top-attach">1</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="keyPinLabel">
+                            <property name="visible">True</property>
+                            <property name="label" translatable="yes">PIN</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing><property name="left-attach">0</property><property name="top-attach">2</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkEntry" id="keyPinEntry">
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="visibility">False</property>
+                            <property name="hexpand">True</property>
+                          </object>
+                          <packing><property name="left-attach">1</property><property name="top-attach">2</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="keyConfirmLabel">
+                            <property name="visible">False</property>
+                            <property name="no-show-all">True</property>
+                            <property name="label" translatable="yes">Confirm PIN</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing><property name="left-attach">0</property><property name="top-attach">3</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkEntry" id="keyConfirmEntry">
+                            <property name="visible">False</property>
+                            <property name="no-show-all">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="visibility">False</property>
+                            <property name="hexpand">True</property>
+                          </object>
+                          <packing><property name="left-attach">1</property><property name="top-attach">3</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="keyRegisterButton">
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="label" translatable="yes">Register</property>
+                            <property name="halign">start</property>
+                          </object>
+                          <packing><property name="left-attach">1</property><property name="top-attach">4</property></packing>
+                        </child>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="keyRegisteredBox">
+                        <property name="visible">False</property>
+                        <property name="no-show-all">True</property>
+                        <property name="spacing">12</property>
+                        <child>
+                          <object class="GtkButton" id="keyRemoveButton">
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="label" translatable="yes">Remove</property>
+                          </object>
+                          <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                        </child>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="keyStatus">
+                        <property name="visible">True</property>
+                        <property name="wrap">True</property>
+                        <property name="xalign">0</property>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="keyError">
+                        <property name="visible">False</property>
+                        <property name="no-show-all">True</property>
+                        <property name="wrap">True</property>
+                        <property name="xalign">0</property>
+                        <attributes><attribute name="foreground" value="#a40000"/></attributes>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                  </object>
+                  <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                </child>
+
+                <child>
+                  <object class="GtkBox" id="fingerprintSection">
+                    <property name="visible">True</property>
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkLabel" id="fpHeader">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">Fingerprint</property>
+                        <property name="xalign">0</property>
+                        <attributes><attribute name="weight" value="bold"/></attributes>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="fpDescription">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">Fingerprint signs you in to sudo and the desktop. It cannot unlock the disk.</property>
+                        <property name="wrap">True</property>
+                        <property name="xalign">0</property>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkGrid" id="fpSetupBox">
+                        <property name="visible">True</property>
+                        <property name="row-spacing">6</property>
+                        <property name="column-spacing">12</property>
+                        <child>
+                          <object class="GtkLabel" id="readerLabel">
+                            <property name="visible">True</property>
+                            <property name="label" translatable="yes">Reader</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing><property name="left-attach">0</property><property name="top-attach">0</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkComboBoxText" id="readerCombo">
+                            <property name="visible">True</property>
+                            <property name="hexpand">True</property>
+                          </object>
+                          <packing><property name="left-attach">1</property><property name="top-attach">0</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="readerRefreshButton">
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="label" translatable="yes">Refresh</property>
+                          </object>
+                          <packing><property name="left-attach">2</property><property name="top-attach">0</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="fingerLabel">
+                            <property name="visible">True</property>
+                            <property name="label" translatable="yes">Finger</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing><property name="left-attach">0</property><property name="top-attach">1</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkComboBoxText" id="fingerCombo">
+                            <property name="visible">True</property>
+                            <property name="hexpand">True</property>
+                          </object>
+                          <packing><property name="left-attach">1</property><property name="top-attach">1</property></packing>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="fpEnrollButton">
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="label" translatable="yes">Enroll</property>
+                            <property name="halign">start</property>
+                          </object>
+                          <packing><property name="left-attach">1</property><property name="top-attach">2</property></packing>
+                        </child>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="fpEnrolledBox">
+                        <property name="visible">False</property>
+                        <property name="no-show-all">True</property>
+                        <property name="spacing">12</property>
+                        <child>
+                          <object class="GtkButton" id="fpRemoveButton">
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="label" translatable="yes">Remove</property>
+                          </object>
+                          <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                        </child>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="fpStatus">
+                        <property name="visible">True</property>
+                        <property name="wrap">True</property>
+                        <property name="xalign">0</property>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="fpError">
+                        <property name="visible">False</property>
+                        <property name="no-show-all">True</property>
+                        <property name="wrap">True</property>
+                        <property name="xalign">0</property>
+                        <attributes><attribute name="foreground" value="#a40000"/></attributes>
+                      </object>
+                      <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                    </child>
+                  </object>
+                  <packing><property name="expand">False</property><property name="fill">True</property></packing>
+                </child>
+              </object>
+              <packing><property name="expand">False</property><property name="fill">True</property></packing>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">True</property>
+            <property name="fill">True</property>
+            <property name="position">1</property>
+          </packing>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>
