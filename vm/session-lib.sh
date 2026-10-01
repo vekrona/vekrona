@@ -6,13 +6,33 @@ export XDG_RUNTIME_DIR
 
 SESSION_OWNED_MARKER="$XDG_RUNTIME_DIR/vekrona-vm-test-session-owned"
 
-session_wait_until() {
-  local timeout="$1" deadline; shift
-  deadline=$((SECONDS + timeout))
-  until "$@" >/dev/null 2>&1; do
-    (( SECONDS < deadline )) || return 1
-    inotifywait -qq -t 1 -e create,modify,moved_to "$XDG_RUNTIME_DIR" >/dev/null 2>&1 || true
+session_wait_until_change() {
+  local timeout="$1" dir="$2" fd line established=0 watch_pid status=0
+  shift 2
+  exec {fd}< <(timeout "$timeout" inotifywait -m -e create,modify,moved_to,close_write,delete "$dir" 2>&1)
+  watch_pid=$!
+  while IFS= read -r -u "$fd" line; do
+    if [[ "$line" == "Watches established." ]]; then
+      established=1
+      break
+    fi
   done
+  if (( established )); then
+    until "$@" >/dev/null 2>&1; do
+      IFS= read -r -u "$fd" line || { status=1; break; }
+    done
+  else
+    status=1
+  fi
+  kill "$watch_pid" 2>/dev/null || true
+  exec {fd}<&-
+  return "$status"
+}
+
+session_wait_until() {
+  local timeout="$1"
+  shift
+  session_wait_until_change "$timeout" "$XDG_RUNTIME_DIR" "$@"
 }
 
 session_resolve_swaysock() {
