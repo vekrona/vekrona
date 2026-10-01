@@ -61,7 +61,11 @@ nvidia_module_present_for() { modinfo -k "$1" nvidia >/dev/null 2>&1; }
 root_files_equal() { root cmp -s "$1" "$2"; }
 user_has_touch_credentials() { [[ -e "$HOME/.config/Yubico/u2f_keys" ]] || root test -e "/var/lib/fprint/$VEKRONA_USER"; }
 vekrona_pam_u2f_lines_ok() {
-  [[ "$(count_occurrences "$(<"$1")" "$PAM_U2F_VEKRONA")" -eq 2 ]]
+  local content pinned total
+  content="$(<"$1")"
+  pinned="$(count_occurrences "$content" "$PAM_U2F_VEKRONA")"
+  total="$(count_occurrences "$content" "pam_u2f.so")"
+  [[ "$pinned" -eq "$2" && "$total" -eq "$2" ]]
 }
 authselect_selection_ok() {
   local want have
@@ -239,8 +243,9 @@ fi
 
 if ran 45-auth; then
   check assert "authselect selects custom/vekrona with its four features" authselect_selection_ok
-  for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
-    check assert "both pam_u2f lines pinned to pam://vekrona in $f" vekrona_pam_u2f_lines_ok "$f"
+  for f in system-auth password-auth; do
+    check assert "both pam_u2f template lines pinned to pam://vekrona in the profile's $f" vekrona_pam_u2f_lines_ok "/etc/authselect/custom/vekrona/$f" 2
+    check assert "the one enabled pam_u2f line pinned to pam://vekrona in /etc/pam.d/$f" vekrona_pam_u2f_lines_ok "/etc/pam.d/$f" 1
   done
   check assert "dankshell-u2f equals the repo file" root_files_equal "$VEKRONA_ROOT/etc/pam.d/dankshell-u2f" /etc/pam.d/dankshell-u2f
   warn_check "fprintd sees a fingerprint reader (with-fingerprint is enabled regardless; none present, plug in a USB reader)" fprintd_sees_reader
