@@ -1,0 +1,8 @@
+[settings]
+minimum_release_age = "1d"
+
+[tools]
+"npm:@openai/codex" = "latest"
+"npm:@earendil-works/pi-coding-agent" = "latest"
+"aqua:anomalyco/opencode" = "latest"
+cursor-agent = "latest"

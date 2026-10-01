@@ -33,9 +33,15 @@ ensure_symlink "$VEKRONA_ROOT/config/ghostty/config" "$HOME/.config/ghostty/conf
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/xremap.service" "$HOME/.config/systemd/user/xremap.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/dms.service.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$HOME/.config/systemd/user/tailscale-systray.service"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors.service" "$HOME/.config/systemd/user/vekrona-errors.service"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors-failed.service" "$HOME/.config/systemd/user/vekrona-errors-failed.service"
 
 systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service tailscale-systray.service
+ensure_user_unit_enabled xremap.service tailscale-systray.service vekrona-errors.service
+
+for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
+  ensure_symlink "$VEKRONA_ROOT/config/agents/skills/vekrona-diagnose" "$skills_dir/vekrona-diagnose"
+done
 
 systemctl --user add-wants sway-session.target dms.service
 assert "dms.service wanted by sway-session.target" test -e "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
@@ -94,6 +100,23 @@ ensure_dms_setting_default() {
   [[ "$(jq -r --arg k "$key" '.[$k]' "$dms_settings")" == "$value" ]] || die "DMS default not applied: $key"
 }
 
+ensure_dms_setting_enforced() {
+  local key="$1" json_value="$2"
+  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$dms_settings" >/dev/null 2>&1 && {
+    log "DMS setting already enforced: $key = $json_value"
+    return 0
+  }
+  log "enforcing DMS setting: $key = $json_value"
+  local tmp
+  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
+  if ! jq --arg k "$key" --argjson v "$json_value" '.[$k] = $v' "$dms_settings" > "$tmp"; then
+    rm -f "$tmp"
+    die "jq failed to enforce DMS setting: $key"
+  fi
+  mv "$tmp" "$dms_settings"
+  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$dms_settings" >/dev/null || die "DMS setting not enforced: $key"
+}
+
 ensure_dms_bar_widget_plugin() {
   local stock_id="$1" plugin_id="$2"
   local tmp
@@ -128,6 +151,48 @@ PYEOF
   else
     mv "$tmp" "$dms_settings"
     log "migrated DMS bar widget: $stock_id -> $plugin_id"
+  fi
+}
+
+ensure_dms_bar_widget_inserted_before() {
+  local widget_id="$1" before_id="$2"
+  local tmp
+  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
+  if ! python3 - "$dms_settings" "$widget_id" "$before_id" > "$tmp" <<'PYEOF'
+import json
+import sys
+
+path, widget_id, before_id = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(path) as f:
+    data = json.load(f)
+
+keys = ("leftWidgets", "centerWidgets", "rightWidgets")
+for bar in data.get("barConfigs", []):
+    already_placed = any(widget_id in (bar.get(k) or []) for k in keys)
+    if already_placed:
+        continue
+    for key in keys:
+        widgets = bar.get(key)
+        if not isinstance(widgets, list):
+            continue
+        if before_id in widgets:
+            widgets.insert(widgets.index(before_id), widget_id)
+            break
+
+json.dump(data, sys.stdout, indent=2)
+sys.stdout.write("\n")
+PYEOF
+  then
+    rm -f "$tmp"
+    die "python3 failed to insert DMS bar widget: $widget_id"
+  fi
+  if cmp -s "$tmp" "$dms_settings"; then
+    rm -f "$tmp"
+    log "DMS bar widget already present or insertion point missing: $widget_id"
+  else
+    mv "$tmp" "$dms_settings"
+    log "inserted DMS bar widget: $widget_id before $before_id"
   fi
 }
 
@@ -209,6 +274,7 @@ seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/session.seed.json" "$dms_s
 
 ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
 ensure_dms_setting_default monoFontFamily "JetBrainsMono Nerd Font"
+ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/plugins"
 ensure_dms_plugin_enabled vekronaSwayWorkspaces
@@ -220,6 +286,15 @@ bars = d.get('barConfigs', [])
 has_plugin = any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 has_stock = any('workspaceSwitcher' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 assert has_plugin or not has_stock, (has_plugin, has_stock)
+"
+
+ensure_dms_plugin_enabled vekronaAgent
+ensure_dms_bar_widget_inserted_before vekronaAgent notificationButton
+assert "DMS bar has the vekrona agent plugin placed in a widget list" python3 -c "
+import json
+d = json.load(open('$dms_settings'))
+bars = d.get('barConfigs', [])
+assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 "
 
 dms_changelog_seen="$(dirname "$dms_settings")/.changelog-$(dms_changelog_version)"

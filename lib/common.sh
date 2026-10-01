@@ -8,7 +8,18 @@ VEKRONA_USER="$(id -un)"
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31m[vekrona] FAIL:\033[0m %s\n' "$*" >&2; exit 1; }
+
+report_error_for_die() {
+  local msg="$1" bin="$VEKRONA_ROOT/bin/vekrona-error"
+  [[ -x "$bin" ]] || return 0
+  timeout 5 "$bin" report --title "$msg" --source vekrona >/dev/null 2>&1
+}
+
+die()  {
+  printf '\033[1;31m[vekrona] FAIL:\033[0m %s\n' "$*" >&2
+  report_error_for_die "$*" || warn "failed to report this error to vekrona-error"
+  exit 1
+}
 
 root() {
   if [[ $EUID -eq 0 ]]; then "$@"; else sudo "$@"; fi
@@ -218,6 +229,87 @@ ensure_user_in_group() {
   getent group "$group" | grep -q "\b$VEKRONA_USER\b" || die "user not added to $group"
 }
 
+owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
+dir_mode_is() { [[ "$(stat -c '%a' "$1" 2>/dev/null)" == "$2" ]]; }
+
+gpg_key_fingerprint_file() {
+  # --dry-run --show-only still needs a writable GNUPGHOME to open a keybox in, so use a scratch one
+  # rather than the invoking user's own (possibly nonexistent) ~/.gnupg.
+  local file="$1" gnupg_home fp
+  gnupg_home="$(mktemp -d)"
+  fp="$(gpg --homedir "$gnupg_home" --batch --with-colons --import-options show-only --dry-run --import "$file" 2>/dev/null \
+    | awk -F: '/^fpr:/{print $10; exit}')"
+  rm -rf "$gnupg_home"
+  printf '%s' "$fp"
+}
+
+gpg_pubkey_installed() {
+  # rpm on this Fedora release stores a gpg-pubkey package's full lowercase fingerprint as %{VERSION},
+  # not the classic 8-hex short key id, so that is what this checks against.
+  local fingerprint_lower="$1"
+  rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$fingerprint_lower"
+}
+
+ensure_gpg_key_imported() {
+  local url="$1" fingerprint="$2" fingerprint_lower got tmp
+  ensure_pkg gnupg2
+  fingerprint_lower="$(tr '[:upper:]' '[:lower:]' <<<"$fingerprint")"
+  gpg_pubkey_installed "$fingerprint_lower" && { log "gpg key already imported: $fingerprint"; return 0; }
+  tmp="$(mktemp)"
+  curl -fsSL "$url" -o "$tmp" || die "failed to download gpg key: $url"
+  # Fingerprint the exact bytes we are about to import, not a second, separate download of the same URL.
+  got="$(gpg_key_fingerprint_file "$tmp")"
+  [[ -n "$got" ]] || { rm -f "$tmp"; die "could not determine gpg key fingerprint: $url"; }
+  [[ "$got" == "$fingerprint" ]] || { rm -f "$tmp"; die "gpg key fingerprint mismatch for $url: got $got, expected $fingerprint"; }
+  log "importing gpg key: $url"
+  root rpm --import "$tmp"
+  rm -f "$tmp"
+  gpg_pubkey_installed "$fingerprint_lower" || die "gpg key not imported: $fingerprint"
+}
+
+# shellcheck disable=SC2034
+CLAUDE_CODE_REPO_ID="claude-code"
+# shellcheck disable=SC2034
+CLAUDE_CODE_GPG_URL="https://downloads.claude.ai/keys/claude-code.asc"
+# shellcheck disable=SC2034
+CLAUDE_CODE_GPG_FINGERPRINT="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+
+# shellcheck disable=SC2034
+MISE_REPO_ID="mise-repo"
+# shellcheck disable=SC2034
+MISE_GPG_URL="https://mise.jdx.dev/gpg-key.pub"
+# shellcheck disable=SC2034
+MISE_GPG_FINGERPRINT="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
+
+# shellcheck disable=SC2034
+ONEPASSWORD_GPG_URL="https://downloads.1password.com/linux/keys/1password.asc"
+# shellcheck disable=SC2034
+ONEPASSWORD_GPG_FINGERPRINT="3FEF9748469ADBE15DA7CA80AC2D62742012EA22"
+
+# shellcheck disable=SC2034
+VEKRONA_AGENT_PKGS=(claude-code mise nodejs22-npm)
+# shellcheck disable=SC2034
+VEKRONA_AGENT_TOOLS=(codex pi opencode cursor-agent)
+
+MISE_SYSTEM_DATA_DIR=/usr/local/share/mise
+MISE_SYSTEM_CONFIG_DIR=/etc/mise
+MISE_SYSTEM_CACHE_DIR=/usr/local/share/mise/cache
+MISE_SYSTEM_STATE_DIR=/usr/local/share/mise/state
+
+mise_system() {
+  # mise --system only installs binary-download backends; overriding MISE_DATA_DIR/MISE_CONFIG_DIR
+  # instead runs the normal (non-system) code path against root-owned dirs, which also covers our npm/aqua/http tools.
+  # sudo resets HOME to /root; pin HOME and every cache path so npm/mise never write outside this tree.
+  root env \
+    HOME="$MISE_SYSTEM_DATA_DIR" \
+    MISE_DATA_DIR="$MISE_SYSTEM_DATA_DIR" \
+    MISE_CONFIG_DIR="$MISE_SYSTEM_CONFIG_DIR" \
+    MISE_CACHE_DIR="$MISE_SYSTEM_CACHE_DIR" \
+    MISE_STATE_DIR="$MISE_SYSTEM_STATE_DIR" \
+    npm_config_cache="$MISE_SYSTEM_DATA_DIR/npm-cache" \
+    mise "$@"
+}
+
 VERSIONLOCK_FILE=/etc/dnf/versionlock.toml
 
 versionlock_has() { grep -qE "^name = \"$1\"" "$VERSIONLOCK_FILE" 2>/dev/null; }
@@ -327,12 +419,15 @@ read_pkg_list() {
   done <<< "$raw"
 }
 
+# shellcheck disable=SC2034
 VEKRONA_COPRS=(blakegardner/xremap scottames/ghostty avengemedia/dms avengemedia/danklinux rossetnocpes/herdr)
 
 copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 
+# shellcheck disable=SC2034
 VEKRONA_X11_FLATPAKS=(com.discordapp.Discord md.obsidian.Obsidian org.signal.Signal)
 
+# shellcheck disable=SC2034
 declare -A VEKRONA_PINNED_PKGS=(
   [quickshell]="$(copr_id avengemedia/danklinux)"
   [herdr]="$(copr_id rossetnocpes/herdr)"
@@ -344,7 +439,7 @@ VEKRONA_DESKTOP_PKGS=(
   gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver
   jetbrains-mono-fonts jq kanshi
   libnotify mangohud matugen mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
-  python3 python3-pyyaml python3-vdf quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
+  python3 python3-gobject python3-pyyaml python3-vdf quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd tailscale tuigreet tuned-ppd wf-recorder wireplumber wl-clipboard wlr-randr
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
 )

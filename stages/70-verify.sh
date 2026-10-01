@@ -37,7 +37,6 @@ file_exists() { [[ -e "$1" ]]; }
 file_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 file_lacks_qsg_backend() { ! grep -q '^QSG_RHI_BACKEND=' "$1" 2>/dev/null; }
 dir_exists() { [[ -d "$1" ]]; }
-owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
 gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
 not_repo_enabled() { ! repo_enabled "$1"; }
@@ -59,6 +58,7 @@ if ran 00-repos; then
   check assert "repo enabled: rpmfusion-nonfree" repo_enabled rpmfusion-nonfree
   check assert "repo enabled: fedora-cisco-openh264" repo_enabled fedora-cisco-openh264
   check assert "repo enabled: 1password" repo_enabled 1password
+  check assert "gpg key imported: 1password" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$ONEPASSWORD_GPG_FINGERPRINT")"
   for c in "${VEKRONA_COPRS[@]}"; do
     check assert "copr enabled: $c" copr_enabled "$c"
   done
@@ -219,6 +219,20 @@ if ran 50-user; then
   check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
   check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
+  check assert "vekrona-errors.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors.service"
+  check assert "vekrona-errors-failed.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors-failed.service"
+  check assert "vekrona-errors.service enabled" user_unit_enabled vekrona-errors
+  for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
+    check assert "vekrona-diagnose skill linked: $skills_dir" file_exists "$skills_dir/vekrona-diagnose/SKILL.md"
+  done
+  check assert "python3-gobject installed" pkg_installed python3-gobject
+  check assert "vekrona-error --help runs" vekrona-error --help
+  errors_store_dir="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona/errors"
+  if [[ -d "$errors_store_dir" ]]; then
+    check assert "error store directory mode is 0700" dir_mode_is "$errors_store_dir" 700
+  else
+    log "error store directory not created yet (vekrona-errors.service has not run in a live session), skipping its mode check"
+  fi
   check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
   check assert "vekrona fontconfig linked" file_exists "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
   check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"
@@ -240,6 +254,11 @@ import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('fontFamily') == 'Atkinson Hyperlegible Next', d.get('fontFamily')
 "
+  check assert "DMS settings: notificationPopupBodyInvokesAction=true" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+assert d.get('notificationPopupBodyInvokesAction') is True, d.get('notificationPopupBodyInvokesAction')
+"
 
   check assert "vekronaSwayWorkspaces plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaSwayWorkspaces/plugin.json"
   check assert "vekronaSwayWorkspaces plugin enabled" bash -c "jq -e '.vekronaSwayWorkspaces.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
@@ -249,6 +268,16 @@ d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 bars = d.get('barConfigs', [])
 assert any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 "
+
+  check assert "vekronaAgent plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaAgent/plugin.json"
+  check assert "vekronaAgent plugin enabled" bash -c "jq -e '.vekronaAgent.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
+  check assert "vekronaAgent plugin placed in a DankBar widget list" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+bars = d.get('barConfigs', [])
+assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
+"
+  check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
 
   for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
     flatpak_installed "$app_id" || continue
@@ -326,6 +355,36 @@ assert d.get('matugenTemplateGhostty', True) is True
   warn_check "$HOME/.nix-profile/bin in systemd user PATH" contains "$HOME/.nix-profile/bin" "$user_path"
 
   check assert "devbox runs" "$HOME/.nix-profile/bin/devbox" version
+fi
+
+if ran 55-agents; then
+  check assert "repo enabled: $CLAUDE_CODE_REPO_ID" repo_enabled "$CLAUDE_CODE_REPO_ID"
+  check assert "repo enabled: $MISE_REPO_ID" repo_enabled "$MISE_REPO_ID"
+  check assert "/etc/yum.repos.d/claude-code.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/claude-code.repo" /etc/yum.repos.d/claude-code.repo
+  check assert "/etc/yum.repos.d/mise.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/mise.repo" /etc/yum.repos.d/mise.repo
+  check assert "gpg key imported: claude-code" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$CLAUDE_CODE_GPG_FINGERPRINT")"
+  check assert "gpg key imported: mise" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$MISE_GPG_FINGERPRINT")"
+  for p in "${VEKRONA_AGENT_PKGS[@]}"; do
+    check assert "package installed: $p" pkg_installed "$p"
+  done
+  check assert "/etc/mise/config.toml matches repo" cmp -s "$VEKRONA_ROOT/etc/mise/config.toml" /etc/mise/config.toml
+  check assert "/etc/profile.d/vekrona-mise.sh matches repo" cmp -s "$VEKRONA_ROOT/etc/profile.d/vekrona-mise.sh" /etc/profile.d/vekrona-mise.sh
+  check assert "claude resolves" bash -c "command -v claude >/dev/null"
+  for t in "${VEKRONA_AGENT_TOOLS[@]}"; do
+    check assert "$t shim present" bash -c "[[ -x '$MISE_SYSTEM_DATA_DIR/shims/$t' ]]"
+  done
+  check assert "$MISE_SYSTEM_DATA_DIR owned by root" owned_by "$MISE_SYSTEM_DATA_DIR" root
+  check assert "$MISE_SYSTEM_CONFIG_DIR owned by root" owned_by "$MISE_SYSTEM_CONFIG_DIR" root
+  for name in claude "${VEKRONA_AGENT_TOOLS[@]}"; do
+    warn_check "no user-local copy shadows $name on PATH" bash -c "[[ ! -e '$HOME/.local/bin/$name' ]]"
+  done
+
+  mise_shims_dir="$MISE_SYSTEM_DATA_DIR/shims"
+  for f in "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$VEKRONA_ROOT/etc/profile.d/vekrona-mise.sh"; do
+    check assert_file_contains "$f" "$mise_shims_dir"
+    check assert_file_contains "$f" 'OPENCODE_DISABLE_AUTOUPDATE=true'
+  done
+  check assert_file_contains "$VEKRONA_ROOT/bin/vekrona-agent" "$mise_shims_dir"
 fi
 
 if ran 60-gaming; then

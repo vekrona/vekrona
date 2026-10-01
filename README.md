@@ -30,10 +30,15 @@ existing Fedora Workstation" below.
 | `config/` | source of truth for dotfiles; stage `50-user` symlinks these into `$HOME`. Stage `50-user` also generates `~/.config/environment.d/vekrona-gpu.conf` itself, not tracked under `config/`, only when `/dev/dri/vekrona-dgpu` exists (see Known issues) |
 | `etc/` | system files installed into `/etc` by `ensure_root_file` |
 | `bin/vekrona-*` | the CLI tools; stage `50-user` symlinks the whole directory into `~/.local/bin` |
+| `config/systemd-user/vekrona-errors.service`, `vekrona-errors-failed.service` | `vekrona-errors.service` runs `vekrona-error watch` (the error pipeline, see "Error pipeline" below); `vekrona-errors-failed.service` is its `OnFailure=` notifier. Stage `50-user` links and enables them the same way it does `xremap.service` |
+| `config/agents/skills/vekrona-diagnose/` | the Claude Code skill an agent uses to investigate a vekrona error; stage `50-user` symlinks it into `~/.claude/skills/`, `~/.codex/skills/`, and `~/.agents/skills/` |
 | `fonts/` | vendored JetBrainsMono Nerd Font (OFL, v3.5.1), symlinked into `~/.local/share/fonts/vekrona` |
 | `config/fontconfig/conf.d/50-vekrona-fonts.conf` | fontconfig aliases: `sans-serif`/`system-ui` prefer Atkinson Hyperlegible Next then Inter (Atkinson has no Cyrillic, Inter covers it), `monospace` prefers JetBrainsMono Nerd Font; symlinked into `~/.config/fontconfig/conf.d/` |
 | `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/` | DMS DankBar plugin: always shows Sway workspaces 1-5 plus any existing 6-10, replacing the stock workspace switcher (see "The vekronaSwayWorkspaces DankBar plugin" below); stage `50-user` symlinks the whole `plugins/` directory into `~/.config/DankMaterialShell/plugins/` |
-| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, rollback, and login-manager checks |
+| `config/DankMaterialShell/plugins/vekronaAgent/` | DMS DankBar plugin: agent-button icon with an unread-error badge, left click opens the default coding agent, right click opens the recorded-error picker (see "Agent button" below) |
+| `bin/vekrona-agent` | opens a configured coding agent harness (Claude Code, Codex, opencode, pi, or Cursor Agent) in a terminal, with default permission prompts and API-key env vars stripped; see "Agent button" below |
+| `bin/vekrona-rofi-theme` | prints a `rofi -theme-str` string from the active vekrona/DMS theme; shared by `vekrona-keybindings` and `vekrona-agent` so the rofi styling lives in one place |
+| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, agents, error-pipeline, agent-launch, rollback, and login-manager checks |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (plain-QEMU install-and-boot test of a test ISO) |
 | `.github/workflows/iso.yml` | CI: builds the release and test ISOs in a Fedora 44 container, boots the test ISO under QEMU/KVM on the runner, and attaches the release ISO to tagged GitHub releases |
 | `docs/PLAN.md` | the design record: decisions, verified machine facts, rollout, verification, known issues |
@@ -65,13 +70,15 @@ cd ~/wrk/vekrona
 ```
 
 With no arguments, `install.sh` runs the default stage list in this order:
-`00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming 65-login-manager 70-verify`.
+`00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 55-agents 60-gaming 65-login-manager 70-verify`.
 Snapper runs before NVIDIA so a snapshot exists before stage `10-nvidia` touches
 the driver. Stage `65-login-manager` runs last, after everything that
 installs and configures greetd (`30-packages`, `40-system`) and right before
 verify: on a fresh install nothing owns `display-manager.service` yet, so it
 enables greetd and switches the default target to `graphical.target`. See
-"New default stage: 65-login-manager" below for the exact condition.
+"New default stage: 65-login-manager" below for the exact condition. Stage
+`55-agents` installs the coding-agent harnesses (Claude Code, Codex, OpenCode,
+Pi, Cursor); see "Agents: delivery and updates" below.
 
 Reboot, then log in through the greeter (tuigreet, running `start-sway`).
 
@@ -230,6 +237,8 @@ launch/focus layer on it:
 | Hyper+Escape | `dms ipc call lock lock` |
 | Hyper+BackSpace | `dms ipc call powermenu toggle` |
 | Hyper+slash | show the keybindings help panel (`vekrona-keybindings`) |
+| Hyper+a | open the coding agent (`vekrona-agent --pick`) |
+| Hyper+Shift+a | pick a recorded error and open the agent on it (`vekrona-error pick`) |
 | Hyper+1..9, Hyper+0 | switch to workspace 1 through 10 |
 | Hyper+h/j/k/l, arrow keys | focus left/down/up/right |
 | Hyper+r | enter resize mode (h/j/k/l or arrows resize, Return or Escape exits) |
@@ -498,6 +507,83 @@ scb -- %command%
 MangoHud toggle in-game: Shift_R+F12 (`config/mangohud/MangoHud.conf`,
 `toggle_hud=Shift_R+F12`).
 
+## Error pipeline
+
+Every error on the machine lands in one place, so any of them can launch a
+coding agent to go diagnose it. `vekrona-errors.service` (a user unit, like
+`xremap.service`, `WantedBy=sway-session.target`) runs `vekrona-error watch`,
+which follows the journal and turns four kinds of entry into a recorded error:
+
+- a coredump (`systemd-coredump`, any crashing process)
+- a failed systemd unit, system or user (it reads the *system* journal, which
+  a `wheel` member can read in full and which already includes user units'
+  own entries, so one watcher covers both without needing the
+  `systemd-journal` group)
+- a kernel OOM kill, or a `systemd-oomd` kill
+- any other journal entry logged at priority `err` or above
+
+`vekrona-error report --title T [--summary S] [--source vekrona|manual]` adds
+a fifth kind by hand: it writes one structured entry straight to
+`/run/systemd/journal/socket` in journald's own native protocol (no `logger`
+dependency, and multi-line summaries survive intact), so it works as root,
+with no session bus, and before `python3-gobject` is even installed.
+`lib/common.sh`'s `die()` calls it
+this way on every stage failure, and `vekrona-keybindings`' own `die()` does
+the same, so a broken stage or a failed keybinding shows up here too instead
+of (or as well as) wherever it already prints to. If the system journal isn't
+readable at all (not in `wheel` or `systemd-journal`), the watcher sends one
+critical toast saying so and falls back to the user journal only.
+
+Each error is recorded once under
+`~/.local/state/vekrona/errors/<id>/` (`record.json` plus a `context.txt`
+captured at the time: the relevant `journalctl`/`systemctl status`/
+`coredumpctl info` output; a corrupt `record.json` is quarantined to
+`record.json.corrupt` rather than crashing the watcher or the CLI). Repeats of
+the same error (by a fingerprint that normalizes out digits, hex, paths, and
+UUIDs from the message) bump its count instead of creating a new record. A
+repeat within 10 minutes of the last one doesn't re-toast, *unless* the record
+had been `ack`ed (or launched) since the last occurrence, in which case it
+re-toasts regardless of the window — an acked error recurring is exactly what
+acking is supposed to surface again. `~/.local/state/vekrona/errors/unread`
+holds the count of errors still in `new` status, kept for the DMS bar button
+(added by another stream) to read. The newest 500 records, by `last_seen`, are
+kept; older ones are pruned.
+
+A toast (via DMS's notification daemon) has two actions, "Fix with agent" and
+"Mute" (clicking the toast body does the same as "Fix with agent": stage
+`50-user` enforces DMS's own `notificationPopupBodyInvokesAction` setting to
+`true` in `settings.json`, since DMS defaults it to `false` and otherwise only
+dismisses the popup on a body click rather than running its first action;
+`70-verify` asserts it stays `true`. This is a DMS-wide setting, not specific
+to vekrona's own toasts: a body click on *any* application's notification
+popup runs that notification's first action the same way, once this is set):
+the former launches `vekrona-agent --pick --error <id>` as a monitored child (its failure
+or non-zero exit is itself toasted, not swallowed), the coding agent launcher
+built by another stream, which calls `vekrona-error prompt <id>` to get its
+brief (see `config/agents/skills/vekrona-diagnose/SKILL.md`, symlinked into
+`~/.claude/skills/`, `~/.codex/skills/`, and `~/.agents/skills/`) and marks the
+record `launched`; the latter appends the error's fingerprint to
+`~/.config/vekrona/errors-mute` (one regex per line, matched against both the
+fingerprint and the title; an unparseable line is toasted once by name rather
+than silently ignored) and marks it muted, so a matching error is dropped
+silently from then on, no record, no toast. More than 5 toasts within 30
+seconds collapse into one "N new errors" toast instead, whose action opens a
+picker rather than any single error. The watcher remembers which notification
+id belongs to which error only while the same notification daemon (D-Bus
+owner) that issued them is still running; if it restarts (or clicking a
+notification racing a watcher restart), the action is answered with a small
+"this notification is stale; use Hyper+Shift+A" toast instead of being
+silently dropped.
+
+```
+vekrona-error list [--all]     # table of recorded errors, newest first (--all includes muted)
+vekrona-error show <id>        # one error's record plus its captured context
+vekrona-error mute <id>        # mute this error's fingerprint
+vekrona-error ack <id>|--all   # mark handled
+vekrona-error rm <id>          # delete one error's record outright (not mute: it can come back on a repeat)
+vekrona-error pick             # rofi picker (bound to Hyper+Shift+A by another stream) -> launches the agent on the pick
+```
+
 ## The vekronaSwayWorkspaces DankBar plugin
 
 Stock DMS pads its workspace switcher to only 3 slots and otherwise shows
@@ -520,7 +606,198 @@ already ships `vekronaSwayWorkspaces` in place of the stock widget for a
 fresh install. `70-verify` checks the plugin is linked, enabled, and placed
 in a bar widget list.
 
+## Agents: delivery and updates
+
+Five coding-agent CLIs run on this desktop, each launched by name from Sway
+(the launcher itself is a separate concern from this repo): Claude Code,
+Codex, OpenCode, Pi, and Cursor. All five are subscription-login tools; no
+API keys are configured or stored by vekrona. Stage `55-agents` installs
+them through exactly two package managers, so there is no per-tool lockfile
+or hash management to maintain:
+
+1. **Claude Code**, via Anthropic's own signed dnf repo
+   (`etc/yum.repos.d/claude-code.repo`, package `claude-code`). This is a
+   root-owned `/usr/bin/claude` that never self-updates (`claude doctor`
+   reports "Auto-updates: Managed by package manager") — it only moves when
+   `vekrona-update` runs `dnf upgrade`.
+2. **Codex, OpenCode, Pi, and Cursor**, via one system-wide, root-owned
+   [mise](https://mise.jdx.dev/) install (`etc/yum.repos.d/mise.repo`,
+   package `mise`, plus `nodejs22-npm` for mise's npm backend). `/etc/mise/config.toml`
+   pins the tool list and sets a supply-chain cooldown,
+   `minimum_release_age = "1d"`: mise will not install or upgrade to a
+   release less than a day old, so a same-day compromised release of any of
+   these tools is never pulled automatically. The cooldown is verified to
+   apply to the npm backend (Codex, Pi) and the aqua backend (OpenCode). It
+   does **not** apply to Cursor: `cursor-agent` comes from mise's http
+   backend, which only ever exposes the current build, so there is no older
+   build for the cooldown to fall back to. Separately, OpenCode's aqua entry
+   and Cursor's http entry carry no upstream checksum in `mise`'s registry,
+   so integrity for those two rests on HTTPS transport alone, not a pinned
+   hash. Both are residual, accepted risks; see `TODO.md`.
+
+Both repo files are GPG-signed (`gpgcheck=1`), and stage `55-agents` does not
+trust dnf's own on-demand key import: before installing anything, it
+downloads each repo's key, computes its fingerprint locally
+(`gpg --import-options show-only`), and `die`s if that fingerprint does not
+exactly match the one verified against the vendor out of band
+(`ensure_gpg_key_imported`, `lib/common.sh`; fingerprints and URLs are the
+`CLAUDE_CODE_GPG_*`/`MISE_GPG_*` constants there). Only once the fingerprint
+matches does it `rpm --import` the key and install the package.
+
+`mise install --system`/`mise upgrade --system` only work for
+binary-download backends, which rules out Codex and Pi (npm backend); the
+one form that installs, upgrades, and reshims all four tools uniformly is to
+skip `--system` and instead point plain `mise` at root-owned directories:
+`MISE_DATA_DIR=/usr/local/share/mise MISE_CONFIG_DIR=/etc/mise`. This is the
+`mise_system` helper in `lib/common.sh`, the one chokepoint stage
+`55-agents` and `bin/vekrona-update` both call, so there is exactly one place
+that knows how mise is invoked system-wide. `mise_system` runs this through
+`sudo`, which resets `HOME` to `/root`; left alone, that would leak npm's and
+mise's own caches into `/root` on every install or upgrade. `mise_system`
+pins `HOME`, `MISE_CACHE_DIR`, `MISE_STATE_DIR`, and `npm_config_cache` to
+paths under `/usr/local/share/mise` instead, so nothing lands outside the
+managed tree; verified empirically by diffing a full listing of `/root`
+before and after a real (network-downloading) `mise_system install` — zero
+new entries. The result, `/usr/local/share/mise/installs/*` and
+`/usr/local/share/mise/shims/{codex,pi,opencode,cursor-agent}`, is
+root:root and not writable by the user; stage `55-agents` asserts this by
+actually attempting a write and expecting it to fail, not by only reading
+permission bits.
+
+PATH carries the shims directory,
+`/usr/local/share/mise/shims`, in two places, since the sway session and a
+login shell/SSH/TTY session build their `PATH` differently: the sway session
+picks it up from `config/environment.d/vekrona.conf` (appended to the
+existing `PATH`), and a login shell, SSH session, or plain text console
+picks it up from `etc/profile.d/vekrona-mise.sh` (a root file, `ensure_root_file`).
+`OPENCODE_DISABLE_AUTOUPDATE=true` is set in both of those same two places:
+OpenCode has a self-update path of its own, and setting this disables it so
+the root-owned mise install is the only thing that ever changes OpenCode's
+binary. Codex accepts an equivalent flag
+(`-c check_for_update_on_startup=false`) but the launcher that calls it (a
+separate stream of work) is expected to pass it. Cursor has no such flag;
+its root-owned install already denies its own updater write access, so there
+is nothing to disable.
+
+Stage `55-agents` warns, but does not fail, if a user-local copy of any of
+these binaries exists under `~/.local/bin` (for example, a native
+Claude-Code installer that already put `claude` there on a previously
+hand-set-up machine): `~/.local/bin` comes first on `PATH`, so a leftover
+copy there silently shadows the managed, root-owned binary and stops it from
+ever being the one that runs, or the one `vekrona-update` keeps current.
+Remove the flagged file so the name resolves to the managed install instead.
+
+## Agent button
+
+Omarchy-style "agent button": one keystroke or bar click opens a configured
+coding agent harness (Claude Code, Codex, opencode, pi, or Cursor Agent) in a
+new Ghostty window, or opens the agent on a specific recorded error.
+
+```
+Hyper+a         open the coding agent (vekrona-agent --pick)
+Hyper+Shift+a   pick a recorded error and open the agent on it (vekrona-error pick)
+```
+
+The DankBar plugin `config/DankMaterialShell/plugins/vekronaAgent/` shows the
+same two actions as a bar button: left click runs `vekrona-agent --pick`,
+right click runs `vekrona-error pick`. A small badge on the icon shows the
+unread recorded-error count
+(`${XDG_STATE_HOME:-~/.local/state}/vekrona/errors/unread`, watched
+event-driven via Quickshell's `FileView`) and hides when it is zero. Stage
+`50-user` symlinks the plugin directory in with the rest of
+`config/DankMaterialShell/plugins/`, enables it in `plugin_settings.json`,
+and inserts `vekronaAgent` into a bar's widget list (before
+`notificationButton`) if it is not already present, the same idempotent
+pattern used for `vekronaSwayWorkspaces`; `settings.seed.json` already ships
+it in place for a fresh install.
+
+`bin/vekrona-agent` resolves harnesses by name on `PATH` (`claude`, `codex`,
+`opencode`, `pi`, `cursor-agent`; `claude` is an RPM in `/usr/bin`, the rest
+are `mise` shims); a harness that is not installed fails with a clear error
+telling you to run `./install.sh 55-agents` or `vekrona-update`. Every
+harness launches with its own **default** permission prompts: there is no
+yolo/auto-approve flag anywhere in this path. Before launch, `vekrona-agent`
+strips every API-key-shaped environment variable (`ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`,
+`OPENAI_BASE_URL`, `CODEX_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`,
+`CURSOR_API_KEY`, `OPENROUTER_API_KEY`) so every harness authenticates
+through its own subscription login, never a stray API key left in the
+session environment:
+
+| Harness | Subscription |
+|---|---|
+| Claude Code (`claude`) | Claude Pro/Max, via Claude Code's own OAuth login |
+| Codex (`codex`) | ChatGPT |
+| opencode, pi | ChatGPT or GitHub Copilot, **not** a Claude subscription (Anthropic's terms only let a Claude subscription's OAuth token authenticate Claude Code itself, enforced since 2026-01-09) |
+| Cursor Agent (`cursor-agent`) | Cursor subscription |
+
+Run each harness once by hand first and log in; `vekrona-agent` never
+automates that.
+
+The default harness is a single id in
+`${XDG_CONFIG_HOME:-~/.config}/vekrona/agent`:
+
+```
+vekrona-agent set claude         # set the default harness
+vekrona-agent get                # print the default harness
+vekrona-agent list                # every known harness: installed? default?
+vekrona-agent choose              # always show the picker, set the default, then launch
+vekrona-agent                     # launch the default harness (dies with no default set)
+vekrona-agent --pick              # launch the default; with no default, show the picker, set it, then launch
+vekrona-agent --prompt "fix the build"
+vekrona-agent --pick --error 42    # launch with the recorded error's prompt (vekrona-error prompt 42), opening the picker if no default harness is set
+vekrona-agent --dry-run ...        # print the final argv instead of launching, one element per line
+```
+
+`vekrona-agent` launches `ghostty --class=vekrona.agent
+--working-directory=<this repo>` (so a session opens in the vekrona checkout,
+not wherever the keybinding happened to fire from) `-e env -u <stripped
+vars...> <harness argv>`, detached from the caller (`setsid -f`) so the
+keybinding, bar click, or notification action never blocks; a failed launch
+still surfaces as a desktop notification (`notify-send -u critical -a
+vekrona`), the same as every other error from this tool.
+
 ## Update policy
+
+`vekrona-update` is the one command for "update the whole computer": it
+takes a pre-update snapper snapshot, runs `dnf upgrade --refresh`, `flatpak
+update`, and `mise` (system-wide) upgrade + reshim, then takes a matching
+post-update snapshot, printing what changed at each step (each tool's own
+output) and the pre-snapshot number with a `vekrona-rollback <N>` hint at the
+end. Run it yourself in a terminal:
+
+```
+vekrona-update
+```
+
+It asks for `sudo` once up front (like `install.sh`), then never prompts
+again: `dnf upgrade -y`, `flatpak update --system -y --noninteractive`, and
+`mise upgrade` are all non-interactive by default, so nothing about a
+routine update requires a `--yes` flag. `flatpak update` runs `--system`
+because stage `30-packages` only adds the flathub remote system-wide
+(`ensure_flatpak_remote_system`), not per-user, and as root it does not need
+`--noninteractive`'s usual job of suppressing a polkit prompt, since root
+already has the privilege the system helper would otherwise ask for. A
+`mise upgrade --dry-run` runs first and prints a `WARN` line for every
+release the `minimum_release_age` cooldown is currently holding back, so a
+run that changes less than expected explains why in its own output rather
+than silently doing less.
+
+The post-update snapshot is taken from an `EXIT` trap, so even a failing
+step (a `die` from a failed `dnf upgrade`, for instance) still leaves a
+matched pre/post pair on disk instead of a dangling pre snapshot with
+nothing to compare it to; the printed rollback hint is the way back to
+before the run regardless of where it failed. If the post-update snapshot
+itself cannot be created, the trap surfaces that with a `warn` rather than
+swallowing it, but still exits with whatever status the run already had
+(a snapshot failure never masks an earlier, more important failure, and
+never turns a successful run into a reported failure either). Stage
+`20-snapper`'s own dnf actions plugin
+(`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`)
+also fires its own pre/post pair around the `dnf upgrade` transaction inside
+this run, nested inside `vekrona-update`'s own pair; that nesting is
+expected and harmless (snapper snapshots are cheap CoW, and `NUMBER_LIMIT=10`
+prunes old ones), not a bug to work around.
 
 Stay one Fedora release behind: this machine runs F44 until F46 reaches GA.
 Staying a release behind gives the NVIDIA driver, Sway/wlroots, and DMS/Qt
@@ -538,9 +815,16 @@ recorded in `/etc/dnf/versionlock.toml`:
 - Stage `30-packages` locks `sway`, the wlroots package providing the libwlroots soname the installed `sway` links against, `dms`, `quickshell`, `qt6-qtbase`, `qt6-qtdeclarative`, `qt6-qtwayland`, `xremap-wlroots`, the whole compositor and shell stack, so a routine `dnf upgrade` cannot pull one of them out from under versions that were actually tested together.
 - Stage `10-nvidia` locks `akmod-nvidia` and every installed `xorg-x11-drv-nvidia*` package, so a routine upgrade cannot install a newer proprietary driver against an untested kernel.
 
-`stages/70-verify.sh` warns when a lock's `.fcNN` suffix no longer matches the
-running Fedora version, which is the signal that a lock is now holding back
-more than intended.
+`vekrona-update`'s `dnf upgrade` respects both locks automatically (dnf never
+moves a versionlocked package on a plain upgrade); `stages/70-verify.sh`
+warns when a lock's `.fcNN` suffix no longer matches the running Fedora
+version, which is the signal that a lock is now holding back more than
+intended.
+
+To change the `minimum_release_age` cooldown, edit the one line in
+`etc/mise/config.toml` and re-run `./install.sh 55`, which reinstalls the
+file and re-runs `mise_system install`/`reshim` against the new setting; the
+same file also controls which tool versions mise tracks (`[tools]`).
 
 Release upgrade procedure:
 
@@ -609,7 +893,7 @@ before any target runs.
 ```
 make -C vm deps      # installs virt-install/virt-viewer/libvirt-client/inotify-tools/ImageMagick/python3-libvirt if missing, enables the virtqemud/virtnetworkd/virtstoraged sockets, starts and autostarts the libvirt "default" network, adds you to the libvirt group (log out and back in for that to take effect)
 make -C vm create     # generates vm/ks-$(VM_NAME).cfg from vm/ks.cfg.in (one generated kickstart per VM name, gitignored, so `make create VM_NAME=foo` next to an existing vekrona-test VM regenerates the right file instead of reusing a stale hostname), generating a dedicated harness SSH key pair at vm/.ssh/id_ed25519 (ed25519, no passphrase, gitignored) if it doesn't exist yet, and substituting your personal SSH public key (first of ~/.ssh/id_ed25519.pub, id_rsa.pub, *.pub, or set VM_SSH_PUBKEY), the harness key, and VM_NAME (as the guest hostname) into the kickstart; virt-install: Fedora Everything netinstall of the release set by FEDORA_RELEASE in vm/Makefile (currently 44), with vm/install-tree.sh resolving the Fedora geo-redirector to one concrete mirror and verifying it serves the install tree before virt-install ever touches it (no retries: a redirector that does not itself redirect is rejected outright), + that kickstart (btrfs autopart, NOPASSWD sudo, password `vekrona` for graphical login, system sleep disabled in the guest because virtio-gpu does not survive suspend and resume (DMS would otherwise suspend an idle VM after 30 min and wedge Sway on its display), `%packages` limited to what the harness itself needs before any stage has run: `@core rsync qemu-guest-agent`; openssh-server is already an @core mandatory package; both the harness key and your personal key are authorized for the VM user); the --os-variant hardware profile is fedora<release> when the host's osinfo database knows it, otherwise the newest known profile plus a warning naming `osinfo-db-import --user --latest`; the VM gets a virtio video device, a local-only SPICE display (`--graphics spice,listen=127.0.0.1`), and a guest-agent channel requested explicitly; the serial console is logged to `/var/log/libvirt/qemu/$(VM_NAME)-serial0.log` (root-owned, read it with sudo) so an install or boot failure can be diagnosed afterwards; the domain is marked as owned by this harness in its libvirt metadata (see `destroy` below); the kickstart shuts the VM down after %post, then this target boots it with `virsh start`
-make -C vm test       # connects only with the harness key (-i vm/.ssh/id_ed25519, IdentitiesOnly=yes, -F /dev/null and IdentityAgent=none so your ~/.ssh/config and any SSH agent, including 1Password, are never touched); waits for an IPv4 lease (vm/wait-for-ip.sh, event-driven: it watches the libvirt dnsmasq lease file with inotifywait rather than polling on a sleep), waits for SSH, enables linger for the VM user, rsyncs the repo in (excluding .git and vm/.ssh, so the harness key never leaves the host), runs ./install.sh --skip 10-nvidia (which installs everything the harness scripts below need: python3/inotify-tools are not in the kickstart, stage 30-packages installs them before session-check.sh ever runs; git is not installed by any stage or needed in the VM, since the repo arrives by rsync, not by clone), vm/session-check.sh, a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for it to actually reboot and for qemu-guest-agent to reconnect, both through libvirt domain events (vm/wait-for-reboot.py), then waits for SSH again, runs vm/rollback-check.sh against that snapshot number, requires `systemctl is-system-running --wait` to report `running` (a degraded boot, with any failed unit, fails the test and prints the failed units), and finally runs vm/login-manager-check.sh to prove the fresh-install login manager (stage 65-login-manager): greetd active, greetd enabled, default target graphical.target. One timed wall-clock wait remains, unlike every other wait here: SSH reachability itself, retried up to `SSH_CONNECT_ATTEMPTS` times, isolated in one `wait_for_ssh` helper in vm/Makefile (see TODO.md)
+make -C vm test       # connects only with the harness key (-i vm/.ssh/id_ed25519, IdentitiesOnly=yes, -F /dev/null and IdentityAgent=none so your ~/.ssh/config and any SSH agent, including 1Password, are never touched); waits for an IPv4 lease (vm/wait-for-ip.sh, event-driven: it watches the libvirt dnsmasq lease file with inotifywait rather than polling on a sleep), waits for SSH, enables linger for the VM user, rsyncs the repo in (excluding .git and vm/.ssh, so the harness key never leaves the host), runs ./install.sh --skip 10-nvidia (which installs everything the harness scripts below need: python3/inotify-tools are not in the kickstart, stage 30-packages installs them before session-check.sh ever runs; git is not installed by any stage or needed in the VM, since the repo arrives by rsync, not by clone), vm/session-check.sh (brings up one headless Sway session and leaves it running for the checks below, see "VM session lifecycle"), vm/agents-check.sh, vm/errors-check.sh, vm/agent-launch-check.sh, vm/session-teardown.sh (tears that session down cleanly), a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for it to actually reboot and for qemu-guest-agent to reconnect, both through libvirt domain events (vm/wait-for-reboot.py), then waits for SSH again, runs vm/rollback-check.sh against that snapshot number, requires `systemctl is-system-running --wait` to report `running` (a degraded boot, with any failed unit, fails the test and prints the failed units), and finally runs vm/login-manager-check.sh to prove the fresh-install login manager (stage 65-login-manager): greetd active, greetd enabled, default target graphical.target. One timed wall-clock wait remains, unlike every other wait here: SSH reachability itself, retried up to `SSH_CONNECT_ATTEMPTS` times, isolated in one `wait_for_ssh` helper in vm/Makefile (see TODO.md)
 make -C vm destroy    # refuses to act on a domain that is not marked as owned by this harness (see `create` above); virsh destroy if running, then virsh undefine --remove-all-storage, then removes the generated vm/ks-$(VM_NAME).cfg
 make -C vm adopt      # marks an existing domain as owned by this harness, for a domain `create` made before the ownership mark existed; requires its generated vm/ks-$(VM_NAME).cfg to already exist, as evidence this harness actually created it
 make -C vm screenshot OUT=path.png   # saves a PNG of the current VM display to OUT, which must be an absolute path (virsh screenshot to PPM, converted with ImageMagick); fails if OUT is unset, relative, or the VM is not running
@@ -635,11 +919,7 @@ Four timeouts, all overridable on the `make` command line, bound the waits in
 after reboot), and `SSH_CONNECT_ATTEMPTS` (default 60, retry count rather
 than a duration, for the one remaining timed SSH wait above).
 
-`vm/session-check.sh` starts a headless Sway session (`WLR_BACKENDS=headless`)
-under `systemd-run --user`, waits for the Sway IPC socket, confirms
-`sway-session.target` is active and starts `dms.service`, calls
-`dms ipc call lock status`, and validates the xremap config with
-`xremap-wlroots --validate-config`. `vm/rollback-check.sh` then confirms the
+`vm/rollback-check.sh` then confirms the
 rollback left both `root` and a `root.old-*` subvolume at the top level, `/`
 mounted from `[/root]`, and the `/.vekrona-rolled-back-from-<N>` marker in
 place. After the reboot that follows, `vm/login-manager-check.sh` confirms
@@ -655,6 +935,37 @@ involved: the NVIDIA stage and every GPU feature that depends on it (stage
 output, Bluetooth, and anything that needs pointer input, such as an area
 screenshot or a screen-recording region selection, since `make -C vm type`
 and `make -C vm key` only send keystrokes.
+
+### VM session lifecycle
+
+`vm/session-check.sh`, `vm/agents-check.sh`, `vm/errors-check.sh`, and
+`vm/agent-launch-check.sh` each run as their own `ssh` connection (a separate
+process with no shared shell state), but the last three need one live
+headless Sway session, not one each, and the VM itself can be shared with a
+human or another check already logged in and watching it (over
+`virt-viewer`/SPICE), so a check must never start a second compositor or
+stop a session it did not start. `vm/session-lib.sh` is the one place that
+reconciles this: `session_attach_existing` finds whatever session is
+already live from a fresh connection (`session_resolve_swaysock`, a
+runtime-dir glob for the Sway IPC socket rather than an inherited
+`$SWAYSOCK`, since that would not survive a new `ssh` connection anyway, plus
+a liveness and `sway-session.target` check), `session_ensure_up` attaches to
+one if it finds it live and otherwise starts a fresh headless one (marking
+it, in a `$XDG_RUNTIME_DIR` file, as owned by this test run), and
+`session_teardown` only stops `sway-session.target` and the Sway unit when
+that marker says this test run started them — a session it merely attached
+to is left running. `vm/session-check.sh` calls `session_ensure_up`
+(`WLR_BACKENDS=headless` Sway under `systemd-run --user` when nothing is
+live yet; wait for the IPC socket, confirm `sway-session.target` is active,
+start `dms.service`, call `dms ipc call lock status`, validate the xremap
+config with `xremap-wlroots --validate-config`) and leaves the session
+running either way; `vm/errors-check.sh` and `vm/agent-launch-check.sh` call
+`session_attach_existing` to use that same session instead of starting
+their own; and `vm/session-teardown.sh`, run once after all three (wired
+into `vm/Makefile`), applies the ownership rule above, so nothing
+(`dms.service`, `vekrona-errors.service`, …) is ever left running against a
+dead compositor, and nothing this test run did not start is ever torn down
+out from under someone else.
 
 ## ISO and CI
 

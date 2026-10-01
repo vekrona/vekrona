@@ -9,6 +9,7 @@
   "fontFamily": "Atkinson Hyperlegible Next",
   "monoFontFamily": "JetBrainsMono Nerd Font",
   "clockFormat": "24h",
+  "notificationPopupBodyInvokesAction": true,
   "barConfigs": [
     {
       "id": "default",
@@ -19,7 +20,7 @@
       "showOnLastDisplay": true,
       "leftWidgets": ["launcherButton", "vekronaSwayWorkspaces", "focusedWindow"],
       "centerWidgets": ["music", "clock", "weather"],
-      "rightWidgets": ["systemTray", "clipboard", "cpuUsage", "memUsage", "notificationButton", "battery", "controlCenterButton"],
+      "rightWidgets": ["systemTray", "clipboard", "cpuUsage", "memUsage", "vekronaAgent", "notificationButton", "battery", "controlCenterButton"],
       "spacing": 4,
       "innerPadding": 4,
       "barInsetPadding": -1,

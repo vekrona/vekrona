@@ -206,6 +206,10 @@ test: require-harness-key
 	rsync -a --exclude=.git --exclude=vm/.ssh -e "ssh $(SSH_OPTS)" "$(REPO_ROOT)/" "$(VM_USER)@$$ip:vekrona/"; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'cd vekrona && ./install.sh --skip 10-nvidia'; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/session-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agents-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/errors-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agent-launch-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/session-teardown.sh'; \
 	snap_n="$$(ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo /home/$(VM_USER)/.local/bin/vekrona-snapshot vm-test')"; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" "sudo /home/$(VM_USER)/.local/bin/vekrona-rollback --yes $$snap_n"; \
 	python3 "$(WAIT_FOR_REBOOT_SCRIPT)" "$(VM_NAME)" $(REBOOT_EVENT_TIMEOUT) $(AGENT_RECONNECT_TIMEOUT); \
