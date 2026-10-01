@@ -293,6 +293,8 @@ MISE_SYSTEM_CACHE_DIR=/usr/local/share/mise/cache
 MISE_SYSTEM_STATE_DIR=/usr/local/share/mise/state
 
 mise_system() {
+  # mise silently ignores /etc/mise/config.toml ("all tools are installed") while its HOME does not exist yet.
+  root mkdir -p "$MISE_SYSTEM_DATA_DIR"
   # mise --system only installs binary-download backends; overriding MISE_DATA_DIR/MISE_CONFIG_DIR
   # instead runs the normal (non-system) code path against root-owned dirs, which also covers our npm/aqua/http tools.
   # sudo resets HOME to /root; pin HOME and every cache path so npm/mise never write outside this tree.
