@@ -1,0 +1,5 @@
+#%PAM-1.0
+auth     required  pam_u2f.so cue timeout=10 pinverification=0 userpresence=1 origin=pam://vekrona appid=pam://vekrona
+account  required  pam_permit.so
+password required  pam_deny.so
+session  required  pam_permit.so

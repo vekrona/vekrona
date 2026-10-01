@@ -3,14 +3,19 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
+source "$ROOT/lib/authselect-vekrona.sh"
+source "$ROOT/lib/luks-fido2.sh"
 
 [[ "${1:-}" == "--all" ]] && VEKRONA_VERIFY_ALL=1
 VEKRONA_VERIFY_ALL="${VEKRONA_VERIFY_ALL:-0}"
 VEKRONA_STAGES="${VEKRONA_STAGES:-}"
 
 ran() {
-  [[ "$VEKRONA_VERIFY_ALL" == "1" ]] && return 0
-  [[ " $VEKRONA_STAGES " == *" $1 "* ]]
+  if [[ "$VEKRONA_VERIFY_ALL" == "1" ]]; then
+    stage_applies "$1"
+  else
+    [[ " $VEKRONA_STAGES " == *" $1 "* ]]
+  fi
 }
 
 ok_count=0
@@ -47,7 +52,24 @@ unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; 
 user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" enabled; }
 pkg_absent() { ! pkg_installed "$1"; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
+module_built_for_running_kernel() { modinfo -k "$(uname -r)" "$1" >/dev/null 2>&1; }
 nvidia_module_present_for() { modinfo -k "$1" nvidia >/dev/null 2>&1; }
+root_files_equal() { root cmp -s "$1" "$2"; }
+user_has_touch_credentials() { [[ -e "$HOME/.config/Yubico/u2f_keys" ]] || root test -e "/var/lib/fprint/$VEKRONA_USER"; }
+vekrona_pam_u2f_lines_ok() {
+  [[ "$(count_occurrences "$(<"$1")" "$PAM_U2F_VEKRONA")" -eq 2 ]]
+}
+authselect_selection_ok() {
+  local want have
+  want="$(printf '%s\n' custom/vekrona with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f | sort | paste -sd' ')"
+  have="$(authselect current --raw | tr ' ' '\n' | sed '/^$/d' | sort | paste -sd' ')"
+  [[ "$have" == "$want" ]]
+}
+not() { if "$@"; then return 1; fi; }
+present_iff() {
+  local applicable="$1"; shift
+  if "$applicable"; then "$@"; else not "$@"; fi
+}
 
 verify_greetd_active() {
   check assert "greetd enabled" greetd_enabled
@@ -161,9 +183,56 @@ if ran 40-system; then
   check assert "/var/cache/tuigreet owned by greetd" owned_by /var/cache/tuigreet greetd
   check assert "logind inhibit-delay drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
   check assert "oomd drop-in present" file_exists /etc/systemd/oomd.conf.d/vekrona.conf
-  check assert "usb autosuspend drop-in present" file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
+  check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
+  check assert "dGPU udev rule present iff discrete NVIDIA on a non-Mac" present_iff wants_dgpu_udev_rule file_exists /etc/udev/rules.d/70-vekrona-dgpu.rules
   check assert "$VEKRONA_USER in input group" group_member "$VEKRONA_USER" input
   check assert "/dev/uinput exists" file_exists /dev/uinput
+fi
+
+if ran 45-auth; then
+  check assert "authselect selects custom/vekrona with its four features" authselect_selection_ok
+  for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
+    check assert "both pam_u2f lines pinned to pam://vekrona in $f" vekrona_pam_u2f_lines_ok "$f"
+  done
+  check assert "dankshell-u2f equals the repo file" root_files_equal "$VEKRONA_ROOT/etc/pam.d/dankshell-u2f" /etc/pam.d/dankshell-u2f
+
+  crypttab_content="$(read_crypttab)"
+  fido2_tokens="$(crypttab_fido2_tokens "$crypttab_content")"
+  fido2_token_found=0
+  while IFS=$'\t' read -r crypt_name crypt_dev token_state; do
+    if [[ -z "$crypt_name" ]]; then
+      continue
+    fi
+    if [[ "$token_state" == yes ]]; then
+      fido2_token_found=1
+      check assert "crypttab entry $crypt_name has fido2-device (token on $crypt_dev)" crypttab_line_has_fido2 "$crypttab_content" "$crypt_name"
+    else
+      check assert "crypttab entry $crypt_name has no fido2-device (no token on $crypt_dev)" not crypttab_line_has_fido2 "$crypttab_content" "$crypt_name"
+    fi
+  done <<<"$fido2_tokens"
+  if [[ "$fido2_token_found" -eq 1 ]]; then
+    initramfs_kvers="$(kvers_with_initramfs)"
+    default_kver="$(basename "$(root grubby --default-kernel)")"
+    default_kver="${default_kver#vmlinuz-}"
+    check assert "default kernel $default_kver has an initramfs" file_exists "$(initramfs_path_for "$default_kver")"
+    while IFS= read -r kver; do
+      check assert "initramfs for $kver carries FIDO2 unlock" initramfs_carries_fido2 "$kver"
+    done <<<"$initramfs_kvers"
+  fi
+
+  warn_check "u2f_keys or fingerprint prints registered for $VEKRONA_USER" user_has_touch_credentials
+  check assert "DMS seed enables fingerprint and security key" python3 -c "
+import json
+d = json.load(open('$VEKRONA_ROOT/config/DankMaterialShell/settings.seed.json'))
+assert d.get('enableFprint') is True and d.get('enableU2f') is True and d.get('u2fMode') == 'or'
+"
+fi
+
+if ran 15-mac; then
+  check assert "wl module built for the running kernel iff Broadcom wl Wi-Fi present" present_iff has_broadcom_wl_wifi module_built_for_running_kernel wl
+  check assert "broadcom-wl modprobe drop-in iff Broadcom wl Wi-Fi present" present_iff has_broadcom_wl_wifi file_exists /etc/modprobe.d/vekrona-broadcom-wl.conf
+  check assert "apple-gmux modprobe drop-in iff Apple dual-GPU" present_iff has_apple_gmux_dual_gpu file_exists /etc/modprobe.d/vekrona-apple-gmux.conf
+  check assert "facetimehd module built for the running kernel iff FaceTime HD camera present" present_iff has_facetime_hd_camera module_built_for_running_kernel facetimehd
 fi
 
 if ran 50-user; then
@@ -317,9 +386,10 @@ if ran 90a-switch-dm || ran 90b-remove; then
   for p in "${desktop_pkgs[@]}"; do
     check assert "protected desktop package present: $p" pkg_installed "$p"
   done
-  for f in /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/oomd.conf.d/vekrona.conf /etc/modprobe.d/vekrona-usb-autosuspend.conf; do
+  for f in /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/oomd.conf.d/vekrona.conf; do
     check assert "override still present: $f" file_exists "$f"
   done
+  check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
 fi
 
 log "verify summary: ok=$ok_count warn=$warn_count"
