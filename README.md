@@ -583,7 +583,17 @@ vekrona-error mute <id>        # mute this error's fingerprint
 vekrona-error ack <id>|--all   # mark handled
 vekrona-error rm <id>          # delete one error's record outright (not mute: it can come back on a repeat)
 vekrona-error pick             # rofi picker (bound to Hyper+Shift+A by another stream) -> launches the agent on the pick
+vekrona-error prompt <id>      # read-only: prints the agent brief, with the record as one nonce-fenced JSON data block; changes no status
+vekrona-error mark-launched <id>  # set status launched (vekrona-agent --error calls it after the agent started)
+vekrona-error watch            # the pipeline itself (vekrona-errors.service); single-instance, a second one refuses to start
 ```
+
+Ids must match the generated format `YYYYMMDDTHHMMSS-xxxxxxxx` (8 lowercase
+hex digits); anything else is rejected before it touches the store. `prompt`
+is read-only on purpose: a brief that is merely printed (for example by
+`vekrona-agent --dry-run`) must not mark the error as handled, so
+`vekrona-agent --error <id>` calls `mark-launched` itself, only after the
+agent window was started.
 
 ## The vekronaSwayWorkspaces DankBar plugin
 
@@ -944,6 +954,13 @@ sudo dnf upgrade qt6-qtbase
 - `WLR_NO_HARDWARE_CURSORS=1` is documented but not set in `config/environment.d/vekrona.conf`. Only add it if the cursor becomes invisible, a known wlroots-on-NVIDIA symptom.
 - Whether the snapper actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`) fires during an offline `dnf system-upgrade` transaction is unverified. Take the manual snapshot in the release upgrade procedure regardless.
 - Every greetd login logs `gkr-pam: unable to locate daemon control file` at error priority. This is the stock `/etc/pam.d/greetd` from the `greetd` package (vekrona does not install or modify it): its `auth` phase runs `pam_gnome_keyring.so` before any keyring daemon exists, so the module logs this and stashes the password; the `session` phase's `pam_gnome_keyring.so auto_start` then starts `gnome-keyring-daemon` and unlocks the login keyring with that stashed password. Verified in the `vekrona-test` VM across a reboot and fresh login: `org.freedesktop.secrets` is served by the PAM-started `gnome-keyring-daemon` (the D-Bus-activated and socket-activated units stay inactive), the login collection's `Locked` property is `false`, and `secret-tool store`/`lookup` succeed with no password prompt.
+
+## Tests
+
+`bash tests/run.sh` runs the headless unit and integration tests of the error
+pipeline (`tests/errors/`, Python `unittest`). They need `python3-gobject` and
+`dbus-daemon` and no VM, desktop session or root. CI runs them in a Fedora
+container (job `unit-tests` in `.github/workflows/iso.yml`).
 
 ## VM smoke test
 
