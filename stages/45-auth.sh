@@ -6,14 +6,13 @@ source "$ROOT/lib/common.sh"
 source "$ROOT/lib/authselect-vekrona.sh"
 source "$ROOT/lib/luks-fido2.sh"
 
-require_cmd authselect cryptsetup dracut lsinitrd jq findfs
-
 PROFILE_NAME=vekrona
 PROFILE_ID="custom/$PROFILE_NAME"
 PROFILE_DIR="/etc/authselect/custom/$PROFILE_NAME"
 PROFILE_FEATURES=(with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f)
 
-ensure_pkg pam-u2f pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam
+ensure_pkg pam-u2f pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam cryptsetup
+require_cmd authselect cryptsetup dracut lsinitrd jq findfs
 
 render_profile() {
   render_authselect_profile "$(authselect_base_dir)" "$1"
