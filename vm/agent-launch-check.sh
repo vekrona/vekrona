@@ -108,7 +108,7 @@ cat > "$BIN_DIR/claude" <<STUB
   printf 'ARGV:%s\n' "\$*"
   env
 } > "$CAPTURE_FILE"
-sleep 2
+exec tail -f /dev/null
 STUB
 chmod +x "$BIN_DIR/claude"
 
