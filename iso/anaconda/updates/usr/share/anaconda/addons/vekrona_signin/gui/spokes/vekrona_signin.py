@@ -1,7 +1,6 @@
-import logging
-
 from dasbus.error import DBusError
 
+from pyanaconda.anaconda_loggers import get_module_logger
 from pyanaconda.core.i18n import N_, _
 from pyanaconda.modules.common.constants.services import USERS
 from pyanaconda.modules.common.structures.user import UserData
@@ -13,7 +12,7 @@ from vekrona_account.categories.vekrona import VekronaCategory
 from vekrona_signin.constants import VEKRONA_SIGNIN
 from vekrona_signin.core.device_description import DeviceDescription
 
-log = logging.getLogger(__name__)
+log = get_module_logger(__name__)
 
 __all__ = ["VekronaSignInSpoke"]
 

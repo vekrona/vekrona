@@ -1,11 +1,10 @@
-import logging
-
+from pyanaconda.anaconda_loggers import get_module_logger
 from pyanaconda.modules.common.task import Task
 
 from vekrona_signin.core import fido2_luks, fprint, pam_u2f
 from vekrona_signin.core.security_key import opened_security_key
 
-log = logging.getLogger(__name__)
+log = get_module_logger(__name__)
 
 __all__ = ["SecurityKeyRegistration", "SecurityKeyRegistrationTask", "FingerprintEnrollmentTask"]
 

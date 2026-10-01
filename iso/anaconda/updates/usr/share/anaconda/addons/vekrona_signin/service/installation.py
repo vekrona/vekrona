@@ -1,6 +1,6 @@
-import logging
 from pathlib import Path
 
+from pyanaconda.anaconda_loggers import get_module_logger
 from pyanaconda.core import util
 from pyanaconda.core.configuration.anaconda import conf
 from pyanaconda.modules.common.constants.objects import DEVICE_TREE
@@ -15,7 +15,7 @@ from vekrona_signin.core.fprint import storage_path
 from vekrona_signin.core.passwd import parse_account
 from vekrona_signin.core.private_files import write_private_file
 
-log = logging.getLogger(__name__)
+log = get_module_logger(__name__)
 
 __all__ = ["LuksFido2Task", "U2fKeysTask", "FprintTask"]
 

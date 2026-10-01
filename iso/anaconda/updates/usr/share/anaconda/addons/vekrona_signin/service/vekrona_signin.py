@@ -1,5 +1,4 @@
-import logging
-
+from pyanaconda.anaconda_loggers import get_module_logger
 from pyanaconda.core.configuration.anaconda import conf
 from pyanaconda.core.dbus import DBus
 from pyanaconda.core.signal import Signal
@@ -20,7 +19,7 @@ from vekrona_signin.service.installation import FprintTask, LuksFido2Task, U2fKe
 from vekrona_signin.service.kickstart import VekronaSignInKickstartSpecification
 from vekrona_signin.service.vekrona_signin_interface import VekronaSignInInterface
 
-log = logging.getLogger(__name__)
+log = get_module_logger(__name__)
 
 __all__ = ["VekronaSignInService"]
 

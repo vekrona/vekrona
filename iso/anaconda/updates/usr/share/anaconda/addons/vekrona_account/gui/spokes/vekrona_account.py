@@ -1,8 +1,8 @@
-import logging
 import re
 
 from pykickstart.constants import AUTOPART_TYPE_BTRFS
 
+from pyanaconda.anaconda_loggers import get_module_logger
 from pyanaconda.core.constants import PARTITIONING_METHOD_AUTOMATIC, PASSWORD_POLICY_LUKS
 from pyanaconda.core.i18n import N_, _
 from pyanaconda.core.users import check_username, crypt_password
@@ -21,7 +21,7 @@ from gi.repository import Gtk
 from vekrona_account.categories.vekrona import VekronaCategory
 from vekrona_account.constants import DEFAULT_HOSTNAME, DEFAULT_TIMEZONE
 
-log = logging.getLogger(__name__)
+log = get_module_logger(__name__)
 
 __all__ = ["VekronaAccountSpoke"]
 
