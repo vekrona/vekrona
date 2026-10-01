@@ -40,7 +40,7 @@
                 <child>
                   <object class="GtkScrolledWindow">
                     <property name="visible">True</property>
-                    <property name="can-focus">True</property>
+                    <property name="can-focus">False</property>
                     <property name="hscrollbar-policy">never</property>
                     <property name="shadow-type">none</property>
                     <child>
@@ -133,6 +133,7 @@
                                         <property name="visible">True</property>
                                         <property name="label" translatable="yes">Password</property>
                                         <property name="xalign">1</property>
+                                        <property name="mnemonic-widget">passwordEntry</property>
                                       </object>
                                       <packing>
                                         <property name="left-attach">0</property>
@@ -158,6 +159,7 @@
                                         <property name="visible">True</property>
                                         <property name="label" translatable="yes">Repeat the password</property>
                                         <property name="xalign">1</property>
+                                        <property name="mnemonic-widget">confirmEntry</property>
                                       </object>
                                       <packing>
                                         <property name="left-attach">0</property>
@@ -317,6 +319,11 @@
                                             <property name="no-show-all">True</property>
                                             <property name="hexpand">True</property>
                                             <signal name="changed" handler="on_key_combo_changed" swapped="no"/>
+                                            <child internal-child="accessible">
+                                              <object class="AtkObject">
+                                                <property name="AtkObject::accessible-name" translatable="yes">Security key</property>
+                                              </object>
+                                            </child>
                                           </object>
                                           <packing>
                                             <property name="expand">True</property>
@@ -329,6 +336,11 @@
                                             <property name="can-focus">True</property>
                                             <property name="label" translatable="yes">Check again</property>
                                             <signal name="clicked" handler="on_key_check_clicked" swapped="no"/>
+                                            <child internal-child="accessible">
+                                              <object class="AtkObject">
+                                                <property name="AtkObject::accessible-name" translatable="yes">Check for a security key again</property>
+                                              </object>
+                                            </child>
                                           </object>
                                           <packing>
                                             <property name="expand">False</property>
@@ -352,6 +364,7 @@
                                             <property name="visible">True</property>
                                             <property name="label" translatable="yes">PIN</property>
                                             <property name="xalign">1</property>
+                                            <property name="mnemonic-widget">keyPinEntry</property>
                                           </object>
                                           <packing>
                                             <property name="left-attach">0</property>
@@ -378,6 +391,7 @@
                                             <property name="no-show-all">True</property>
                                             <property name="label" translatable="yes">Repeat the PIN</property>
                                             <property name="xalign">1</property>
+                                            <property name="mnemonic-widget">keyConfirmEntry</property>
                                           </object>
                                           <packing>
                                             <property name="left-attach">0</property>
@@ -443,6 +457,11 @@
                                             <property name="can-focus">True</property>
                                             <property name="label" translatable="yes">Remove</property>
                                             <signal name="clicked" handler="on_key_remove_clicked" swapped="no"/>
+                                            <child internal-child="accessible">
+                                              <object class="AtkObject">
+                                                <property name="AtkObject::accessible-name" translatable="yes">Remove the security key</property>
+                                              </object>
+                                            </child>
                                           </object>
                                           <packing>
                                             <property name="expand">False</property>
@@ -498,6 +517,8 @@
                                             <property name="wrap">True</property>
                                             <property name="max-width-chars">70</property>
                                             <property name="xalign">0</property>
+                                            <property name="margin-top">6</property>
+                                            <property name="margin-left">12</property>
                                             <property name="selectable">True</property>
                                             <attributes>
                                               <attribute name="font-desc" value="monospace"/>
@@ -616,6 +637,11 @@
                                             <property name="no-show-all">True</property>
                                             <property name="hexpand">True</property>
                                             <signal name="changed" handler="on_reader_combo_changed" swapped="no"/>
+                                            <child internal-child="accessible">
+                                              <object class="AtkObject">
+                                                <property name="AtkObject::accessible-name" translatable="yes">Fingerprint reader</property>
+                                              </object>
+                                            </child>
                                           </object>
                                           <packing>
                                             <property name="expand">True</property>
@@ -628,6 +654,11 @@
                                             <property name="can-focus">True</property>
                                             <property name="label" translatable="yes">Check again</property>
                                             <signal name="clicked" handler="on_fp_check_clicked" swapped="no"/>
+                                            <child internal-child="accessible">
+                                              <object class="AtkObject">
+                                                <property name="AtkObject::accessible-name" translatable="yes">Check for a fingerprint reader again</property>
+                                              </object>
+                                            </child>
                                           </object>
                                           <packing>
                                             <property name="expand">False</property>
@@ -649,6 +680,11 @@
                                           <object class="GtkComboBoxText" id="fingerCombo">
                                             <property name="visible">True</property>
                                             <property name="hexpand">True</property>
+                                            <child internal-child="accessible">
+                                              <object class="AtkObject">
+                                                <property name="AtkObject::accessible-name" translatable="yes">Finger to enroll</property>
+                                              </object>
+                                            </child>
                                           </object>
                                           <packing>
                                             <property name="expand">True</property>
@@ -684,6 +720,11 @@
                                             <property name="can-focus">True</property>
                                             <property name="label" translatable="yes">Remove</property>
                                             <signal name="clicked" handler="on_fp_remove_clicked" swapped="no"/>
+                                            <child internal-child="accessible">
+                                              <object class="AtkObject">
+                                                <property name="AtkObject::accessible-name" translatable="yes">Remove the fingerprint</property>
+                                              </object>
+                                            </child>
                                           </object>
                                           <packing>
                                             <property name="expand">False</property>
@@ -739,6 +780,8 @@
                                             <property name="wrap">True</property>
                                             <property name="max-width-chars">70</property>
                                             <property name="xalign">0</property>
+                                            <property name="margin-top">6</property>
+                                            <property name="margin-left">12</property>
                                             <property name="selectable">True</property>
                                             <attributes>
                                               <attribute name="font-desc" value="monospace"/>

@@ -103,6 +103,31 @@ class SignInGladeTest(unittest.TestCase):
                 self.assertEqual(properties.get("no-show-all"), "True")
                 self.assertEqual(properties.get("visible"), "False")
 
+    def test_scrolled_window_is_no_tab_stop(self):
+        scrolled = next(o for o in self.root.iter("object") if o.get("class") == "GtkScrolledWindow")
+        properties = {p.get("name"): p.text for p in scrolled.findall("property")}
+        self.assertEqual(properties.get("can-focus"), "False")
+
+    def test_entry_labels_point_at_their_entries(self):
+        pairs = {
+            "passwordLabel": "passwordEntry", "confirmLabel": "confirmEntry",
+            "keyPinLabel": "keyPinEntry", "keyConfirmLabel": "keyConfirmEntry",
+        }
+        for label_id, entry_id in pairs.items():
+            with self.subTest(label_id):
+                self.assertEqual(self.properties(label_id).get("mnemonic-widget"), entry_id)
+
+    def test_controls_without_a_visible_label_have_an_accessible_name(self):
+        for widget_id in ("keyCombo", "readerCombo", "fingerCombo", "keyCheckButton", "fpCheckButton",
+                          "keyRemoveButton", "fpRemoveButton"):
+            with self.subTest(widget_id):
+                names = [
+                    p for atk in self.objects[widget_id].findall("child[@internal-child='accessible']/object")
+                    for p in atk.findall("property[@name='AtkObject::accessible-name']")
+                ]
+                self.assertEqual(len(names), 1)
+                self.assertTrue(names[0].text)
+
     def test_password_entries_hide_their_text(self):
         for widget_id in ("passwordEntry", "confirmEntry", "keyPinEntry", "keyConfirmEntry"):
             with self.subTest(widget_id):

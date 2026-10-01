@@ -190,8 +190,6 @@ class VekronaSignInSpoke(NormalSpoke):
     def _set_static_texts(self):
         texts = {
             self.builder.get_object("introLabel"): guidance.INTRO,
-            self.builder.get_object("passwordLabel"): guidance.PASSWORD_LABEL,
-            self.builder.get_object("confirmLabel"): guidance.CONFIRM_LABEL,
             self.builder.get_object("keyWhatLabel"): guidance.KEY_WHAT,
             self.builder.get_object("keyUseLabel"): guidance.KEY_USE,
             self.builder.get_object("keyStepsLabel"): guidance.KEY_STEPS,
@@ -204,6 +202,8 @@ class VekronaSignInSpoke(NormalSpoke):
         }
         for label, text in texts.items():
             label.set_text(_(text))
+        self.builder.get_object("passwordLabel").set_text_with_mnemonic(_(guidance.PASSWORD_FIELD_LABEL))
+        self.builder.get_object("confirmLabel").set_text_with_mnemonic(_(guidance.CONFIRM_LABEL))
         self.builder.get_object("passwordHint").set_text(
             _(guidance.PASSWORD_HINT).format(n=self._min_length)
         )
@@ -332,6 +332,7 @@ class VekronaSignInSpoke(NormalSpoke):
         if has_account:
             self._scan(self._key)
             self._scan(self._fp)
+            self._password_entry.grab_focus()
         self._render()
 
     def _on_entered(self, _spoke):
