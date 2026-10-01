@@ -7,14 +7,7 @@ source "$ROOT/lib/common.sh"
 require_cmd rpm dnf5 grubby modinfo
 
 target_kver="$(uname -r)"
-assert_running_kernel_is_latest() {
-  local latest
-  latest="$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' | sort -V | tail -1)"
-  [[ "$latest" == "$target_kver" ]] || die "reboot into the latest installed kernel first (running $target_kver, latest installed $latest)"
-}
-
-assert_running_kernel_is_latest
-ensure_pkg "kernel-devel-$target_kver"
+ensure_target_kernel_devel
 
 CUDA_REPO_ID="cuda-fedora44-x86_64"
 CUDA_REPOFILE_URL="https://developer.download.nvidia.com/compute/cuda/repos/fedora44/x86_64/cuda-fedora44.repo"
@@ -65,17 +58,11 @@ else
   ensure_pkg "${INSTALL_PKGS[@]}"
 fi
 
-require_cmd akmods
-
-assert_running_kernel_is_latest
-ensure_pkg "kernel-devel-$target_kver"
-
 if pkg_installed cuda-toolkit; then
   root dnf upgrade -y cuda-toolkit
 fi
 
-log "rebuilding akmods for $target_kver"
-root akmods --force --kernels "$target_kver"
+build_akmods_for_target_kernel
 
 nvidia_version="$(modinfo -F version nvidia)"
 [[ "${nvidia_version%%.*}" -ge 615 ]] || die "unexpected nvidia module version: $nvidia_version (expected >= 615)"
@@ -93,7 +80,9 @@ else
 fi
 
 modprobe_option_active() {
-  grep -rhE '^[[:space:]]*[^#[:space:]]' /etc/modprobe.d /usr/lib/modprobe.d 2>/dev/null | grep -qE -- "$1"
+  local active
+  active="$(grep -rhE '^[[:space:]]*[^#[:space:]]' /etc/modprobe.d /usr/lib/modprobe.d 2>/dev/null || true)"
+  grep -qE -- "$1" <<<"$active"
 }
 
 if modprobe_option_active 'NVreg_PreserveVideoMemoryAllocations=1' \
@@ -111,9 +100,8 @@ while IFS= read -r p; do [[ -n "$p" ]] && lock_pkgs+=("$p"); done < <(rpm -qa --
 [[ ${#lock_pkgs[@]} -gt 0 ]] && versionlock_installed "${lock_pkgs[@]}"
 
 missing_kernels=()
-for moddir in /lib/modules/*/; do
-  kernel="$(basename "$moddir")"
-  [[ -e "/boot/vmlinuz-$kernel" ]] || continue
+installed_kernels="$(installed_kvers)"
+for kernel in $installed_kernels; do
   modinfo -k "$kernel" nvidia >/dev/null 2>&1 || missing_kernels+=("$kernel")
 done
 [[ ${#missing_kernels[@]} -eq 0 ]] || warn "nvidia module missing for installed kernels: ${missing_kernels[*]}"

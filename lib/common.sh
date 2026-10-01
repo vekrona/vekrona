@@ -58,7 +58,11 @@ mark_user_installed() {
   root dnf mark -y user "${installed[@]}"
 }
 
-repo_enabled() { dnf repolist --enabled 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
+repo_enabled() {
+  local ids
+  ids="$(dnf repolist --enabled 2>/dev/null | awk '{print $1}')"
+  grep -qx "$1" <<<"$ids"
+}
 
 ensure_repo_enabled() {
   local r
@@ -110,7 +114,8 @@ ensure_line() {
 }
 
 user_gsettings() {
-  local bus="/run/user/$(id -u)/bus"
+  local bus
+  bus="/run/user/$(id -u)/bus"
   if [[ -S "$bus" ]]; then
     DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" gsettings "$@"
   else
@@ -192,6 +197,109 @@ ensure_user_in_group() {
   log "adding $VEKRONA_USER to $group (re-login required)"
   root usermod -aG "$group" "$VEKRONA_USER"
   getent group "$group" | grep -q "\b$VEKRONA_USER\b" || die "user not added to $group"
+}
+
+pci_has_id() {
+  local want="$1" dev
+  for dev in /sys/bus/pci/devices/*/; do
+    [[ -r "$dev/vendor" && -r "$dev/device" ]] || continue
+    [[ "$(<"$dev/vendor"):$(<"$dev/device")" == "0x${want%%:*}:0x${want##*:}" ]] && return 0
+  done
+  return 1
+}
+
+pci_display_vendors() {
+  local dev
+  for dev in /sys/bus/pci/devices/*/; do
+    [[ -r "$dev/vendor" && -r "$dev/class" ]] || continue
+    [[ "$(<"$dev/class")" == 0x03* ]] && cat "$dev/vendor"
+  done
+  return 0
+}
+
+dmi_field() { cat "/sys/class/dmi/id/$1" 2>/dev/null || true; }
+
+has_nvidia_gpu() {
+  local vendors
+  vendors="$(pci_display_vendors)"
+  grep -qx 0x10de <<<"$vendors"
+}
+
+is_apple_mac() { [[ "$(dmi_field sys_vendor)" == "Apple Inc." ]]; }
+
+has_broadcom_wl_wifi() { pci_has_id 14e4:43a0 || pci_has_id 14e4:4331; }
+
+has_facetime_hd_camera() { pci_has_id 14e4:1570; }
+
+has_apple_gmux_dual_gpu() { is_apple_mac && [[ "$(pci_display_vendors | wc -l)" -gt 1 ]]; }
+
+is_laptop() {
+  case "$(dmi_field chassis_type)" in 8|9|10|14) return 0 ;; *) return 1 ;; esac
+}
+
+wants_nvidia_stage() { has_nvidia_gpu && ! is_apple_mac; }
+
+stage_applies() {
+  case "$1" in
+    10-nvidia) wants_nvidia_stage ;;
+    15-mac) is_apple_mac ;;
+    *) return 0 ;;
+  esac
+}
+
+wants_dgpu_udev_rule() { wants_nvidia_stage; }
+
+wants_usb_autosuspend_dropin() { ! is_laptop; }
+
+installed_kvers() {
+  local kvers
+  kvers="$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n')" || die "kernel-core is not installed"
+  [[ -n "$kvers" ]] || die "no installed kernel-core versions found"
+  sort -V <<<"$kvers"
+}
+
+newest_installed_kver() {
+  local kvers
+  kvers="$(installed_kvers)" || exit 1
+  tail -1 <<<"$kvers"
+}
+
+assert_running_kernel_is_latest() {
+  local running latest
+  running="$(uname -r)"
+  latest="$(newest_installed_kver)"
+  [[ "$latest" == "$running" ]] || die "reboot into the latest installed kernel first (running $running, latest installed $latest)"
+}
+
+ensure_target_kernel_devel() {
+  assert_running_kernel_is_latest
+  ensure_pkg "kernel-devel-$(newest_installed_kver)"
+}
+
+build_akmods_for_target_kernel() {
+  local target_kver
+  target_kver="$(uname -r)"
+  require_cmd akmods
+  ensure_target_kernel_devel
+  log "rebuilding akmods for $target_kver"
+  root akmods --force --kernels "$target_kver"
+}
+
+fetch_pinned() {
+  local url="$1" sha256="$2" dest="$3" actual
+  require_cmd curl sha256sum
+  log "fetching: $url"
+  curl --fail --silent --show-error --location --output "$dest" "$url" || die "download failed: $url"
+  actual="$(sha256sum "$dest" | awk '{print $1}')"
+  [[ "$actual" == "$sha256" ]] || die "sha256 mismatch for $url (expected $sha256, got $actual)"
+}
+
+ensure_root_file_absent() {
+  local dst="$1"
+  [[ -e "$dst" ]] || { log "absent: $dst"; return 0; }
+  log "removing: $dst"
+  root rm -f "$dst"
+  [[ ! -e "$dst" ]] || die "failed to remove $dst"
 }
 
 VERSIONLOCK_FILE=/etc/dnf/versionlock.toml

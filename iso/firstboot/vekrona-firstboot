@@ -81,26 +81,11 @@ while [[ ! -S "$bus" ]]; do
   inotifywait -qq -t 5 -e create "/run/user/$uid" >/dev/null 2>&1 || true
 done
 
-has_nvidia() {
-  local dev vendor class
-  for dev in /sys/bus/pci/devices/*/; do
-    [[ -r "$dev/vendor" && -r "$dev/class" ]] || continue
-    vendor="$(cat "$dev/vendor")"
-    [[ "$vendor" == "0x10de" ]] || continue
-    class="$(cat "$dev/class")"
-    [[ "$class" == 0x03* ]] && return 0
-  done
-  return 1
-}
-
-install_args=()
-has_nvidia || install_args=(--skip 10-nvidia)
-
-log "running ./install.sh ${install_args[*]:-} as $user"
+log "running ./install.sh as $user"
 sudo -iu "$user" env \
   "XDG_RUNTIME_DIR=/run/user/$uid" \
   "DBUS_SESSION_BUS_ADDRESS=unix:path=$bus" \
-  "$target/install.sh" "${install_args[@]}"
+  "$target/install.sh"
 
 touch "$STATE_DIR/firstboot.done"
 systemctl disable vekrona-firstboot.service
