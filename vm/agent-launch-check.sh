@@ -81,7 +81,7 @@ REAL_ERROR_ID=""
 error_record_deadline=$((SECONDS + 30))
 while [[ -z "$REAL_ERROR_ID" ]]; do
   REAL_ERROR_ID="$(grep -rl -F -- "$ERROR_MARKER" "$ERROR_STORE_DIR"/*/record.json 2>/dev/null \
-    | head -1 | xargs -r dirname | xargs -r basename)"
+    | head -1 | xargs -r dirname | xargs -r basename; true)"
   [[ -n "$REAL_ERROR_ID" ]] && break
   (( SECONDS < error_record_deadline )) || fail "vekrona-error report never produced a record for --error end-to-end test"
   inotifywait -qq -t 1 -e create,modify,moved_to,close_write "$ERROR_STORE_DIR" >/dev/null 2>&1 || true
