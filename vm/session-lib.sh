@@ -45,9 +45,16 @@ session_start_new() {
     inotifywait -e create --include 'sway-ipc\.[0-9]+\.[0-9]+\.sock$' \
       --format '%f' -t 60 "$XDG_RUNTIME_DIR" 2>&1
   }
-  local watch_line
-  IFS= read -r -u "${SESSION_SWAY_WATCH[0]}" watch_line
-  if [[ "$watch_line" != "Watches established." ]]; then
+  local watch_line watches_ready=0 preamble_lines=0
+  while IFS= read -r -u "${SESSION_SWAY_WATCH[0]}" watch_line; do
+    if [[ "$watch_line" == "Watches established." ]]; then
+      watches_ready=1
+      break
+    fi
+    preamble_lines=$((preamble_lines + 1))
+    (( preamble_lines < 5 )) || break
+  done
+  if [[ "$watches_ready" != "1" ]]; then
     echo "session-lib: could not set up the sway ipc socket watch" >&2
     return 1
   fi
