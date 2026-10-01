@@ -214,9 +214,7 @@ and tag:
   repository's `.git` directory, which must exist at the same path inside the
   container (`-v <main-checkout>/.git:<main-checkout>/.git:ro`); without it
   `iso/build.sh` stops with "not a git repository", names the worktree and
-  prints that mount. The builder image from `iso/Containerfile` does not
-  contain `rsync`, which `pack-updates.sh` needs (see [TODO.md](../TODO.md)), so build in an
-  image that has it.
+  prints that mount.
 - The installed system runs `vekrona-firstboot.service` once on first boot:
   it runs `./install.sh` as the `vekrona` user (skipping `10-nvidia` when
   there is no NVIDIA GPU), then writes `/var/lib/vekrona/firstboot.done` or
