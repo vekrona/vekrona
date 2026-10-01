@@ -399,7 +399,7 @@ vm_build_qemu_command() {
     VM_QEMU_CMD+=(
       -kernel "$dev_dir/vmlinuz"
       -initrd "$dev_dir/initrd.img"
-      -append "$(vm_installer_kernel_args) console=ttyS0 console=tty0 inst.updates=http://10.0.2.2:${http_port}/updates.img inst.sshd ${VM_KERNEL_ARGS[*]}"
+      -append "$(vm_installer_kernel_args) console=ttyS0 console=tty0 inst.updates=http://10.0.2.2:${http_port}/updates.img inst.sshd inst.graphical ${VM_KERNEL_ARGS[*]}"
       -no-reboot
     )
   fi
