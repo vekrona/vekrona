@@ -32,6 +32,12 @@ printf 'systemctl %s\\n' "$*" >> "$FAKE_LOG"
 if [ -n "$FAKE_RELEASE" ]; then cat "$FAKE_RELEASE" > /dev/null; fi
 """
 
+FAKE_NOTIFY_SEND = """#!/bin/sh
+printf 'notify-send %s\\n' "$*" >> "$FAKE_LOG"
+if [ "${FAKE_NOTIFY_STATUS:-0}" != 0 ]; then echo "no notification daemon" >&2; fi
+exit "${FAKE_NOTIFY_STATUS:-0}"
+"""
+
 FAKE_ROFI = """#!/bin/sh
 printf 'rofi %s\\n' "$*" >> "$FAKE_LOG"
 cat > "$FAKE_ROFI_MENU"
@@ -140,8 +146,8 @@ class Sandbox:
         write_executable(os.path.join(self.fakes, "journalctl"), FAKE_JOURNALCTL)
         write_executable(os.path.join(self.fakes, "rofi"), FAKE_ROFI)
         write_executable(os.path.join(self.fakes, "systemctl"), FAKE_SYSTEMCTL)
-        for name in ("coredumpctl", "notify-send"):
-            write_executable(os.path.join(self.fakes, name), FAKE_LOGGING_TOOL)
+        write_executable(os.path.join(self.fakes, "notify-send"), FAKE_NOTIFY_SEND)
+        write_executable(os.path.join(self.fakes, "coredumpctl"), FAKE_LOGGING_TOOL)
         self.log = os.path.join(self.root, "calls.log")
         self.journal = os.path.join(self.root, "journal.jsonl")
         self.rofi_menu = os.path.join(self.root, "rofi-menu.txt")
@@ -209,6 +215,9 @@ class Sandbox:
     def latest_error_id(self):
         listing = self.run("list", "--all").stdout.splitlines()[1:]
         return listing[0].split()[0]
+
+    def store_dir(self):
+        return os.path.join(self.env["XDG_STATE_HOME"], "vekrona", "errors")
 
     def external_calls(self):
         with open(self.log) as f:

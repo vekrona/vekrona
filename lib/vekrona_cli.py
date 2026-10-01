@@ -1,3 +1,4 @@
+import html
 import os
 import shutil
 import subprocess
@@ -37,35 +38,39 @@ def vekrona_config_dir():
     return os.path.join(xdg_config_home(), "vekrona")
 
 
-def notify_send(prog, msg, urgency="critical"):
+def run_quietly(argv):
     try:
-        subprocess.run(
-            ["notify-send", "-u", urgency, "-a", "vekrona", prog, msg],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
-        )
-    except Exception:
-        pass
+        result = subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"{argv[0]}: {exc}"
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        return f"{argv[0]} exited with status {result.returncode}" + (f": {detail}" if detail else "")
+    return None
+
+
+def notify_send(prog, msg, urgency="critical"):
+    return run_quietly(["notify-send", "-u", urgency, "-a", "vekrona", "--", prog, html.escape(msg, quote=False)])
 
 
 def report_to_vekrona_error(prog, msg, script_file):
     bin_path = resolve_tool(script_file, "vekrona-error")
     if not bin_path:
-        return False
-    try:
-        result = subprocess.run(
-            [bin_path, "report", "--title", f"{prog}: {msg}", "--source", "vekrona"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+        return "vekrona-error not found"
+    return run_quietly([bin_path, "report", "--title", f"{prog}: {msg}", "--source", "vekrona"])
 
 
 def make_die(prog, script_file, report=True):
     def die(msg):
         print(f"{prog}: {msg}", file=sys.stderr)
-        notify_send(prog, msg)
-        if report and not report_to_vekrona_error(prog, msg, script_file):
-            print(f"{prog}: WARN: failed to report this error to vekrona-error", file=sys.stderr)
+        notify_failure = notify_send(prog, msg)
+        if notify_failure:
+            print(f"{prog}: WARN: failed to show this error as a notification: {notify_failure}", file=sys.stderr)
+        if report:
+            report_failure = report_to_vekrona_error(prog, msg, script_file)
+            if report_failure:
+                print(f"{prog}: WARN: failed to report this error to vekrona-error: {report_failure}",
+                      file=sys.stderr)
         sys.exit(1)
     return die

@@ -170,9 +170,11 @@ def quarantine_record(error_id, exc, on_quarantine):
     path = record_path(error_id)
     try:
         os.replace(path, path + ".corrupt")
-    except OSError:
-        pass
-    message = f"quarantined a corrupt record: {error_id}: {exc}"
+    except OSError as move_exc:
+        message = (f"failed to quarantine a corrupt record: {error_id}: {exc} "
+                   f"(could not move it aside: {move_exc})")
+    else:
+        message = f"quarantined a corrupt record: {error_id}: {exc}"
     warn(message)
     if on_quarantine is not None:
         on_quarantine(error_id, message)
@@ -684,8 +686,9 @@ def cmd_pick(args):
     records = sorted_records(include_muted=False)
     if not records:
         print("no errors recorded")
-        if shutil.which("notify-send"):
-            subprocess.run(["notify-send", "-a", PROG, "vekrona", "no errors recorded"])
+        failure = vekrona_cli.notify_send("vekrona", "no errors recorded", urgency="normal")
+        if failure:
+            die(f"failed to show the notification: {failure}")
         return
     if not shutil.which("rofi"):
         die("rofi not found (install the 'rofi' package)")
@@ -844,12 +847,13 @@ def cmd_watch(args):
             try:
                 with open(path) as f:
                     data = json.load(f)
-            except (json.JSONDecodeError, OSError):
+                if data.get("owner") != self.owner or not self.owner:
+                    return
+                loaded = {int(notif_id): tuple(mapping) for notif_id, mapping in data.get("map", {}).items()}
+            except (OSError, ValueError, TypeError, AttributeError) as exc:
+                warn(f"ignoring the corrupt notification map {path}: {exc!r}")
                 return
-            if data.get("owner") != self.owner or not self.owner:
-                return
-            for notif_id_str, mapping in data.get("map", {}).items():
-                self.notif_map[int(notif_id_str)] = tuple(mapping)
+            self.notif_map.update(loaded)
 
         def _persist_notif_map(self):
             data = {
@@ -1125,7 +1129,10 @@ def cmd_watch(args):
         def handle_entry_line(self, line):
             try:
                 entry = json.loads(line)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
+                message = f"skipping a journalctl line that is not JSON: {exc}: {line[:200]!r}"
+                warn(message)
+                self._toast_rate_limited("bad-journal-line", "vekrona-errors", message)
                 return
             cursor = entry.get("__CURSOR")
             classified = None
@@ -1147,8 +1154,8 @@ def cmd_watch(args):
             if self.last_cursor and self.lines_since_cursor_flush:
                 self._persist_cursor(self.last_cursor)
 
-        def on_journal_died(self):
-            warn("journalctl exited unexpectedly; exiting so systemd restarts the watcher")
+        def on_journal_died(self, reason):
+            warn(f"{reason}; exiting so systemd restarts the watcher")
             self.exit_code = 1
             self.flush_cursor_on_exit()
             self.journal_closed = True
@@ -1166,7 +1173,7 @@ def cmd_watch(args):
                 stream.read_line_async(GLib.PRIORITY_DEFAULT, None, self._on_stdout_line)
                 return
             if line is None:
-                self.on_journal_died()
+                self.on_journal_died("journalctl exited unexpectedly")
                 return
             if line:
                 self.handle_entry_line(line)
@@ -1179,7 +1186,8 @@ def cmd_watch(args):
         def _on_stderr_line(self, stream, result):
             try:
                 line, _length = stream.read_line_finish_utf8(result)
-            except GLib.Error:
+            except GLib.Error as exc:
+                self.on_journal_died(f"failed to read the stderr of journalctl: {exc}")
                 return
             if line is None:
                 return
