@@ -76,9 +76,10 @@ def encrypted_tree():
 
 
 def state(partitionings, tree, *, applied=APPLIED, created=(APPLIED,), disks=("vda",),
-          password=PASSWORD):
+          password=PASSWORD, wait_until_idle=lambda: None):
     return read_state(
         lambda candidate: candidate == password,
+        wait_until_idle=wait_until_idle,
         storage=FakeStorage(applied, created),
         get_partitioning_proxy=partitionings.__getitem__,
         device_tree=tree,
@@ -90,7 +91,31 @@ def matching_partitioning():
     return FakePartitioning(request=with_encryption(PartitioningRequest(), PASSWORD))
 
 
+class RecordingDeviceTree(FakeDeviceTree):
+    def __init__(self, events, *args):
+        super().__init__(*args)
+        self._events = events
+
+    def GetMountPoints(self):
+        self._events.append("device tree read")
+        return super().GetMountPoints()
+
+
 class ReadStateTest(unittest.TestCase):
+    def test_device_tree_is_read_only_after_the_storage_is_idle(self):
+        events = []
+        reference = encrypted_tree()
+        tree = RecordingDeviceTree(
+            events, reference._formats, reference._parents, reference._mount_points
+        )
+        state(
+            {APPLIED: matching_partitioning()},
+            tree,
+            wait_until_idle=lambda: events.append("storage idle"),
+        )
+        self.assertEqual(events[0], "storage idle")
+        self.assertIn("device tree read", events)
+
     def test_encrypted_layout_with_the_password_matches(self):
         self.assertEqual(state({APPLIED: matching_partitioning()}, encrypted_tree()),
                          StorageState.MATCH)

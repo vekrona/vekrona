@@ -58,6 +58,11 @@ ENCRYPT_THREAD_PREFIX = "VekronaEncryptStorage"
 STOCK_STORAGE_THREADS = (THREAD_STORAGE, THREAD_STORAGE_WATCHER, THREAD_EXECUTE_STORAGE)
 
 
+def wait_for_stock_storage():
+    for thread_name in STOCK_STORAGE_THREADS:
+        thread_manager.wait(thread_name)
+
+
 class _Panel:
     def __init__(self, kind, *, state_label, combo, check_button, registered_box, remove_button,
                  progress, error_label, details, details_label):
@@ -249,6 +254,7 @@ class VekronaSignInSpoke(NormalSpoke):
                 return Snapshot()
             storage_state = read_state(
                 self._passphrase_matches,
+                wait_until_idle=wait_for_stock_storage,
                 storage=self._storage_proxy,
                 get_partitioning_proxy=STORAGE.get_proxy,
                 device_tree=self._device_tree_proxy,
@@ -385,8 +391,7 @@ class VekronaSignInSpoke(NormalSpoke):
 
     def _encrypt_storage(self, password):
         try:
-            for thread_name in STOCK_STORAGE_THREADS:
-                thread_manager.wait(thread_name)
+            wait_for_stock_storage()
             report, partitioning = apply_encrypted(
                 password,
                 show_message=lambda message: hubQ.send_message(self.__class__.__name__, message),

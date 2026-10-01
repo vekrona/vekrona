@@ -39,7 +39,8 @@ def _mounts_encrypted(device_tree):
     return all(_is_behind_luks(device_tree, device_id) for device_id in system_ids)
 
 
-def read_state(password_matches, *, storage, get_partitioning_proxy, device_tree, disk_selection):
+def read_state(password_matches, *, wait_until_idle, storage, get_partitioning_proxy, device_tree, disk_selection):
+    wait_until_idle()
     has_disks = bool(disk_selection.SelectedDisks)
     object_path = storage.AppliedPartitioning
     if not has_disks or not object_path:
