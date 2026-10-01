@@ -394,27 +394,52 @@ vm_usb_device_id() {
   echo "hostusb-${1//:/-}"
 }
 
-vm_usb_host_device_args() {
-  local spec vid pid dev found bus devnum node
+vm_usb_sysfs_dir() { printf '%s/sys/bus/usb/devices' "${VEKRONA_SYSFS_ROOT:-}"; }
+
+vm_usb_find_device() {
+  local vid="${1%%:*}" pid="${1##*:}" dev
+  for dev in "$(vm_usb_sysfs_dir)"/*; do
+    [[ -r "$dev/idVendor" && -r "$dev/idProduct" ]] || continue
+    [[ "$(<"$dev/idVendor")" == "${vid,,}" && "$(<"$dev/idProduct")" == "${pid,,}" ]] || continue
+    echo "$dev"
+    return 0
+  done
+  return 1
+}
+
+vm_usb_interface_drivers() {
+  local interface driver_link
+  for interface in "$1":*; do
+    [[ -e "$interface" ]] || continue
+    driver_link="$(readlink "$interface/driver" 2>/dev/null)" || driver_link=unbound
+    printf '%s=%s\n' "$(basename "$interface")" "$(basename "$driver_link")"
+  done
+}
+
+vm_usb_require_unclaimed() {
+  local spec="$1" dev="$2" drivers
+  drivers="$(vm_usb_interface_drivers "$dev")"
+  grep -qx '.*=usbfs' <<<"$drivers" || return 0
+  vm_die "USB device $spec ($dev) has an interface claimed by another host process through usbfs; QEMU cannot take it over and the guest would fail with \"can't set config #1, error -32\". Interface drivers: $(paste -sd' ' <<<"$drivers"). Usually the smartcard daemon holds a security key's CCID interface: run 'sudo systemctl stop pcscd.socket pcscd.service' and retry"
+}
+
+vm_validate_usb_devices() {
+  local spec dev node
   for spec in ${VEKRONA_DEV_USB:-}; do
     [[ "$spec" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$ ]] || vm_die "VEKRONA_DEV_USB entry is not VID:PID in hex: $spec"
-    vid="${spec%%:*}"
-    pid="${spec##*:}"
-    found=""
-    for dev in /sys/bus/usb/devices/*; do
-      [[ -r "$dev/idVendor" && -r "$dev/idProduct" ]] || continue
-      [[ "$(<"$dev/idVendor")" == "${vid,,}" && "$(<"$dev/idProduct")" == "${pid,,}" ]] || continue
-      found="$dev"
-      break
-    done
-    [[ -n "$found" ]] || vm_die "USB device $spec is not plugged in"
-    bus="$(printf '%03d' "$(<"$found/busnum")")"
-    devnum="$(printf '%03d' "$(<"$found/devnum")")"
-    node="/dev/bus/usb/$bus/$devnum"
+    dev="$(vm_usb_find_device "$spec")" || vm_die "USB device $spec is not plugged in"
+    node="/dev/bus/usb/$(printf '%03d' "$(<"$dev/busnum")")/$(printf '%03d' "$(<"$dev/devnum")")"
     [[ -r "$node" && -w "$node" ]] \
       || vm_die "no read/write access to $node ($spec); run: sudo setfacl -m u:$USER:rw $node"
+    vm_usb_require_unclaimed "$spec" "$dev"
+  done
+}
+
+vm_usb_host_device_args() {
+  local spec
+  for spec in ${VEKRONA_DEV_USB:-}; do
     echo "-device"
-    echo "usb-host,vendorid=0x${vid},productid=0x${pid},id=$(vm_usb_device_id "$spec")"
+    echo "usb-host,vendorid=0x${spec%%:*},productid=0x${spec##*:},id=$(vm_usb_device_id "$spec")"
   done
 }
 
@@ -577,6 +602,7 @@ vm_validate_up_options() {
   [[ -r /dev/kvm && -w /dev/kvm ]] || vm_die "/dev/kvm is missing or not accessible; add this user to the kvm group and re-login"
   vm_require_commands qemu-system-x86_64 qemu-img python3 systemd-run systemctl flock inotifywait journalctl
   [[ "$VM_PROFILE" != installer ]] || vm_require_commands isoinfo
+  vm_validate_usb_devices
 }
 
 vm_print_command() {

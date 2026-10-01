@@ -1082,7 +1082,7 @@ sudo dnf upgrade qt6-qtbase
 
 `bash tests/run.sh` is the single entry point: it runs all headless
 suites, keeps going after a failing one and exits non-zero if any failed.
-They need no VM, desktop session or root. There are four suites. CI runs the same command in a
+They need no VM, desktop session or root. There are five suites. CI runs the same command in a
 Fedora container (job `unit-tests` in `.github/workflows/iso.yml`), and the
 ISO build waits for it.
 
@@ -1098,6 +1098,10 @@ ISO build waits for it.
 - `tests/vm/` (Python `unittest`): the serial-console helpers of
   `iso/lib/qmp.py` that `iso/lib-vm.sh` uses to wait for a prompt and type
   into the console.
+- `tests/vm/test-usb-claims.sh`: the USB passthrough pre-flight of
+  `iso/lib-vm.sh` (`VEKRONA_DEV_USB` devices whose interface a host process,
+  typically `pcscd`, holds through usbfs are refused before the VM starts),
+  against a fake sysfs tree selected with `VEKRONA_SYSFS_ROOT`.
 
 ## VM smoke test
 
