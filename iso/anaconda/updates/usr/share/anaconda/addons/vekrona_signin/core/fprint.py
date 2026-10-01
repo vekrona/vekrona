@@ -3,9 +3,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vekrona_signin.core.device_description import DeviceDescription
+from vekrona_signin.core.device_scan import DeviceScan, HintCode
+from vekrona_signin.core.diagnose import SYSFS_USB, describe_exception, library_missing, usb_devices
 from vekrona_signin.core.errors import SignInError
 
-__all__ = ["FINGERS", "EnrolledPrint", "list_readers", "find_reader", "enroll", "storage_path"]
+__all__ = ["FINGERS", "EnrolledPrint", "scan_readers", "find_reader", "enroll", "storage_path"]
 
 FINGERS = {
     "left-thumb": 1,
@@ -42,18 +44,28 @@ def _fprint():
     return FPrint
 
 
-def list_readers():
-    return [
-        DeviceDescription.create(device.get_device_id(), device.get_name())
-        for device in _fprint().Context().get_devices()
-    ]
+def scan_readers(sysfs_root=SYSFS_USB, load_fprint=_fprint):
+    usb_seen = usb_devices(sysfs_root)
+    try:
+        FPrint = load_fprint()
+    except (ImportError, ValueError) as error:
+        return library_missing("libfprint (gi.repository.FPrint)", error, usb_seen)
+    try:
+        readers = FPrint.Context().get_devices()
+    except Exception as error:
+        return DeviceScan.create(
+            [], f"libfprint could not list readers. {describe_exception(error)}",
+            usb_seen, HintCode.USB_SEEN_BUT_UNUSABLE,
+        )
+    devices = [DeviceDescription.create(reader.get_device_id(), reader.get_name()) for reader in readers]
+    return DeviceScan.create(devices, "", usb_seen, HintCode.OK if devices else HintCode.NO_USB_DEVICE)
 
 
 def find_reader(devices, device_id):
     for device in devices:
         if device.get_device_id() == device_id:
             return device
-    raise SignInError("The fingerprint reader was unplugged; press Refresh")
+    raise SignInError("The fingerprint reader was unplugged; press Check again")
 
 
 def enroll(device_id, finger_nick, username, announce_scan):

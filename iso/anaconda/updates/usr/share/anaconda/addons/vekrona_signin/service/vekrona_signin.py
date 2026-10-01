@@ -5,12 +5,12 @@ from pyanaconda.core.signal import Signal
 from pyanaconda.modules.common.base import KickstartService
 from pyanaconda.modules.common.constants.services import USERS
 from pyanaconda.modules.common.containers import TaskContainer
-from pyanaconda.modules.common.structures.user import UserData
 
+from vekrona_account.wheel_user import read_wheel_user
 from vekrona_signin.constants import VEKRONA_SIGNIN
 from vekrona_signin.core import fprint
 from vekrona_signin.core.errors import SignInError
-from vekrona_signin.core.security_key import key_has_pin, list_security_keys, opened_security_key
+from vekrona_signin.core.security_key import key_has_pin, opened_security_key, scan_security_keys
 from vekrona_signin.service.enrollment import (
     FingerprintEnrollmentTask,
     SecurityKeyRegistrationTask,
@@ -25,8 +25,6 @@ __all__ = ["VekronaSignInService"]
 
 
 class VekronaSignInService(KickstartService):
-    """The implementation of the vekrona sign-in service."""
-
     def __init__(self):
         super().__init__()
         self._security_key = None
@@ -52,13 +50,18 @@ class VekronaSignInService(KickstartService):
         return self._fingerprint is not None
 
     def _username(self):
-        for user in UserData.from_structure_list(USERS.get_proxy().Users):
-            if "wheel" in user.groups:
-                return user.name
-        raise SignInError("Create the user account first; sign-in methods are registered for it.")
+        user = read_wheel_user(USERS.get_proxy())
+        if user is None:
+            raise SignInError("Create the user account first; sign-in methods are registered for it.")
+        return user.name
 
-    def list_security_keys(self):
-        return list_security_keys()
+    def scan_security_keys(self):
+        return self._logged(scan_security_keys(), "security key")
+
+    def _logged(self, scan, what):
+        if scan.problem:
+            log.warning("Scanning for %s devices: %s [%s]", what, scan.problem, scan.hint_code)
+        return scan
 
     def security_key_has_pin(self, device_id):
         with opened_security_key(device_id) as device:
@@ -77,8 +80,18 @@ class VekronaSignInService(KickstartService):
         self._security_key = None
         self.security_key_registered_changed.emit()
 
-    def list_fingerprint_readers(self):
-        return fprint.list_readers()
+    def scan_fingerprint_readers(self):
+        return self._logged(fprint.scan_readers(), "fingerprint reader")
+
+    def forget_if_user_changed(self, username):
+        forgotten = False
+        if self._security_key is not None and self._security_key.username != username:
+            self.forget_security_key()
+            forgotten = True
+        if self._fingerprint is not None and self._fingerprint[0] != username:
+            self.forget_fingerprint()
+            forgotten = True
+        return forgotten
 
     def enroll_finger_with_task(self, device_id, finger):
         task = FingerprintEnrollmentTask(device_id, finger, self._username())

@@ -4,7 +4,7 @@ from dasbus.typing import *  # pylint: disable=wildcard-import
 from pyanaconda.modules.common.base import KickstartModuleInterface
 from pyanaconda.modules.common.containers import TaskContainer
 from vekrona_signin.constants import VEKRONA_SIGNIN
-from vekrona_signin.core.device_description import DeviceDescription
+from vekrona_signin.core.device_scan import DeviceScan
 
 __all__ = ["VekronaSignInInterface"]
 
@@ -30,8 +30,8 @@ class VekronaSignInInterface(KickstartModuleInterface):
     def FingerprintEnrolled(self) -> Bool:
         return self.implementation.fingerprint_enrolled
 
-    def ListSecurityKeys(self) -> List[Structure]:
-        return DeviceDescription.to_structure_list(self.implementation.list_security_keys())
+    def ScanSecurityKeys(self) -> Structure:
+        return DeviceScan.to_structure(self.implementation.scan_security_keys())
 
     def SecurityKeyHasPin(self, device_id: Str) -> Bool:
         return self.implementation.security_key_has_pin(device_id)
@@ -41,8 +41,11 @@ class VekronaSignInInterface(KickstartModuleInterface):
             self.implementation.register_security_key_with_task(device_id, pin, set_pin)
         )
 
-    def ListFingerprintReaders(self) -> List[Structure]:
-        return DeviceDescription.to_structure_list(self.implementation.list_fingerprint_readers())
+    def ScanFingerprintReaders(self) -> Structure:
+        return DeviceScan.to_structure(self.implementation.scan_fingerprint_readers())
+
+    def ForgetIfUserChanged(self, username: Str) -> Bool:
+        return self.implementation.forget_if_user_changed(username)
 
     def EnrollFingerWithTask(self, device_id: Str, finger: Str) -> ObjPath:
         return TaskContainer.to_object_path(

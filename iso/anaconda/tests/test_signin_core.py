@@ -161,7 +161,7 @@ class DeviceResolutionTest(unittest.TestCase):
         self.assertIs(find_descriptor(descriptors[1:], "/dev/hidraw5"), descriptors[1])
 
     def test_unplugged_security_key_asks_for_refresh(self):
-        with self.assertRaisesRegex(SignInError, "unplugged; press Refresh"):
+        with self.assertRaisesRegex(SignInError, "unplugged; press Check again"):
             find_descriptor([FakeDescriptor("/dev/hidraw3")], "/dev/hidraw5")
 
     def test_fingerprint_reader_is_found_by_its_device_id(self):
@@ -169,7 +169,7 @@ class DeviceResolutionTest(unittest.TestCase):
         self.assertIs(find_reader(readers[1:], "b"), readers[1])
 
     def test_unplugged_fingerprint_reader_asks_for_refresh(self):
-        with self.assertRaisesRegex(SignInError, "unplugged; press Refresh"):
+        with self.assertRaisesRegex(SignInError, "unplugged; press Check again"):
             find_reader([FakeReader("a")], "b")
 
 
