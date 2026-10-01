@@ -4,12 +4,13 @@ from contextlib import contextmanager
 
 from pyanaconda.core import util
 
-from vekrona_signin.core.errors import SignInError
+from vekrona_signin.core.errors import PassphraseRejected, SignInError
 from vekrona_signin.core.fido2_luks import passphrase, token_json
 
-__all__ = ["parse_keyslot_numbers", "add_fido2_keyslot", "luks_uuid"]
+__all__ = ["parse_keyslot_numbers", "add_fido2_keyslot", "luks_uuid", "require_luks2", "verify_passphrase"]
 
 CRYPTSETUP = "cryptsetup"
+WRONG_PASSPHRASE_EXIT_CODE = 2
 FAST_PBKDF = ["--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000"]
 
 
@@ -34,6 +35,28 @@ def _cryptsetup(arguments, secret_bearing):
     if returncode != 0:
         raise SignInError(f"cryptsetup {arguments[0]} failed ({returncode}): {output.strip()}")
     return output
+
+
+def require_luks2(device_path):
+    try:
+        _cryptsetup(["isLuks", "--type=luks2", device_path], secret_bearing=False)
+    except SignInError as error:
+        raise SignInError(
+            f"{device_path} is not a LUKS2 device; a security key can only unlock LUKS2. {error}"
+        ) from error
+
+
+def verify_passphrase(device_path, existing_passphrase):
+    with _in_memory_file(existing_passphrase.encode()) as key_file:
+        returncode, output = util.execProgram(
+            CRYPTSETUP,
+            ["open", "--test-passphrase", f"--key-file={key_file}", device_path],
+            log_output=False,
+        )
+    if returncode == WRONG_PASSPHRASE_EXIT_CODE:
+        raise PassphraseRejected(f"cryptsetup open --test-passphrase failed ({returncode}) on {device_path}.")
+    if returncode != 0:
+        raise SignInError(f"cryptsetup open --test-passphrase failed ({returncode}): {output.strip()}")
 
 
 def luks_uuid(device_path):

@@ -31,6 +31,7 @@ class VekronaSignInService(KickstartService):
         self.security_key_registered_changed = Signal()
         self._fingerprint = None
         self.fingerprint_enrolled_changed = Signal()
+        self._disk_passphrase = None
 
     def publish(self):
         TaskContainer.set_namespace(VEKRONA_SIGNIN.namespace)
@@ -78,10 +79,14 @@ class VekronaSignInService(KickstartService):
 
     def forget_security_key(self):
         self._security_key = None
+        self._disk_passphrase = None
         self.security_key_registered_changed.emit()
 
     def scan_fingerprint_readers(self):
         return self._logged(fprint.scan_readers(), "fingerprint reader")
+
+    def set_disk_passphrase(self, passphrase):
+        self._disk_passphrase = passphrase or None
 
     def forget_if_user_changed(self, username):
         forgotten = False
@@ -111,9 +116,10 @@ class VekronaSignInService(KickstartService):
     def install_with_tasks(self):
         sysroot = conf.target.system_root
         tasks = []
+        disk_passphrase, self._disk_passphrase = self._disk_passphrase, None
         if self._security_key is not None:
             self._require_registered_user(self._security_key.username)
-            tasks.append(LuksFido2Task(sysroot, self._security_key.luks_enrollment))
+            tasks.append(LuksFido2Task(sysroot, self._security_key.luks_enrollment, disk_passphrase))
             tasks.append(U2fKeysTask(sysroot, self._security_key.username, self._security_key.u2f_line))
         if self._fingerprint is not None:
             username, enrolled_print = self._fingerprint

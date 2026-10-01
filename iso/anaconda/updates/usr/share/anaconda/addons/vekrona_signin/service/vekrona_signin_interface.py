@@ -13,8 +13,9 @@ __all__ = ["VekronaSignInInterface"]
 class VekronaSignInInterface(KickstartModuleInterface):
     """The DBus interface of the vekrona sign-in service.
 
-    Secrets, salts, credentials and prints never cross this interface;
-    the spoke only learns whether a registration exists.
+    Salts, credentials and prints never cross this interface; the spoke only learns
+    whether a registration exists. The one secret that does cross it, the disk passphrase
+    of a manual layout, only travels towards the service and is never read back.
     """
 
     def connect_signals(self):
@@ -43,6 +44,9 @@ class VekronaSignInInterface(KickstartModuleInterface):
 
     def ScanFingerprintReaders(self) -> Structure:
         return DeviceScan.to_structure(self.implementation.scan_fingerprint_readers())
+
+    def SetDiskPassphrase(self, passphrase: Str):
+        self.implementation.set_disk_passphrase(passphrase)
 
     def ForgetIfUserChanged(self, username: Str) -> Bool:
         return self.implementation.forget_if_user_changed(username)

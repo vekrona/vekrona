@@ -13,9 +13,23 @@ LUKS_VERSION = "luks2"
 class StorageState(Enum):
     NO_DISK = "no_disk"
     NOT_APPLIED = "not_applied"
-    NOT_AUTOMATIC = "not_automatic"
+    MANUAL_PLAIN = "manual_plain"
+    MANUAL_LUKS = "manual_luks"
     MISMATCH = "mismatch"
+    FOREIGN_PASSPHRASE = "foreign_passphrase"
     MATCH = "match"
+
+    @property
+    def needs_encryption(self):
+        return self in (StorageState.MISMATCH, StorageState.FOREIGN_PASSPHRASE)
+
+    @property
+    def disk_chosen(self):
+        return self not in (StorageState.NO_DISK, StorageState.NOT_APPLIED)
+
+    @property
+    def settled(self):
+        return self in (StorageState.MATCH, StorageState.MANUAL_PLAIN, StorageState.MANUAL_LUKS)
 
 
 def with_encryption(request, password):
@@ -27,13 +41,15 @@ def with_encryption(request, password):
     return encrypted
 
 
-def classify(method, request, mounts_encrypted, password_matches, has_disks):
+def classify(method, request, *, mounts_encrypted, has_luks, password_matches, has_disks):
     if not has_disks:
         return StorageState.NO_DISK
     if not method:
         return StorageState.NOT_APPLIED
     if method != PARTITIONING_METHOD_AUTOMATIC:
-        return StorageState.NOT_AUTOMATIC
+        return StorageState.MANUAL_LUKS if has_luks else StorageState.MANUAL_PLAIN
+    if request.encrypted and not password_matches(request.passphrase):
+        return StorageState.FOREIGN_PASSPHRASE
     requested = (
         request.partitioning_scheme == AUTOPART_TYPE_BTRFS
         and request.encrypted

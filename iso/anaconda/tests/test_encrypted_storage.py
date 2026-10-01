@@ -7,10 +7,11 @@ import _paths
 from pykickstart.constants import AUTOPART_TYPE_BTRFS, AUTOPART_TYPE_LVM
 
 from pyanaconda.modules.common.structures.partitioning import PartitioningRequest
-from pyanaconda.modules.common.structures.storage import DeviceFormatData
+from pyanaconda.modules.common.structures.storage import DeviceData, DeviceFormatData
 from pyanaconda.modules.common.structures.validation import ValidationReport
 
 from vekrona_signin.core.encrypted_storage import apply_encrypted, read_state
+from vekrona_signin.core.errors import SignInError
 from vekrona_signin.core.storage_policy import StorageState, with_encryption
 
 PASSWORD = "correct horse"
@@ -43,6 +44,15 @@ class FakeDeviceTree:
         self._formats = formats
         self._parents = parents
         self._mount_points = mount_points
+
+    def GetDevices(self):
+        return list(self._formats)
+
+    def GetDeviceData(self, device_id):
+        data = DeviceData()
+        data.device_id = device_id
+        data.path = f"/dev/{device_id}"
+        return DeviceData.to_structure(data)
 
     def GetMountPoints(self):
         return dict(self._mount_points)
@@ -120,9 +130,9 @@ class ReadStateTest(unittest.TestCase):
         self.assertEqual(state({APPLIED: matching_partitioning()}, encrypted_tree()),
                          StorageState.MATCH)
 
-    def test_wrong_password_is_a_mismatch(self):
+    def test_layout_encrypted_with_another_passphrase_is_foreign(self):
         self.assertEqual(state({APPLIED: matching_partitioning()}, encrypted_tree(), password="x"),
-                         StorageState.MISMATCH)
+                         StorageState.FOREIGN_PASSPHRASE)
 
     def test_request_that_is_not_encrypted_is_a_mismatch(self):
         partitioning = FakePartitioning()
@@ -141,9 +151,29 @@ class ReadStateTest(unittest.TestCase):
         partitionings = {APPLIED: FakePartitioning(request=request)}
         self.assertEqual(state(partitionings, encrypted_tree()), StorageState.MISMATCH)
 
-    def test_non_automatic_applied_partitioning(self):
-        partitionings = {APPLIED: FakePartitioning(method="CUSTOM")}
-        self.assertEqual(state(partitionings, encrypted_tree()), StorageState.NOT_AUTOMATIC)
+    def test_manual_layout_with_a_luks_device_under_the_system(self):
+        for method in ("INTERACTIVE", "BLIVET"):
+            with self.subTest(method):
+                partitionings = {APPLIED: FakePartitioning(method=method)}
+                self.assertEqual(state(partitionings, encrypted_tree()), StorageState.MANUAL_LUKS)
+
+    def test_manual_layout_without_luks(self):
+        tree = encrypted_tree()
+        tree._formats["vda3"] = "ext4"
+        partitionings = {APPLIED: FakePartitioning(method="INTERACTIVE")}
+        self.assertEqual(state(partitionings, tree), StorageState.MANUAL_PLAIN)
+
+    def test_manual_layout_ignores_the_password_and_never_matches(self):
+        partitionings = {APPLIED: FakePartitioning(method="INTERACTIVE")}
+        self.assertEqual(state(partitionings, encrypted_tree(), password="x"), StorageState.MANUAL_LUKS)
+
+    def test_manual_layout_with_a_luks_device_outside_the_system_is_plain(self):
+        tree = encrypted_tree()
+        tree._formats.update({"vdb": "disklabel", "vdb1": "luks"})
+        tree._parents["vdb1"] = ["vdb"]
+        tree._formats["vda3"] = "ext4"
+        partitionings = {APPLIED: FakePartitioning(method="INTERACTIVE")}
+        self.assertEqual(state(partitionings, tree), StorageState.MANUAL_PLAIN)
 
     def test_nothing_applied(self):
         self.assertEqual(state({}, encrypted_tree(), applied=""), StorageState.NOT_APPLIED)
@@ -238,22 +268,27 @@ class ApplyEncryptedTest(unittest.TestCase):
         self.assertEqual(disk_initialization.InitializationMode, 0)
         self.assertTrue(disk_initialization.InitializeLabelsEnabled)
 
-    def test_without_any_partitioning_the_default_request_is_encrypted(self):
-        report, calls, created, _ = self.apply({}, storage=FakeStorage("", []))
-        calls.create.assert_called_once_with("AUTOMATIC")
-        self.assertTrue(created[0].request().encrypted)
-        self.assertEqual(created[0].request().passphrase, PASSWORD)
-        self.assertTrue(report.is_valid())
+    def test_without_an_applied_partitioning_nothing_is_created(self):
+        calls = mock.Mock()
+        with self.assertRaisesRegex(SignInError, "No partitioning has been applied"):
+            apply_encrypted(
+                PASSWORD,
+                show_message=calls.show,
+                reset_storage_cb=calls.reset,
+                storage=FakeStorage("", []),
+                get_partitioning_proxy={}.__getitem__,
+                disk_selection=FakeDiskSelection(),
+                disk_initialization=FakeDiskInitialization(),
+                create_partitioning=calls.create,
+                apply=calls.apply,
+            )
+        calls.create.assert_not_called()
+        calls.apply.assert_not_called()
 
-    def test_last_created_automatic_request_is_the_base_when_nothing_is_applied(self):
-        older = FakePartitioning()
-        newer = self.stale()
-        custom = FakePartitioning("CUSTOM")
-        partitionings = {"/o": older, "/n": newer, "/c": custom}
-        _, _, created, _ = self.apply(partitionings, storage=FakeStorage("", ["/o", "/n", "/c"]))
-        self.assertEqual(created[0].request().excluded_mount_points, ["/home"])
-        self.assertFalse(older.request().encrypted)
-        self.assertFalse(newer.request().encrypted)
+    def test_a_manual_layout_is_never_replaced(self):
+        manual = FakePartitioning("INTERACTIVE")
+        with self.assertRaisesRegex(SignInError, "not automatic"):
+            self.apply({APPLIED: manual})
 
     def test_invalid_report_is_returned_and_existing_modules_stay_untouched(self):
         stale = self.stale()

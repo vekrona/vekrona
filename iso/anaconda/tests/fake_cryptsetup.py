@@ -31,6 +31,12 @@ elif command == "luksAddKey":
         call["new_key_content"] = new_key_content
         slot = min(set(range(32)) - {int(n) for n in state["keyslots"]})
         state["keyslots"][str(slot)] = new_key_content
+elif command == "isLuks":
+    if positional[-1] in state.get("luks1_devices", []):
+        exit_code = 1
+elif command == "open":
+    if call["key_file_content"] != state["existing_passphrase"]:
+        exit_code = 2
 elif command == "token":
     if state["fail_token_import"]:
         exit_code = 1
