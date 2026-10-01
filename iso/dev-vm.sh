@@ -25,6 +25,7 @@ owner pid, its idle lease (re-armed by every subcommand) or its hard TTL.
                                (a TEXT starting with a dash needs a preceding --)
   click X Y [--button left|right|middle] [--double]   pixel coordinates of a fresh screenshot
   shot ABSOLUTE_OUT.png        screenshot; prints the path
+  usb detach|attach VID:PID    hot-unplug / re-plug a host USB device passed through with VEKRONA_DEV_USB
   ssh [-- CMD...]              ssh to the guest through the forwarded port
   wait serial=REGEX | ssh | exit [--timeout SEC]
                                serial: waits on the serial log; exit: waits on the qemu pid;
@@ -108,6 +109,17 @@ cmd_click() {
   [[ $# -ge 2 ]] || usage
   vm_touch "$VM_NAME"
   vm_qmp "$VM_NAME" click "$@"
+}
+
+cmd_usb() {
+  local action="${1:-}" spec="${2:-}"
+  [[ $# -eq 2 && "$spec" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$ ]] || usage
+  vm_touch "$VM_NAME"
+  case "$action" in
+    detach) vm_qmp "$VM_NAME" usb-detach "$(vm_usb_device_id "$spec")" ;;
+    attach) vm_qmp "$VM_NAME" usb-attach "$(vm_usb_device_id "$spec")" "${spec%%:*}" "${spec##*:}" ;;
+    *) usage ;;
+  esac
 }
 
 cmd_shot() {
@@ -255,7 +267,7 @@ main() {
   shift
   case "$subcommand" in
     -h|--help|help) usage 0 ;;
-    up|key|type|click|shot|ssh|wait|status|down|guard|sweep) ;;
+    up|key|type|click|shot|usb|ssh|wait|status|down|guard|sweep) ;;
     *) vm_log "unknown subcommand: $subcommand"; usage ;;
   esac
   [[ "$subcommand" == sweep ]] || [[ "$subcommand" == type && "${1:-}" == --print-keys ]] || vm_require_name "$VM_NAME"
