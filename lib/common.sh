@@ -322,6 +322,8 @@ VEKRONA_COPRS=(blakegardner/xremap scottames/ghostty avengemedia/dms avengemedia
 
 copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 
+VEKRONA_X11_FLATPAKS=(com.discordapp.Discord md.obsidian.Obsidian org.signal.Signal)
+
 declare -A VEKRONA_PINNED_PKGS=(
   [quickshell]="$(copr_id avengemedia/danklinux)"
   [herdr]="$(copr_id rossetnocpes/herdr)"

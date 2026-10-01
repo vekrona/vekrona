@@ -227,21 +227,17 @@ bars = d.get('barConfigs', [])
 assert any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 "
 
-  declare -A electron_apps=(
-    [com.discordapp.Discord]=1
-    [com.spotify.Client]=1
-    [md.obsidian.Obsidian]=1
-    [org.signal.Signal]=1
-  )
-  for app_id in "${!electron_apps[@]}"; do
+  for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
     flatpak_installed "$app_id" || continue
     override="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
     check assert "flatpak x11 override set: $app_id" contains x11 "$override"
   done
 
   firefox_profiles_ini="$(firefox_profile_root)/profiles.ini"
-  check assert "youtube webapp profile registered" grep -q 'vekrona-youtube' "$firefox_profiles_ini"
-  check assert "whatsapp webapp profile registered" grep -q 'vekrona-whatsapp' "$firefox_profiles_ini"
+  for webapp_dir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
+    webapp="$(basename "$webapp_dir")"
+    check assert "$webapp webapp profile registered" grep -q "vekrona-$webapp" "$firefox_profiles_ini"
+  done
   check assert "vekrona-theme installed" file_exists "$HOME/.local/bin/vekrona-theme"
 
   ghostty_theme_dir="/usr/share/ghostty/themes"

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Spotify
+Exec=vekrona-webapp spotify
+StartupWMClass=vekrona-spotify
+Icon=web-browser
+Type=Application
+Categories=AudioVideo;Audio;

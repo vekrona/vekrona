@@ -267,7 +267,7 @@ ensure_flatpak_override() {
   { grep -q 'x11' <<<"$current" && grep -q '!wayland' <<<"$current"; } || die "flatpak override not applied: $app_id"
 }
 
-for app_id in com.discordapp.Discord com.spotify.Client md.obsidian.Obsidian org.signal.Signal; do
+for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
   ensure_flatpak_override "$app_id"
 done
 
