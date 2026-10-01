@@ -3,13 +3,13 @@ import json
 import os
 import sys
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import vekrona_cli
+
 PROG = "vekrona-rofi-theme"
 
-
-def die(msg):
-    print(f"{PROG}: {msg}", file=sys.stderr)
-    sys.exit(1)
-
+die = vekrona_cli.make_die(PROG, __file__)
 
 REQUIRED_COLOR_KEYS = (
     "background", "backgroundText", "surfaceContainer", "surfaceText",
@@ -19,8 +19,7 @@ REQUIRED_COLOR_KEYS = (
 
 
 def load_theme_colors():
-    state_home = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-    theme_file = os.path.join(state_home, "vekrona", "active-theme.json")
+    theme_file = os.path.join(vekrona_cli.vekrona_state_dir(), "active-theme.json")
     if not os.path.isfile(theme_file):
         die(f"active theme file not found: {theme_file} (run vekrona-theme <name> first)")
     try:
