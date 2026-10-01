@@ -308,7 +308,16 @@ MISE_SYSTEM_DATA_DIR=/usr/local/share/mise
 MISE_SYSTEM_CONFIG_DIR=/etc/mise
 MISE_SYSTEM_CACHE_DIR=/usr/local/share/mise/cache
 MISE_SYSTEM_STATE_DIR=/usr/local/share/mise/state
+MISE_SYSTEM_SHIMS_DIR="$MISE_SYSTEM_DATA_DIR/shims"
 MISE_NPM_MIN_RELEASE_AGE_VERSION=11.10.0
+CLAUDE_BIN=/usr/bin/claude
+
+managed_binary() {
+  case "$1" in
+    claude) printf '%s' "$CLAUDE_BIN" ;;
+    *) printf '%s/%s' "$MISE_SYSTEM_SHIMS_DIR" "$1" ;;
+  esac
+}
 
 mise_system() {
   # mise silently ignores /etc/mise/config.toml ("all tools are installed") while its HOME does not exist yet.
@@ -352,6 +361,11 @@ assert_tree_root_owned_not_writable() {
   offenders="$(root find "$dir" \( ! -user root -o \( ! -type l -perm /022 \) \) -print)" || die "cannot scan $dir"
   [[ -z "$offenders" ]] || die "$dir has entries not owned by root or writable by group/other, first: $(head -n 5 <<<"$offenders" | tr '\n' ' ')"
   log "ok: $dir is root-owned and not group/other-writable throughout"
+}
+
+root_owned_not_writable_file() {
+  local file="$1"
+  [[ -f "$file" && ! -L "$file" ]] && owned_by "$file" root && (( (8#$(stat -c '%a' "$file") & 022) == 0 ))
 }
 
 VERSIONLOCK_FILE=/etc/dnf/versionlock.toml

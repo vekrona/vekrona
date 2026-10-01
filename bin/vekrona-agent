@@ -12,9 +12,6 @@ CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 AGENT_CONFIG_DIR="$CONFIG_HOME/vekrona"
 AGENT_CONFIG_FILE="$AGENT_CONFIG_DIR/agent"
 
-CLAUDE_BIN=/usr/bin/claude
-MISE_SYSTEM_SHIMS_DIR="$MISE_SYSTEM_DATA_DIR/shims"
-
 AGENT_KNOWN_TOOLS=(claude "${VEKRONA_AGENT_TOOLS[@]}")
 
 STRIP_ENV_PATTERNS=('*_API_KEY' '*_API_TOKEN' '*_AUTH_TOKEN' '*_BASE_URL' 'CLAUDE_CODE_USE_*')
@@ -51,13 +48,6 @@ is_known_tool() {
     [[ "$t" == "$known" ]] && return 0
   done
   return 1
-}
-
-managed_binary() {
-  case "$1" in
-    claude) printf '%s' "$CLAUDE_BIN" ;;
-    *) printf '%s/%s' "$MISE_SYSTEM_SHIMS_DIR" "$1" ;;
-  esac
 }
 
 tool_installed() {

@@ -18,27 +18,24 @@ assert_npm_supports_release_age
 ensure_root_file "$ROOT/etc/mise/config.toml" /etc/mise/config.toml
 ensure_root_file "$ROOT/etc/profile.d/vekrona-mise.sh" /etc/profile.d/vekrona-mise.sh
 
+ensure_root_file "$ROOT/etc/claude-code/managed-settings.json" /etc/claude-code/managed-settings.json
+ensure_root_file "$ROOT/etc/codex/requirements.toml" /etc/codex/requirements.toml
+ensure_root_file "$ROOT/etc/codex/managed_config.toml" /etc/codex/managed_config.toml
+ensure_root_file "$ROOT/etc/opencode/opencode.json" /etc/opencode/opencode.json
+
 log "mise system install"
 mise_system_strict install
 mise_system reshim
 
-for t in "${VEKRONA_AGENT_TOOLS[@]}"; do
-  bin="$MISE_SYSTEM_DATA_DIR/shims/$t"
-  [[ -x "$bin" ]] || die "agent shim missing or not executable: $bin"
+for t in claude "${VEKRONA_AGENT_TOOLS[@]}"; do
+  bin="$(managed_binary "$t")"
+  [[ -x "$bin" ]] || die "managed $t missing or not executable: $bin"
   log "$t: $("$bin" --version)"
 done
-
-assert "claude resolves" bash -c "command -v claude >/dev/null"
-log "claude: $(claude --version)"
 
 for d in "$MISE_SYSTEM_DATA_DIR" "$MISE_SYSTEM_CONFIG_DIR"; do
   assert_tree_root_owned_not_writable "$d"
   assert "$d not writable by $VEKRONA_USER" bash -c "! touch '$d/.vekrona-write-test' 2>/dev/null"
-done
-
-for name in claude "${VEKRONA_AGENT_TOOLS[@]}"; do
-  shadow="$HOME/.local/bin/$name"
-  [[ -e "$shadow" ]] && warn "user-local copy shadows the managed binary on PATH: $shadow (remove it so '$name' resolves to the vekrona-managed install)"
 done
 
 log "agents ready: claude ${VEKRONA_AGENT_TOOLS[*]}"

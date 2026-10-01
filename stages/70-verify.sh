@@ -372,7 +372,7 @@ if ran 55-agents; then
   check assert "/etc/profile.d/vekrona-mise.sh matches repo" cmp -s "$VEKRONA_ROOT/etc/profile.d/vekrona-mise.sh" /etc/profile.d/vekrona-mise.sh
   check assert "claude resolves" bash -c "command -v claude >/dev/null"
   for t in "${VEKRONA_AGENT_TOOLS[@]}"; do
-    check assert "$t shim present" bash -c "[[ -x '$MISE_SYSTEM_DATA_DIR/shims/$t' ]]"
+    check assert "$t shim present" test -x "$(managed_binary "$t")"
   done
   check assert_tree_root_owned_not_writable "$MISE_SYSTEM_DATA_DIR"
   check assert_tree_root_owned_not_writable "$MISE_SYSTEM_CONFIG_DIR"
@@ -381,12 +381,14 @@ if ran 55-agents; then
     warn_check "no user-local copy shadows $name on PATH" bash -c "[[ ! -e '$HOME/.local/bin/$name' ]]"
   done
 
-  mise_shims_dir="$MISE_SYSTEM_DATA_DIR/shims"
-  for f in "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$VEKRONA_ROOT/etc/profile.d/vekrona-mise.sh"; do
-    check assert_file_contains "$f" "$mise_shims_dir"
-    check assert_file_contains "$f" 'OPENCODE_DISABLE_AUTOUPDATE=true'
+  for policy in /etc/claude-code/managed-settings.json /etc/codex/requirements.toml /etc/codex/managed_config.toml /etc/opencode/opencode.json; do
+    check assert "$policy is a root-owned regular file, not group/other-writable" root_owned_not_writable_file "$policy"
+    check assert "$policy matches repo" cmp -s "$VEKRONA_ROOT$policy" "$policy"
   done
-  check assert_file_contains "$VEKRONA_ROOT/bin/vekrona-agent" "$mise_shims_dir"
+
+  for f in "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$VEKRONA_ROOT/etc/profile.d/vekrona-mise.sh"; do
+    check assert_file_contains "$f" "$MISE_SYSTEM_SHIMS_DIR"
+  done
 fi
 
 if ran 60-gaming; then
