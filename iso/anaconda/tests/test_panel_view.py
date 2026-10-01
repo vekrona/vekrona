@@ -18,7 +18,7 @@ YUBIKEY_USB = "1050:0407 Yubico YubiKey OTP+FIDO+CCID"
 YUBIKEY = DeviceDescription.create("/dev/hidraw3", "YubiKey OTP+FIDO+CCID (1050:0407)")
 
 
-def scan(devices=(), problem="", usb_seen=(), hint=HintCode.NO_USB_DEVICE):
+def scan(devices=(), problem="", usb_seen=(), hint=HintCode.NO_DEVICE):
     return DeviceScan.create(devices, problem, usb_seen, hint)
 
 
@@ -39,19 +39,23 @@ class EmptyResultsAreExplainedTest(unittest.TestCase):
         self.assertEqual(view.details_text, guidance.DETAILS_NO_USB)
         self.assertEqual(view.devices, ())
 
-    def test_usb_device_that_is_no_security_key(self):
+    def test_unrelated_usb_devices_keep_the_plain_no_key_text_and_stay_in_details(self):
         mouse = "046d:c077 Logitech USB Optical Mouse"
-        view = panel_view(KEY_PANEL, ready_input(scan=scan(
-            usb_seen=[mouse], problem="2 HID nodes inspected; none is a security key.",
-            hint=HintCode.USB_SEEN_BUT_UNUSABLE,
-        )))
-        self.assertEqual(view.state_text, guidance.KEY_NONE_USB_SEEN)
+        view = panel_view(KEY_PANEL, ready_input(scan=scan(usb_seen=[mouse])))
+        self.assertEqual(view.state_text, guidance.KEY_NONE)
         self.assertIn(mouse, view.details_text)
-        self.assertIn("none is a security key", view.details_text)
+
+    def test_key_candidate_that_failed_says_it_cannot_be_used(self):
+        view = panel_view(KEY_PANEL, ready_input(scan=scan(
+            usb_seen=[YUBIKEY_USB], problem="/dev/hidraw3: OSError: Inappropriate ioctl",
+            hint=HintCode.DEVICE_UNUSABLE,
+        )))
+        self.assertEqual(view.state_text, guidance.PROBLEM_UNUSABLE)
+        self.assertIn("Inappropriate ioctl", view.details_text)
 
     def test_details_separate_the_device_list_from_the_problem(self):
         view = panel_view(KEY_PANEL, ready_input(scan=scan(
-            usb_seen=[YUBIKEY_USB], problem="2 HID nodes inspected.", hint=HintCode.USB_SEEN_BUT_UNUSABLE,
+            usb_seen=[YUBIKEY_USB], problem="2 HID nodes inspected.", hint=HintCode.DEVICE_UNUSABLE,
         )))
         self.assertEqual(
             view.details_text,
