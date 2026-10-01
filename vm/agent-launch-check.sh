@@ -3,6 +3,7 @@ set -euo pipefail
 
 fail() { echo "agent-launch-check FAILED: $*" >&2; exit 1; }
 
+# shellcheck source=vm/session-lib.sh
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/session-lib.sh"
 
 command -v vekrona-agent >/dev/null 2>&1 || fail "vekrona-agent not on PATH"

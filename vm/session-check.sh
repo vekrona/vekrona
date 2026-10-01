@@ -5,6 +5,7 @@ fail() { echo "session-check FAILED: $*" >&2; exit 1; }
 
 command -v inotifywait >/dev/null 2>&1 || fail "inotifywait not installed"
 
+# shellcheck source=vm/session-lib.sh
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/session-lib.sh"
 
 session_ensure_up || fail "could not bring up or attach to a sway session"

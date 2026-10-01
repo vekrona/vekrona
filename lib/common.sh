@@ -243,15 +243,23 @@ ensure_gpg_key_imported() {
   gpg_pubkey_installed "$fingerprint_lower" || die "gpg key not imported: $fingerprint"
 }
 
+# shellcheck disable=SC2034
 CLAUDE_CODE_REPO_ID="claude-code"
+# shellcheck disable=SC2034
 CLAUDE_CODE_GPG_URL="https://downloads.claude.ai/keys/claude-code.asc"
+# shellcheck disable=SC2034
 CLAUDE_CODE_GPG_FINGERPRINT="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
 
+# shellcheck disable=SC2034
 MISE_REPO_ID="mise-repo"
+# shellcheck disable=SC2034
 MISE_GPG_URL="https://mise.jdx.dev/gpg-key.pub"
+# shellcheck disable=SC2034
 MISE_GPG_FINGERPRINT="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
 
+# shellcheck disable=SC2034
 VEKRONA_AGENT_PKGS=(claude-code mise nodejs22-npm)
+# shellcheck disable=SC2034
 VEKRONA_AGENT_TOOLS=(codex pi opencode cursor-agent)
 
 MISE_SYSTEM_DATA_DIR=/usr/local/share/mise

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 SESSION_SWAY_UNIT="vekrona-sway-session"
 
 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
