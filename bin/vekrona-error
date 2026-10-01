@@ -783,7 +783,7 @@ def cmd_watch(args):
             if n > 0:
                 plural = "s" if n != 1 else ""
                 notif_id = self._notify("vekrona errors", f"{n} new error{plural}",
-                                         ["fix", "Open", "default", "Open"],
+                                         ["fix", "Open"],
                                          {"urgency": GLib.Variant("y", 1)})
                 if notif_id is not None:
                     self.notif_map[notif_id] = ("pick", None)
@@ -797,7 +797,7 @@ def cmd_watch(args):
             body = record["summary"] or record["title"]
             if record.get("count", 1) > 1:
                 body = f"{body} ×{record['count']}"
-            actions = ["fix", "Fix with agent", "mute", "Mute", "default", "Fix with agent"]
+            actions = ["fix", "Fix with agent", "mute", "Mute"]
             hints = {"urgency": GLib.Variant("y", urgency)}
             notif_id = self._notify(record["title"], body, actions, hints)
             if notif_id is not None:
@@ -851,7 +851,7 @@ def cmd_watch(args):
                 self.send_plain_toast("vekrona", "this notification is stale; use Hyper+Shift+A", urgency=1)
                 return
             kind, error_id = mapping
-            if action_key in ("fix", "default"):
+            if action_key == "fix":
                 if kind == "error":
                     self.launch_agent(error_id)
                 else:
