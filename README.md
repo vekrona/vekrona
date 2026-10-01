@@ -65,7 +65,8 @@ cd ~/wrk/vekrona
 ```
 
 With no arguments, `install.sh` runs the default stage list in this order:
-`00-repos 20-snapper 10-nvidia 30-packages 40-system 50-user 60-gaming 65-login-manager 70-verify`.
+`00-repos 20-snapper 10-nvidia 15-mac 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify`
+(on a Mac, `10-nvidia` is skipped; on non-Mac hardware without NVIDIA, both `10-nvidia` and `15-mac` are skipped).
 Snapper runs before NVIDIA so a snapshot exists before stage `10-nvidia` touches
 the driver. Stage `65-login-manager` runs last, after everything that
 installs and configures greetd (`30-packages`, `40-system`) and right before
@@ -84,6 +85,73 @@ a first-boot service clones this repo to the new user's home and runs
 `./install.sh` unattended, ending at the same greetd login prompt. See "ISO
 and CI" below for how the ISO is built, what first boot does, and how it is
 tested.
+
+### Sign-in methods
+
+The installer offers an optional **SIGN-IN METHODS** screen to enroll a security
+key (YubiKey or equivalent FIDO2 device) or a USB fingerprint reader. Either
+device then works for sudo, polkit, the login greeter, and the lock screen,
+with your password always available as a fallback.
+
+**Security key (FIDO2, PIN + touch):** unlocks the disk at boot and signs you in.
+- Both touches (LUKS enrollment and PAM registration) happen once, during
+  install, and the installer derives a secret for disk unlock that gets stored in
+  a `systemd-fido2` token keyslot. After first boot, the key's PIN and a touch
+  are needed to unlock the disk; the password alone also works.
+- Later, to enroll the key on an already-installed machine, run:
+  ```
+  pamu2fcfg -N -o pam://vekrona -i pam://vekrona > ~/.config/Yubico/u2f_keys
+  sudo systemd-cryptenroll --fido2-device=auto --fido2-with-client-pin=yes /dev/mapper/root
+  ```
+  then rerun `./install.sh 45` to update crypttab and rebuild the initramfs.
+- PAM origin is fixed at `pam://vekrona` so later hostname changes do not break
+  key sign-in.
+
+**Fingerprint (USB reader via libfprint):** signs you in but does not unlock the disk.
+- A fingerprint reader returns only match/no-match, not a cryptographic secret,
+  so it cannot work with LUKS. If you need disk unlock with biometrics, use a
+  FIDO2 key with a built-in fingerprint sensor (a "Bio" key); that is out of
+  scope here.
+- After install, enroll another finger with `fprintd-enroll <finger>`.
+
+**Lock screen:** touch-only (no PIN prompt) to avoid burning through FIDO2 PIN
+retries on mistyped patterns. The screen sends its password answer to every
+PAM prompt, so a PIN dialog would lock you out after too many wrong answers.
+
+**Password:** always works, regardless of key/fingerprint enrollment.
+
+If you skip the SIGN-IN METHODS screen during install, the machine works exactly as
+before: password-only, no optional keys or fingerprint.
+
+### Install on a MacBook (2013–2015)
+
+This targets Intel MacBook Pro models from 2013–2015 (11,x and 12,x). T2 Macs
+(2018–2020 with Touch ID) require a patched kernel and a Secure Enclave proxy,
+which are out of scope.
+
+**Before install:**
+- Update the firmware to the latest macOS version before you wipe it (recovery
+  holds older firmware).
+- If you have a USB fingerprint reader, check its lsusb ID against
+  https://fprint.freedesktop.org/supported-devices.html to confirm libfprint
+  supports it.
+- Wired network or USB-tethered connection is needed during install and first
+  boot: the BCM4360 Wi-Fi card has no Anaconda driver. After firstboot's reboot,
+  `./install.sh` builds the `wl` driver kernel module.
+
+**Boot:** hold Option at power-on and pick "EFI Boot" to boot the install media.
+
+**What stage 15-mac does:**
+- Builds and installs the Broadcom `wl` Wi-Fi driver; fails loudly if the module
+  does not load.
+- Activates dual-GPU switching on dual-GPU models (iGPU + dGPU) with `apple-gmux force_igd=y`.
+- Installs FaceTime HD camera support from the `frgt10/facetimehd-dkms` COPR if
+  the hardware is present.
+- Applies Intel HD graphics VA acceleration (`libva-intel-driver`).
+- On MBP12,1, adds audio quirk `snd_hda_intel model=mbp11`.
+
+**Known gaps:** fan control (mbpfan) and full suspend/resume testing are tracked
+in TODO.md.
 
 ### Migrating an existing Fedora Workstation
 
@@ -650,6 +718,39 @@ and tag:
   polled with a bounded, env-overridable timeout rather than a fixed sleep;
   on any failure it prints the serial console log tail before cleaning up
   its QEMU processes and temp files.
+
+### Installer REPL
+
+`iso/dev-installer.sh` boots the installer with a fresh, dev-built `updates.img`
+served over HTTP, so Anaconda add-on edits can be iterated without rebuilding the
+ISO each time.
+
+**Usage:**
+```
+VEKRONA_DEV_USB="0a00:0a01 0a00:0a02" iso/dev-installer.sh
+```
+
+- `VEKRONA_DEV_USB` is a space-separated list of USB device VID:PID pairs to
+  pass through to the QEMU VM. For YubiKeys, use `1050:0407` (or your key's ID).
+- `--fresh-disk` creates a new qcow2 disk (otherwise reuses the existing one for
+  faster iteration).
+- `--iso <path>` points to a release ISO (defaults to `iso/out/vekrona-release.iso`).
+
+Before running: ensure you have read/write access to the USB device nodes:
+```
+sudo setfacl -m u:$USER:rw /dev/bus/usb/BBB/DDD
+```
+
+Over SSH into the installer (port printed by the script):
+```
+ssh -i ~/.ssh/id_rsa -p <port> root@localhost
+cat /tmp/anaconda.log
+```
+
+The script prints a build stamp showing the dev image was loaded (not the baked
+ISO one), located at the path printed on stderr. This proves the `inst.updates=`
+parameter worked and the bundled packages (`python3-fido2`, `libfprint`, etc.)
+were extracted correctly.
 
 The `iso.yml` workflow has three jobs: `build` (Fedora 44 container, caches
 the downloaded netinstall ISO by release, builds both the release and a
