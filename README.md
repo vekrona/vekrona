@@ -102,6 +102,12 @@ default run:
 - `90b-remove`, run after that reboot from the greetd-started Sway session,
   reviews and removes the leftover Omarchy/Hyprland/KDE/GNOME packages.
 
+Special handling for applications during migration:
+
+- **Zed**: if you have a tarball-based Zed installation from `~/.local/`, stage 70 will fail until you remove the old files (`~/.local/zed.app`, `~/.local/bin/zed`, `~/.local/share/applications/dev.zed.Zed.desktop`). These files conflict with the Flatpak install and are no longer needed. Stage 70's verify checks ensure these paths are absent.
+- **herdr**: if herdr was previously installed from another source (e.g., `omedora-4` COPR), stage 30 will replace it with the upstream `rossetnocpes/herdr` COPR build.
+- **/nix subvolume**: when you have an existing Nix installation at `/nix`, stage 20 will migrate it onto its own btrfs subvolume `nix` (separate from root). This is necessary because `vekrona-rollback` swaps the entire root subvolume, and profiles must stay in `/home` (the home subvolume) to survive rollbacks. The migration stops and restarts `nix-daemon` briefly; this is normal.
+
 `docs/PLAN.md` has the full rationale and the gated rollout used the one time
 this machine was actually migrated; see "Rollout order" below for the
 step-by-step version.
@@ -290,6 +296,29 @@ own keybinds instead (`config/ghostty/config`: `super+c=copy_to_clipboard`,
 configured keyboard layouts, `us` and `ua`, by pressing Left Alt and Right Alt
 together.
 
+## Applications
+
+Vekrona installs a curated set of applications via the following channels:
+
+- **1Password + CLI**: vendor RPM repository (`downloads.1password.com/linux/rpm/stable`)
+- **herdr**: COPR `rossetnocpes/herdr` (single-package COPR, upstream Rust builds for f43–rawhide)
+- **Zed**: Flathub Flatpak `dev.zed.Zed` (system-wide install, requires hardware Vulkan driver; Fedora-built RPMs freeze on F44 due to GCC 16/LLVM ABI bug rhbz#2464281, unresolved; updates via `flatpak update`)
+- **Spotify**: Firefox webapp with Widevine (replaces the `com.spotify.Client` Flatpak; downloads the Widevine CDM on first launch)
+- **Steam**: RPM Fusion (already installed; stage 60 sets Steam Play preset to `proton_experimental` for all titles)
+- **Nix**: Fedora 44's own `nix` and `nix-daemon` RPMs (flakes enabled by default; `/nix` lives on its own btrfs subvolume `nix` separate from root, so rollbacks never include the Nix store)
+- **devbox**: installed via `nix profile install nixpkgs#devbox` for the desktop user
+- **Tailscale**: Fedora `updates` repository (no vendor repo needed; `tailscaled` enabled and active, you are operator: `tailscale up` without sudo; tray icon runs via user systemd unit)
+- **btop**: Fedora repository
+- **Non-free codecs**: RPM Fusion (swap `ffmpeg-free` to `ffmpeg`, add freeworld gstreamer plugins, `mesa-va-drivers-freeworld`, openh264 via already-enabled `fedora-cisco-openh264`; VDPAU packages no longer exist in F44)
+
+Webapps are available as follows:
+
+```
+vekrona-webapp youtube
+vekrona-webapp whatsapp
+vekrona-webapp spotify
+```
+
 ## Daily operations
 
 Theme (applies the DMS color scheme, the terminal colors, and a matching 4K
@@ -377,6 +406,7 @@ Webapps (each opens a dedicated Firefox profile and window, set up by stage
 ```
 vekrona-webapp youtube
 vekrona-webapp whatsapp
+vekrona-webapp spotify
 ```
 
 Snapshots:
@@ -470,6 +500,12 @@ Stay one Fedora release behind: this machine runs F44 until F46 reaches GA.
 Staying a release behind gives the NVIDIA driver, Sway/wlroots, and DMS/Qt
 time to catch up before this machine takes the upgrade.
 
+Updates flow through multiple channels:
+
+- **dnf upgrade** covers all system packages: Fedora, RPM Fusion, COPRs, and vendor repos (1Password). This is protected by snapper pre/post snapshots created by the actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`), so any dnf transaction is automatically rolled back on failure via `vekrona-rollback`.
+- **flatpak update** covers Flatpak apps: currently Zed.
+- **nix profile upgrade --all** covers devbox (installed through `nix profile`).
+
 The versionlocked set, applied by the stage that installs each package and
 recorded in `/etc/dnf/versionlock.toml`:
 
@@ -520,6 +556,9 @@ sudo dnf upgrade qt6-qtbase
 
 ## Known issues and trade-offs
 
+- **Zed requires a hardware Vulkan driver** and will not start in the VM or on machines with only software-rendered Vulkan. Tested on the real machine with an NVIDIA RTX 4090.
+- **Spotify on first launch downloads the Widevine CDM** into `~/.cache/` to enable DRM-protected content playback. This download takes a few seconds; wait for it to complete before playing a track.
+- **Pre-migration snapshots lack the /nix fstab line**: if you rolled back to a snapshot taken before stage 20 set up the `/nix` subvolume, `vekrona-rollback` will warn you to re-run `./install.sh 20` after the reboot. This re-mounts the untouched `/nix` subvolume and restores the fstab entry.
 - Sway/wlroots, Quickshell, and DMS are all pre-1.0 software, stacked on top of each other and on top of the proprietary NVIDIA driver. Snapshot before touching any of them.
 - wlroots can flicker in fullscreen games under NVIDIA. Running a game through `scb` (gamescope) isolates it from wlroots' own compositing and works around this.
 - ScopeBuddy 1.5.0 sets `SCB_STEAMARGIGNORE=1` by default, which makes it ignore the `-e` flag configured in `scb.conf`'s `SCB_GAMESCOPE_ARGS` unless that default is overridden. Check ScopeBuddy's own behavior before assuming `-e` is doing anything.
