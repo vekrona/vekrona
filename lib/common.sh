@@ -81,7 +81,11 @@ mark_user_installed() {
   root dnf mark -y user "${installed[@]}"
 }
 
-repo_enabled() { dnf repolist --enabled 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
+repo_enabled() {
+  local ids
+  ids="$(dnf repolist --enabled 2>/dev/null | awk '{print $1}')" || die "dnf repolist failed"
+  grep -qx -- "$1" <<<"$ids"
+}
 
 ensure_repo_enabled() {
   local r
@@ -266,8 +270,9 @@ assert_repo_key_file_pinned() {
 
 gpg_pubkey_installed() {
   # rpm records a gpg-pubkey's full fingerprint as %{VERSION}, not the 8-hex short key id.
-  local fingerprint_lower="$1"
-  rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$fingerprint_lower"
+  local fingerprint_lower="$1" keys
+  keys="$(rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]')" || return 1
+  grep -qx -- "$fingerprint_lower" <<<"$keys"
 }
 
 repo_key_in_rpm_keyring() {
@@ -521,7 +526,9 @@ vekrona_versionlock_pkgs() {
 }
 
 flatpak_installed() {
-  flatpak list --app --columns=application 2>/dev/null | grep -qx "$1"
+  local apps
+  apps="$(flatpak list --app --columns=application 2>/dev/null)" || die "flatpak list failed"
+  grep -qx -- "$1" <<<"$apps"
 }
 
 flatpak_remote_system_enabled() {

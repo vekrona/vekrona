@@ -41,9 +41,7 @@ version_at_least "$npm_version" "$MISE_NPM_MIN_RELEASE_AGE_VERSION" \
 echo "agents-check: npm $npm_version supports minimum_release_age"
 
 for repo in "${!VEKRONA_REPO_KEY_FINGERPRINTS[@]}"; do
-  fingerprint="$(tr '[:upper:]' '[:lower:]' <<<"${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]}")"
-  rpm -q gpg-pubkey --qf '%{VERSION}\n' | grep -qx "$fingerprint" \
-    || fail "rpm keyring lacks the pinned key for $repo ($fingerprint)"
+  repo_key_in_rpm_keyring "$repo" || fail "rpm keyring lacks the pinned key for $repo (${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]})"
   key_file="$VEKRONA_REPO_KEY_DIR/$(repo_key_name "$repo")"
   [[ "$(stat -c '%U %a' "$key_file")" == "root 644" ]] || fail "$key_file is not root-owned 0644: $(stat -c '%U %a' "$key_file")"
 done
