@@ -43,6 +43,7 @@ gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
 not_repo_enabled() { ! repo_enabled "$1"; }
 copr_enabled() { repo_enabled "$(copr_id "$1")"; }
 unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; }
+unit_active() { eq "$(systemctl is-active "$1" 2>/dev/null || true)" active; }
 user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" enabled; }
 pkg_absent() { ! pkg_installed "$1"; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
@@ -127,6 +128,19 @@ if ran 20-snapper; then
   check assert "at least 2 new snapshots from install/remove round-trip" ge "$((n1 - n0))" 2
   check assert "pre snapshot has cleanup=number" csv_row_matches '^[0-9]+,pre,number$'
   check assert "post snapshot has cleanup=number" csv_row_matches '^[0-9]+,post,number$'
+
+  nix_mounted_from_subvol() { [[ "$(findmnt -no SOURCE /nix 2>/dev/null)" == *"[/nix]" ]]; }
+  check assert "/nix mounted from subvolume nix" nix_mounted_from_subvol
+
+  nix_fstab_line="$(fstab_line_for_mountpoint /nix)" || die "no fstab entry for /nix"
+  home_fstab_line="$(fstab_line_for_mountpoint /home)" || die "no fstab entry for /home"
+  read -r nix_device _ _ nix_options _ _ <<<"$nix_fstab_line"
+  read -r home_device _ <<<"$home_fstab_line"
+  check assert "fstab /nix options contain subvol=nix" contains "subvol=nix" "$nix_options"
+  check assert "fstab /nix device matches /home device" eq "$nix_device" "$home_device"
+
+  check assert "/nix migration marker present" file_exists /nix/.vekrona-migrated
+  check assert "/nix.pre-vekrona backup absent" file_absent /nix.pre-vekrona
 fi
 
 if ran 30-packages; then
@@ -184,6 +198,14 @@ if ran 40-system; then
   check assert "usb autosuspend drop-in present" file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
   check assert "$VEKRONA_USER in input group" group_member "$VEKRONA_USER" input
   check assert "/dev/uinput exists" file_exists /dev/uinput
+
+  for u in tailscaled nix-daemon.service; do
+    check assert "$u enabled" unit_enabled "$u"
+    check assert "$u active" unit_active "$u"
+  done
+
+  tailscale_operator="$(root tailscale debug prefs | jq -r '.OperatorUser // ""')"
+  check assert "tailscale operator is $VEKRONA_USER" eq "$tailscale_operator" "$VEKRONA_USER"
 fi
 
 if ran 50-user; then
@@ -196,6 +218,7 @@ if ran 50-user; then
   check assert "dms.service wanted by sway-session.target" file_exists "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
   check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
+  check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
   check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
   check assert "vekrona fontconfig linked" file_exists "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
   check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"
@@ -300,6 +323,9 @@ assert d.get('matugenTemplateGhostty', True) is True
 
   user_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"
   warn_check "$HOME/.local/bin in systemd user PATH" contains "$HOME/.local/bin" "$user_path"
+  warn_check "$HOME/.nix-profile/bin in systemd user PATH" contains "$HOME/.nix-profile/bin" "$user_path"
+
+  check assert "devbox runs" "$HOME/.nix-profile/bin/devbox" version
 fi
 
 if ran 60-gaming; then

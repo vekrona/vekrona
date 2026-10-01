@@ -190,6 +190,15 @@ ensure_system_unit() {
   done
 }
 
+ensure_system_unit_active() {
+  local u
+  for u in "$@"; do
+    if [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]]; then log "unit active: $u"; continue; fi
+    root systemctl start "$u"
+    [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]] || die "unit not active: $u"
+  done
+}
+
 ensure_user_unit_enabled() {
   local u
   for u in "$@"; do
@@ -429,4 +438,96 @@ firefox_profile_root() {
   else
     printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/firefox"
   fi
+}
+
+whitespace_normalized() { local -a f; read -r -a f <<<"$1"; printf '%s' "${f[*]}"; }
+
+fstab_line_for_mountpoint() {
+  local mountpoint="$1" matches
+  matches="$(awk -v m="$mountpoint" '$1 !~ /^#/ && NF >= 6 && $2 == m' /etc/fstab)"
+  [[ -n "$matches" ]] || return 1
+  [[ "$(wc -l <<<"$matches")" -eq 1 ]] || die "multiple fstab lines for mountpoint: $mountpoint"
+  printf '%s' "$matches"
+}
+
+fstab_line_for_subvol() {
+  local ref="$1" target="$2" subvol="$3"
+  local line device fstype options dump pass
+  line="$(fstab_line_for_mountpoint "$ref")" || die "no fstab line for mountpoint: $ref"
+  read -r device _ fstype options dump pass <<<"$line"
+
+  local -a opts=() new_opts=()
+  IFS=',' read -r -a opts <<<"$options"
+  local found=0 o
+  for o in "${opts[@]}"; do
+    if [[ "$o" == subvol=* ]]; then
+      found=$((found + 1))
+      new_opts+=("subvol=$subvol")
+    else
+      new_opts+=("$o")
+    fi
+  done
+  [[ $found -eq 1 ]] || die "expected exactly one subvol= option in fstab line for $ref, found $found"
+
+  local new_options
+  IFS=','; new_options="${new_opts[*]}"; unset IFS
+  printf '%s %s %s %s %s %s\n' "$device" "$target" "$fstype" "$new_options" "$dump" "$pass"
+}
+
+ensure_fstab_entry() {
+  local mountpoint="$1" line="$2" existing
+  if existing="$(fstab_line_for_mountpoint "$mountpoint")"; then
+    if [[ "$(whitespace_normalized "$existing")" == "$(whitespace_normalized "$line")" ]]; then
+      log "fstab entry present: $mountpoint"
+      return 0
+    fi
+    die "fstab entry for $mountpoint differs, resolve manually: existing='$existing' wanted='$line'"
+  fi
+  log "appending fstab entry: $line"
+  printf '%s\n' "$line" | root tee -a /etc/fstab >/dev/null
+  existing="$(fstab_line_for_mountpoint "$mountpoint")" || die "fstab entry not written for $mountpoint"
+  [[ "$(whitespace_normalized "$existing")" == "$(whitespace_normalized "$line")" ]] || die "fstab entry not written for $mountpoint"
+}
+
+root_btrfs_device() {
+  local device
+  device="$(findmnt -no SOURCE /)"
+  device="${device%%\[*}"
+  [[ -n "$device" ]] || die "could not determine btrfs device of /"
+  printf '%s' "$device"
+}
+
+mount_btrfs_top_level() {
+  local dir="$1"
+  root mount -o subvolid=5 "$(root_btrfs_device)" "$dir"
+}
+
+is_btrfs_subvolume() { btrfs subvolume show "$1" >/dev/null 2>&1; }
+
+btrfs_migrate_dir_into_subvolume() {
+  local subvol="$1" src="${2:-}"
+  local marker="$subvol/.vekrona-migrated"
+
+  if is_btrfs_subvolume "$subvol"; then
+    [[ -e "$marker" ]] || die "subvolume exists without migration marker (interrupted migration?): $subvol — inspect it, delete it with 'sudo btrfs subvolume delete <path>' (mount the top-level subvolume with subvolid=5 to reach it), then re-run ./install.sh 20; the source directory, if present, is untouched"
+    log "subvolume already migrated: $subvol"
+    return 0
+  fi
+  [[ -e "$subvol" ]] && die "path exists but is not a btrfs subvolume: $subvol"
+
+  log "creating subvolume: $subvol"
+  root btrfs subvolume create "$subvol"
+  root chown root:root "$subvol"
+  root chmod 0755 "$subvol"
+
+  if [[ -n "$src" ]]; then
+    [[ -d "$src" ]] || die "source directory missing: $src"
+    log "migrating $src into $subvol"
+    root cp -a --reflink=always "$src/." "$subvol/"
+    local diff_out diff_rc=0
+    diff_out="$(root diff -rq --no-dereference "$src" "$subvol" 2>&1)" || diff_rc=$?
+    [[ $diff_rc -eq 0 ]] || die "migration verification failed for $subvol (diff exit $diff_rc): $diff_out"
+  fi
+
+  root touch "$marker"
 }

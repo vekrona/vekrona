@@ -32,9 +32,10 @@ ensure_symlink "$VEKRONA_ROOT/config/ghostty/config" "$HOME/.config/ghostty/conf
 
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/xremap.service" "$HOME/.config/systemd/user/xremap.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/dms.service.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$HOME/.config/systemd/user/tailscale-systray.service"
 
 systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service
+ensure_user_unit_enabled xremap.service tailscale-systray.service
 
 systemctl --user add-wants sway-session.target dms.service
 assert "dms.service wanted by sway-session.target" test -e "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
@@ -293,3 +294,12 @@ ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
 
 ensure_symlink "$VEKRONA_ROOT/config/scopebuddy/scb.conf" "$HOME/.config/scopebuddy/scb.conf"
 ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/MangoHud/MangoHud.conf"
+
+require_cmd nix
+if nix profile list --json | jq -e '.elements | has("devbox")' >/dev/null; then
+  log "devbox already installed via nix profile"
+else
+  log "installing devbox via nix profile"
+  nix profile install nixpkgs#devbox
+fi
+assert "devbox runs" "$HOME/.nix-profile/bin/devbox" version

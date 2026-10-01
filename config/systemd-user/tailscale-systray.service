@@ -1,0 +1,11 @@
+[Unit]
+Description=Tailscale tray icon
+PartOf=sway-session.target
+After=sway-session.target
+
+[Service]
+ExecStart=/usr/bin/tailscale systray
+Restart=on-failure
+
+[Install]
+WantedBy=sway-session.target

@@ -41,3 +41,18 @@ else
 fi
 
 root systemctl daemon-reload
+
+ensure_system_unit enabled tailscaled nix-daemon.service
+ensure_system_unit_active tailscaled nix-daemon.service
+
+tailscale_operator() { root tailscale debug prefs | jq -r '.OperatorUser // ""'; }
+
+ensure_tailscale_operator() {
+  local user="$1"
+  [[ "$(tailscale_operator)" == "$user" ]] && { log "tailscale operator: $user"; return 0; }
+  log "setting tailscale operator: $user"
+  root tailscale set --operator="$user"
+  [[ "$(tailscale_operator)" == "$user" ]] || die "tailscale operator not set to $user: run 'tailscale up' to log in, then re-run ./install.sh 40"
+}
+
+ensure_tailscale_operator "$VEKRONA_USER"

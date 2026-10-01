@@ -1,7 +1,7 @@
 # TODO
 
 - `stages/10-nvidia.sh`'s `REMOVE_GLOBS` includes the glob `libnvidia-*`, which is removed in the same transaction as the cuda-repo driver whenever `cuda_driver_installed` is true. This glob also matches CUDA runtime libraries unrelated to the display driver itself (e.g. `libnvidia-ml`, `libnvidia-container`), so a host that has those installed for other reasons could have them removed as a side effect of this stage. Narrow the glob to the driver-specific packages it actually targets.
-- Nested btrfs subvolume for /var/lib/libvirt/images so snapshots do not pin VM images.
+- Nested btrfs subvolume for /var/lib/libvirt/images so snapshots do not pin VM images. `btrfs_migrate_dir_into_subvolume` in `lib/common.sh` can be reused (nested, no fstab line needed).
 - DMS bar indicator for vekrona-caffeine (plugin API unverified).
 - The CUDA repo release is hardcoded as `fedora44` (current) and `fedora43` (stale) in `stages/10-nvidia.sh`, `stages/70-verify.sh` and `stages/90b-remove.sh`, and the README release upgrade procedure does not mention them. After a host upgrade to the next release, `./install.sh 10` would re-add the `fedora44` repo and `./install.sh 70` would assert it. Derive both from `rpm -E %fedora` or one shared variable.
 - `~/.gitconfig` sets the github.com and gist.github.com credential helpers to `/opt/homebrew/bin/gh`, a macOS path that does not exist on this Fedora host (`gh` lives at `~/.local/bin/gh`). HTTPS git auth to GitHub fails here. Use `!gh auth git-credential` so PATH resolves it on both OSes.
