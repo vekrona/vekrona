@@ -44,7 +44,7 @@ cmd_up() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --profile) need_value "$@"; VM_PROFILE="$2"; shift 2 ;;
-      --iso) need_value "$@"; VM_ISO="$2"; shift 2 ;;
+      --iso) need_value "$@"; VM_ISO="$(readlink -f "$2")"; shift 2 ;;
       --ram) need_value "$@"; VM_RAM_MB="$2"; shift 2 ;;
       --vcpus) need_value "$@"; VM_VCPUS="$2"; shift 2 ;;
       --fresh-disk) VM_FRESH_DISK=1; shift ;;
