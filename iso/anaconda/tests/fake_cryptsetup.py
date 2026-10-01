@@ -21,6 +21,8 @@ state["calls"].append(call)
 exit_code = 0
 if command == "luksDump":
     print(json.dumps({"keyslots": {str(n): {"type": "luks2"} for n in state["keyslots"]}}))
+elif command == "luksUUID":
+    print(state["uuids"][positional[0]])
 elif command == "luksAddKey":
     if call["key_file_content"] != state["existing_passphrase"]:
         exit_code = 2

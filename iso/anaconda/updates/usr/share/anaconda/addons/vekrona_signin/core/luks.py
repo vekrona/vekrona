@@ -7,7 +7,7 @@ from pyanaconda.core import util
 from vekrona_signin.core.errors import SignInError
 from vekrona_signin.core.fido2_luks import passphrase, token_json
 
-__all__ = ["parse_keyslot_numbers", "add_fido2_keyslot"]
+__all__ = ["parse_keyslot_numbers", "add_fido2_keyslot", "luks_uuid"]
 
 CRYPTSETUP = "cryptsetup"
 FAST_PBKDF = ["--pbkdf", "pbkdf2", "--pbkdf-force-iterations", "1000"]
@@ -34,6 +34,10 @@ def _cryptsetup(arguments, secret_bearing):
     if returncode != 0:
         raise SignInError(f"cryptsetup {arguments[0]} failed ({returncode}): {output.strip()}")
     return output
+
+
+def luks_uuid(device_path):
+    return _cryptsetup(["luksUUID", device_path], secret_bearing=False).strip()
 
 
 def _keyslot_numbers(device_path):

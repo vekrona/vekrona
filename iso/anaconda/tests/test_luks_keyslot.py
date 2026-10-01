@@ -15,6 +15,7 @@ from vekrona_signin.core.luks import add_fido2_keyslot
 
 DEVICE = "/dev/vda3"
 EXISTING_PASSPHRASE = "existing-install-passphrase"
+LUKS_UUID = "0a1b2c3d-0000-4000-8000-000000000001"
 ENROLLMENT = FidoLuksEnrollment(
     credential_id=bytes(range(40)),
     salt=bytes(range(32)),
@@ -42,6 +43,7 @@ class FakeCryptsetupTest(unittest.TestCase):
         self.state_path.write_text(json.dumps({
             "keyslots": {"0": EXISTING_PASSPHRASE},
             "existing_passphrase": EXISTING_PASSPHRASE,
+            "uuids": {DEVICE: LUKS_UUID},
             "fail_token_import": fail_token_import,
             "calls": [],
         }))

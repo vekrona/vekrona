@@ -1,0 +1,6 @@
+# written by the installer
+luks-0a1b2c3d-0000-4000-8000-000000000001 UUID=0a1b2c3d-0000-4000-8000-000000000001 none x-initrd.attach,fido2-device=auto,token-timeout=10s
+luks-0a1b2c3d-0000-4000-8000-000000000002 UUID=0a1b2c3d-0000-4000-8000-000000000002 none discard
+luks-0a1b2c3d-0000-4000-8000-000000000003 UUID=0a1b2c3d-0000-4000-8000-000000000003 none fido2-device=auto,token-timeout=10s
+luks-0a1b2c3d-0000-4000-8000-000000000004 UUID=0a1b2c3d-0000-4000-8000-000000000004 none discard,fido2-device=auto,token-timeout=10s
+vault /dev/vdb /dev/urandom swap,cipher=aes-xts-plain64

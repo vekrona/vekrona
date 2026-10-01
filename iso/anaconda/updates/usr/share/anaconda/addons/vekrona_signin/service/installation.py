@@ -8,6 +8,11 @@ from pyanaconda.modules.common.structures.storage import DeviceData, DeviceForma
 from pyanaconda.modules.common.task import Task
 
 from vekrona_signin.core import luks
+from vekrona_signin.core.crypttab import (
+    LuksDevice,
+    enable_fido2_unlock,
+    require_fido2_unlock_support,
+)
 from vekrona_signin.core.encrypted_storage import applied_request
 from vekrona_signin.core.errors import SignInError
 from vekrona_signin.core.fprint import storage_path
@@ -63,10 +68,11 @@ def _target_account(sysroot, username):
 
 
 class LuksFido2Task(Task):
-    """Add the registered security key as a keyslot of the LUKS devices backing the installed system."""
+    """Add the registered security key to the LUKS devices backing the installed system and make the first boot use it."""
 
-    def __init__(self, enrollment):
+    def __init__(self, sysroot, enrollment):
         super().__init__()
+        self._sysroot = sysroot
         self._enrollment = enrollment
 
     @property
@@ -74,10 +80,15 @@ class LuksFido2Task(Task):
         return "Enroll the security key for disk unlocking"
 
     def run(self):
+        require_fido2_unlock_support(self._sysroot)
         passphrase = find_luks_passphrase(STORAGE.get_proxy(), STORAGE.get_proxy)
+        enrolled = []
         for device_path in find_luks_backing_paths(STORAGE.get_proxy(DEVICE_TREE)):
             luks.add_fido2_keyslot(device_path, passphrase, self._enrollment)
             log.info("Security key enrolled on %s.", device_path)
+            enrolled.append(LuksDevice(device_path, luks.luks_uuid(device_path)))
+        enable_fido2_unlock(self._sysroot, enrolled)
+        log.info("The first boot unlocks %s with the security key.", [d.path for d in enrolled])
 
 
 class U2fKeysTask(Task):
