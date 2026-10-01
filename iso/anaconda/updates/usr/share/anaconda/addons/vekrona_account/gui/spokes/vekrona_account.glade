@@ -84,57 +84,12 @@
             </child>
 
             <child>
-              <object class="GtkLabel" id="passwordLabel">
-                <property name="visible">True</property>
-                <property name="label" translatable="yes">Password</property>
-                <property name="xalign">1</property>
-              </object>
-              <packing><property name="left-attach">0</property><property name="top-attach">3</property></packing>
-            </child>
-            <child>
-              <object class="GtkEntry" id="passwordEntry">
-                <property name="visible">True</property>
-                <property name="can-focus">True</property>
-                <property name="visibility">False</property>
-                <property name="hexpand">True</property>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">3</property></packing>
-            </child>
-
-            <child>
-              <object class="GtkLabel" id="confirmLabel">
-                <property name="visible">True</property>
-                <property name="label" translatable="yes">Confirm password</property>
-                <property name="xalign">1</property>
-              </object>
-              <packing><property name="left-attach">0</property><property name="top-attach">4</property></packing>
-            </child>
-            <child>
-              <object class="GtkEntry" id="confirmEntry">
-                <property name="visible">True</property>
-                <property name="can-focus">True</property>
-                <property name="visibility">False</property>
-                <property name="hexpand">True</property>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">4</property></packing>
-            </child>
-            <child>
-              <object class="GtkLabel" id="passwordError">
-                <property name="visible">False</property>
-                <property name="no-show-all">True</property>
-                <property name="xalign">0</property>
-                <attributes><attribute name="foreground" value="#a40000"/></attributes>
-              </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">5</property></packing>
-            </child>
-
-            <child>
               <object class="GtkLabel" id="hostnameLabel">
                 <property name="visible">True</property>
                 <property name="label" translatable="yes">Hostname</property>
                 <property name="xalign">1</property>
               </object>
-              <packing><property name="left-attach">0</property><property name="top-attach">6</property></packing>
+              <packing><property name="left-attach">0</property><property name="top-attach">3</property></packing>
             </child>
             <child>
               <object class="GtkEntry" id="hostnameEntry">
@@ -142,7 +97,7 @@
                 <property name="can-focus">True</property>
                 <property name="hexpand">True</property>
               </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">6</property></packing>
+              <packing><property name="left-attach">1</property><property name="top-attach">3</property></packing>
             </child>
             <child>
               <object class="GtkLabel" id="hostnameError">
@@ -151,7 +106,7 @@
                 <property name="xalign">0</property>
                 <attributes><attribute name="foreground" value="#a40000"/></attributes>
               </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">7</property></packing>
+              <packing><property name="left-attach">1</property><property name="top-attach">4</property></packing>
             </child>
 
             <child>
@@ -160,7 +115,7 @@
                 <property name="label" translatable="yes">Timezone</property>
                 <property name="xalign">1</property>
               </object>
-              <packing><property name="left-attach">0</property><property name="top-attach">8</property></packing>
+              <packing><property name="left-attach">0</property><property name="top-attach">5</property></packing>
             </child>
             <child>
               <object class="GtkEntry" id="timezoneEntry">
@@ -168,7 +123,7 @@
                 <property name="can-focus">True</property>
                 <property name="hexpand">True</property>
               </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">8</property></packing>
+              <packing><property name="left-attach">1</property><property name="top-attach">5</property></packing>
             </child>
             <child>
               <object class="GtkLabel" id="timezoneError">
@@ -177,7 +132,7 @@
                 <property name="xalign">0</property>
                 <attributes><attribute name="foreground" value="#a40000"/></attributes>
               </object>
-              <packing><property name="left-attach">1</property><property name="top-attach">9</property></packing>
+              <packing><property name="left-attach">1</property><property name="top-attach">6</property></packing>
             </child>
           </object>
           <packing>

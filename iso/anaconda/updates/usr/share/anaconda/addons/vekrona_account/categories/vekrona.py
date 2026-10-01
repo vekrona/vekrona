@@ -5,8 +5,8 @@ __all__ = ["VekronaCategory"]
 
 
 class VekronaCategory(SpokeCategory):
-    """The category for the vekrona account spoke, sorted before every
-    stock category so it is the first thing the user sees on the hub."""
+    """The category of the vekrona account and sign-in spokes, sorted before
+    every stock category so it is the first thing the user sees on the hub."""
 
     @staticmethod
     def get_title():
