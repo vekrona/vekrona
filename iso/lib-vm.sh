@@ -101,6 +101,10 @@ vm_lock() {
     || vm_die "another dev-vm.sh is starting a VM (lock $VM_LOCK_FILE held for ${VM_LOCK_TIMEOUT_SEC}s)"
 }
 
+vm_unlock() {
+  exec {VM_LOCK_FD}>&-
+}
+
 vm_qemu_process_name() {
   local pid="$1" name
   name="$(tr '\0' '\n' < "/proc/$pid/cmdline" | awk '$0 == "-name" { getline; print; exit }')"
@@ -649,6 +653,7 @@ vm_up() {
   vm_write_run_env "$state_dir" "$http_port" "$serve_dir"
   vm_write_meta "$state_dir" "$ssh_port" "$http_port"
   vm_start_unit "$state_dir"
+  vm_unlock
   vm_arm_idle "$VM_NAME" "$VM_IDLE_SEC"
   vm_log "VM '$VM_NAME' is up: ssh port $ssh_port, state $state_dir, stops after ${VM_IDLE_SEC}s idle or ${VM_TTL_SEC}s total"
 }

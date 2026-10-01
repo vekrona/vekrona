@@ -19,6 +19,7 @@ run_suite "stage helpers" bash tests/stages/run.sh
 run_suite "Anaconda add-ons" python3 -B -m unittest discover -v -s iso/anaconda/tests
 run_suite "VM serial helpers" python3 -B -m unittest discover -v -s tests/vm
 run_suite "VM USB passthrough checks" bash tests/vm/test-usb-claims.sh
+run_suite "VM start lock" bash tests/vm/test-lock.sh
 
 if [[ ${#failed[@]} -gt 0 ]]; then
   echo "FAILED suites: ${failed[*]}" >&2
