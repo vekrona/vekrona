@@ -330,10 +330,51 @@ fi
 
 if ran 60-gaming; then
   check assert "scb is executable" bash -c "[[ -x /usr/local/bin/scb ]]"
-  for p in gamescope mangohud gamemode steam; do
+  for p in gamescope mangohud gamemode steam python3-vdf; do
     check assert "package installed: $p" pkg_installed "$p"
   done
   check assert "scopebuddy config present" file_exists "$HOME/.config/scopebuddy/scb.conf"
+
+  steam_config_vdf="$HOME/.local/share/Steam/config/config.vdf"
+  if [[ -e "$steam_config_vdf" ]]; then
+    check assert "Steam Play for all titles enabled (proton_experimental)" python3 -c "
+import vdf
+
+
+def find_key(d, key):
+    if key in d:
+        return key
+    for k in d:
+        if isinstance(k, str) and k.lower() == key.lower():
+            return k
+    return None
+
+
+def child(d, key):
+    found = find_key(d, key)
+    assert found is not None, f'missing section: {key}'
+    value = d[found]
+    assert isinstance(value, dict), f'expected a section at {key!r}, found {type(value).__name__}'
+    return value
+
+
+with open('$steam_config_vdf') as f:
+    data = vdf.load(f)
+
+node = data
+for key in ('InstallConfigStore', 'Software', 'Valve', 'Steam', 'CompatToolMapping'):
+    node = child(node, key)
+
+zero_key = find_key(node, '0')
+assert zero_key is not None, 'no CompatToolMapping entry \"0\"'
+entry = node[zero_key]
+name_key = find_key(entry, 'name')
+assert name_key is not None, 'no name field in CompatToolMapping \"0\"'
+assert entry[name_key].lower() == 'proton_experimental', entry[name_key]
+"
+  else
+    warn_check "Steam never launched: launch Steam once, quit it, then run ./install.sh 60" false
+  fi
 fi
 
 if ran 65-login-manager; then
