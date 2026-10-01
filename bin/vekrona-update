@@ -46,6 +46,9 @@ mise_system_strict upgrade --dry-run
 log "=== mise system: upgrading ==="
 mise_system_strict upgrade
 
+log "=== mise system: pruning superseded tool versions ==="
+mise_system prune --tools --yes
+
 log "=== mise system: reshim ==="
 mise_system reshim
 
