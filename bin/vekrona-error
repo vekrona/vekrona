@@ -873,7 +873,7 @@ def cmd_watch(args):
             try:
                 variant = GLib.Variant(
                     "(susssasa{sv}i)",
-                    ("vekrona", 0, "", title, body, actions, hints, -1),
+                    ("vekrona", 0, "", title, GLib.markup_escape_text(body, -1), actions, hints, -1),
                 )
                 result = self.bus.call_sync(
                     "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
