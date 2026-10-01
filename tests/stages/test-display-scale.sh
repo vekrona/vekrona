@@ -27,14 +27,15 @@ if panel_scale_for 2560 1600 abc 179 2>/dev/null; then die "non-numeric size mus
 log "ok: invalid dimensions rejected"
 
 write_edid() {
-  local file="$1" mm_w="$2" mm_h="$3" b
+  local file="$1" mm_w="$2" mm_h="$3" b escapes
   read -ra b <<<"$(printf '0 %.0s' {1..128})"
   b[1]=255; b[2]=255; b[3]=255; b[4]=255; b[5]=255; b[6]=255
   b[21]=$((mm_w / 10)); b[22]=$((mm_h / 10))
   b[54]=1; b[55]=1
   b[66]=$((mm_w & 255)); b[67]=$((mm_h & 255))
   b[68]=$(( ((mm_w >> 8) << 4) | (mm_h >> 8) ))
-  printf '%02x' "${b[@]}" | xxd -r -p > "$file"
+  escapes="$(printf '\\x%02x' "${b[@]}")"
+  printf '%b' "$escapes" > "$file"
 }
 
 make_connector() {
