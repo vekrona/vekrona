@@ -4,12 +4,7 @@ from dasbus.client.proxy import get_object_path
 from dasbus.error import DBusError
 
 from pyanaconda.anaconda_loggers import get_module_logger
-from pyanaconda.core.constants import (
-    PASSWORD_POLICY_LUKS,
-    THREAD_EXECUTE_STORAGE,
-    THREAD_STORAGE,
-    THREAD_STORAGE_WATCHER,
-)
+from pyanaconda.core.constants import PASSWORD_POLICY_LUKS
 from pyanaconda.core.i18n import N_, _
 from pyanaconda.core.threads import thread_manager
 from pyanaconda.input_checking import get_policy
@@ -49,6 +44,7 @@ from vekrona_signin.gui.signin_state import (
 )
 from vekrona_signin.gui.spokes import guidance
 from vekrona_signin.gui.spokes.devwatch import DeviceWatcher
+from vekrona_signin.gui.stock_storage import wait_for_stock_storage
 from vekrona_signin.gui.storage_link import STORAGE_SPOKE_NAME, find_storage_spoke, seed_storage_spoke
 
 log = get_module_logger(__name__)
@@ -56,12 +52,6 @@ log = get_module_logger(__name__)
 __all__ = ["VekronaSignInSpoke"]
 
 ENCRYPT_THREAD_PREFIX = "VekronaEncryptStorage"
-STOCK_STORAGE_THREADS = (THREAD_STORAGE, THREAD_STORAGE_WATCHER, THREAD_EXECUTE_STORAGE)
-
-
-def wait_for_stock_storage():
-    for thread_name in STOCK_STORAGE_THREADS:
-        thread_manager.wait(thread_name)
 
 
 class _Panel:
