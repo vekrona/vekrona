@@ -642,6 +642,8 @@ def cmd_mute(args):
 
 
 def cmd_ack(args):
+    if args.all and args.id:
+        die("ack takes either an id or --all, not both")
     if args.all:
         changed = False
         with store_lock():
