@@ -95,6 +95,7 @@ def lock_file():
 
 def ensure_store_subdir(path):
     os.makedirs(path, mode=0o700, exist_ok=True)
+    os.chmod(path, 0o700)
 
 
 @contextmanager
