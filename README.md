@@ -116,8 +116,9 @@ encrypted with that password, re-applies an encrypted automatic partitioning
 itself, so the standard "Disk Encryption Passphrase" dialog is not needed.
 **Network & Host Name** (including Wi-Fi) is Anaconda's own screen, unchanged.
 
-Once the install finishes and the machine reboots, GRUB will ask for that
-same password to unlock the encrypted root before Anaconda's first-boot
+Once the install finishes and the machine reboots, the disk prompt will ask for
+that same password (or the security key, if you registered one) to unlock the
+encrypted root before Anaconda's first-boot
 service clones this repo to the new user's home and runs `./install.sh`
 unattended, ending at the same greetd login prompt. See "ISO and CI" below
 for how the ISO and addon are built, what first boot does, and how it is
@@ -131,18 +132,29 @@ device then works for sudo, polkit, the login greeter, and the lock screen,
 with your password always available as a fallback.
 
 **Security key (FIDO2, PIN + touch):** unlocks the disk at boot and signs you in.
-- Both touches (LUKS enrollment and PAM registration) happen once, during
-  install, and the installer derives a secret for disk unlock that gets stored in
-  a `systemd-fido2` token keyslot. After first boot, the key's PIN and a touch
-  are needed to unlock the disk; the password alone also works.
+- The installer asks for three touches, all during the install: one to
+  create the credential for the disk, one to answer a challenge that derives
+  the disk secret (stored in a `systemd-fido2` token keyslot), and one to
+  create the credential for sudo and login (`~/.config/Yubico/u2f_keys`).
+- The installer also writes `fido2-device=auto,token-timeout=10s` into the new
+  system's `/etc/crypttab` and generates its initramfs with FIDO2 support, so
+  the very first boot already asks for the key's PIN and a touch. Without the
+  key plugged in, the prompt falls back to the password after 10 seconds; the
+  password always works.
 - Later, to enroll the key on an already-installed machine, run:
   ```
   pamu2fcfg -N -o pam://vekrona -i pam://vekrona > ~/.config/Yubico/u2f_keys
   sudo systemd-cryptenroll --fido2-device=auto --fido2-with-client-pin=yes /dev/mapper/root
   ```
-  then rerun `./install.sh 45` to update crypttab and rebuild the initramfs.
+  then rerun `./install.sh 45` to update crypttab and rebuild the initramfs
+  (it changes nothing on a system the installer already prepared).
 - PAM origin is fixed at `pam://vekrona` so later hostname changes do not break
   key sign-in.
+- sudo, polkit and the login greeter go through the system PAM stack, where
+  the key needs its PIN and a touch (`pinverification=1`).
+- Testing in the dev VM (`iso/dev-vm.sh`): USB passthrough of the key fails
+  while a host smartcard daemon (`pcscd`) holds it. `dev-vm.sh up` refuses and
+  names the remedy: `sudo systemctl stop pcscd.socket pcscd.service`.
 
 **Fingerprint (USB reader via libfprint):** signs you in but does not unlock the disk.
 - A fingerprint reader returns only match/no-match, not a cryptographic secret,
@@ -151,7 +163,7 @@ with your password always available as a fallback.
   scope here.
 - After install, enroll another finger with `fprintd-enroll <finger>`.
 
-**Lock screen:** touch-only (no PIN prompt) to avoid burning through FIDO2 PIN
+**Lock screen:** touch-only (no PIN prompt, `etc/pam.d/dankshell-u2f`) to avoid burning through FIDO2 PIN
 retries on mistyped patterns. The screen sends its password answer to every
 PAM prompt, so a PIN dialog would lock you out after too many wrong answers.
 
