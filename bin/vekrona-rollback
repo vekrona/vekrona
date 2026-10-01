@@ -86,8 +86,8 @@ fi
 mv "$mountpoint_dir/$backup/.snapshots" "$mountpoint_dir/root/.snapshots"
 
 marker="$mountpoint_dir/root/.vekrona-rolled-back-from-$number"
-: > "$marker"
-[[ -f "$marker" ]] || die "failed to write rollback marker: $marker"
+printf '%s\n' "$backup" > "$marker"
+[[ "$(< "$marker")" == "$backup" ]] || die "failed to write rollback marker: $marker"
 
 log "rollback complete: / now points at snapshot $number, previous root kept as $backup"
 log "reboot to boot into the restored root: systemctl reboot"
