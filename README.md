@@ -467,8 +467,9 @@ the top-level btrfs subvolume (`subvolid=5`), snapshots
 `root` subvolume to `root.old-<timestamp>`, promotes `root.vekrona-new` to
 `root`, and moves the old root's `.snapshots` across so the restored root
 keeps its own snapshot history. It then writes a marker file,
-`/.vekrona-rolled-back-from-<N>`, so a later check can confirm a rollback
-happened. It asks for confirmation unless run with `--yes`, and refuses to
+`/.vekrona-rolled-back-from-<N>`, holding the name of the backup subvolume
+(`root.old-<timestamp>`), so a later check can confirm that this rollback
+happened and which backup it left. It asks for confirmation unless run with `--yes`, and refuses to
 prompt at all when it has no controlling tty, so a non-interactive caller
 (such as the VM test harness) must pass `--yes`. Before that, it warns about
 every non-rescue kernel in `/boot` that has no matching
@@ -622,7 +623,7 @@ or hash management to maintain:
    `vekrona-update` runs `dnf upgrade`.
 2. **Codex, OpenCode, Pi, and Cursor**, via one system-wide, root-owned
    [mise](https://mise.jdx.dev/) install (`etc/yum.repos.d/mise.repo`,
-   package `mise`, plus `nodejs22-npm` for mise's npm backend). `/etc/mise/config.toml`
+   package `mise`, plus `nodejs24-npm` for mise's npm backend). `/etc/mise/config.toml`
    pins the tool list and sets a supply-chain cooldown,
    `minimum_release_age = "1d"`: mise will not install or upgrade to a
    release less than a day old, so a same-day compromised release of any of
@@ -635,14 +636,34 @@ or hash management to maintain:
    so integrity for those two rests on HTTPS transport alone, not a pinned
    hash. Both are residual, accepted risks; see `TODO.md`.
 
-Both repo files are GPG-signed (`gpgcheck=1`), and stage `55-agents` does not
-trust dnf's own on-demand key import: before installing anything, it
-downloads each repo's key, computes its fingerprint locally
-(`gpg --import-options show-only`), and `die`s if that fingerprint does not
-exactly match the one verified against the vendor out of band
-(`ensure_gpg_key_imported`, `lib/common.sh`; fingerprints and URLs are the
-`CLAUDE_CODE_GPG_*`/`MISE_GPG_*` constants there). Only once the fingerprint
-matches does it `rpm --import` the key and install the package.
+`nodejs24-npm` rather than Fedora's older Node stream because mise can only
+apply the cooldown to npm's transitive dependencies through npm's own
+`min-release-age`, which needs npm 11.10 or newer. The stage runs
+`assert_npm_supports_release_age` right after installing the package and
+dies on an older npm. With mise's default `npm.package_manager = auto`, mise
+installs npm-backed tools with its embedded package manager, applies the
+cutoff itself and passes `--ignore-scripts=true`; this was observed locally
+on one install and is still to be confirmed in the VM. When mise cannot
+apply the cooldown it prints `minimum_release_age is set for ...`;
+`mise_system_strict` turns that warning into a fatal error for both
+`55-agents` and `vekrona-update`, so the cooldown never silently covers less
+than it claims.
+
+All repo files are GPG-signed (`gpgcheck=1`), and no key is fetched from the
+network. The signing keys of the three vendor repos (Claude Code, mise,
+1Password) are vendored in `etc/pki/rpm-gpg/RPM-GPG-KEY-<repo>`. Each repo
+file points at its copy with `gpgkey=file:///etc/pki/rpm-gpg/...`, and
+`VEKRONA_REPO_KEY_FINGERPRINTS` in `lib/common.sh` pins the one primary-key
+fingerprint each file must hold. `ensure_repo_key` (stage `00-repos` for
+1Password, `55-agents` for the other two) checks the vendored file against
+the pin, installs it root-owned, checks the installed copy again, and only
+then runs `rpm --import`. `70-verify` re-checks the installed files and the
+rpm keyring against the same pins.
+
+When a vendor rotates its signing key, the stage dies naming the expected and
+the found fingerprints. Verify the new fingerprint with the vendor out of
+band, then replace the vendored file and update the pin in
+`VEKRONA_REPO_KEY_FINGERPRINTS` in the same commit.
 
 `mise install --system`/`mise upgrade --system` only work for
 binary-download backends, which rules out Codex and Pi (npm backend); the
@@ -667,25 +688,42 @@ permission bits.
 PATH carries the shims directory,
 `/usr/local/share/mise/shims`, in two places, since the sway session and a
 login shell/SSH/TTY session build their `PATH` differently: the sway session
-picks it up from `config/environment.d/vekrona.conf` (appended to the
-existing `PATH`), and a login shell, SSH session, or plain text console
-picks it up from `etc/profile.d/vekrona-mise.sh` (a root file, `ensure_root_file`).
-`OPENCODE_DISABLE_AUTOUPDATE=true` is set in both of those same two places:
-OpenCode has a self-update path of its own, and setting this disables it so
-the root-owned mise install is the only thing that ever changes OpenCode's
-binary. Codex accepts an equivalent flag
-(`-c check_for_update_on_startup=false`) but the launcher that calls it (a
-separate stream of work) is expected to pass it. Cursor has no such flag;
-its root-owned install already denies its own updater write access, so there
-is nothing to disable.
+picks it up from `config/environment.d/vekrona.conf` (placed before
+`~/.local/bin` and the rest of the existing `PATH`), and a login shell, SSH session, or plain text console
+picks it up from `etc/profile.d/vekrona-mise.sh` (a root file,
+`ensure_root_file`; it appends the directory only when it is not already on
+`PATH`, so nested login shells do not add it twice).
+In a login shell the shims directory is last, so a user-level copy can win a
+plain `PATH` lookup. The launcher does not rely on `PATH`: it runs each
+harness by its absolute managed path (`managed_binary` in `lib/common.sh`:
+`/usr/bin/claude`, or the mise shim), and `vekrona-agent` warns when another
+copy of the same name (for example a native Claude Code installer's
+`~/.local/bin/claude`) shadows it on `PATH`. `70-verify` also warns about such
+copies. They can self-update outside the snapshotted root; remove them.
 
-Stage `55-agents` warns, but does not fail, if a user-local copy of any of
-these binaries exists under `~/.local/bin` (for example, a native
-Claude-Code installer that already put `claude` there on a previously
-hand-set-up machine): `~/.local/bin` comes first on `PATH`, so a leftover
-copy there silently shadows the managed, root-owned binary and stops it from
-ever being the one that runs, or the one `vekrona-update` keeps current.
-Remove the flagged file so the name resolves to the managed install instead.
+### Subscription-only enforcement per tool
+
+`vekrona-agent` strips API-key variables from the environment (see "Agent
+button"), but a tool can also be told directly. Stage `55-agents` installs
+four root-owned policy files for that, and `70-verify` asserts that each is
+installed, root-owned, not group/other-writable and identical to the repo
+copy:
+
+| Tool | Login method | Self-update |
+|---|---|---|
+| Claude Code | `forceLoginMethod: claudeai` in `/etc/claude-code/managed-settings.json` | disabled there (`DISABLE_AUTOUPDATER`, `DISABLE_UPDATES`) |
+| Codex | `allowed_login_methods = ["chatgpt"]` in `/etc/codex/requirements.toml` | update check off in `/etc/codex/managed_config.toml` |
+| OpenCode | no setting to enforce it | `autoupdate: false` in `/etc/opencode/opencode.json` |
+| Pi | no setting to enforce it | version check disabled by `PI_SKIP_VERSION_CHECK=1`, which only `vekrona-agent` sets |
+| Cursor | not documented | not documented |
+
+For OpenCode, Pi and Cursor only the environment stripping protects the
+subscription-only rule, so an API key the user stores inside the tool itself
+still works. OpenCode's `OPENCODE_DISABLE_AUTOUPDATE` variable is not set
+anywhere: OpenCode does not document it, and `autoupdate: false` is the
+documented mechanism. Whether each tool honours its policy file is only
+proven by running it in the VM; the checks in `vm/agents-check.sh` cover that
+the files and their keys are in place.
 
 ## Agent button
 
@@ -711,18 +749,28 @@ and inserts `vekronaAgent` into a bar's widget list (before
 pattern used for `vekronaSwayWorkspaces`; `settings.seed.json` already ships
 it in place for a fresh install.
 
-`bin/vekrona-agent` resolves harnesses by name on `PATH` (`claude`, `codex`,
-`opencode`, `pi`, `cursor-agent`; `claude` is an RPM in `/usr/bin`, the rest
-are `mise` shims); a harness that is not installed fails with a clear error
-telling you to run `./install.sh 55-agents` or `vekrona-update`. Every
-harness launches with its own **default** permission prompts: there is no
-yolo/auto-approve flag anywhere in this path. Before launch, `vekrona-agent`
-strips every API-key-shaped environment variable (`ANTHROPIC_API_KEY`,
-`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`,
-`OPENAI_BASE_URL`, `CODEX_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`,
-`CURSOR_API_KEY`, `OPENROUTER_API_KEY`) so every harness authenticates
-through its own subscription login, never a stray API key left in the
-session environment:
+`bin/vekrona-agent` runs every harness by its absolute managed path
+(`managed_binary` in `lib/common.sh`), never by `PATH` lookup: `claude` is the
+RPM's `/usr/bin/claude`, the rest are mise shims. A harness that is not
+installed fails with a clear error telling you to run `./install.sh
+55-agents` or `vekrona-update`. Every harness launches with its own
+**default** permission prompts: there is no yolo/auto-approve flag anywhere
+in this path. The launcher is the only place that warns about a shadowing
+copy on `PATH`.
+
+Before launch, `vekrona-agent` strips credential variables, so every harness
+authenticates through its own subscription login, never a stray key left in
+the session. The list is built at launch from the user manager's environment
+(`systemctl --user show-environment`), because that is the environment
+`systemd-run --user` hands to the new unit. Every variable whose name matches
+one of these patterns is removed: `*_API_KEY`, `*_API_TOKEN`,
+`*_AUTH_TOKEN`, `*_BASE_URL`, `CLAUDE_CODE_USE_*`; plus these names:
+`AWS_BEARER_TOKEN_BEDROCK`, `ANTHROPIC_PROFILE`,
+`ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`.
+`CLAUDE_CODE_OAUTH_TOKEN` is kept on purpose: it is the Claude subscription
+token, not an API key. Ambient AWS and GCP credentials are not stripped;
+with `CLAUDE_CODE_USE_*` removed, Claude Code is not switched to Bedrock or
+Vertex by them.
 
 | Harness | Subscription |
 |---|---|
@@ -742,26 +790,37 @@ vekrona-agent set claude         # set the default harness
 vekrona-agent get                # print the default harness
 vekrona-agent list                # every known harness: installed? default?
 vekrona-agent choose              # always show the picker, set the default, then launch
-vekrona-agent                     # launch the default harness (dies with no default set)
-vekrona-agent --pick              # launch the default; with no default, show the picker, set it, then launch
+vekrona-agent                     # launch the default harness (fails with no usable default)
+vekrona-agent --pick              # launch the default; with no usable default, show the picker, then launch
 vekrona-agent --prompt "fix the build"
-vekrona-agent --pick --error 42    # launch with the recorded error's prompt (vekrona-error prompt 42), opening the picker if no default harness is set
-vekrona-agent --dry-run ...        # print the final argv instead of launching, one element per line
+vekrona-agent --pick --error 42    # launch with the recorded error's prompt (vekrona-error prompt 42), opening the picker if no usable default is set
+vekrona-agent --dry-run ...        # print the final argv instead of launching, NUL-separated
 ```
 
-`vekrona-agent` launches `ghostty --class=vekrona.agent
---working-directory=<this repo>` (so a session opens in the vekrona checkout,
-not wherever the keybinding happened to fire from) `-e env -u <stripped
-vars...> <harness argv>`, detached from the caller (`setsid -f`) so the
-keybinding, bar click, or notification action never blocks; a failed launch
-still surfaces as a desktop notification (`notify-send -u critical -a
-vekrona`), the same as every other error from this tool.
+The picker lists only the harnesses that are installed and does not accept
+custom input. A default is saved only after its launch succeeded, so a failed
+launch never becomes the default. A stored default that is unknown or no
+longer installed is not used: `--pick` falls back to the picker, a plain
+launch fails with an error. The prompt is passed after `--` for `claude`,
+`codex`, `pi` and `cursor-agent`, and through `--prompt` for `opencode`.
+
+`vekrona-agent` starts the session with `systemd-run --user --collect`
+(`ghostty --class=vekrona.agent --working-directory=<this repo> -e env -u
+<stripped vars...> <harness argv>`), so a keybinding, bar click or
+notification action never blocks, and the transient unit is dropped once it
+exits. `--working-directory` opens the session in the vekrona checkout, not
+wherever the keybinding fired. Launcher failures go through `die` in
+`lib/common.sh`, which prints to stderr and files an error record with
+`vekrona-error report`, so they appear in the error pipeline and the
+desktop notification instead of vanishing when no terminal is attached.
+`--dry-run` prints the `systemd-run` argv NUL-separated, so an argument
+containing a newline survives intact.
 
 ## Update policy
 
 `vekrona-update` is the one command for "update the whole computer": it
 takes a pre-update snapper snapshot, runs `dnf upgrade --refresh`, `flatpak
-update`, and `mise` (system-wide) upgrade + reshim, then takes a matching
+update`, and `mise` (system-wide) upgrade, prune of superseded tool versions and reshim, then takes a matching
 post-update snapshot, printing what changed at each step (each tool's own
 output) and the pre-snapshot number with a `vekrona-rollback <N>` hint at the
 end. Run it yourself in a terminal:
@@ -770,28 +829,30 @@ end. Run it yourself in a terminal:
 vekrona-update
 ```
 
-It asks for `sudo` once up front (like `install.sh`), then never prompts
-again: `dnf upgrade -y`, `flatpak update --system -y --noninteractive`, and
-`mise upgrade` are all non-interactive by default, so nothing about a
-routine update requires a `--yes` flag. `flatpak update` runs `--system`
-because stage `30-packages` only adds the flathub remote system-wide
-(`ensure_flatpak_remote_system`), not per-user, and as root it does not need
-`--noninteractive`'s usual job of suppressing a polkit prompt, since root
-already has the privilege the system helper would otherwise ask for. A
-`mise upgrade --dry-run` runs first and prints a `WARN` line for every
-release the `minimum_release_age` cooldown is currently holding back, so a
-run that changes less than expected explains why in its own output rather
-than silently doing less.
+It asks for `sudo` once up front (like `install.sh`). A long `dnf upgrade`
+can outlast sudo's credential cache, so a later step may ask again (see
+`TODO.md`). Every step is non-interactive: `dnf upgrade -y`, `flatpak update --system -y --noninteractive`, and
+`mise upgrade` need no confirmation flag. `flatpak update` runs
+`--system -y --noninteractive` because stage `30-packages` only adds the
+flathub remote system-wide (`ensure_flatpak_remote_system`), not per-user; a
+plain user-scope update failed on the appstream refresh. A `mise upgrade
+--dry-run` runs first, and `minimum_release_age` may hold some releases back;
+whether the dry run reports each held-back release is not verified, so do not
+rely on its output to explain a run that changes less than expected. Both mise
+upgrade steps run through `mise_system_strict`, which fails on the
+`minimum_release_age is set for` warning. After the upgrade, `mise prune
+--tools --yes` removes superseded tool versions, so old installs do not pile
+up under `/usr/local/share/mise/installs`.
 
-The post-update snapshot is taken from an `EXIT` trap, so even a failing
-step (a `die` from a failed `dnf upgrade`, for instance) still leaves a
-matched pre/post pair on disk instead of a dangling pre snapshot with
-nothing to compare it to; the printed rollback hint is the way back to
-before the run regardless of where it failed. If the post-update snapshot
-itself cannot be created, the trap surfaces that with a `warn` rather than
-swallowing it, but still exits with whatever status the run already had
-(a snapshot failure never masks an earlier, more important failure, and
-never turns a successful run into a reported failure either). Stage
+The post-update snapshot is attempted exactly once. On success it is taken
+at the end of the run; if a step fails first, an `EXIT` trap takes it, so a
+failing step (a failed `dnf upgrade`, for instance) still leaves a matched
+pre/post pair instead of a dangling pre snapshot; the printed rollback hint
+is the way back to before the run regardless of where it failed. If the post
+snapshot cannot be created at the end of a successful run, that is a fatal
+error; if it cannot be created in the trap, the trap surfaces it with a
+`warn` and still exits with the status the run already had, so a snapshot
+failure never masks an earlier failure. Stage
 `20-snapper`'s own dnf actions plugin
 (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`)
 also fires its own pre/post pair around the `dnf upgrade` transaction inside
@@ -926,7 +987,7 @@ than a duration, for the one remaining timed SSH wait above).
 `vm/rollback-check.sh` then confirms the
 rollback left both `root` and a `root.old-*` subvolume at the top level, `/`
 mounted from `[/root]`, and the `/.vekrona-rolled-back-from-<N>` marker in
-place. After the reboot that follows, `vm/login-manager-check.sh` confirms
+place, and that the backup subvolume named in the marker exists. After the reboot that follows, `vm/login-manager-check.sh` confirms
 `systemctl is-active greetd`, `systemctl is-enabled greetd`, and
 `systemctl get-default` is `graphical.target`, proving the fresh-install
 login manager stage actually leaves the VM bootable straight into the
