@@ -47,7 +47,7 @@ DETAILS_NO_USB = N_("The installer sees no USB devices.")
 DETAILS_USB_SEEN = N_("USB devices the installer sees:")
 DETAILS_PROBLEM = N_("Problem: {problem}")
 
-DISABLED_NO_ACCOUNT = N_("Fill in VEKRONA ACCOUNT first. This screen sets the password for that account.")
+DISABLED_NO_ACCOUNT = N_("Fill in VEKRONA ACCOUNT first.")
 NEED_PASSWORD_FIRST = N_("Set the password above first.")
 USER_CHANGED = N_("Your username changed. Register the key or fingerprint again.")
 WATCH_UNAVAILABLE = N_("Automatic detection is not available. Use Check again.")
