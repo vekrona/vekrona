@@ -41,7 +41,6 @@ owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
 gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
 not_repo_enabled() { ! repo_enabled "$1"; }
-copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 copr_enabled() { repo_enabled "$(copr_id "$1")"; }
 unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; }
 user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" enabled; }
@@ -57,13 +56,16 @@ verify_greetd_active() {
 
 if ran 00-repos; then
   check assert "repo enabled: rpmfusion-nonfree" repo_enabled rpmfusion-nonfree
-  for c in blakegardner/xremap scottames/ghostty avengemedia/dms avengemedia/danklinux; do
+  check assert "repo enabled: fedora-cisco-openh264" repo_enabled fedora-cisco-openh264
+  check assert "repo enabled: 1password" repo_enabled 1password
+  for c in "${VEKRONA_COPRS[@]}"; do
     check assert "copr enabled: $c" copr_enabled "$c"
   done
 fi
 
 if ran 10-nvidia; then
   check assert "akmod-nvidia installed" pkg_installed akmod-nvidia
+  check assert "libva-nvidia-driver installed" pkg_installed libva-nvidia-driver
 
   nvidia_disk_version="$(modinfo -F version nvidia 2>/dev/null || true)"
   nvidia_loaded_version="$(cat /sys/module/nvidia/version 2>/dev/null || true)"
@@ -153,6 +155,24 @@ if ran 30-packages; then
     busctl introspect net.hadess.PowerProfiles /net/hadess/PowerProfiles
 
   check assert "flathub flatpak remote present and enabled system-wide" flatpak_remote_system_enabled flathub
+  check assert "dev.zed.Zed flatpak installed" flatpak_installed dev.zed.Zed
+
+  declare -a desktop_pkgs
+  read_pkg_list desktop_pkgs vekrona_desktop_pkgs
+  for p in "${desktop_pkgs[@]}"; do
+    check assert "package installed: $p" pkg_installed "$p"
+  done
+  check assert "package absent: ffmpeg-free" pkg_absent ffmpeg-free
+
+  pkg_from_repo() { dnf repoquery --installed --qf '%{from_repo}\n' "$1" 2>/dev/null || true; }
+  for p in "${!VEKRONA_PINNED_PKGS[@]}"; do
+    check assert "package installed from pinned repo: $p" eq "$(pkg_from_repo "$p")" "${VEKRONA_PINNED_PKGS[$p]}"
+  done
+
+  for stale in "$HOME/.local/zed.app" "$HOME/.local/bin/zed" "$HOME/.local/share/applications/dev.zed.Zed.desktop"; do
+    check assert "no stale tarball Zed at $stale (if present, remove it: it shadows the dev.zed.Zed Flatpak)" \
+      file_absent "$stale"
+  done
 fi
 
 if ran 40-system; then

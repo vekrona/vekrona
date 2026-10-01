@@ -65,6 +65,8 @@ else
   ensure_pkg "${INSTALL_PKGS[@]}"
 fi
 
+ensure_pkg libva-nvidia-driver
+
 require_cmd akmods
 
 assert_running_kernel_is_latest

@@ -50,6 +50,18 @@ ensure_pkg_from_repo() {
   done
 }
 
+ensure_pkg_swapped() {
+  local from="$1" to="$2"
+  if pkg_installed "$to" && ! pkg_installed "$from"; then log "already swapped: $from -> $to"; return 0; fi
+  if ! pkg_installed "$from"; then
+    ensure_pkg "$to"
+    return 0
+  fi
+  log "swapping: $from -> $to"
+  root dnf swap -y "$from" "$to" --allowerasing
+  { pkg_installed "$to" && ! pkg_installed "$from"; } || die "swap did not complete: $from -> $to"
+}
+
 mark_user_installed() {
   local installed=()
   local p
@@ -73,7 +85,8 @@ ensure_repo_enabled() {
 ensure_copr() {
   local c
   for c in "$@"; do
-    local id="copr:copr.fedorainfracloud.org:${c/\//:}"
+    local id
+    id="$(copr_id "$c")"
     repo_enabled "$id" && { log "copr enabled: $c"; continue; }
     log "enabling copr: $c"
     root dnf copr enable -y "$c"
@@ -84,7 +97,8 @@ ensure_copr() {
 ensure_copr_absent() {
   local c
   for c in "$@"; do
-    local id="copr:copr.fedorainfracloud.org:${c/\//:}"
+    local id
+    id="$(copr_id "$c")"
     repo_enabled "$id" || continue
     log "removing copr: $c"
     root dnf copr remove -y "$c"
@@ -110,7 +124,8 @@ ensure_line() {
 }
 
 user_gsettings() {
-  local bus="/run/user/$(id -u)/bus"
+  local bus
+  bus="/run/user/$(id -u)/bus"
   if [[ -S "$bus" ]]; then
     DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" gsettings "$@"
   else
@@ -303,14 +318,23 @@ read_pkg_list() {
   done <<< "$raw"
 }
 
+VEKRONA_COPRS=(blakegardner/xremap scottames/ghostty avengemedia/dms avengemedia/danklinux rossetnocpes/herdr)
+
+copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
+
+declare -A VEKRONA_PINNED_PKGS=(
+  [quickshell]="$(copr_id avengemedia/danklinux)"
+  [herdr]="$(copr_id rossetnocpes/herdr)"
+)
+
 VEKRONA_DESKTOP_PKGS=(
-  NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl
-  danksearch dconf dgop dms firefox flatpak gamemode gamescope ghostty
-  gnome-keyring gnome-keyring-pam greetd grim inotify-tools
+  1password 1password-cli NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl btop
+  danksearch dconf dgop dms ffmpeg firefox flatpak gamemode gamescope ghostty
+  gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver
   jetbrains-mono-fonts jq kanshi
-  libnotify mangohud matugen perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
-  python3 python3-pyyaml quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
-  sway-systemd tuigreet tuned-ppd wf-recorder wireplumber wl-clipboard wlr-randr
+  libnotify mangohud matugen mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
+  python3 python3-pyyaml python3-vdf quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
+  sway-systemd tailscale tuigreet tuned-ppd wf-recorder wireplumber wl-clipboard wlr-randr
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
 )
 
@@ -358,6 +382,14 @@ ensure_flatpak_remote_system() {
     root flatpak remote-add --if-not-exists --system "$name" "$url"
   fi
   flatpak_remote_system_enabled "$name" || die "flatpak remote not added or not enabled: $name"
+}
+
+ensure_flatpak_app_system() {
+  local remote="$1" app_id="$2"
+  flatpak_installed "$app_id" && { log "flatpak app present: $app_id"; return 0; }
+  log "installing flatpak: $app_id"
+  root flatpak install --system -y --noninteractive "$remote" "$app_id"
+  flatpak_installed "$app_id" || die "flatpak app not installed: $app_id"
 }
 
 declare -A GHOSTTY_THEME_MAP=(
