@@ -90,6 +90,10 @@ verify_greetd_active() {
 
 if ran 00-repos; then
   check assert "repo enabled: rpmfusion-nonfree" repo_enabled rpmfusion-nonfree
+  for section in free nonfree; do
+    check assert_repo_key_trusted "$(rpmfusion_key_repo "$section")"
+    check assert "rpmfusion-$section.repo takes its key only from the pinned key file" rpmfusion_repo_file_uses_pinned_key "$section"
+  done
   check assert "repo enabled: fedora-cisco-openh264" repo_enabled fedora-cisco-openh264
   check assert "repo enabled: 1password" repo_enabled 1password
   check assert_repo_key_trusted 1password

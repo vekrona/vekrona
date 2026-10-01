@@ -364,9 +364,24 @@ declare -A VEKRONA_REPO_KEY_FINGERPRINTS=(
   [claude-code]="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
   [mise]="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
   [1password]="3FEF9748469ADBE15DA7CA80AC2D62742012EA22"
+  [rpmfusion-free-fedora-44]="E9A491A3DE247814E7E067EAE06F8ECDD651FF2E"
+  [rpmfusion-nonfree-fedora-44]="79BDB88F9BBF73910FD4095B6A2AF96194843C65"
 )
 
 repo_key_name() { printf 'RPM-GPG-KEY-%s' "$1"; }
+
+rpmfusion_key_repo() { printf 'rpmfusion-%s-fedora-%s' "$1" "$(rpm -E %fedora)"; }
+
+rpmfusion_release_url() {
+  local section="$1"
+  printf 'https://mirrors.rpmfusion.org/%s/fedora/rpmfusion-%s-release-%s.noarch.rpm' "$section" "$section" "$(rpm -E %fedora)"
+}
+
+rpmfusion_repo_file_uses_pinned_key() {
+  local section="$1" lines
+  lines="$(grep '^gpgkey=' "/etc/yum.repos.d/rpmfusion-$section.repo" | sort -u)"
+  [[ "$lines" == "gpgkey=file://$VEKRONA_REPO_KEY_DIR/RPM-GPG-KEY-rpmfusion-$section-fedora-\$releasever" ]]
+}
 
 key_file_primary_fingerprints() {
   local file="$1" scratch_gnupg_home listing
@@ -379,10 +394,23 @@ key_file_primary_fingerprints() {
 
 assert_repo_key_file_pinned() {
   local repo="$1" file="$2" found
-  [[ -v "VEKRONA_REPO_KEY_FINGERPRINTS[$repo]" ]] || die "no pinned gpg key fingerprint for repo: $repo"
+  [[ -v "VEKRONA_REPO_KEY_FINGERPRINTS[$repo]" ]] || die "no pinned gpg key fingerprint for repo: $repo; verify its key out of band (docs/agents.md), vendor it as etc/pki/rpm-gpg/$(repo_key_name "$repo") and pin the fingerprint in VEKRONA_REPO_KEY_FINGERPRINTS in lib/common.sh"
   local expected="${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]}"
   found="$(key_file_primary_fingerprints "$file")"
   [[ "$found" == "$expected" ]] || die "gpg key file for repo '$repo' ($file) must hold exactly one primary key with fingerprint $expected, found: ${found//$'\n'/ }; if the vendor rotated its key, verify the new fingerprint out of band, then update VEKRONA_REPO_KEY_FINGERPRINTS and etc/pki/rpm-gpg/$(repo_key_name "$repo") together"
+}
+
+assert_rpm_signed_by_pinned_key() {
+  local repo="$1" rpm_file="$2" key_file keyring result
+  key_file="$VEKRONA_ROOT/etc/pki/rpm-gpg/$(repo_key_name "$repo")"
+  assert_repo_key_file_pinned "$repo" "$key_file"
+  require_cmd rpmkeys
+  keyring="$(mktemp -d)"
+  rpmkeys --dbpath "$keyring" --import "$key_file" \
+    || { rm -rf "$keyring"; die "cannot import the pinned gpg key $key_file into a scratch rpm keyring"; }
+  result="$(rpmkeys --dbpath "$keyring" --checksig -v "$rpm_file" 2>&1)" \
+    || { rm -rf "$keyring"; die "$rpm_file is not validly signed by the pinned key of repo '$repo' (${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]}, $key_file): ${result//$'\n'/ | }"; }
+  rm -rf "$keyring"
 }
 
 gpg_pubkey_installed() {
@@ -408,6 +436,17 @@ ensure_1password_repo_file() {
   ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" /etc/yum.repos.d/1password.repo
 }
 
+import_pinned_repo_key() {
+  local repo="$1" key_file="$2"
+  assert_repo_key_file_pinned "$repo" "$key_file"
+  if repo_key_in_rpm_keyring "$repo"; then
+    log "gpg key already imported for repo $repo"
+  else
+    log "importing gpg key for repo $repo"
+    root rpm --import "$key_file"
+  fi
+}
+
 ensure_repo_key() {
   local repo="$1" src dst
   ensure_pkg gnupg2
@@ -415,13 +454,7 @@ ensure_repo_key() {
   dst="$VEKRONA_REPO_KEY_DIR/$(repo_key_name "$repo")"
   assert_repo_key_file_pinned "$repo" "$src"
   ensure_root_file "$src" "$dst"
-  assert_repo_key_file_pinned "$repo" "$dst"
-  if repo_key_in_rpm_keyring "$repo"; then
-    log "gpg key already imported for repo $repo"
-  else
-    log "importing gpg key for repo $repo"
-    root rpm --import "$dst"
-  fi
+  import_pinned_repo_key "$repo" "$dst"
   assert_repo_key_trusted "$repo"
 }
 

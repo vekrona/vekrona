@@ -43,7 +43,7 @@ echo "agents-check: npm $npm_version supports minimum_release_age"
 for repo in "${!VEKRONA_REPO_KEY_FINGERPRINTS[@]}"; do
   repo_key_in_rpm_keyring "$repo" || fail "rpm keyring lacks the pinned key for $repo (${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]})"
   key_file="$VEKRONA_REPO_KEY_DIR/$(repo_key_name "$repo")"
-  [[ "$(stat -c '%U %a' "$key_file")" == "root 644" ]] || fail "$key_file is not root-owned 0644: $(stat -c '%U %a' "$key_file")"
+  [[ "$(stat -L -c '%U %a' "$key_file")" == "root 644" ]] || fail "$key_file is not root-owned 0644: $(stat -L -c '%U %a' "$key_file")"
 done
 echo "agents-check: pinned repo keys are in the rpm keyring and vendored files are root-owned 0644"
 

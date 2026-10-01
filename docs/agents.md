@@ -48,15 +48,45 @@ apply the cooldown it prints `minimum_release_age is set for ...`;
 than it claims.
 
 All repo files are GPG-signed (`gpgcheck=1`), and no key is fetched from the
-network. The signing keys of the three vendor repos (Claude Code, mise,
-1Password) are vendored in `etc/pki/rpm-gpg/RPM-GPG-KEY-<repo>`. Each repo
-file points at its copy with `gpgkey=file:///etc/pki/rpm-gpg/...`, and
-`VEKRONA_REPO_KEY_FINGERPRINTS` in `lib/common.sh` pins the one primary-key
-fingerprint each file must hold. `ensure_repo_key` (stage `00-repos` for
-1Password, `55-agents` for the other two) checks the vendored file against
-the pin, installs it root-owned, checks the installed copy again, and only
-then runs `rpm --import`. `70-verify` re-checks the installed files and the
-rpm keyring against the same pins.
+network. The signing keys of the five pinned repos are vendored in
+`etc/pki/rpm-gpg/RPM-GPG-KEY-<repo>`:
+
+| Pin (`VEKRONA_REPO_KEY_FINGERPRINTS`) | Repo | Installed by |
+|---|---|---|
+| `claude-code`, `mise` | Claude Code, mise | `55-agents` |
+| `1password` | 1Password | `00-repos` |
+| `rpmfusion-free-fedora-44`, `rpmfusion-nonfree-fedora-44` | RPM Fusion free and nonfree | `00-repos` |
+
+Each repo file points at its copy with `gpgkey=file:///etc/pki/rpm-gpg/...`,
+and `VEKRONA_REPO_KEY_FINGERPRINTS` in `lib/common.sh` pins the one
+primary-key fingerprint each file must hold. `ensure_repo_key` checks the
+vendored file against the pin, installs it root-owned, checks the installed
+copy again, and only then runs `rpm --import`. `70-verify` re-checks the
+installed files and the rpm keyring against the same pins.
+
+RPM Fusion ships its repo files and keys inside the
+`rpmfusion-{free,nonfree}-release` RPMs, whose repo files read
+`gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-<section>-fedora-$releasever`.
+The RPM installs the per-release name as a symlink to the shared 2020 key
+file. Stage `00-repos` therefore pins one key per Fedora release (the pin name is
+exactly that key file's `<repo>` part, e.g. `rpmfusion-free-fedora-44`) and
+does this, in order: the pinned vendored key is imported into rpm's keyring
+(it is not copied into `/etc/pki/rpm-gpg`, the RPM owns that name); the release RPM
+is downloaded from `mirrors.rpmfusion.org` and verified with
+`assert_rpm_signed_by_pinned_key` (`rpmkeys --checksig` against a scratch
+keyring holding only the pinned key, so a signature by any other key, a
+missing signature or a modified file dies naming the file and the key); only
+then it is installed with `dnf`; afterwards `assert_repo_key_trusted` proves
+that the key file the RPM dropped carries exactly the pinned fingerprint and
+the rpm keyring has it, and the repo files are checked to take their key
+only from that file. RPM Fusion has used one key pair (the 2020 keys) since
+Fedora 33, so the vendored F44 files are byte-identical to
+`/usr/share/distribution-gpg-keys/rpmfusion/` for the same release.
+
+A release without a pin cannot silently inherit trust: `ensure_repo_key`
+dies with "no pinned gpg key fingerprint for repo:
+rpmfusion-free-fedora-<N>" before anything is downloaded. See the
+[release upgrade procedure](updates.md) for the steps.
 
 The 1Password RPM's `%post` rewrites `/etc/yum.repos.d/1password.repo` on
 every install and upgrade (with `gpgkey=` pointing at its HTTPS URL and
