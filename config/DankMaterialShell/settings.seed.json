@@ -9,6 +9,7 @@
   "fontFamily": "Atkinson Hyperlegible Next",
   "monoFontFamily": "JetBrainsMono Nerd Font",
   "clockFormat": "24h",
+  "notificationPopupBodyInvokesAction": true,
   "barConfigs": [
     {
       "id": "default",

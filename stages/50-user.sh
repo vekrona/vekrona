@@ -100,6 +100,23 @@ ensure_dms_setting_default() {
   [[ "$(jq -r --arg k "$key" '.[$k]' "$dms_settings")" == "$value" ]] || die "DMS default not applied: $key"
 }
 
+ensure_dms_setting_enforced() {
+  local key="$1" json_value="$2"
+  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$dms_settings" >/dev/null 2>&1 && {
+    log "DMS setting already enforced: $key = $json_value"
+    return 0
+  }
+  log "enforcing DMS setting: $key = $json_value"
+  local tmp
+  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
+  if ! jq --arg k "$key" --argjson v "$json_value" '.[$k] = $v' "$dms_settings" > "$tmp"; then
+    rm -f "$tmp"
+    die "jq failed to enforce DMS setting: $key"
+  fi
+  mv "$tmp" "$dms_settings"
+  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$dms_settings" >/dev/null || die "DMS setting not enforced: $key"
+}
+
 ensure_dms_bar_widget_plugin() {
   local stock_id="$1" plugin_id="$2"
   local tmp
@@ -257,6 +274,7 @@ seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/session.seed.json" "$dms_s
 
 ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
 ensure_dms_setting_default monoFontFamily "JetBrainsMono Nerd Font"
+ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/plugins"
 ensure_dms_plugin_enabled vekronaSwayWorkspaces

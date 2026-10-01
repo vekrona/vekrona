@@ -494,8 +494,14 @@ holds the count of errors still in `new` status, kept for the DMS bar button
 kept; older ones are pruned.
 
 A toast (via DMS's notification daemon) has two actions, "Fix with agent" and
-"Mute" (clicking the toast body does the same as "Fix with agent"): the
-former launches `vekrona-agent --error <id>` as a monitored child (its failure
+"Mute" (clicking the toast body does the same as "Fix with agent": stage
+`50-user` enforces DMS's own `notificationPopupBodyInvokesAction` setting to
+`true` in `settings.json`, since DMS defaults it to `false` and otherwise only
+dismisses the popup on a body click rather than running its first action;
+`70-verify` asserts it stays `true`. This is a DMS-wide setting, not specific
+to vekrona's own toasts: a body click on *any* application's notification
+popup runs that notification's first action the same way, once this is set):
+the former launches `vekrona-agent --error <id>` as a monitored child (its failure
 or non-zero exit is itself toasted, not swallowed), the coding agent launcher
 built by another stream, which calls `vekrona-error prompt <id>` to get its
 brief (see `config/agents/skills/vekrona-diagnose/SKILL.md`, symlinked into
