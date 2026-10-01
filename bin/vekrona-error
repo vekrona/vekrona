@@ -652,7 +652,7 @@ def cmd_prompt(args):
     print(
         "Diagnose the root cause of this error and, if there is a reasonable fix, "
         f"propose or apply it directly in the vekrona repo at {root} (your working "
-        "directory), following the repo's own conventions (see README.md and "
+        "directory), following the repo's own conventions (see docs/PLAN.md and "
         "lib/common.sh: fail early, no dead code, no code comments except genuine "
         "vendor quirks, chokepoints over duplication)."
     )
