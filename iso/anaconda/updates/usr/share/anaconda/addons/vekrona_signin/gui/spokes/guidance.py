@@ -62,8 +62,8 @@ STATUS_STORAGE_REAPPLIED = N_("{status}; disk setup re-applied to use this passw
 STATUS_STORAGE_FAILED = N_("Disk encryption failed: {error} Open Installation Destination and click Done; it is already set to encrypt with your password.")
 STATUS_STORAGE_STILL_PLAIN = N_("The disk setup was applied, but it is still not encrypted with this password.")
 STATUS_APPLYING = N_("Encrypting the disk setup with your password...")
-STATUS_CHOOSE_DISK = N_("Password set. Choose the installation disk in Installation Destination.")
-STATUS_DISK_NOT_SET_UP = N_("Password set. The disk is not set up yet: open Installation Destination.")
+STATUS_CHOOSE_DISK = N_("Password set. Choose the disk in Installation Destination.")
+STATUS_DISK_NOT_SET_UP = N_("Password set. Set up the disk in Installation Destination.")
 STATUS_ERROR = N_("Cannot read the installer state: {error}")
 
 HANDS = (("right", N_("Right")), ("left", N_("Left")))
