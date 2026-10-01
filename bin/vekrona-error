@@ -546,13 +546,7 @@ def sanitize_untrusted_text(text):
 
 
 def cmd_prompt(args):
-    with store_lock():
-        rec = get_record_or_die(args.id)
-        if rec.get("status") != "muted":
-            rec["status"] = "launched"
-            save_record(args.id, rec)
-            recompute_unread()
-
+    rec = get_record_or_die(args.id)
     root = repo_root()
     skill_path = os.path.join(root, "config", "agents", "skills", SKILL_NAME, "SKILL.md")
     ctx = context_path(args.id)
@@ -604,6 +598,16 @@ def cmd_prompt(args):
     print()
     print(f"When you are done (fixed it, or confirmed there is nothing actionable), "
           f"run: vekrona-error ack {rec['id']}")
+
+
+def cmd_mark_launched(args):
+    with store_lock():
+        rec = get_record_or_die(args.id)
+        if rec.get("status") != "muted":
+            rec["status"] = "launched"
+            save_record(args.id, rec)
+            recompute_unread()
+    print(f"launched: {args.id}")
 
 
 def rofi_theme_str_or_die():
@@ -1169,9 +1173,13 @@ def build_parser():
     p.add_argument("id", type=error_id_arg)
     p.set_defaults(func=cmd_show)
 
-    p = sub.add_parser("prompt", help="print an agent prompt for one error, marking it launched")
+    p = sub.add_parser("prompt", help="print an agent prompt for one error")
     p.add_argument("id", type=error_id_arg)
     p.set_defaults(func=cmd_prompt)
+
+    p = sub.add_parser("mark-launched", help="record that an agent was launched on one error")
+    p.add_argument("id", type=error_id_arg)
+    p.set_defaults(func=cmd_mark_launched)
 
     p = sub.add_parser("pick", help="pick an error from a rofi menu and launch the agent on it")
     p.set_defaults(func=cmd_pick)
