@@ -44,7 +44,8 @@ ISO build waits for it.
 - `tests/stages/` (`bash tests/stages/run.sh`): stage helpers: hardware
   predicates and the per-machine stage list against the sysfs trees in
   `tests/fixtures/` (selected with `VEKRONA_SYSFS_ROOT`), the panel scale, the
-  authselect profile rendering.
+  authselect profile rendering, the crypttab FIDO2 option handling and the
+  first-boot sudoers drop-in.
 - `iso/anaconda/tests/` (`python3 -B -m unittest discover -s
   iso/anaconda/tests`): the Anaconda add-ons. Needs `python3-dasbus`,
   `python3-fido2` and `anaconda-core`.
@@ -265,7 +266,11 @@ and tag:
   `VEKRONA_QEMU_RAM_MB`, `VEKRONA_QEMU_VCPUS`, `VEKRONA_QEMU_DISK_GB`,
   `VEKRONA_QEMU_DISPLAY=none|gtk`); on any failure it prints the serial
   console log tail (also kept in `VEKRONA_QEMU_LOG_DIR`) before tearing the VM
-  and its disk down through the library.
+  and its disk down through the library. With
+  `VEKRONA_QEMU_KEEP_DISK_ON_FAILURE=1` a failed run keeps the disk
+  (`iso/dev/qemu-test`) for inspection; boot it with `iso/dev-vm.sh up --name
+  qemu-test --profile disk`. A full run takes about 20-25 minutes on the
+  maintainer's host.
 
 ### Installer REPL
 

@@ -4,8 +4,9 @@ Security key, fingerprint and password sign-in, as set up by the installer's VEK
 
 The installer's **VEKRONA SIGN-IN** screen (which also sets the password) offers to enroll a security
 key (YubiKey or equivalent FIDO2 device) or a USB fingerprint reader. Either
-device then works for sudo, polkit, the login greeter, and the lock screen,
-with your password always available as a fallback.
+device then works for sudo, polkit, the lock screen and, if greetd's PAM file
+includes the system stack (unverified, see below), the login greeter, with
+your password always available as a fallback.
 
 **Security key (FIDO2, PIN + touch):** unlocks the disk at boot and signs you in.
 - The installer asks for three touches, all during the install: one to
@@ -26,8 +27,12 @@ with your password always available as a fallback.
   (it changes nothing on a system the installer already prepared).
 - PAM origin is fixed at `pam://vekrona` so later hostname changes do not break
   key sign-in.
-- sudo, polkit and the login greeter go through the system PAM stack, where
-  the key needs its PIN and a touch (`pinverification=1`).
+- sudo and polkit go through the system PAM stack (`system-auth`, from the
+  `vekrona` authselect profile that stage `45-auth` selects), where the key
+  needs its PIN and a touch (`pinverification=1`). The repo ships no PAM file
+  for greetd; the Fedora `greetd` package provides it. That greetd's PAM file
+  includes `system-auth`, so the greeter also asks for PIN and touch, is
+  unverified.
 - Testing in the dev VM (`iso/dev-vm.sh`): USB passthrough of the key fails
   while a host smartcard daemon (`pcscd`) holds it. `dev-vm.sh up` refuses and
   names the remedy: `sudo systemctl stop pcscd.socket pcscd.service`.
