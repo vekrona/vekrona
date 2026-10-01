@@ -22,6 +22,7 @@ Repo layout, tests, the VM smoke test, the ISO build and CI.
 | `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/` | DMS DankBar plugin: always shows Sway workspaces 1-5 plus any existing 6-10, replacing the stock workspace switcher (see [The vekronaSwayWorkspaces DankBar plugin](daily-use.md#the-vekronaswayworkspaces-dankbar-plugin)); stage `50-user` symlinks the whole `plugins/` directory into `~/.config/DankMaterialShell/plugins/` |
 | `config/DankMaterialShell/plugins/vekronaAgent/` | DMS DankBar plugin: agent-button icon with an unread-error badge, left click opens the default coding agent, right click opens the recorded-error picker (see [Agent button](agents.md#agent-button)) |
 | `bin/vekrona-agent` | opens a configured coding agent harness (Claude Code, Codex, opencode, pi, or Cursor Agent) in a terminal, with default permission prompts and API-key env vars stripped; see [Agent button](agents.md#agent-button) |
+| `bin/vekrona-xkb-env` | prints `XKB_DEFAULT_*` for Sway from `/etc/X11/xorg.conf.d/00-keyboard.conf` (`VEKRONA_XKB_CONF` overrides the path in tests); sourced by `config/sway/environment`, and read by `vekrona-keybindings` for its layout row; tested by `tests/stages/test-xkb-env.sh` |
 | `bin/vekrona-rofi-theme` | prints a `rofi -theme-str` string from the active vekrona/DMS theme; shared by `vekrona-keybindings` and `vekrona-agent` so the rofi styling lives in one place |
 | `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, agents, error-pipeline, agent-launch, rollback, and login-manager checks |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (install-and-boot test of a test ISO), `lib-vm.sh` + `dev-vm.sh` (the QEMU VM lifetime library and its REPL CLI), `dev-installer.sh` (installer window with a freshly packed `updates.img`), `firstboot/`, `kickstart/` |
@@ -183,10 +184,12 @@ and tag:
   uses `--erroronfail` so a failing step aborts the install instead of
   continuing silently. It then runs `mkksiso` (Fedora 44 host, `lorax`
   installed) to produce the release ISO: interactive on boot, with no
-  storage, user, root-password or timezone kickstart commands at all, so
-  Installation Destination and the vekrona account spoke both always need a
-  visit; with `--test-ssh-pubkey <file>` it instead produces a fully
-  unattended test ISO: wipes the disk, installs btrfs with LUKS2 encryption
+  storage, user, root-password, timezone, language or keyboard kickstart
+  commands at all (it boots with `inst.geoloc-use-with-ks` so Anaconda still
+  geolocates the language, keyboard and time zone defaults), so Installation
+  Destination, the vekrona account spoke and the Keyboard spoke all always
+  need a visit; with `--test-ssh-pubkey <file>` it instead produces a fully
+  unattended test ISO: sets `lang en_US.UTF-8` and `keyboard --vckeymap=us --xlayouts='us'`, wipes the disk, installs btrfs with LUKS2 encryption
   (kickstart `autopart --type=btrfs --encrypted --luks-version=luks2
   --passphrase=vekrona`, so the vekrona spoke's own `completed` check — which
   reads the same Storage/Users/Timezone/Network module state the spoke would

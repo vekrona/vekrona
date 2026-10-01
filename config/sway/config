@@ -10,8 +10,6 @@ output DP-7 mode 3840x2160@240Hz adaptive_sync on scale 1.5
 font pango:Atkinson Hyperlegible Next 10
 
 input "type:keyboard" {
-    xkb_layout us,ua
-    xkb_options grp:alts_toggle,shift:both_capslock_cancel
     repeat_delay 250
     repeat_rate 40
     xkb_numlock enabled

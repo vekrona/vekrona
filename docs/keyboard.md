@@ -111,6 +111,24 @@ character instead of a word. Copy and paste in ghostty come from ghostty's
 own keybinds instead (`config/ghostty/config`: `super+c=copy_to_clipboard`,
 `super+v=paste_from_clipboard`), not from xremap.
 
-`xkb_options grp:alts_toggle` in `config/sway/config` toggles between the two
-configured keyboard layouts, `us` and `ua`, by pressing Left Alt and Right Alt
-together.
+Keyboard layouts are not hardcoded in `config/sway/config`: they follow the
+system X11 keymap, the layouts chosen in the installer (Anaconda writes
+`/etc/X11/xorg.conf.d/00-keyboard.conf`, which `localectl status` shows as
+"X11 Layout"). `config/sway/environment`, which Fedora's `start-sway` sources
+at every login, runs `bin/vekrona-xkb-env`; that script turns the file into
+`XKB_DEFAULT_LAYOUT`, `_VARIANT`, `_MODEL` and `_OPTIONS`, which Sway uses
+because the config sets no `xkb_layout`. It always adds
+`shift:both_capslock_cancel`. With more than one layout it replaces any
+layout-switch option the installer chose (such as Alt+Shift) with
+`grp:alts_toggle`, so Left Alt and Right Alt pressed together cycle the
+layouts; with one layout there is no switch. A system with no X11 keymap gets
+`us`, with a notice. If the tool is missing or the file is unreadable or
+malformed, the session still starts, with `us` and
+`shift:both_capslock_cancel`, and the cause is logged at priority `err`
+(`journalctl -t vekrona-xkb-env`); the error watcher (see [Errors](errors.md))
+records it and shows a toast once the session is up, and `./install.sh 70`
+fails until the keymap is fixed.
+
+To change layouts later, run `localectl set-x11-keymap us,ua` (variants and
+options are further arguments) and log out and in again; `vekrona-keybindings`
+and `./install.sh 70` read the same file.

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "usage: $(basename "$0")" >&2
+  echo "prints POSIX-sh-quoted XKB_DEFAULT_* assignments for Sway, derived from the system X11 keymap" >&2
+  echo "(${VEKRONA_XKB_CONF:-/etc/X11/xorg.conf.d/00-keyboard.conf}, written by the installer or localectl set-x11-keymap)" >&2
+  exit "${1:-2}"
+}
+
+[[ $# -eq 0 ]] || { [[ "$1" != -h && "$1" != --help ]] || usage 0; usage; }
+
+die() { echo "vekrona-xkb-env: $*" >&2; exit 1; }
+
+conf="${VEKRONA_XKB_CONF:-/etc/X11/xorg.conf.d/00-keyboard.conf}"
+safe_value='^[A-Za-z0-9_:,.+()-]*$'
+
+has_option() {
+  grep -Eq "^[[:space:]]*Option[[:space:]]+\"$1\"[[:space:]]" "$conf"
+}
+
+option_value() {
+  local value
+  value="$(sed -n "s/^[[:space:]]*Option[[:space:]]\+\"$1\"[[:space:]]\+\"\(.*\)\"[[:space:]]*\$/\1/p" "$conf" | tail -n 1)"
+  [[ "$value" =~ $safe_value ]] || die "$conf: unsupported characters in $1: $value"
+  printf '%s' "$value"
+}
+
+layout="us"
+variant=""
+model=""
+system_options=""
+
+if [[ -r "$conf" ]] && has_option XkbLayout; then
+  layout="$(option_value XkbLayout)"
+  [[ -n "$layout" ]] || die "$conf: XkbLayout is empty"
+  variant="$(option_value XkbVariant)"
+  model="$(option_value XkbModel)"
+  system_options="$(option_value XkbOptions)"
+elif [[ -e "$conf" && ! -r "$conf" ]]; then
+  die "cannot read $conf"
+else
+  echo "vekrona-xkb-env: no X11 keymap configured in $conf; using the explicit default layout us (set one with: localectl set-x11-keymap)" >&2
+fi
+
+options=()
+IFS=, read -ra system_option_list <<<"$system_options"
+for option in "${system_option_list[@]}"; do
+  [[ -z "$option" || "$option" == grp:* ]] || options+=("$option")
+done
+[[ "$layout" != *,* ]] || options+=("grp:alts_toggle")
+[[ " ${options[*]} " == *" shift:both_capslock_cancel "* ]] || options+=("shift:both_capslock_cancel")
+
+options_csv="$(IFS=,; echo "${options[*]}")"
+
+printf "XKB_DEFAULT_LAYOUT='%s'\n" "$layout"
+printf "XKB_DEFAULT_VARIANT='%s'\n" "$variant"
+printf "XKB_DEFAULT_MODEL='%s'\n" "$model"
+printf "XKB_DEFAULT_OPTIONS='%s'\n" "$options_csv"

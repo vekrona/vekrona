@@ -51,6 +51,23 @@ than the real machine's Workstation-plus-Omarchy install, so it does not
 stand in for the 206/4-package rehearsal above; it only proves the mechanism,
 not the real machine's package set.
 
+## Keyboard layouts on an existing machine
+
+Sway used to hardcode the layouts `us,ua`. It now follows the system X11 keymap
+(`/etc/X11/xorg.conf.d/00-keyboard.conf`, see [Keyboard](keyboard.md)). A
+machine installed or migrated before this change usually has only `us` there,
+so after the update and the next login the Ukrainian layout and the Alt+Alt
+toggle are gone. Nothing changes the system keymap for you; to get them back,
+run once:
+
+```
+localectl set-x11-keymap us,ua
+```
+
+and log out and in. The Alt+Alt toggle is added automatically whenever more
+than one layout is configured. `localectl status` shows the current "X11
+Layout".
+
 ## Rollout order
 
 `docs/PLAN.md` prescribes a specific, gated rollout for migrating a machine for

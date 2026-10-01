@@ -315,6 +315,8 @@ if ran 50-user; then
   check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
   check assert "sway panel scale drop-in present iff an internal panel is connected" present_iff has_internal_panel file_exists "$SWAY_PANEL_SCALE_DROPIN"
+  check assert "system X11 keymap converts to Sway's XKB environment" vekrona-xkb-env
+  warn_check "system X11 keymap configured (localectl set-x11-keymap)" bash -c "! vekrona-xkb-env 2>&1 >/dev/null | grep -qF 'no X11 keymap configured'"
   check assert "xremap config validates" xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml"
   check assert "sway keybindings all described" vekrona-keybindings --check
   check assert "vekrona-keybindings --list has workspace 10 bindings" bash -c "vekrona-keybindings --list | grep -qF 'workspace 1…10'"

@@ -3,6 +3,7 @@ import argparse
 import glob
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -393,16 +394,17 @@ def load_xremap_rows(path):
     return rows
 
 
-def load_layout_row(sway_main_path):
-    with open(sway_main_path) as f:
-        text = f.read()
-    opts_match = re.search(r'xkb_options\s+(\S+)', text)
-    layout_match = re.search(r'xkb_layout\s+(\S+)', text)
-    if not opts_match or not layout_match:
+def load_layout_row():
+    tool = vekrona_cli.resolve_tool(__file__, "vekrona-xkb-env")
+    if not tool:
+        die("vekrona-xkb-env not found")
+    result = subprocess.run([tool], capture_output=True, text=True)
+    if result.returncode != 0:
+        die(f"vekrona-xkb-env failed:\n{result.stderr.strip()}")
+    xkb = dict(shlex.split(line)[0].split("=", 1) for line in result.stdout.splitlines())
+    if "grp:alts_toggle" not in xkb["XKB_DEFAULT_OPTIONS"].split(","):
         return []
-    if "grp:alts_toggle" not in opts_match.group(1).split(","):
-        return []
-    layouts = " / ".join(layout_match.group(1).split(","))
+    layouts = " / ".join(xkb["XKB_DEFAULT_LAYOUT"].split(","))
     return [Row("Alt + Alt", f"Switch keyboard layout ({layouts})", None, (95, 0))]
 
 
@@ -436,7 +438,7 @@ def build_all_rows(sway_main_path, xremap_path):
             "\n".join(f"  {path}:{lineno}: {line.strip()}" for path, lineno, line in missing))
     rows = rows_from_sway(variables, raw_binds)
     rows += load_xremap_rows(xremap_path)
-    rows += load_layout_row(sway_main_path)
+    rows += load_layout_row()
     rows.sort(key=lambda r: r.priority)
     return rows
 

@@ -176,6 +176,9 @@ hostname_actual="$(ssh_guest hostname)"
 timezone_actual="$(ssh_guest 'timedatectl show -p Timezone --value')"
 [[ "$timezone_actual" == UTC ]] || fail "timezone is '$timezone_actual', expected UTC"
 
+x11_layout="$(ssh_guest "sed -n 's/^[[:space:]]*Option[[:space:]]*\"XkbLayout\"[[:space:]]*\"\(.*\)\"[[:space:]]*\$/\1/p' /etc/X11/xorg.conf.d/00-keyboard.conf")"
+[[ "$x11_layout" == us ]] || fail "installed /etc/X11/xorg.conf.d/00-keyboard.conf has XkbLayout '$x11_layout', expected us"
+
 for leaked in /root/anaconda-ks.cfg /root/original-ks.cfg /var/log/anaconda; do
   ssh_guest "sudo test ! -e $leaked" || fail "$leaked exists on the installed system and may contain the LUKS passphrase in plaintext (disable it via the vekrona anaconda.conf drop-in)"
 done
@@ -231,6 +234,9 @@ fi
 log "checking greetd is active"
 ssh_guest 'systemctl is-active --quiet greetd' || fail "greetd is not active"
 
+log "checking the desktop session keymap"
+xkb_env_layout="$(ssh_guest "bash -lc vekrona-xkb-env" | sed -n "s/^XKB_DEFAULT_LAYOUT='\(.*\)'\$/\1/p")"
+[[ "$xkb_env_layout" == us ]] || fail "vekrona-xkb-env reports layout '$xkb_env_layout' for the vekrona user, expected us"
 log "running $REPO_DIR/vm/session-check.sh"
 ssh_guest "bash '$REPO_DIR/vm/session-check.sh'" || fail "session-check.sh failed"
 

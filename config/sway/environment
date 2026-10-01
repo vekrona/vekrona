@@ -3,3 +3,23 @@ SWAY_EXTRA_ARGS="--unsupported-gpu"
 if [ "$(systemd-detect-virt --vm)" = kvm ]; then
   WLR_NO_HARDWARE_CURSORS=1
 fi
+vekrona_xkb_environment() {
+  xkb_tool="$(command -v vekrona-xkb-env || echo "$HOME/.local/bin/vekrona-xkb-env")"
+  xkb_err="$(mktemp)"
+  if [ -x "$xkb_tool" ] && xkb_env="$("$xkb_tool" 2>"$xkb_err")"; then
+    eval "$xkb_env"
+  else
+    echo "falling back to layout us, because $xkb_tool is missing or failed" >> "$xkb_err"
+    XKB_DEFAULT_LAYOUT=us
+    XKB_DEFAULT_VARIANT=
+    XKB_DEFAULT_MODEL=
+    XKB_DEFAULT_OPTIONS=shift:both_capslock_cancel
+  fi
+  if [ -s "$xkb_err" ]; then
+    logger -p user.err -t vekrona-xkb-env < "$xkb_err"
+  fi
+  rm -f "$xkb_err"
+  unset xkb_tool xkb_err xkb_env
+}
+vekrona_xkb_environment
+unset -f vekrona_xkb_environment
