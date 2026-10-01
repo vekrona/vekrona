@@ -36,6 +36,14 @@ MESSAGE_ID_UNIT_PROCESS_EXITED = "98e322203f7a4ed290d09fe03c09fe15"
 MESSAGE_ID_KERNEL_OOM = "fe6faa94e7774663a0da52717891d8ef"
 MESSAGE_ID_OOMD_KILL = "d989611b15e44c9dbf31e3c81256e4ed"
 
+SYSTEMD_EXE = "/usr/lib/systemd/systemd"
+COREDUMP_EXE = "/usr/lib/systemd/systemd-coredump"
+UNIT_NAME_RE = re.compile(
+    r"[A-Za-z0-9:_.\\@][A-Za-z0-9:_.\\@-]{0,254}"
+    r"\.(service|socket|timer|mount|automount|swap|target|path|slice|scope)")
+PID_RE = re.compile(r"[0-9]{1,10}")
+REPORT_SOURCES = ("vekrona", "manual")
+
 JOURNAL_SOCKET_PATH = "/run/systemd/journal/socket"
 
 
@@ -336,6 +344,68 @@ def unit_failure_detail(unit, user_flag):
     return " / ".join(chosen)[:300]
 
 
+def from_system_manager(entry):
+    return (field_str(entry.get("_PID")) == "1"
+            and field_str(entry.get("_UID")) == "0"
+            and field_str(entry.get("_EXE")) == SYSTEMD_EXE)
+
+
+def from_own_user_manager(entry):
+    uid = str(os.getuid())
+    return (field_str(entry.get("_UID")) == uid
+            and field_str(entry.get("_EXE")) == SYSTEMD_EXE
+            and field_str(entry.get("_SYSTEMD_UNIT")) == f"user@{uid}.service")
+
+
+def from_coredump_handler(entry):
+    return (field_str(entry.get("_EXE")) == COREDUMP_EXE
+            and field_str(entry.get("_SYSTEMD_UNIT")).startswith("systemd-coredump@"))
+
+
+def trusted_unit(entry):
+    if from_system_manager(entry):
+        unit, is_user_unit = field_str(entry.get("UNIT")), False
+    elif from_own_user_manager(entry):
+        unit, is_user_unit = field_str(entry.get("USER_UNIT")), True
+    else:
+        return None
+    if not UNIT_NAME_RE.fullmatch(unit):
+        return None
+    return unit, is_user_unit
+
+
+def classify_coredump(entry):
+    pid = field_str(entry.get("COREDUMP_PID"))
+    if not from_coredump_handler(entry) or not PID_RE.fullmatch(pid):
+        return None
+    comm = field_str(entry.get("COREDUMP_COMM"))
+    exe = field_str(entry.get("COREDUMP_EXE"))
+    signal_name = field_str(entry.get("COREDUMP_SIGNAL_NAME"))
+    title = f"{comm or exe or 'a process'} crashed" + (f" ({signal_name})" if signal_name else "")
+    return {
+        "source": "coredump", "title": title, "summary": f"exe={exe} pid={pid}",
+        "identifier": exe or comm, "unit": "", "exe": exe, "pid": pid,
+    }
+
+
+def classify_unit_failure(entry):
+    unit_and_scope = trusted_unit(entry)
+    if unit_and_scope is None:
+        return None
+    unit, is_user_unit = unit_and_scope
+    result = field_str(entry.get("UNIT_RESULT"))
+    detail = unit_failure_detail(unit, ["--user"] if is_user_unit else [])
+    if detail and result:
+        summary = f"{detail} (result={result})"
+    else:
+        summary = detail or (f"result={result}" if result else field_str(entry.get("MESSAGE")))
+    return {
+        "source": "unit", "title": f"{unit} failed", "summary": summary,
+        "identifier": unit, "unit": unit, "exe": "", "pid": "",
+        "is_user_unit": is_user_unit,
+    }
+
+
 def classify(entry):
     message_id = entry.get("MESSAGE_ID")
     message = field_str(entry.get("MESSAGE"))
@@ -349,33 +419,14 @@ def classify(entry):
         return None
 
     if message_id == MESSAGE_ID_COREDUMP:
-        comm = field_str(entry.get("COREDUMP_COMM"))
-        exe = field_str(entry.get("COREDUMP_EXE"))
-        pid = field_str(entry.get("COREDUMP_PID"))
-        signal_name = field_str(entry.get("COREDUMP_SIGNAL_NAME"))
-        title = f"{comm or exe or 'a process'} crashed" + (f" ({signal_name})" if signal_name else "")
-        summary = f"exe={exe} pid={pid}" if (exe or pid) else message
-        return {
-            "source": "coredump", "title": title, "summary": summary,
-            "identifier": exe or comm, "unit": "", "exe": exe, "pid": pid,
-        }
+        classified = classify_coredump(entry)
+        if classified:
+            return classified
 
     if message_id == MESSAGE_ID_UNIT_FAILED:
-        user_unit = field_str(entry.get("USER_UNIT"))
-        system_unit = field_str(entry.get("UNIT"))
-        unit = user_unit or system_unit
-        result = field_str(entry.get("UNIT_RESULT"))
-        title = f"{unit} failed" if unit else "a unit failed"
-        detail = unit_failure_detail(unit, ["--user"] if user_unit else []) if unit else ""
-        if detail and result:
-            summary = f"{detail} (result={result})"
-        else:
-            summary = detail or (f"result={result}" if result else message)
-        return {
-            "source": "unit", "title": title, "summary": summary,
-            "identifier": unit, "unit": unit, "exe": "", "pid": "",
-            "is_user_unit": bool(user_unit),
-        }
+        classified = classify_unit_failure(entry)
+        if classified:
+            return classified
 
     if message_id in (MESSAGE_ID_KERNEL_OOM, MESSAGE_ID_OOMD_KILL):
         title = "process killed by systemd-oomd" if message_id == MESSAGE_ID_OOMD_KILL \
@@ -389,11 +440,11 @@ def classify(entry):
         }
 
     if syslog_id == "vekrona" and entry.get("VEKRONA_TITLE") is not None:
-        source = field_str(entry.get("VEKRONA_SOURCE")) or "manual"
+        source = field_str(entry.get("VEKRONA_SOURCE"))
         title = field_str(entry.get("VEKRONA_TITLE")) or message
-        summary = field_str(entry.get("VEKRONA_SUMMARY"))
         return {
-            "source": source, "title": title, "summary": summary,
+            "source": source if source in REPORT_SOURCES else "manual", "title": title,
+            "summary": field_str(entry.get("VEKRONA_SUMMARY")),
             "identifier": title, "unit": "", "exe": "", "pid": field_str(entry.get("_PID")),
         }
 
@@ -409,40 +460,35 @@ def classify(entry):
     return None
 
 
+def capture_commands(classified):
+    source = classified["source"]
+    if source == "coredump":
+        return [["coredumpctl", "info", "--", classified["pid"]]]
+    if source == "unit":
+        user_flag = ["--user"] if classified.get("is_user_unit") else []
+        unit = classified["unit"]
+        return [["journalctl", *user_flag, "-u", unit, "-n", "200"],
+                ["systemctl", *user_flag, "status", "--", unit]]
+    pid = classified.get("pid")
+    identifier = classified.get("identifier")
+    if PID_RE.fullmatch(pid or ""):
+        return [["journalctl", "-n", "200", "-o", "short-iso", "--", f"_PID={pid}"]]
+    if identifier:
+        return [["journalctl", "-n", "200", "-o", "short-iso", "--", f"SYSLOG_IDENTIFIER={identifier}"]]
+    return [["journalctl", "-n", "100", "-o", "short-iso"]]
+
+
 def run_capture(cmd, timeout=15):
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, timeout=timeout)
         return f"$ {' '.join(cmd)}\n{result.stdout}"
-    except Exception as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         return f"$ {' '.join(cmd)}\n(failed: {exc})"
 
 
 def write_context(error_id, classified):
-    source = classified["source"]
-    parts = []
-    try:
-        if source == "coredump":
-            pid = classified.get("pid")
-            cmd = ["coredumpctl", "info", pid] if pid else ["coredumpctl", "info"]
-            parts.append(run_capture(cmd))
-        elif source == "unit":
-            unit = classified["unit"]
-            user_flag = ["--user"] if classified.get("is_user_unit") else []
-            parts.append(run_capture(["journalctl", *user_flag, "-u", unit, "-n", "200"]))
-            parts.append(run_capture(["systemctl", *user_flag, "status", unit]))
-        else:
-            pid = classified.get("pid")
-            identifier = classified.get("identifier")
-            if pid:
-                parts.append(run_capture(["journalctl", f"_PID={pid}", "-n", "200", "-o", "short-iso"]))
-            elif identifier:
-                parts.append(run_capture(
-                    ["journalctl", f"SYSLOG_IDENTIFIER={identifier}", "-n", "200", "-o", "short-iso"]))
-            else:
-                parts.append(run_capture(["journalctl", "-n", "100", "-o", "short-iso"]))
-    except Exception as exc:
-        parts.append(f"(failed to capture context: {exc})")
+    parts = [run_capture(cmd) for cmd in capture_commands(classified)]
     atomic_write(context_path(error_id), "\n\n".join(parts) + "\n")
 
 
