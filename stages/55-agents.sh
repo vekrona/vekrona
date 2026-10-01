@@ -4,14 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
-require_cmd rpm curl dnf5
+require_cmd rpm dnf5
 
+ensure_repo_key claude-code
+ensure_repo_key mise
 ensure_root_file "$ROOT/etc/yum.repos.d/claude-code.repo" /etc/yum.repos.d/claude-code.repo
 ensure_root_file "$ROOT/etc/yum.repos.d/mise.repo" /etc/yum.repos.d/mise.repo
 ensure_repo_enabled "$CLAUDE_CODE_REPO_ID" "$MISE_REPO_ID"
-
-ensure_gpg_key_imported "$CLAUDE_CODE_GPG_URL" "$CLAUDE_CODE_GPG_FINGERPRINT"
-ensure_gpg_key_imported "$MISE_GPG_URL" "$MISE_GPG_FINGERPRINT"
 
 ensure_pkg "${VEKRONA_AGENT_PKGS[@]}"
 

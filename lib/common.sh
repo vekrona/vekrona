@@ -232,13 +232,36 @@ ensure_user_in_group() {
 owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 dir_mode_is() { [[ "$(stat -c '%a' "$1" 2>/dev/null)" == "$2" ]]; }
 
-gpg_key_fingerprint_file() {
-  local file="$1" scratch_gnupg_home fp
+VEKRONA_REPO_KEY_DIR=/etc/pki/rpm-gpg
+
+# shellcheck disable=SC2034
+CLAUDE_CODE_REPO_ID="claude-code"
+# shellcheck disable=SC2034
+MISE_REPO_ID="mise-repo"
+
+declare -A VEKRONA_REPO_KEY_FINGERPRINTS=(
+  [claude-code]="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+  [mise]="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
+  [1password]="3FEF9748469ADBE15DA7CA80AC2D62742012EA22"
+)
+
+repo_key_name() { printf 'RPM-GPG-KEY-%s' "$1"; }
+
+key_file_primary_fingerprints() {
+  local file="$1" scratch_gnupg_home listing
   scratch_gnupg_home="$(mktemp -d)"
-  fp="$(gpg --homedir "$scratch_gnupg_home" --batch --with-colons --import-options show-only --dry-run --import "$file" 2>/dev/null \
-    | awk -F: '/^fpr:/{print $10; exit}')"
+  listing="$(gpg --homedir "$scratch_gnupg_home" --batch --with-colons --import-options show-only --import "$file" 2>&1)" \
+    || { rm -rf "$scratch_gnupg_home"; die "cannot read gpg key file $file: $listing"; }
   rm -rf "$scratch_gnupg_home"
-  printf '%s' "$fp"
+  awk -F: '/^pub:/{want=1; next} /^fpr:/&&want{print $10; want=0}' <<<"$listing"
+}
+
+assert_repo_key_file_pinned() {
+  local repo="$1" file="$2" found
+  [[ -v "VEKRONA_REPO_KEY_FINGERPRINTS[$repo]" ]] || die "no pinned gpg key fingerprint for repo: $repo"
+  local expected="${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]}"
+  found="$(key_file_primary_fingerprints "$file")"
+  [[ "$found" == "$expected" ]] || die "gpg key file for repo '$repo' ($file) must hold exactly one primary key with fingerprint $expected, found: ${found//$'\n'/ }; if the vendor rotated its key, verify the new fingerprint out of band, then update VEKRONA_REPO_KEY_FINGERPRINTS and etc/pki/rpm-gpg/$(repo_key_name "$repo") together"
 }
 
 gpg_pubkey_installed() {
@@ -247,40 +270,34 @@ gpg_pubkey_installed() {
   rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$fingerprint_lower"
 }
 
-ensure_gpg_key_imported() {
-  local url="$1" fingerprint="$2" fingerprint_lower got tmp
-  ensure_pkg gnupg2
-  fingerprint_lower="$(tr '[:upper:]' '[:lower:]' <<<"$fingerprint")"
-  gpg_pubkey_installed "$fingerprint_lower" && { log "gpg key already imported: $fingerprint"; return 0; }
-  tmp="$(mktemp)"
-  curl -fsSL "$url" -o "$tmp" || die "failed to download gpg key: $url"
-  got="$(gpg_key_fingerprint_file "$tmp")"
-  [[ -n "$got" ]] || { rm -f "$tmp"; die "could not determine gpg key fingerprint: $url"; }
-  [[ "$got" == "$fingerprint" ]] || { rm -f "$tmp"; die "gpg key fingerprint mismatch for $url: got $got, expected $fingerprint"; }
-  log "importing gpg key: $url"
-  root rpm --import "$tmp"
-  rm -f "$tmp"
-  gpg_pubkey_installed "$fingerprint_lower" || die "gpg key not imported: $fingerprint"
+repo_key_in_rpm_keyring() {
+  local repo="$1" fingerprint_lower
+  fingerprint_lower="$(tr '[:upper:]' '[:lower:]' <<<"${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]}")"
+  gpg_pubkey_installed "$fingerprint_lower"
 }
 
-# shellcheck disable=SC2034
-CLAUDE_CODE_REPO_ID="claude-code"
-# shellcheck disable=SC2034
-CLAUDE_CODE_GPG_URL="https://downloads.claude.ai/keys/claude-code.asc"
-# shellcheck disable=SC2034
-CLAUDE_CODE_GPG_FINGERPRINT="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+assert_repo_key_trusted() {
+  local repo="$1"
+  assert_repo_key_file_pinned "$repo" "$VEKRONA_REPO_KEY_DIR/$(repo_key_name "$repo")"
+  repo_key_in_rpm_keyring "$repo" || die "rpm keyring lacks the pinned gpg key for repo '$repo': ${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]}"
+}
 
-# shellcheck disable=SC2034
-MISE_REPO_ID="mise-repo"
-# shellcheck disable=SC2034
-MISE_GPG_URL="https://mise.jdx.dev/gpg-key.pub"
-# shellcheck disable=SC2034
-MISE_GPG_FINGERPRINT="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
-
-# shellcheck disable=SC2034
-ONEPASSWORD_GPG_URL="https://downloads.1password.com/linux/keys/1password.asc"
-# shellcheck disable=SC2034
-ONEPASSWORD_GPG_FINGERPRINT="3FEF9748469ADBE15DA7CA80AC2D62742012EA22"
+ensure_repo_key() {
+  local repo="$1" src dst
+  ensure_pkg gnupg2
+  src="$VEKRONA_ROOT/etc/pki/rpm-gpg/$(repo_key_name "$repo")"
+  dst="$VEKRONA_REPO_KEY_DIR/$(repo_key_name "$repo")"
+  assert_repo_key_file_pinned "$repo" "$src"
+  ensure_root_file "$src" "$dst"
+  assert_repo_key_file_pinned "$repo" "$dst"
+  if repo_key_in_rpm_keyring "$repo"; then
+    log "gpg key already imported for repo $repo"
+  else
+    log "importing gpg key for repo $repo"
+    root rpm --import "$dst"
+  fi
+  assert_repo_key_trusted "$repo"
+}
 
 # shellcheck disable=SC2034
 VEKRONA_AGENT_PKGS=(claude-code mise nodejs22-npm)

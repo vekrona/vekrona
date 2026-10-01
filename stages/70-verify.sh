@@ -58,7 +58,8 @@ if ran 00-repos; then
   check assert "repo enabled: rpmfusion-nonfree" repo_enabled rpmfusion-nonfree
   check assert "repo enabled: fedora-cisco-openh264" repo_enabled fedora-cisco-openh264
   check assert "repo enabled: 1password" repo_enabled 1password
-  check assert "gpg key imported: 1password" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$ONEPASSWORD_GPG_FINGERPRINT")"
+  check assert_repo_key_trusted 1password
+  check assert "/etc/yum.repos.d/1password.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" /etc/yum.repos.d/1password.repo
   for c in "${VEKRONA_COPRS[@]}"; do
     check assert "copr enabled: $c" copr_enabled "$c"
   done
@@ -362,8 +363,8 @@ if ran 55-agents; then
   check assert "repo enabled: $MISE_REPO_ID" repo_enabled "$MISE_REPO_ID"
   check assert "/etc/yum.repos.d/claude-code.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/claude-code.repo" /etc/yum.repos.d/claude-code.repo
   check assert "/etc/yum.repos.d/mise.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/mise.repo" /etc/yum.repos.d/mise.repo
-  check assert "gpg key imported: claude-code" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$CLAUDE_CODE_GPG_FINGERPRINT")"
-  check assert "gpg key imported: mise" gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$MISE_GPG_FINGERPRINT")"
+  check assert_repo_key_trusted claude-code
+  check assert_repo_key_trusted mise
   for p in "${VEKRONA_AGENT_PKGS[@]}"; do
     check assert "package installed: $p" pkg_installed "$p"
   done

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
-require_cmd rpm curl dnf5
+require_cmd rpm dnf5
 
 fedora_version="$(rpm -E %fedora)"
 
@@ -24,6 +24,6 @@ ensure_repo_enabled fedora-cisco-openh264
 
 ensure_copr "${VEKRONA_COPRS[@]}"
 
+ensure_repo_key 1password
 ensure_root_file "$ROOT/etc/yum.repos.d/1password.repo" /etc/yum.repos.d/1password.repo
-ensure_gpg_key_imported "$ONEPASSWORD_GPG_URL" "$ONEPASSWORD_GPG_FINGERPRINT"
 ensure_repo_enabled 1password

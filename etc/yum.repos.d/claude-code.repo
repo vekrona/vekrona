@@ -3,4 +3,4 @@ name=Claude Code
 baseurl=https://downloads.claude.ai/claude-code/rpm/stable
 enabled=1
 gpgcheck=1
-gpgkey=https://downloads.claude.ai/keys/claude-code.asc
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-claude-code
