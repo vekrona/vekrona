@@ -22,18 +22,14 @@ session_resolve_swaysock() {
   printf '%s' "$sock"
 }
 
-# Attaches to whatever live session is already running (this VM is shared
-# across test runs, and a human or another check may already be logged in
-# and watching it over virt-viewer: never start a second compositor, or
-# stop the live one, while that is the case). Exports SWAYSOCK on success.
 session_attach_existing() {
   pgrep -x sway >/dev/null || return 1
   local sock
   sock="$(session_resolve_swaysock)" || return 1
-  swaymsg -t get_version >/dev/null 2>&1 || return 1
-  [[ "$(systemctl --user is-active sway-session.target 2>/dev/null || true)" == active ]] || return 1
   SWAYSOCK="$sock"
   export SWAYSOCK
+  swaymsg -t get_version >/dev/null 2>&1 || return 1
+  [[ "$(systemctl --user is-active sway-session.target 2>/dev/null || true)" == active ]] || return 1
 }
 
 session_start_new() {
@@ -95,9 +91,6 @@ session_start_new() {
   : > "$SESSION_OWNED_MARKER"
 }
 
-# Idempotent: attaches to a session that is already up (another check's own
-# session_start_new, or a live login someone is watching), only starting a
-# new headless one when nothing is running at all.
 session_ensure_up() {
   if session_attach_existing; then
     echo "session-lib: attached to an already-running sway session" >&2
@@ -110,8 +103,6 @@ session_ensure_up() {
   session_start_new
 }
 
-# Only stops the session this test run itself started (session_start_new);
-# a session we merely attached to (session_attach_existing) is left alone.
 session_teardown() {
   if [[ -e "$SESSION_OWNED_MARKER" ]]; then
     systemctl --user stop sway-session.target >/dev/null 2>&1 || true
