@@ -408,7 +408,8 @@ def from_own_user_manager(entry):
 
 
 def from_coredump_handler(entry):
-    return (field_str(entry.get("_EXE")) == COREDUMP_EXE
+    # journald leaves _EXE out when the short-lived handler has exited before journald read /proc/<pid>/exe
+    return (field_str(entry.get("_EXE")) in (COREDUMP_EXE, "")
             and field_str(entry.get("_SYSTEMD_UNIT")).startswith("systemd-coredump@"))
 
 

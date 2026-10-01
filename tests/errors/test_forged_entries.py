@@ -49,6 +49,10 @@ class ForgedJournalEntriesTest(SandboxTestCase):
         self.assertEqual(self.external_calls_mentioning("--evil"), [])
         self.assertFalse([c for c in self.sandbox.external_calls() if c.startswith("coredumpctl")])
 
+    def test_a_coredump_whose_handler_exe_journald_could_not_read_is_still_recorded(self):
+        self.sandbox.watch([coredump_entry("1234", _EXE=None)])
+        self.assertEqual(self.sources_listed(), ["coredump"])
+
     def test_a_coredump_from_the_handler_with_a_non_numeric_pid_is_not_run(self):
         self.sandbox.watch([coredump_entry("--evil")])
         self.assertFalse([c for c in self.sandbox.external_calls() if c.startswith("coredumpctl")])
