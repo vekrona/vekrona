@@ -74,7 +74,7 @@ PluginComponent {
         Item {
             id: horizontalContent
             implicitWidth: icon.width
-            implicitHeight: root.widgetThickness - root.horizontalPadding * 2
+            implicitHeight: root.widgetThickness
 
             DankIcon {
                 id: icon
