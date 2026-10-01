@@ -59,13 +59,15 @@ for t in "${VEKRONA_AGENT_TOOLS[@]}"; do
 done
 echo "agents-check: mise lists all agent tools"
 
-json_policy_value() { jq -er "$2" "$1" || fail "$1 lacks $2"; }
-[[ "$(json_policy_value /etc/claude-code/managed-settings.json .forceLoginMethod)" == claudeai ]] \
-  || fail "claude managed settings do not force claudeai login"
-[[ "$(json_policy_value /etc/claude-code/managed-settings.json .env.DISABLE_AUTOUPDATER)" == 1 ]] \
-  || fail "claude managed settings do not disable the auto-updater"
-[[ "$(json_policy_value /etc/opencode/opencode.json .autoupdate)" == false ]] \
-  || fail "opencode config does not disable autoupdate"
+assert_json_value() {
+  local file="$1" filter="$2" expected="$3" actual
+  actual="$(jq -r "$filter | if . == null then error(\"missing\") else . end" "$file")" \
+    || fail "$file lacks $filter"
+  [[ "$actual" == "$expected" ]] || fail "$file: $filter is '$actual', expected '$expected'"
+}
+assert_json_value /etc/claude-code/managed-settings.json .forceLoginMethod claudeai
+assert_json_value /etc/claude-code/managed-settings.json .env.DISABLE_AUTOUPDATER 1
+assert_json_value /etc/opencode/opencode.json .autoupdate false
 grep -qxF 'allowed_login_methods = ["chatgpt"]' /etc/codex/requirements.toml \
   || fail "codex requirements do not restrict login to chatgpt"
 grep -qxF 'check_for_update_on_startup = false' /etc/codex/managed_config.toml \
