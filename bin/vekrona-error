@@ -635,15 +635,17 @@ def cmd_pick(args):
     ]
     theme_str = rofi_theme_str_or_die()
     result = subprocess.run(
-        ["rofi", "-dmenu", "-i", "-p", "Errors", "-format", "i", "-theme-str", theme_str],
+        ["rofi", "-dmenu", "-i", "-no-custom", "-p", "Errors", "-format", "i", "-theme-str", theme_str],
         input="\n".join(lines), capture_output=True, text=True,
     )
     if result.returncode == 1 or (result.returncode == 0 and not result.stdout.strip()):
         return
     if result.returncode != 0:
         die(f"rofi exited with status {result.returncode}: {(result.stderr or '').strip()}")
-    index = int(result.stdout.strip())
-    error_id = records[index]["id"]
+    selection = result.stdout.strip()
+    if not selection.isdigit() or int(selection) >= len(records):
+        die(f"rofi returned an unexpected selection: {selection!r}")
+    error_id = records[int(selection)]["id"]
     agent_bin = resolve_tool("vekrona-agent")
     if not agent_bin:
         die("vekrona-agent not found on PATH")
