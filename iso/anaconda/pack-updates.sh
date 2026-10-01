@@ -2,15 +2,20 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $(basename "$0") <out-updates.img>" >&2
+  echo "usage: $(basename "$0") <out-updates.img> | --check" >&2
   exit "${1:-2}"
 }
 
 [[ $# -eq 1 ]] || usage
 [[ "$1" != -h && "$1" != --help ]] || usage 0
-out_img="$(realpath -m "$1")"
 
 die() { echo "pack-updates: $*" >&2; exit 1; }
+
+for c in cpio rpm2cpio gzip dnf sha256sum git rsync; do
+  command -v "$c" >/dev/null 2>&1 || die "missing command: $c"
+done
+[[ "$1" != --check ]] || exit 0
+out_img="$(realpath -m "$1")"
 
 anaconda_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$anaconda_dir/../.." && pwd)"
@@ -19,9 +24,6 @@ bundle_list="$anaconda_dir/bundle.list"
 cache_dir="$anaconda_dir/.cache"
 fedora_release=44
 
-for c in cpio rpm2cpio gzip dnf sha256sum git rsync; do
-  command -v "$c" >/dev/null 2>&1 || die "missing command: $c"
-done
 [[ -d "$updates_root" ]] || die "missing anaconda updates tree: $updates_root"
 [[ -r "$bundle_list" ]] || die "missing bundle list: $bundle_list"
 

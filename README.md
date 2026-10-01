@@ -1209,6 +1209,9 @@ and tag:
   every variant. The account add-on's module holds no account data itself; its
   GUI spoke reads and writes the Users, Timezone, Network and Storage DBus
   modules directly, exactly as Anaconda's own hidden spokes would have.
+  `pack-updates.sh` needs `cpio rpm2cpio gzip dnf sha256sum git rsync` and
+  names the first missing one before it does anything; `pack-updates.sh
+  --check` does only that, and `iso/build.sh` runs it up front.
 - `iso/build.sh --netinst <iso> --out <iso>` refuses to run against a dirty
   working tree (the ISO embeds a `git clone` of HEAD, so uncommitted changes
   would silently be missing from it) — commit or stash first. It points the
@@ -1243,7 +1246,14 @@ and tag:
   already having free loop devices. `iso/Containerfile` plus `podman build
   -t vekrona-iso-builder -f iso/Containerfile .` and `sudo podman run --rm
   <the flags above> -v "$PWD:/src:Z" -w /src vekrona-iso-builder bash
-  iso/build.sh ...` reproduce this locally.
+  iso/build.sh ...` reproduce this locally. Building from a git worktree
+  needs one more mount: a worktree's `.git` is a pointer file to the main
+  repository's `.git` directory, which must exist at the same path inside the
+  container (`-v <main-checkout>/.git:<main-checkout>/.git:ro`); without it
+  `iso/build.sh` stops with "not a git repository", names the worktree and
+  prints that mount. The builder image from `iso/Containerfile` does not
+  contain `rsync`, which `pack-updates.sh` needs (see TODO.md), so build in an
+  image that has it.
 - The installed system runs `vekrona-firstboot.service` once on first boot:
   it runs `./install.sh` as the `vekrona` user (skipping `10-nvidia` when
   there is no NVIDIA GPU), then writes `/var/lib/vekrona/firstboot.done` or

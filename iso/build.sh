@@ -29,10 +29,14 @@ done
 [[ -f "$netinst" ]] || { echo "netinst iso not found: $netinst" >&2; exit 1; }
 [[ -e "$out" ]] && { echo "output already exists, refusing to overwrite: $out" >&2; exit 1; }
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 for c in mkksiso git xorriso; do
   command -v "$c" >/dev/null 2>&1 \
     || { echo "missing command: $c; run this on a Fedora 44 host/container with lorax installed (see iso/Containerfile)" >&2; exit 1; }
 done
+
+bash "$repo_root/iso/anaconda/pack-updates.sh" --check
 
 [[ $EUID -eq 0 ]] \
   || { echo "mkksiso needs root to rebuild the EFI boot image; run this as root (iso/Containerfile's image runs as root by default)" >&2; exit 1; }
@@ -51,10 +55,16 @@ done
 variant="release"
 [[ -n "$ssh_pubkey" ]] && variant="test"
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 git_repo() { git -c 'safe.directory=*' -C "$repo_root" "$@"; }
-git_repo rev-parse HEAD >/dev/null 2>&1 \
-  || { echo "not a git repository: $repo_root" >&2; exit 1; }
+if ! git_repo rev-parse HEAD >/dev/null 2>&1; then
+  if [[ -f "$repo_root/.git" ]]; then
+    main_git_dir="$(sed -n 's/^gitdir: \(.*\)\/worktrees\/.*$/\1/p' "$repo_root/.git")"
+    echo "not a git repository: $repo_root is a git worktree and its main repository's .git directory is not reachable; mount it at the same path, e.g. -v ${main_git_dir:-<main-checkout>/.git}:${main_git_dir:-<main-checkout>/.git}:ro" >&2
+  else
+    echo "not a git repository: $repo_root" >&2
+  fi
+  exit 1
+fi
 [[ -z "$(git_repo status --porcelain)" ]] \
   || { echo "uncommitted changes in $repo_root: the ISO embeds a clone of HEAD, so commit (or stash) first" >&2; exit 1; }
 origin_url="$(git_repo remote get-url origin)" \
