@@ -75,15 +75,8 @@ else
   bash "$repo_root/iso/kickstart/render.sh" release "$ks_file"
 fi
 
-updates_root="$repo_root/iso/anaconda/updates"
-[[ -d "$updates_root" ]] || { echo "missing anaconda updates tree: $updates_root" >&2; exit 1; }
 updates_img="$workdir/updates.img"
-(
-  cd "$updates_root"
-  find . ! -path . | LC_ALL=C sort \
-    | cpio --quiet -o -H newc --reproducible \
-    | gzip -n -9
-) > "$updates_img"
+bash "$repo_root/iso/anaconda/pack-updates.sh" "$updates_img"
 
 volid="VEKRONA-44"
 mkksiso_args=(-a "$payload_dir" -u "$updates_img" -V "$volid")

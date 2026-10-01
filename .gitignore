@@ -10,3 +10,7 @@ iso/*.iso
 iso/kickstart/vekrona-*.ks
 
 iso/.ssh/
+
+iso/dev/
+iso/anaconda/.cache/
+__pycache__/

@@ -51,34 +51,12 @@ s.close()
 }
 SSH_PORT="${VEKRONA_SSH_PORT:-$(free_port)}"
 
-find_ovmf() {
-  local pair code vars
-  local candidates=(
-    "/usr/share/edk2/ovmf/OVMF_CODE.fd:/usr/share/edk2/ovmf/OVMF_VARS.fd"
-    "/usr/share/edk2/ovmf/OVMF_CODE_4M.fd:/usr/share/edk2/ovmf/OVMF_VARS_4M.fd"
-    "/usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd"
-    "/usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd"
-    "/usr/share/edk2-ovmf/OVMF_CODE.fd:/usr/share/edk2-ovmf/OVMF_VARS.fd"
-  )
-  for pair in "${candidates[@]}"; do
-    code="${pair%%:*}"
-    vars="${pair##*:}"
-    if [[ -r "$code" && -r "$vars" ]]; then
-      echo "$code:$vars"
-      return 0
-    fi
-  done
-  return 1
-}
-
-ovmf_pair="$(find_ovmf)" || fail "could not find OVMF UEFI firmware (looked for OVMF_CODE*.fd + OVMF_VARS*.fd under /usr/share/edk2/ovmf, /usr/share/OVMF and /usr/share/edk2-ovmf); install edk2-ovmf (Fedora) or ovmf (Debian/Ubuntu)"
-OVMF_CODE="${ovmf_pair%%:*}"
-OVMF_VARS_SRC="${ovmf_pair##*:}"
+source "$ISO_DIR/lib-qemu.sh"
 
 WORKDIR="$(mktemp -d -t vekrona-qemu-test.XXXXXX)"
 DISK_IMG="$WORKDIR/disk.qcow2"
 VARS_COPY="$WORKDIR/OVMF_VARS.fd"
-cp "$OVMF_VARS_SRC" "$VARS_COPY"
+OVMF_CODE="$(init_ovmf "$VARS_COPY")" || fail "OVMF setup failed"
 
 LOG_DIR="${VEKRONA_QEMU_LOG_DIR:-$(mktemp -d -t vekrona-qemu-test-logs.XXXXXX)}"
 mkdir -p "$LOG_DIR"
