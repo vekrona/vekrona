@@ -233,19 +233,16 @@ owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 dir_mode_is() { [[ "$(stat -c '%a' "$1" 2>/dev/null)" == "$2" ]]; }
 
 gpg_key_fingerprint_file() {
-  # --dry-run --show-only still needs a writable GNUPGHOME to open a keybox in, so use a scratch one
-  # rather than the invoking user's own (possibly nonexistent) ~/.gnupg.
-  local file="$1" gnupg_home fp
-  gnupg_home="$(mktemp -d)"
-  fp="$(gpg --homedir "$gnupg_home" --batch --with-colons --import-options show-only --dry-run --import "$file" 2>/dev/null \
+  local file="$1" scratch_gnupg_home fp
+  scratch_gnupg_home="$(mktemp -d)"
+  fp="$(gpg --homedir "$scratch_gnupg_home" --batch --with-colons --import-options show-only --dry-run --import "$file" 2>/dev/null \
     | awk -F: '/^fpr:/{print $10; exit}')"
-  rm -rf "$gnupg_home"
+  rm -rf "$scratch_gnupg_home"
   printf '%s' "$fp"
 }
 
 gpg_pubkey_installed() {
-  # rpm on this Fedora release stores a gpg-pubkey package's full lowercase fingerprint as %{VERSION},
-  # not the classic 8-hex short key id, so that is what this checks against.
+  # rpm records a gpg-pubkey's full fingerprint as %{VERSION}, not the 8-hex short key id.
   local fingerprint_lower="$1"
   rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx "$fingerprint_lower"
 }
@@ -257,7 +254,6 @@ ensure_gpg_key_imported() {
   gpg_pubkey_installed "$fingerprint_lower" && { log "gpg key already imported: $fingerprint"; return 0; }
   tmp="$(mktemp)"
   curl -fsSL "$url" -o "$tmp" || die "failed to download gpg key: $url"
-  # Fingerprint the exact bytes we are about to import, not a second, separate download of the same URL.
   got="$(gpg_key_fingerprint_file "$tmp")"
   [[ -n "$got" ]] || { rm -f "$tmp"; die "could not determine gpg key fingerprint: $url"; }
   [[ "$got" == "$fingerprint" ]] || { rm -f "$tmp"; die "gpg key fingerprint mismatch for $url: got $got, expected $fingerprint"; }
