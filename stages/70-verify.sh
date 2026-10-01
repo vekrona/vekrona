@@ -374,8 +374,8 @@ if ran 55-agents; then
   for t in "${VEKRONA_AGENT_TOOLS[@]}"; do
     check assert "$t shim present" bash -c "[[ -x '$MISE_SYSTEM_DATA_DIR/shims/$t' ]]"
   done
-  check assert "$MISE_SYSTEM_DATA_DIR owned by root" owned_by "$MISE_SYSTEM_DATA_DIR" root
-  check assert "$MISE_SYSTEM_CONFIG_DIR owned by root" owned_by "$MISE_SYSTEM_CONFIG_DIR" root
+  check assert_tree_root_owned_not_writable "$MISE_SYSTEM_DATA_DIR"
+  check assert_tree_root_owned_not_writable "$MISE_SYSTEM_CONFIG_DIR"
   for name in claude "${VEKRONA_AGENT_TOOLS[@]}"; do
     warn_check "no user-local copy shadows $name on PATH" bash -c "[[ ! -e '$HOME/.local/bin/$name' ]]"
   done

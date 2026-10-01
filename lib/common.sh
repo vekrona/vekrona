@@ -325,6 +325,13 @@ mise_system() {
     mise "$@"
 }
 
+assert_tree_root_owned_not_writable() {
+  local dir="$1" offenders
+  offenders="$(root find "$dir" \( ! -user root -o \( ! -type l -perm /022 \) \) -print)" || die "cannot scan $dir"
+  [[ -z "$offenders" ]] || die "$dir has entries not owned by root or writable by group/other, first: $(head -n 5 <<<"$offenders" | tr '\n' ' ')"
+  log "ok: $dir is root-owned and not group/other-writable throughout"
+}
+
 VERSIONLOCK_FILE=/etc/dnf/versionlock.toml
 
 versionlock_has() { grep -qE "^name = \"$1\"" "$VERSIONLOCK_FILE" 2>/dev/null; }

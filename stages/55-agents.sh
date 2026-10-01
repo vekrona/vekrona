@@ -31,7 +31,7 @@ assert "claude resolves" bash -c "command -v claude >/dev/null"
 log "claude: $(claude --version)"
 
 for d in "$MISE_SYSTEM_DATA_DIR" "$MISE_SYSTEM_CONFIG_DIR"; do
-  assert "$d owned by root" owned_by "$d" root
+  assert_tree_root_owned_not_writable "$d"
   assert "$d not writable by $VEKRONA_USER" bash -c "! touch '$d/.vekrona-write-test' 2>/dev/null"
 done
 
