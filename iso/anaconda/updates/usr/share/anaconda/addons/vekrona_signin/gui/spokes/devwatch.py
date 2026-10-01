@@ -106,6 +106,7 @@ class DeviceWatcher:
                 log.warning("device watcher backend %s unavailable: %s", factory.__name__, error)
                 continue
             self._backend = backend
+            log.info("device watcher uses %s", factory.__name__)
             return
         log.warning("no device watcher backend is available; devices are not detected automatically")
 
