@@ -8,7 +8,6 @@ selinux --enforcing
 zerombr
 clearpart --all --initlabel
 autopart --type=btrfs
-bootloader --location=mbr
 
 network --bootproto=dhcp --hostname=@VM_NAME@
 
