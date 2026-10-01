@@ -58,7 +58,7 @@ def read_state(password_matches, *, wait_until_idle, storage, get_partitioning_p
 def applied_request(storage, get_partitioning_proxy):
     object_path = storage.AppliedPartitioning
     if not object_path:
-        raise SignInError("No partitioning has been applied; cannot take the LUKS passphrase.")
+        raise SignInError("No partitioning has been applied; cannot take the disk passphrase.")
     return PartitioningRequest.from_structure(get_partitioning_proxy(object_path).Request)
 
 

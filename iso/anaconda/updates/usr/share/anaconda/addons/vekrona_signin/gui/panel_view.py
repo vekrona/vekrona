@@ -109,19 +109,20 @@ def _password_hint(panel_input, devices):
 
 
 def _details_text(panel_input):
-    lines = []
+    blocks = []
     scan = panel_input.scan
     if scan is not None and not panel_input.scan_error:
         if scan.usb_seen:
-            lines.append(_(guidance.DETAILS_USB_SEEN))
-            lines.extend(f"  {device}" for device in scan.usb_seen)
+            devices = [_(guidance.DETAILS_USB_SEEN)]
+            devices.extend(f"  {device}" for device in scan.usb_seen)
+            blocks.append("\n".join(devices))
         else:
-            lines.append(_(guidance.DETAILS_NO_USB))
+            blocks.append(_(guidance.DETAILS_NO_USB))
         if scan.problem:
-            lines.append(_(guidance.DETAILS_PROBLEM).format(problem=scan.problem))
+            blocks.append(_(guidance.DETAILS_PROBLEM).format(problem=scan.problem))
     if panel_input.scan_error:
-        lines.append(_(guidance.DETAILS_PROBLEM).format(problem=panel_input.scan_error))
-    return "\n".join(lines)
+        blocks.append(_(guidance.DETAILS_PROBLEM).format(problem=panel_input.scan_error))
+    return "\n\n".join(blocks)
 
 
 def panel_view(kind, panel_input):

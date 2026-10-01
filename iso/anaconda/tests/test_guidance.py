@@ -15,6 +15,7 @@ from vekrona_signin.gui.spokes.guidance import (
     device_scan_hint_to_fp_text, finger_choices,
 )
 from vekrona_signin.core.device_scan import HintCode
+from vekrona_signin.gui.spokes import guidance
 from vekrona_signin.core.fprint import FINGERS
 from vekrona_signin.core.password_policy import PasswordState
 
@@ -85,6 +86,24 @@ class HubTileStatusTest(unittest.TestCase):
         for name, text in statuses.items():
             with self.subTest(name):
                 self.assertLessEqual(len(text), HUB_TILE_MAX_CHARS)
+
+
+class PlainLanguageTest(unittest.TestCase):
+    def test_jargon_acronyms_never_appear_in_screen_texts(self):
+        for name in dir(guidance):
+            value = getattr(guidance, name)
+            if name.isupper() and isinstance(value, str):
+                with self.subTest(name):
+                    self.assertNotIn("LUKS", value)
+                    self.assertNotIn("FIDO", value)
+
+    def test_the_pin_is_explained_where_the_steps_introduce_it(self):
+        self.assertIn("A PIN is a short code", KEY_STEPS)
+
+    def test_sudo_comes_with_its_plain_meaning(self):
+        for text in (KEY_USE, FP_USE):
+            with self.subTest(text):
+                self.assertIn("administrator actions (sudo)", text)
 
 
 class PasswordStateTest(unittest.TestCase):

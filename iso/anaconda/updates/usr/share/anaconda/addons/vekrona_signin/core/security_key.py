@@ -60,7 +60,7 @@ def scan_security_keys(
         hint = HintCode.USB_SEEN_BUT_UNUSABLE
     elif usb_seen:
         hint = HintCode.USB_SEEN_BUT_UNUSABLE
-        problem = f"{len(hidraw_paths)} HID nodes inspected; none is a FIDO security key."
+        problem = f"{len(hidraw_paths)} HID nodes inspected; none is a security key."
     else:
         hint = HintCode.NO_USB_DEVICE
     return DeviceScan.create(devices, problem, usb_seen, hint)

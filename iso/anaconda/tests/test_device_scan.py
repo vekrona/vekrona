@@ -105,7 +105,7 @@ class SecurityKeyScanTest(UsbFixtureCase):
         self.usb.add("1-3", idVendor="046d", idProduct="c52b", manufacturer="Logitech", product="Receiver")
         scan = self.scan(["/dev/hidraw0"], {"/dev/hidraw0": ValueError("not CTAP")})
         self.assertEqual(scan.hint_code, HintCode.USB_SEEN_BUT_UNUSABLE)
-        self.assertIn("none is a FIDO security key", scan.problem)
+        self.assertIn("none is a security key", scan.problem)
         self.assertEqual(scan.usb_seen, ["046d:c52b Logitech Receiver"])
 
     def test_permission_error_is_access_denied_and_names_the_node(self):

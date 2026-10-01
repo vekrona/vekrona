@@ -42,12 +42,21 @@ class EmptyResultsAreExplainedTest(unittest.TestCase):
     def test_usb_device_that_is_no_security_key(self):
         mouse = "046d:c077 Logitech USB Optical Mouse"
         view = panel_view(KEY_PANEL, ready_input(scan=scan(
-            usb_seen=[mouse], problem="2 HID nodes inspected; none is a FIDO security key.",
+            usb_seen=[mouse], problem="2 HID nodes inspected; none is a security key.",
             hint=HintCode.USB_SEEN_BUT_UNUSABLE,
         )))
         self.assertEqual(view.state_text, guidance.KEY_NONE_USB_SEEN)
         self.assertIn(mouse, view.details_text)
-        self.assertIn("none is a FIDO security key", view.details_text)
+        self.assertIn("none is a security key", view.details_text)
+
+    def test_details_separate_the_device_list_from_the_problem(self):
+        view = panel_view(KEY_PANEL, ready_input(scan=scan(
+            usb_seen=[YUBIKEY_USB], problem="2 HID nodes inspected.", hint=HintCode.USB_SEEN_BUT_UNUSABLE,
+        )))
+        self.assertEqual(
+            view.details_text,
+            f"{guidance.DETAILS_USB_SEEN}\n  {YUBIKEY_USB}\n\n{guidance.DETAILS_PROBLEM.format(problem='2 HID nodes inspected.')}",
+        )
 
     def test_missing_library_names_the_failure(self):
         view = panel_view(FINGERPRINT_PANEL, ready_input(scan=scan(
