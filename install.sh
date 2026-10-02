@@ -66,6 +66,10 @@ while [[ $# -gt 0 ]]; do
     *) selected+=("$(resolve_stage "$1")"); shift ;;
   esac
 done
+if [[ $list_only -eq 0 ]] && ! array_has 10-nvidia "${skip[@]+"${skip[@]}"}" \
+  && { [[ ${#selected[@]} -eq 0 ]] || array_has 10-nvidia "${selected[@]}"; }; then
+  warn_if_nvidia_stage_refused
+fi
 if [[ ${#selected[@]} -eq 0 ]]; then
   selected=("${DEFAULT_STAGES[@]}")
 else

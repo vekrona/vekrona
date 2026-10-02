@@ -43,7 +43,6 @@ not_contains() { [[ "$2" != *"$1"* ]]; }
 file_exists() { [[ -e "$1" ]]; }
 fprintd_sees_reader() { fprintd-list "$VEKRONA_USER" >/dev/null 2>&1; }
 file_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
-file_lacks_qsg_backend() { ! grep -q '^QSG_RHI_BACKEND=' "$1" 2>/dev/null; }
 dir_exists() { [[ -d "$1" ]]; }
 group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
 gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
@@ -121,17 +120,23 @@ if ran 10-nvidia; then
     warn_check "nvidia module is proprietary, not Open (reboot pending)" false
   fi
 
-  for arg in nvidia.NVreg_EnableGpuFirmware=0 rd.driver.blacklist=nouveau; do
-    if kernel_cmdline_has "$arg"; then
-      log "ok: kernel arg active: $arg"
-      ok_count=$((ok_count + 1))
-    elif grubby_has_arg "$arg"; then
-      warn "kernel arg configured but not active yet, reboot required: $arg"
-      warn_count=$((warn_count + 1))
-    else
-      die "kernel arg not configured: $arg"
-    fi
+  mapfile -t nvidia_args < <(nvidia_kernel_args)
+  for arg in "${nvidia_args[@]}"; do
+    state="$(kernel_arg_state "$arg")"
+    case "$state" in
+      active)
+        log "ok: kernel arg active: $arg"
+        ok_count=$((ok_count + 1)) ;;
+      pending)
+        warn "kernel arg configured but not active yet, reboot required: $arg"
+        warn_count=$((warn_count + 1)) ;;
+      missing) die "kernel arg not configured: $arg" ;;
+    esac
   done
+
+  check assert "nvidia module for kernel $(uname -r) is proprietary (license NVIDIA)" eq "$(nvidia_module_problem "$(uname -r)")" ""
+  check assert "initramfs for kernel $(uname -r) contains nvidia" initramfs_has_nvidia "$(uname -r)"
+  check assert "akmods@$(uname -r) regenerates the initramfs after its build" akmods_dropin_active "$(uname -r)"
 
   for u in nvidia-suspend nvidia-resume nvidia-hibernate; do
     check assert "$u enabled" unit_enabled "$u"
@@ -238,7 +243,7 @@ if ran 40-system; then
   check assert "logind inhibit-delay drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
   check assert "oomd drop-in present" file_exists /etc/systemd/oomd.conf.d/vekrona.conf
   check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
-  check assert "dGPU udev rule present iff discrete NVIDIA on a non-Mac" present_iff wants_dgpu_udev_rule file_exists /etc/udev/rules.d/70-vekrona-dgpu.rules
+  check assert "no stale dGPU udev rule from an earlier install" file_absent /etc/udev/rules.d/70-vekrona-dgpu.rules
   check assert "$VEKRONA_USER in input group" group_member "$VEKRONA_USER" input
   check assert "/dev/uinput exists" file_exists /dev/uinput
 
@@ -423,38 +428,10 @@ assert d.get('runDmsMatugenTemplates', True) is True
 assert d.get('matugenTemplateGhostty', True) is True
 "
 
-  gpu_env_file="$HOME/.config/environment.d/vekrona-gpu.conf"
-  dms_main_pid="$(systemctl --user show dms -p MainPID --value 2>/dev/null || true)"
-  qsg_declared_env="$(systemctl --user show dms -p Environment 2>/dev/null || true)"
-  qsg_manager_env="$(systemctl --user show-environment 2>/dev/null || true)"
-  dms_process_env=""
-  if [[ -n "$dms_main_pid" && "$dms_main_pid" != "0" ]]; then
-    dms_process_env="$(tr '\0' '\n' < "/proc/$dms_main_pid/environ" 2>/dev/null || true)"
-  fi
-
-  if [[ -e /dev/dri/vekrona-dgpu ]]; then
-    check assert "vekrona-gpu.conf present (dGPU device exists)" file_exists "$gpu_env_file"
-    check assert_file_contains "$gpu_env_file" '^QSG_RHI_BACKEND=vulkan$'
-    if [[ -n "$dms_main_pid" && "$dms_main_pid" != "0" ]]; then
-      warn_check "dms.service process has QSG_RHI_BACKEND=vulkan (warn, not fail: environment.d only takes effect for a new login; a process already running from before this stage ran can lag until reboot or re-login)" \
-        contains 'QSG_RHI_BACKEND=vulkan' "$dms_process_env"
-    else
-      log "dms.service not running, skipping its process environment check"
-    fi
-  else
-    check assert "vekrona-gpu.conf absent (no dGPU device)" file_absent "$gpu_env_file"
-    for f in "$HOME/.config/environment.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"; do
-      check assert "$f has no QSG_RHI_BACKEND" file_lacks_qsg_backend "$f"
-    done
-    check assert "dms.service declared Environment has no QSG_RHI_BACKEND" not_contains 'QSG_RHI_BACKEND' "$qsg_declared_env"
-    check assert "systemd --user manager environment has no QSG_RHI_BACKEND" not_contains 'QSG_RHI_BACKEND' "$qsg_manager_env"
-    if [[ -n "$dms_main_pid" && "$dms_main_pid" != "0" ]]; then
-      warn_check "dms.service process has no QSG_RHI_BACKEND (warn, not fail: environment.d only takes effect for a new login; a process already running from before this stage ran can lag until reboot or re-login)" \
-        not_contains 'QSG_RHI_BACKEND' "$dms_process_env"
-    else
-      log "dms.service not running, skipping its process environment check"
-    fi
-  fi
+  check assert "no stale vekrona-gpu.conf from an earlier install (the GPU is chosen at login by vekrona-gpu-env)" file_absent "$HOME/.config/environment.d/vekrona-gpu.conf"
+  check assert "vekrona-gpu-env runs" vekrona-gpu-env
+  check assert "dms.service declared Environment has no QSG_RHI_BACKEND (Vulkan deadlocks the lock screen)" not_contains 'QSG_RHI_BACKEND' "$(systemctl --user show dms -p Environment 2>/dev/null || true)"
+  check assert "systemd --user manager environment has no QSG_RHI_BACKEND (Vulkan deadlocks the lock screen)" not_contains 'QSG_RHI_BACKEND' "$(systemctl --user show-environment 2>/dev/null || true)"
 
   user_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"
   warn_check "$HOME/.local/bin in systemd user PATH" contains "$HOME/.local/bin" "$user_path"

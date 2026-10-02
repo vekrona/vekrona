@@ -11,23 +11,21 @@ ensure_symlink_tree "$VEKRONA_ROOT/config/sway" "$HOME/.config/sway"
 ensure_internal_panel_scale
 ensure_symlink "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$HOME/.config/environment.d/vekrona.conf"
 
-gpu_env_file="$HOME/.config/environment.d/vekrona-gpu.conf"
-if [[ -e /dev/dri/vekrona-dgpu ]]; then
-  gpu_env_content=$'WLR_DRM_DEVICES=/dev/dri/vekrona-dgpu\nQSG_RHI_BACKEND=vulkan'
-  if [[ -f "$gpu_env_file" && "$(cat "$gpu_env_file")" == "$gpu_env_content" ]]; then
-    log "up to date: $gpu_env_file"
-  else
-    log "writing: $gpu_env_file"
-    ensure_dir "$(dirname "$gpu_env_file")"
-    printf '%s\n' "$gpu_env_content" > "$gpu_env_file"
-    [[ "$(cat "$gpu_env_file")" == "$gpu_env_content" ]] || die "failed to write $gpu_env_file"
-  fi
-elif [[ -e "$gpu_env_file" ]]; then
-  log "removing: $gpu_env_file (/dev/dri/vekrona-dgpu absent)"
-  rm -f "$gpu_env_file"
-  [[ -e "$gpu_env_file" ]] && die "failed to remove $gpu_env_file"
+stale_gpu_env_file="$HOME/.config/environment.d/vekrona-gpu.conf"
+if [[ -e "$stale_gpu_env_file" || -L "$stale_gpu_env_file" ]]; then
+  log "removing: $stale_gpu_env_file (left by an earlier install; config/sway/environment now picks the GPU at login)"
+  rm -f "$stale_gpu_env_file"
+  [[ ! -e "$stale_gpu_env_file" ]] || die "failed to remove $stale_gpu_env_file"
+  # The running user manager still holds what that file set; a session started before the upgrade would keep it.
+  manager_env="$(systemctl --user show-environment)" || die "cannot read the systemd user manager environment"
+  for stale_gpu_var in QSG_RHI_BACKEND WLR_DRM_DEVICES; do
+    if grep -q "^$stale_gpu_var=" <<<"$manager_env"; then
+      log "unsetting $stale_gpu_var in the systemd user manager"
+      systemctl --user unset-environment "$stale_gpu_var" || die "failed to unset $stale_gpu_var in the systemd user manager"
+    fi
+  done
 else
-  log "no /dev/dri/vekrona-dgpu, $gpu_env_file absent (ok)"
+  log "absent: $stale_gpu_env_file"
 fi
 ensure_symlink "$VEKRONA_ROOT/config/xremap/config.yml" "$HOME/.config/xremap/config.yml"
 ensure_symlink "$VEKRONA_ROOT/config/ghostty/config" "$HOME/.config/ghostty/config"

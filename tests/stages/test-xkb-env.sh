@@ -83,10 +83,17 @@ XKB_DEFAULT_OPTIONS='grp_led:scroll,shift:both_capslock_cancel,grp:alts_toggle'"
 stubs="$scratch/stubs"
 mkdir -p "$stubs"
 printf '#!/bin/sh\ncat >> "%s/logged"\n' "$scratch" > "$stubs/logger"
-chmod +x "$stubs/logger"
+printf '#!/bin/sh\necho none\n' > "$stubs/systemd-detect-virt"
+printf '#!/bin/sh\n' > "$stubs/vekrona-gpu-env"
+chmod +x "$stubs/logger" "$stubs/systemd-detect-virt" "$stubs/vekrona-gpu-env"
+# The session file may reach only these host tools (resolved now, so hosts without /usr/bin and /bin work too).
+for tool_name in sh bash env cat mktemp rm grep sed tail; do
+  ln -s "$(command -v "$tool_name")" "$stubs/$tool_name"
+done
 
 session_environment() {
-  env -i PATH="$stubs:/usr/bin:/bin" HOME="$scratch/home" VEKRONA_XKB_CONF="$scratch/00-keyboard.conf" \
+  # shellcheck disable=SC2016 # $1 expands in the inner sh
+  env -i PATH="$stubs" HOME="$scratch/home" VEKRONA_XKB_CONF="$scratch/00-keyboard.conf" \
     sh -c 'set -o allexport; . "$1/config/sway/environment"; set +o allexport; env' sh "$ROOT"
 }
 
@@ -110,3 +117,19 @@ env_dump="$(session_environment)" || die "a missing tool must not stop the sessi
 grep -qx 'XKB_DEFAULT_LAYOUT=us' <<<"$env_dump" || die "missing tool must fall back to us"
 grep -q "missing or failed" "$scratch/logged" || die "the missing tool was not logged"
 log "ok: missing tool falls back to us and is logged"
+
+rm -f "$scratch/logged"
+printf '#!/bin/sh\necho "export WLR_DRM_DEVICES=/dev/dri/card1"\n' > "$stubs/vekrona-gpu-env"
+write_conf "us" "" ""
+ln -sf "$tool" "$stubs/vekrona-xkb-env"
+env_dump="$(session_environment)" || die "sourcing config/sway/environment failed"
+grep -qx 'WLR_DRM_DEVICES=/dev/dri/card1' <<<"$env_dump" || die "the GPU choice did not reach the environment"
+[[ ! -e "$scratch/logged" ]] || die "a healthy GPU tool must not log: $(cat "$scratch/logged")"
+log "ok: GPU choice from vekrona-gpu-env reaches the environment"
+
+rm -f "$stubs/vekrona-gpu-env"
+env_dump="$(session_environment)" || die "a missing GPU tool must not stop the session environment"
+grep -qx 'XKB_DEFAULT_LAYOUT=us' <<<"$env_dump" || die "the session environment did not complete after a missing GPU tool"
+if grep -q '^WLR_DRM_DEVICES=' <<<"$env_dump"; then die "a missing GPU tool must not set WLR_DRM_DEVICES"; fi
+grep -q "missing or failed" "$scratch/logged" || die "the missing GPU tool was not logged"
+log "ok: missing GPU tool leaves the choice to wlroots and is logged"

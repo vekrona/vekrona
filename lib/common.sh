@@ -253,6 +253,15 @@ pci_display_vendors() {
   return 0
 }
 
+pci_display_ids() {
+  local dev
+  for dev in "$(vekrona_sysfs)"/bus/pci/devices/*/; do
+    [[ -r "$dev/vendor" && -r "$dev/device" && -r "$dev/class" ]] || continue
+    [[ "$(<"$dev/class")" == 0x03* ]] && printf '%s:%s\n' "$(<"$dev/vendor")" "$(<"$dev/device")"
+  done
+  return 0
+}
+
 dmi_field() { cat "$(vekrona_sysfs)/class/dmi/id/$1" 2>/dev/null || true; }
 
 has_nvidia_gpu() {
@@ -277,7 +286,70 @@ is_laptop() {
   case "$(dmi_field chassis_type)" in 8|9|10|14) return 0 ;; *) return 1 ;; esac
 }
 
-wants_nvidia_stage() { has_nvidia_gpu && ! is_apple_mac; }
+# The proprietary 615 module drives Turing..Ada only: pre-Turing (Maxwell, Pascal, Volta) was dropped after the 580
+# branch, and Blackwell needs the open module with GSP, which this setup turns off.
+NVIDIA_FIRST_SUPPORTED_ID=0x1e00
+NVIDIA_FIRST_UNSUPPORTED_ID=0x2900
+AKMODS_PUBLIC_KEY=/etc/pki/akmods/certs/public_key.der
+
+# Prints "10de:XXXX" for every NVIDIA display device outside the supported range, or with a malformed ID.
+unsupported_nvidia_ids() {
+  local id device
+  while read -r id; do
+    [[ "${id%%:*}" == 0x10de ]] || continue
+    device="${id##*:}"
+    if [[ "$device" =~ ^0x[0-9a-fA-F]{4}$ ]] \
+      && ((device >= NVIDIA_FIRST_SUPPORTED_ID && device < NVIDIA_FIRST_UNSUPPORTED_ID)); then continue; fi
+    printf '10de:%s\n' "${device#0x}"
+  done < <(pci_display_ids)
+}
+
+# Prints why akmods modules would not load under Secure Boot, or why that cannot be verified; nothing when fine.
+secure_boot_problem() {
+  local state sb_state_ok enrolled key="${VEKRONA_SYSFS_ROOT:-}$AKMODS_PUBLIC_KEY"
+  [[ -d "$(vekrona_sysfs)/firmware/efi" ]] || return 0 # booted without UEFI: no Secure Boot
+  command -v mokutil >/dev/null || { echo "mokutil is not installed, cannot verify Secure Boot (run: sudo dnf install mokutil, then rerun install.sh)"; return 0; }
+  state="$(mokutil --sb-state 2>&1)" && sb_state_ok=1 || sb_state_ok=0 # firmware without Secure Boot support answers on stderr and exits non-zero
+  case "$state" in
+    *"SecureBoot disabled"*|*"doesn't support Secure Boot"*) return 0 ;;
+  esac
+  [[ "$sb_state_ok" == 1 ]] || { echo "mokutil --sb-state failed ($state), cannot verify Secure Boot"; return 0; }
+  case "$state" in
+    *"SecureBoot enabled"*) ;;
+    *) echo "unexpected mokutil --sb-state output ($state), cannot verify Secure Boot"; return 0 ;;
+  esac
+  if [[ -e "$key" ]]; then
+    enrolled="$(mokutil --test-key "$key" 2>&1 || true)" # judged by its output: it exits non-zero when not enrolled
+  else
+    enrolled="is not enrolled"
+  fi
+  case "$enrolled" in
+    *"is already enrolled"*) ;;
+    *"is not enrolled"*) echo "Secure Boot is enabled and the akmods key $AKMODS_PUBLIC_KEY is not enrolled, so a built nvidia module would not load" ;;
+    *) echo "unexpected mokutil --test-key output ($enrolled), cannot verify the akmods key" ;;
+  esac
+}
+
+# Prints why stage 10-nvidia must not run on a non-Mac with an NVIDIA GPU; nothing when it may.
+# RPM Fusion's xorg-x11-drv-nvidia %posttrans blacklists nouveau on install, so this decides before any package.
+nvidia_stage_refusal() {
+  local ids
+  ids="$(unsupported_nvidia_ids | paste -sd' ')"
+  if [[ -n "$ids" ]]; then
+    echo "NVIDIA GPU $ids is outside the supported range $NVIDIA_FIRST_SUPPORTED_ID-$NVIDIA_FIRST_UNSUPPORTED_ID (exclusive)"
+  else
+    secure_boot_problem
+  fi
+}
+
+wants_nvidia_stage() { has_nvidia_gpu && ! is_apple_mac && [[ -z "$(nvidia_stage_refusal)" ]]; }
+
+warn_if_nvidia_stage_refused() {
+  local reason
+  has_nvidia_gpu && ! is_apple_mac || return 0
+  reason="$(nvidia_stage_refusal)"
+  [[ -z "$reason" ]] || warn "stage 10-nvidia skipped: $reason; keeping nouveau"
+}
 
 stage_applies() {
   case "$1" in
@@ -286,8 +358,6 @@ stage_applies() {
     *) return 0 ;;
   esac
 }
-
-wants_dgpu_udev_rule() { wants_nvidia_stage; }
 
 wants_usb_autosuspend_dropin() { ! is_laptop; }
 
@@ -544,24 +614,90 @@ versionlock_installed() {
   done
 }
 
-kernel_cmdline_has() { grep -qw -- "$1" /proc/cmdline; }
+# Exact whole-token lookup in a file in kernel command line format.
+cmdline_file_has() {
+  local file="$1" arg="$2" words w
+  [[ -r "$file" ]] || die "cannot read kernel command line file: $file"
+  read -ra words < "$file" || true
+  for w in "${words[@]}"; do [[ "$w" == "$arg" ]] && return 0; done
+  return 1
+}
+
+kernel_cmdline_has() { cmdline_file_has "${VEKRONA_SYSFS_ROOT:-}/proc/cmdline" "$1"; }
 
 grubby_has_arg() {
-  local arg="$1"
-  root grubby --info=ALL | awk -v a="$arg" '
+  local arg="$1" info
+  info="$(root grubby --info=ALL)" || die "grubby --info=ALL failed"
+  awk -v a="$arg" '
     /^args=/ { n=split($0, w, /[ "]/); for (i=1;i<=n;i++) if (w[i]==a) found=1 }
     END { exit !found }
-  '
+  ' <<<"$info"
+}
+
+# Every kernel arg stage 10 ensures and 70-verify checks, one per line; the blacklist spelling is RPM Fusion's own.
+# pcie_aspm=off stays on desktops only: it costs laptops battery.
+nvidia_kernel_args() {
+  printf '%s\n' nvidia.NVreg_EnableGpuFirmware=0
+  is_laptop || printf '%s\n' pcie_aspm=off
+  printf '%s\n' 'rd.driver.blacklist=nouveau,nova_core' 'modprobe.blacklist=nouveau,nova_core'
+}
+
+# Prints active (on the running cmdline), pending (in grubby, needs a reboot) or missing.
+kernel_arg_state() {
+  if kernel_cmdline_has "$1"; then echo active
+  elif grubby_has_arg "$1"; then echo pending
+  else echo missing
+  fi
+}
+
+nvidia_module_license() { modinfo -k "$1" -F license nvidia 2>/dev/null || true; }
+
+# Prints what is wrong with the kernel's nvidia module (the proprietary one has license NVIDIA); nothing when fine.
+nvidia_module_problem() {
+  local license
+  license="$(nvidia_module_license "$1")"
+  if [[ -z "$license" ]]; then echo "nvidia module missing or unreadable for $1 (license '')"
+  elif [[ "$license" != NVIDIA ]]; then echo "nvidia module for $1 has license '$license', expected NVIDIA"
+  fi
+}
+
+DRACUT_NVIDIA_CONF=/etc/dracut.conf.d/99-nvidia-dracut.conf
+
+initramfs_path() { printf '%s/boot/initramfs-%s.img' "${VEKRONA_SYSFS_ROOT:-}" "$1"; }
+
+initramfs_has_nvidia() {
+  local img listing
+  img="$(initramfs_path "$1")"
+  listing="$(root lsinitrd "$img")" || die "lsinitrd failed for $img"
+  grep -qE '/nvidia\.ko(\.[a-z0-9]+)?$' <<<"$listing"
+}
+
+# True when the initramfs is absent, lacks nvidia, or predates the module or the dracut config that adds it.
+initramfs_needs_nvidia_regen() {
+  local img module
+  img="$(initramfs_path "$1")"
+  [[ -e "$img" ]] || return 0
+  module="$(modinfo -k "$1" -n nvidia)" || die "nvidia module missing for $1"
+  [[ "$img" -ot "$module" || "$img" -ot "${VEKRONA_SYSFS_ROOT:-}$DRACUT_NVIDIA_CONF" ]] && return 0
+  initramfs_has_nvidia "$1" && return 1
+  return 0
+}
+
+# akmods@<kver> (started by kernel-install's akmods hook) must regenerate that kernel's initramfs once the module exists.
+akmods_dropin_active() {
+  local unit
+  unit="$(systemctl cat "akmods@$1.service")" || die "cannot read unit akmods@$1.service"
+  grep -qxF 'ExecStartPost=/usr/bin/dracut -f --kver %i' <<<"$unit"
 }
 
 ensure_kernel_arg() {
-  local arg
+  local arg file="${VEKRONA_SYSFS_ROOT:-}/etc/kernel/cmdline"
   for arg in "$@"; do
-    if grubby_has_arg "$arg" && grep -qw -- "$arg" /etc/kernel/cmdline 2>/dev/null; then log "kernel arg present: $arg"; continue; fi
+    if grubby_has_arg "$arg" && [[ -e "$file" ]] && cmdline_file_has "$file" "$arg"; then log "kernel arg present: $arg"; continue; fi
     log "adding kernel arg: $arg"
     root grubby --update-kernel=ALL --args="$arg"
     grubby_has_arg "$arg" || die "kernel arg not applied by grubby: $arg"
-    grep -qw -- "$arg" /etc/kernel/cmdline || die "kernel arg not in /etc/kernel/cmdline: $arg"
+    cmdline_file_has "$file" "$arg" || die "kernel arg not in /etc/kernel/cmdline: $arg"
   done
 }
 

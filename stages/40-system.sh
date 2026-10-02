@@ -46,23 +46,9 @@ root modprobe uinput
 assert "uinput module loaded" grep -q '^uinput ' /proc/modules
 assert "xremap udev rule installed" test -f /usr/lib/udev/rules.d/00-xremap-input.rules
 
+ensure_root_file_absent /etc/udev/rules.d/70-vekrona-dgpu.rules
 root udevadm control --reload
 root udevadm trigger --settle --sysname-match=uinput
-
-if wants_dgpu_udev_rule; then
-  ensure_root_file "$VEKRONA_ROOT/etc/udev/rules.d/70-vekrona-dgpu.rules" /etc/udev/rules.d/70-vekrona-dgpu.rules
-  root udevadm control --reload
-  root udevadm trigger --settle --subsystem-match=drm
-
-  if [[ -e /dev/dri/vekrona-dgpu ]]; then
-    log "ok: /dev/dri/vekrona-dgpu exists"
-  else
-    log "note: no /dev/dri/vekrona-dgpu (no matching DRM device at PCI 0000:01:00.0 or nvidia not loaded)"
-  fi
-else
-  ensure_root_file_absent /etc/udev/rules.d/70-vekrona-dgpu.rules
-  root udevadm control --reload
-fi
 
 root systemctl daemon-reload
 

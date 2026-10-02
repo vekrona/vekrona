@@ -39,6 +39,9 @@ cuda_driver_installed() {
   return 1
 }
 
+# RPM Fusion's akmod builds the Open module for Turing+ GPUs unless this macro turns its detection off.
+ensure_root_file "$ROOT/etc/rpm/macros.nvidia-kmod" /etc/rpm/macros.nvidia-kmod
+
 REMOVE_GLOBS=(cuda-drivers 'nvidia-driver*' kmod-nvidia-latest-dkms nvidia-kmod-common 'libnvidia-*' nvidia-libXNVCtrl nvidia-modprobe nvidia-persistenced nvidia-settings)
 INSTALL_PKGS=(akmod-nvidia xorg-x11-drv-nvidia-cuda)
 
@@ -64,22 +67,54 @@ if pkg_installed cuda-toolkit; then
   root dnf upgrade -y cuda-toolkit
 fi
 
-build_akmods_for_target_kernel
+require_cmd akmods dracut lsinitrd flock
 
-nvidia_version="$(modinfo -F version nvidia)"
+# akmod-nvidia's posttrans starts a background akmods build; every akmods run holds this lock, so wait for it
+# instead of queueing a redundant rebuild behind it.
+AKMODS_LOCK=/run/akmods/akmods.lock
+AKMODS_LOCK_TIMEOUT_STATUS=1 # flock -w exits 1 on timeout, so any other status is a different failure
+root install -d -m 0755 "$(dirname "$AKMODS_LOCK")"
+lock_status=0
+root flock -w 900 "$AKMODS_LOCK" true || lock_status=$?
+case "$lock_status" in
+  0) ;;
+  "$AKMODS_LOCK_TIMEOUT_STATUS") die "timed out after 900 s waiting for a running akmods build (lock $AKMODS_LOCK)" ;;
+  *) die "flock on $AKMODS_LOCK failed with status $lock_status" ;;
+esac
+
+if [[ "$(nvidia_module_license "$target_kver")" == NVIDIA ]]; then
+  log "ok: proprietary nvidia module already built for $target_kver"
+else
+  log "building the proprietary nvidia module for $target_kver"
+  root akmods --rebuild --kernels "$target_kver" || die "akmods failed, see /var/log/akmods/akmods.log"
+fi
+
+nvidia_problem="$(nvidia_module_problem "$target_kver")"
+[[ -z "$nvidia_problem" ]] || die "$nvidia_problem; see /var/log/akmods/akmods.log"
+log "ok: nvidia module for $target_kver is proprietary (license NVIDIA)"
+
+nvidia_version="$(modinfo -k "$target_kver" -F version nvidia)"
 [[ "${nvidia_version%%.*}" -ge 615 ]] || die "unexpected nvidia module version: $nvidia_version (expected >= 615)"
 log "ok: nvidia module version $nvidia_version"
 
-modinfo -k "$target_kver" nvidia >/dev/null 2>&1 || die "nvidia module missing for kernel $target_kver"
-log "ok: nvidia module present for kernel $target_kver"
+# RPM Fusion's dracut config omits nvidia from the initramfs; without it the LUKS prompt and the greeter have no display.
+ensure_root_file "$ROOT/etc/dracut.conf.d/99-nvidia-dracut.conf" "$DRACUT_NVIDIA_CONF"
 
-ensure_kernel_arg nvidia.NVreg_EnableGpuFirmware=0 pcie_aspm=off
+# New kernels get their initramfs from kernel-install before the asynchronous akmods@<kver> build exists.
+ensure_root_file "$ROOT/etc/systemd/system/akmods@.service.d/vekrona-dracut.conf" /etc/systemd/system/akmods@.service.d/vekrona-dracut.conf
+root systemctl daemon-reload
+akmods_dropin_active "$target_kver" || die "akmods@$target_kver.service does not regenerate the initramfs after its build"
 
-if grubby_has_arg "rd.driver.blacklist=nouveau"; then
-  log "ok: nouveau blacklisted via grubby"
+if initramfs_needs_nvidia_regen "$target_kver"; then
+  log "regenerating initramfs for $target_kver"
+  root dracut -f --kver "$target_kver"
+  initramfs_has_nvidia "$target_kver" || die "initramfs for $target_kver still lacks nvidia after dracut"
 else
-  ensure_kernel_arg "rd.driver.blacklist=nouveau,nova_core" "modprobe.blacklist=nouveau,nova_core"
+  log "ok: initramfs for $target_kver contains nvidia and is newer than the module and its config"
 fi
+
+mapfile -t kernel_args < <(nvidia_kernel_args)
+ensure_kernel_arg "${kernel_args[@]}"
 
 modprobe_option_active() {
   local active
@@ -101,11 +136,9 @@ pkg_installed akmod-nvidia && lock_pkgs+=(akmod-nvidia)
 while IFS= read -r p; do [[ -n "$p" ]] && lock_pkgs+=("$p"); done < <(rpm -qa --qf '%{NAME}\n' 'xorg-x11-drv-nvidia*' | sort -u)
 [[ ${#lock_pkgs[@]} -gt 0 ]] && versionlock_installed "${lock_pkgs[@]}"
 
-missing_kernels=()
-installed_kernels="$(installed_kvers)"
-for kernel in $installed_kernels; do
-  modinfo -k "$kernel" nvidia >/dev/null 2>&1 || missing_kernels+=("$kernel")
+for kernel in $(installed_kvers); do
+  problem="$(nvidia_module_problem "$kernel")"
+  [[ -z "$problem" ]] || warn "$problem"
 done
-[[ ${#missing_kernels[@]} -eq 0 ]] || warn "nvidia module missing for installed kernels: ${missing_kernels[*]}"
 
 warn "reboot required: nvidia driver, kernel args, and modprobe options only take effect after reboot"

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "usage: $(basename "$0")" >&2
+  echo "prints 'export WLR_DRM_DEVICES=/dev/dri/cardN' for Sway when the NVIDIA driver is loaded and every connected" >&2
+  echo "output sits on the NVIDIA card; prints nothing otherwise, so wlroots picks the GPUs itself" >&2
+  echo "(\$VEKRONA_SYSFS_ROOT prefixes /sys and /proc in tests); sourced by config/sway/environment at every login" >&2
+  exit "${1:-2}"
+}
+
+[[ $# -eq 0 ]] || { [[ "$1" != -h && "$1" != --help ]] || usage 0; usage; }
+
+# The login must never fail because of this script: any surprise is a warning and no override.
+unexpected() { echo "vekrona-gpu-env: $*; leaving the GPU choice to wlroots" >&2; exit 0; }
+
+root="${VEKRONA_SYSFS_ROOT:-}"
+drm="$root/sys/class/drm"
+
+[[ -d "$root/sys/module/nvidia_drm" || -e "$root/proc/driver/nvidia/version" ]] || exit 0
+
+# Card names owning at least one connected output. Writeback connectors report 'unknown', never 'connected'.
+connected_cards=()
+for status_file in "$drm"/card*-*/status; do
+  [[ -e "$status_file" ]] || continue
+  status="$(<"$status_file")" || unexpected "cannot read $status_file"
+  [[ "$status" == connected ]] || continue
+  connector="${status_file%/status}"
+  card="${connector##*/}"
+  card="${card%%-*}"
+  [[ " ${connected_cards[*]-} " == *" $card "* ]] || connected_cards+=("$card")
+done
+
+[[ ${#connected_cards[@]} -eq 1 ]] || exit 0
+card="${connected_cards[0]}"
+
+vendor_file="$drm/$card/device/vendor"
+vendor="$(<"$vendor_file")" || unexpected "cannot read $vendor_file"
+[[ "$vendor" =~ ^0x[0-9a-f]{4}$ ]] || unexpected "unexpected content in $vendor_file: '$vendor'"
+[[ "$vendor" == 0x10de ]] || exit 0
+
+# wlroots splits WLR_DRM_DEVICES on ':', which rules out /dev/dri/by-path/pci-0000:... names.
+# cardN is stable enough here because it is derived from sysfs at this very login.
+echo "export WLR_DRM_DEVICES=/dev/dri/$card"

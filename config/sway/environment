@@ -23,3 +23,19 @@ vekrona_xkb_environment() {
 }
 vekrona_xkb_environment
 unset -f vekrona_xkb_environment
+vekrona_gpu_environment() {
+  gpu_tool="$(command -v vekrona-gpu-env || echo "$HOME/.local/bin/vekrona-gpu-env")"
+  gpu_err="$(mktemp)"
+  if [ -x "$gpu_tool" ] && gpu_env="$("$gpu_tool" 2>"$gpu_err")"; then
+    eval "$gpu_env"
+  else
+    echo "leaving the GPU choice to wlroots, because $gpu_tool is missing or failed" >> "$gpu_err"
+  fi
+  if [ -s "$gpu_err" ]; then
+    logger -p user.warning -t vekrona-gpu-env < "$gpu_err"
+  fi
+  rm -f "$gpu_err"
+  unset gpu_tool gpu_err gpu_env
+}
+vekrona_gpu_environment
+unset -f vekrona_gpu_environment
