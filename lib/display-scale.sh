@@ -61,9 +61,16 @@ ensure_internal_panel_scale() {
     return 0
   fi
   while IFS= read -r connector; do
-    line="$(internal_panel_scale_line "$connector")" || die "cannot derive display scale from $connector"
-    content+="$line"$'\n'
+    if line="$(internal_panel_scale_line "$connector")"; then
+      content+="$line"$'\n'
+    else
+      warn "cannot derive display scale from $connector; leaving that panel at scale 1"
+    fi
   done < <(internal_panel_connectors)
+  if [[ -z "$content" ]]; then
+    rm -f "$SWAY_PANEL_SCALE_DROPIN"
+    return 0
+  fi
   ensure_dir "$(dirname "$SWAY_PANEL_SCALE_DROPIN")"
   if [[ -f "$SWAY_PANEL_SCALE_DROPIN" && "$(<"$SWAY_PANEL_SCALE_DROPIN")" == "${content%$'\n'}" ]]; then
     log "up to date: $SWAY_PANEL_SCALE_DROPIN"

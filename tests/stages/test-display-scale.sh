@@ -68,7 +68,21 @@ ensure_internal_panel_scale
 [[ ! -e "$SWAY_PANEL_SCALE_DROPIN" ]] || die "drop-in must be removed when no internal panel is connected"
 log "ok: no internal panel removes the drop-in"
 
-make_connector card1-eDP-1 connected 2880x1800 331 207
-: > "$DRM_SYSFS_ROOT/card1-eDP-1/edid"
-if (ensure_internal_panel_scale) 2>/dev/null; then die "unreadable EDID must fail"; fi
-log "ok: unreadable EDID fails loudly"
+expect_no_scale_dropin() {
+  local label="$1" break_edid="$2" warnings
+  make_connector card1-eDP-1 connected 2880x1800 331 207
+  ensure_internal_panel_scale
+  "$break_edid"
+  warnings="$(ensure_internal_panel_scale 2>&1 >/dev/null)" || die "$label: must not fail"
+  [[ "$warnings" == *"cannot derive display scale"* ]] || die "$label: must warn, got '$warnings'"
+  [[ ! -e "$SWAY_PANEL_SCALE_DROPIN" ]] || die "$label: drop-in must be absent, scale stays 1"
+  log "ok: $label warns and leaves scale 1"
+}
+
+break_edid_empty() { : > "$DRM_SYSFS_ROOT/card1-eDP-1/edid"; }
+break_edid_zero_size() { write_edid "$DRM_SYSFS_ROOT/card1-eDP-1/edid" 0 0; }
+break_edid_garbage() { head -c 128 /dev/zero > "$DRM_SYSFS_ROOT/card1-eDP-1/edid"; }
+
+expect_no_scale_dropin "unreadable (empty) EDID" break_edid_empty
+expect_no_scale_dropin "EDID reporting 0x0 mm" break_edid_zero_size
+expect_no_scale_dropin "EDID with an invalid header" break_edid_garbage
