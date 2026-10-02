@@ -15,4 +15,5 @@ url_file="$repo_root/config/firefox/webapps/$app/url"
 
 [[ -f "$url_file" ]] || { echo "unknown webapp: $app (no $url_file)" >&2; exit 1; }
 
+export MOZ_APP_REMOTINGNAME="vekrona-$app"
 exec firefox --name "vekrona-$app" -P "vekrona-$app" --new-window "$(cat "$url_file")"
