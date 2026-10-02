@@ -12,4 +12,8 @@ enabled="$(systemctl is-enabled greetd 2>/dev/null || true)"
 target="$(systemctl get-default)"
 [[ "$target" == graphical.target ]] || fail "default target is not graphical.target: $target"
 
+for dm in sddm gdm lightdm; do
+  ! rpm -q --quiet "$dm" || fail "display manager $dm is installed; only greetd may be"
+done
+
 echo "login-manager-check OK"

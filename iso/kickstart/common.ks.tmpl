@@ -14,6 +14,49 @@ fido2-tools
 libfido2
 fprintd
 fprintd-pam
+python3
+mokutil
+%end
+
+# Backstop independent of the installer UI. dnf5 records every installed group
+# and environment in its system state; the only group the %packages above
+# selects is core, so any environment or other group means the user picked a
+# software selection in some Anaconda UI. The display-manager check is a second,
+# independent line of defence. python3 is listed above because this guard needs
+# its tomllib.
+%post --erroronfail --log=/root/vekrona-package-guard.log
+set -euo pipefail
+unexpected=$(python3 - <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+STATE_DIR = Path("/usr/lib/sysimage/libdnf5")
+ALLOWED_GROUPS = {"core"}
+
+
+def installed(filename, key):
+    path = STATE_DIR / filename
+    if not path.exists():
+        return set()
+    try:
+        return set(tomllib.loads(path.read_text()).get(key, {}))
+    except (OSError, ValueError, TypeError) as err:
+        sys.exit(f"cannot read dnf5 state {path}: {err}")
+
+
+for env in sorted(installed("environments.toml", "environments")):
+    print(f"environment {env}")
+for group in sorted(installed("groups.toml", "groups") - ALLOWED_GROUPS):
+    print(f"group {group}")
+PY
+)
+packages=$(rpm -q --qf '%{NAME}\n' sddm gdm lightdm plasma-workspace gnome-shell | grep -v 'is not installed' | sed 's/^/package /' || true)
+found=$(printf '%s\n%s' "$unexpected" "$packages" | sed '/^$/d')
+if [ -n "$found" ]; then
+  echo "The Vekrona installer only supports its default package set; do not select a software environment. Unexpected: $(printf '%s' "$found" | paste -sd' ')" >&2
+  exit 1
+fi
 %end
 
 %post --nochroot --erroronfail --log=/mnt/sysimage/root/vekrona-payload-copy.log
