@@ -5,7 +5,7 @@ include /etc/sway/config.d/*.conf
 include /usr/share/sway-systemd/95-xdg-desktop-autostart.conf
 include ~/.config/sway/config.d/*.conf
 
-output DP-7 mode 3840x2160@240Hz adaptive_sync on scale 1.5
+output DP-7 mode 3840x2160@119.880Hz adaptive_sync off scale 1.5
 
 font pango:Atkinson Hyperlegible Next 10
 
