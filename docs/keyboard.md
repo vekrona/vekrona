@@ -35,6 +35,12 @@ launch/focus layer on it:
 | Hyper+= | go to a new workspace (the first empty one, `vekrona-workspace-new`) |
 | Hyper+Shift+= | move the focused window to a new workspace and follow it |
 | Hyper+Print | `vekrona-screenshot` |
+| Super+Shift+3 | `vekrona-screenshot screen` |
+| Super+Shift+4 | `vekrona-screenshot area` |
+| Super+Shift+5 | `vekrona-screenshot window` |
+| Super+Ctrl+Shift+3 | `vekrona-screenshot --clipboard screen` |
+| Super+Ctrl+Shift+4 | `vekrona-screenshot --clipboard area` |
+| Super+Ctrl+Shift+5 | `vekrona-screenshot --clipboard window` |
 | Hyper+Shift+c | `vekrona-caffeine` |
 | Hyper+Shift+n | `dms ipc call night toggle` |
 | Hyper+Shift+t | `vekrona-theme next` |

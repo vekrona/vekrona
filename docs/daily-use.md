@@ -101,10 +101,16 @@ vekrona-caffeine        # no argument: stops it if running, else starts it for 1
 Screenshot and recording:
 
 ```
-vekrona-screenshot area     # grim + slurp region capture, opens in swappy, saved to ~/Pictures/Screenshots
-vekrona-screenshot output   # full output, same pipeline
-vekrona-record              # slurp region select, systemd-run transient user unit toggle, saved to ~/Videos/Recordings
+vekrona-screenshot screen       # focused monitor
+vekrona-screenshot area         # drag a rectangle or click a window (default)
+vekrona-screenshot window       # click a window only
+vekrona-screenshot --clipboard screen   # copy to clipboard, no file
+vekrona-screenshot --clipboard area     # copy to clipboard, no file
+vekrona-screenshot --clipboard window   # copy to clipboard, no file
+vekrona-record                  # slurp region select, systemd-run transient user unit toggle, saved to ~/Videos/Recordings
 ```
+
+Super+Shift+3/4/5 work like Cmd+Shift+3/4/5 on macOS, and adding Ctrl copies to the clipboard without saving a file. In area mode, click a window or drag a rectangle. Saved shots are also copied to the clipboard, and the Edit button in the notification opens swappy.
 
 Webapps (each opens a dedicated Firefox profile and window, set up by stage
 `50-user` from `config/firefox/webapps/<app>/`):

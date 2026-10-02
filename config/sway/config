@@ -158,6 +158,18 @@ bindsym --to-code $hyper+Shift+equal exec vekrona-workspace-new --move
 
 #: Take a screenshot
 bindsym $hyper+Print exec vekrona-screenshot
+#: Screenshot the focused screen
+bindsym Mod4+Shift+3 exec vekrona-screenshot screen
+#: Screenshot an area or click a window
+bindsym Mod4+Shift+4 exec vekrona-screenshot area
+#: Screenshot a window
+bindsym Mod4+Shift+5 exec vekrona-screenshot window
+#: Copy screenshot of the focused screen
+bindsym Mod4+Ctrl+Shift+3 exec vekrona-screenshot --clipboard screen
+#: Copy screenshot of an area or window
+bindsym Mod4+Ctrl+Shift+4 exec vekrona-screenshot --clipboard area
+#: Copy screenshot of a window
+bindsym Mod4+Ctrl+Shift+5 exec vekrona-screenshot --clipboard window
 #: Record the screen
 bindsym $hyper+Shift+Print exec vekrona-record
 #: Toggle caffeine (prevent sleep)

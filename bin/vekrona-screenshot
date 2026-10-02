@@ -1,21 +1,71 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODE="${1:-area}"
-DEST_DIR="$HOME/Pictures/Screenshots"
-FILE="$DEST_DIR/$(date +%Y%m%d-%H%M%S).png"
+usage() {
+  echo "usage: vekrona-screenshot [--clipboard] [screen|area|window]" >&2
+  exit 2
+}
 
-mkdir -p "$DEST_DIR"
+fail() {
+  echo "vekrona-screenshot: $1" >&2
+  notify-send -u critical -a vekrona "Screenshot failed" "$1"
+  exit 1
+}
 
+CLIPBOARD=0
+if [[ "${1-}" == "--clipboard" ]]; then
+  CLIPBOARD=1
+  shift
+fi
+MODE="${1-area}"
+[[ $# -le 1 ]] || usage
+
+grim_args=()
 case "$MODE" in
-  area)
-    grim -g "$(slurp)" - | tee "$FILE" | swappy -f -
+  screen)
+    output="$(swaymsg -t get_outputs | jq -r '.[] | select(.focused) | .name')" \
+      || fail "could not query the focused output"
+    [[ -n "$output" ]] || fail "no focused output"
+    grim_args=(-o "$output")
     ;;
-  output)
-    grim - | tee "$FILE" | swappy -f -
+  area | window)
+    tree="$(swaymsg -t get_tree)" || fail "swaymsg get_tree failed"
+    boxes="$(jq -r '.. | select((.type? == "con" or .type? == "floating_con") and .visible? == true and .pid? != null) | .rect | "\(.x),\(.y) \(.width)x\(.height)"' <<<"$tree")" \
+      || fail "could not read window rects"
+    slurp_args=()
+    [[ "$MODE" == "area" ]] || slurp_args=(-r)
+
+    slurp_err="$(mktemp)"
+    trap 'rm -f "$slurp_err"' EXIT
+    if ! geometry="$(slurp "${slurp_args[@]}" <<<"$boxes" 2>"$slurp_err")"; then
+      [[ "$(<"$slurp_err")" == "selection cancelled" ]] && exit 0
+      fail "slurp: $(<"$slurp_err")"
+    fi
+    [[ -n "$geometry" ]] || fail "slurp: empty selection"
+    grim_args=(-g "$geometry")
     ;;
   *)
-    printf 'usage: %s [area|output]\n' "$(basename "$0")" >&2
-    exit 1
+    usage
     ;;
 esac
+
+if [[ "$CLIPBOARD" == 1 ]]; then
+  grim "${grim_args[@]}" - | wl-copy --type image/png || fail "capture or copy to clipboard failed"
+  notify-send -a vekrona "Screenshot" "Copied to clipboard"
+  exit 0
+fi
+
+DEST_DIR="$HOME/Pictures/Screenshots"
+FILE="$DEST_DIR/$(date +%Y%m%d-%H%M%S-%3N).png"
+mkdir -p "$DEST_DIR"
+
+if ! grim "${grim_args[@]}" "$FILE"; then
+  rm -f "$FILE"
+  fail "grim failed"
+fi
+wl-copy --type image/png <"$FILE" || fail "saved $FILE, but copying to clipboard failed"
+
+action="$(notify-send -a vekrona -i "$FILE" -A edit=Edit "Screenshot" "Saved to $FILE and copied")"
+if [[ "$action" == "edit" ]]; then
+  exec swappy -f "$FILE"
+fi
