@@ -170,7 +170,7 @@ anything passed to `--skip`), so a bare `./install.sh 70` re-verifies
 everything without re-running any stage.
 
 Steam launch option, wraps a game with ScopeBuddy using
-`config/scopebuddy/scb.conf` (`-f -W 3840 -H 2160 -r 240 --adaptive-sync -e`):
+`config/scopebuddy/scb.conf` (`-f -W 3840 -H 2160 -r 240 -e`):
 
 ```
 scb -- %command%
