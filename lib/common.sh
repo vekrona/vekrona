@@ -477,11 +477,20 @@ with_scratch_dir() {
   )
 }
 
+# The one download chokepoint. Retries transient failures (DNS, connect, 5xx): redirectors such as
+# mirrors.rpmfusion.org hand out a different mirror per request, so a retry usually lands on a healthy one.
+download_file() {
+  local url="$1" dest="$2"
+  require_cmd curl
+  curl --fail --silent --show-error --location --retry 5 --retry-all-errors --connect-timeout 20 \
+    --output "$dest" "$url" || die "download failed: $url"
+}
+
 fetch_pinned() {
   local url="$1" sha256="$2" dest="$3" actual
-  require_cmd curl sha256sum
+  require_cmd sha256sum
   log "fetching: $url"
-  curl --fail --silent --show-error --location --output "$dest" "$url" || die "download failed: $url"
+  download_file "$url" "$dest"
   actual="$(sha256sum "$dest" | awk '{print $1}')"
   [[ "$actual" == "$sha256" ]] || die "sha256 mismatch for $url (expected $sha256, got $actual)"
 }
