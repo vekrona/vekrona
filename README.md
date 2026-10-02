@@ -79,7 +79,7 @@ cd ~/wrk/vekrona
 ```
 
 Reboot and log in at the greeter. `./install.sh --list` shows the stages that
-apply to your machine: `10-nvidia` runs only with an NVIDIA GPU outside a Mac,
+apply to your machine: `10-nvidia` runs only with a Turing to Ada NVIDIA GPU outside a Mac (older and newer GPUs keep nouveau; Secure Boot with an unenrolled akmods key also skips it),
 `15-mac` only on a Mac.
 
 On hardware other than mine:

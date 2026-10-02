@@ -76,7 +76,7 @@ the first time, each step confirmed before moving to the next:
 1. VM first. `make -C vm create`, then `make -C vm test`, which runs `./install.sh --skip 10-nvidia` inside the VM, a headless Sway session check, a real snapshot/rollback round trip, and (post-reboot) the fresh-install login manager check (see [VM smoke test](development.md#vm-smoke-test)).
 2. Host, no reboot needed: stages `00`, `20`, `30`, `40`, `50`, `60` (`65-login-manager` is skipped here on purpose: gdm is still enabled on a Workstation machine at this point, so it would only log and leave it alone; running it explicitly adds nothing until the cleanup step).
 3. Host, NVIDIA: stage `10`, reboot, `./install.sh 70`, then a real `vekrona-rollback` to the pre-`10` snapshot and back.
-4. Host, Sway validation: log into the Sway session (through GDM's Sway entry, or `start-sway` from a text console) and check the 240 Hz output, the Hyper layer, the Cmd layer in a browser versus a terminal, lock/idle/suspend, DMS features, all four themes, the webapps, and autostart apps such as 1Password.
+4. Host, Sway validation: log into the Sway session (through GDM's Sway entry, or `start-sway` from a text console) and check the 120 Hz output, the Hyper layer, the Cmd layer in a browser versus a terminal, lock/idle/suspend, DMS features, all four themes, the webapps, and autostart apps such as 1Password.
 5. Host, gaming: one Vulkan title through Steam with the `scb --` launch option, for about 30 minutes.
 6. Host, cleanup: `90a-switch-dm`, reboot, then `90b-remove`, then `./install.sh 70` again.
 7. Finish the README and push.

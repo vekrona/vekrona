@@ -40,8 +40,8 @@ vekrona's `config/` is the source of truth for most dotfiles: `stages/50-user.sh
 symlinks them into `$HOME` with `ensure_symlink`, so a hand-edit of, say,
 `~/.config/sway/config` doesn't stick — edit `config/sway/config` in this repo
 instead. But not everything under `$HOME` is a symlink: `~/.config/DankMaterialShell/settings.json`
-and `~/.config/environment.d/vekrona-gpu.conf`, for two, are files stage
-`50-user` *generates* (from a seed, or conditionally from hardware), not links
+and `~/.config/sway/config.d/vekrona-panel-scale.conf`, for two, are files stage
+`50-user` *generates* (from a seed, or from the panel's EDID), not links
 back into the repo. Check with `ls -la` (or a `readlink`) before assuming which
 kind you're looking at. Either way, fix the stage or the seed in this repo, then
 re-run it to see the fix take effect:

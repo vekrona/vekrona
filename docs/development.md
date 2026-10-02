@@ -12,7 +12,7 @@ Repo layout, tests, the VM smoke test, the ISO build and CI.
 | `lib/authselect-vekrona.sh`, `lib/luks-fido2.sh` | helpers for stage `45-auth` (authselect profile with `pam_u2f`, fingerprint, FIDO2 LUKS keyslot, crypttab and initramfs); `70-verify` sources them too |
 | `lib/facetimehd.sh` | pinned, sha256-verified patjak/facetimehd source build and firmware extraction for stage `15-mac` |
 | `stages/*.sh` | one script per stage, numbered so the run order is visible in a directory listing; `install.sh` filters the list per machine with `stage_applies` (`./install.sh --list` prints the result) |
-| `config/` | source of truth for dotfiles; stage `50-user` symlinks these into `$HOME`. Stage `50-user` also generates `~/.config/environment.d/vekrona-gpu.conf` itself, not tracked under `config/`, only when `/dev/dri/vekrona-dgpu` exists (see [Known issues](known-issues.md)) |
+| `config/` | source of truth for dotfiles; stage `50-user` symlinks these into `$HOME`. Stage `50-user` also deletes `~/.config/environment.d/vekrona-gpu.conf`, left by earlier installs (the GPU is now chosen at login by `bin/vekrona-gpu-env`) |
 | `etc/` | system files installed into `/etc` by `ensure_root_file` |
 | `bin/vekrona-*` | the CLI tools; stage `50-user` symlinks the whole directory into `~/.local/bin` |
 | `config/systemd-user/vekrona-errors.service`, `vekrona-errors-failed.service` | `vekrona-errors.service` runs `vekrona-error watch` (the error pipeline, see [Error pipeline](errors.md)); `vekrona-errors-failed.service` is its `OnFailure=` notifier. Stage `50-user` links and enables them the same way it does `xremap.service` |
@@ -23,6 +23,7 @@ Repo layout, tests, the VM smoke test, the ISO build and CI.
 | `config/DankMaterialShell/plugins/vekronaAgent/` | DMS DankBar plugin: agent-button icon with an unread-error badge, left click opens the default coding agent, right click opens the recorded-error picker (see [Agent button](agents.md#agent-button)) |
 | `bin/vekrona-agent` | opens a configured coding agent harness (Claude Code, Codex, opencode, pi, or Cursor Agent) in a terminal, with default permission prompts and API-key env vars stripped; see [Agent button](agents.md#agent-button) |
 | `bin/vekrona-xkb-env` | prints `XKB_DEFAULT_*` for Sway from `/etc/X11/xorg.conf.d/00-keyboard.conf` (`VEKRONA_XKB_CONF` overrides the path in tests); sourced by `config/sway/environment`, and read by `vekrona-keybindings` for its layout row; tested by `tests/stages/test-xkb-env.sh` |
+| `bin/vekrona-gpu-env` | prints `export WLR_DRM_DEVICES=/dev/dri/cardN` only when the NVIDIA driver is loaded and every connected output is on the NVIDIA card, nothing otherwise (`VEKRONA_SYSFS_ROOT` prefixes `/sys` and `/proc` in tests); sourced by `config/sway/environment` at every login, never fails it; tested by `tests/stages/test-gpu-env.sh`; see [PLAN.md](PLAN.md) decision #6 |
 | `bin/vekrona-rofi-theme` | prints a `rofi -theme-str` string from the active vekrona/DMS theme; shared by `vekrona-keybindings` and `vekrona-agent` so the rofi styling lives in one place |
 | `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, agents, error-pipeline, agent-launch, rollback, and login-manager checks |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (install-and-boot test of a test ISO), `lib-vm.sh` + `dev-vm.sh` (the QEMU VM lifetime library and its REPL CLI), `dev-installer.sh` (installer window with a freshly packed `updates.img`), `firstboot/`, `kickstart/` |
@@ -46,7 +47,7 @@ ISO build waits for it.
   predicates and the per-machine stage list against the sysfs trees in
   `tests/fixtures/` (selected with `VEKRONA_SYSFS_ROOT`), the panel scale, the
   authselect profile rendering, the crypttab FIDO2 option handling and the
-  first-boot sudoers drop-in.
+  first-boot sudoers drop-in, and the NVIDIA kernel-arg states.
 - `iso/anaconda/tests/` (`python3 -B -m unittest discover -s
   iso/anaconda/tests`): the Anaconda add-ons. Needs `python3-dasbus`,
   `python3-fido2` and `anaconda-core`.
@@ -111,7 +112,7 @@ the VM in between, and `make -C vm viewer` gives graphical access.
 
 What the VM cannot smoke-test, because the VM has none of the hardware
 involved: the NVIDIA stage and every GPU feature that depends on it (stage
-`10-nvidia` is always skipped in `make -C vm test`), the named 4K 240 Hz
+`10-nvidia` is always skipped in `make -C vm test`), the named 4K 119.88 Hz
 output, Bluetooth, and anything that needs pointer input, such as an area
 screenshot or a screen-recording region selection, since `make -C vm type`
 and `make -C vm key` only send keystrokes.
