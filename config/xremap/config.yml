@@ -62,8 +62,6 @@ keymap:
       Super-BackSpace: [Shift-Home, BackSpace]
       Super-Shift-LeftBrace: C-PageUp
       Super-Shift-RightBrace: C-PageDown
-      Super-Tab: Alt-Tab
-      Super-Shift-Tab: Alt-Shift-Tab
       Super-comma: C-comma
 
   - name: terminal-word-nav

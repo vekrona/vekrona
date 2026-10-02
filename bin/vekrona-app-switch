@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# macOS-style Cmd+Tab: cycle through open apps (one entry per app, across all
+# workspaces) in most-recently-used order. `next`/`prev` open the overlay in
+# config/vekrona-app-switch, or step it if it is already open; it focuses the
+# selected app when Super is released. `daemon` keeps the MRU list current.
+set -euo pipefail
+
+state="${XDG_RUNTIME_DIR:-/tmp}/vekrona-app-switch"
+mkdir -p "$state"
+mru="$state/mru"
+overlay="$(dirname "$(readlink -f "$0")")/../config/vekrona-app-switch"
+
+usage() {
+  printf 'usage: %s daemon|next|prev\n' "$(basename "$0")" >&2
+  exit 1
+}
+
+# One line per window: id, focused flag, app id (or X11 class).
+windows() {
+  swaymsg -t get_tree | jq -r '
+    recurse(.nodes[]?, .floating_nodes[]?)
+    | select(.pid != null and (.nodes | length) == 0 and (.floating_nodes | length) == 0)
+    | "\(.id)\t\(.focused)\t\(.app_id // .window_properties.class // "?")"'
+}
+
+# Rebuild the MRU file: focused window first, then previous order, dropping
+# closed windows and adding ones we have not seen.
+refresh() {
+  local focused ids
+  wins="$(windows)"
+  focused="$(awk -F'\t' '$2 == "true" { print $1 }' <<<"$wins")"
+  ids="$(cut -f1 <<<"$wins")"
+  { echo "$focused"; cat "$mru" 2>/dev/null || true; echo "$ids"; } |
+    awk -v ids="$ids" '
+      BEGIN { n = split(ids, a, "\n"); for (i = 1; i <= n; i++) ok[a[i]] = 1 }
+      ok[$0] && !seen[$0]++' >"$mru.tmp"
+  mv "$mru.tmp" "$mru"
+}
+
+switch() {
+  local dir="$1" items n
+  if qs -p "$overlay" ipc call appswitch "$dir" >/dev/null 2>&1; then
+    return 0
+  fi
+  refresh
+  # Most recent window of each app, in MRU order.
+  items="$(awk -F'\t' '
+      NR == FNR { app[$1] = $3; next }
+      ($1 in app) && !seen[app[$1]]++ { print $1 "\t" app[$1] }' <(printf '%s\n' "$wins") "$mru" |
+    jq -R -s -c 'split("\n") | map(select(. != "") | split("\t") | {id: (.[0] | tonumber), app: .[1]})')"
+  n="$(jq length <<<"$items")"
+  [[ $n -ge 2 ]] || return 0
+  VEKRONA_SWITCH_ITEMS="$items" \
+    VEKRONA_SWITCH_START="$([[ $dir == next ]] && echo 1 || echo $((n - 1)))" \
+    qs -n -d -p "$overlay" >/dev/null 2>&1
+  wait_super_release
+  # The overlay may still be starting after a quick tap.
+  for _ in $(seq 40); do
+    qs -p "$overlay" ipc call appswitch commit >/dev/null 2>&1 && return 0
+    sleep 0.05
+  done
+}
+
+# Neither Sway nor the overlay sees Super go up reliably (Sway release
+# bindings miss it, Qt gets no event), so poll the kernel's key state on
+# every keyboard, xremap's virtual one included, until no Super key is down.
+wait_super_release() {
+  python3 - <<'EOF'
+import fcntl, glob, os, time
+
+EVIOCGKEY = 0x80000000 | (96 << 16) | (ord("E") << 8) | 0x18
+KEY_LEFTMETA, KEY_RIGHTMETA = 125, 126
+
+fds = []
+for path in glob.glob("/dev/input/event*"):
+    try:
+        fds.append(os.open(path, os.O_RDONLY | os.O_NONBLOCK))
+    except OSError:
+        pass
+
+def super_down():
+    for fd in fds:
+        keys = bytearray(96)
+        try:
+            fcntl.ioctl(fd, EVIOCGKEY, keys)
+        except OSError:
+            continue
+        if any(keys[k // 8] >> (k % 8) & 1 for k in (KEY_LEFTMETA, KEY_RIGHTMETA)):
+            return True
+    return False
+
+deadline = time.monotonic() + 60
+while super_down() and time.monotonic() < deadline:
+    time.sleep(0.02)
+EOF
+}
+
+case "${1:-}" in
+  daemon)
+    refresh
+    swaymsg -t subscribe -m '["window"]' |
+      jq --unbuffered -r 'select(.change == "focus" or .change == "new" or .change == "close") | .change' |
+      while read -r _; do
+        refresh
+      done
+    ;;
+  next | prev) switch "$1" ;;
+  *) usage ;;
+esac

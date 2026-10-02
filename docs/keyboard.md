@@ -49,10 +49,40 @@ them:
 | Hyper+Shift+h/j/k/l, arrow keys | move the focused container left/down/up/right |
 | Hyper+Shift+Print | `vekrona-record` |
 
+Super+Tab and Super+Shift+Tab are the macOS-style app switcher (see below).
+
 Shift is not folded into the Hyper mask itself: Hyper is exactly
 Ctrl+Alt+Super, and Hyper+Shift is a separate binding on top of it. Putting
 Shift inside the Hyper mask would make Hyper+Shift+X carry the same modifier
 mask as some other Hyper+X binding and silently overwrite it.
+
+## App switcher
+
+Super+Tab works like Cmd+Tab on macOS: hold Super and press Tab to open a row
+of app icons, one per app across all workspaces, most recently used first.
+More Tab presses move right, Shift+Tab moves left, and releasing Super focuses
+the most recent window of the highlighted app, switching workspace if needed.
+A quick tap goes straight back to the previous app; Escape cancels and Return
+or a click picks.
+
+`bin/vekrona-app-switch` does the work. Its `daemon` subcommand, started by
+`exec` in the Sway config, follows Sway window events and keeps the
+most-recently-used window list in `$XDG_RUNTIME_DIR/vekrona-app-switch/mru`.
+`next`/`prev`, bound to Super+Tab and Super+Shift+Tab, open the Quickshell
+overlay in `config/vekrona-app-switch/shell.qml`, or step it over Quickshell
+IPC when it is already open. The overlay takes exclusive keyboard focus, but
+Sway bindings still run first, so Tab presses keep reaching the script.
+
+Neither Sway nor the overlay sees Super go up reliably: a `bindsym --release
+Super_L` in a mode never fires after Super+Tab, and Qt gets no key event for
+it. So after opening the overlay the script polls the kernel's key state
+(`EVIOCGKEY`) on every `/dev/input/event*` keyboard, xremap's virtual one
+included, which the `input` group membership already allows, and commits over
+IPC once no Super key is down.
+
+xremap's Cmd layer must not remap Super+Tab: an earlier `Super-Tab: Alt-Tab`
+entry made xremap send a fake Super release, which ended the switch at once,
+and turned the next Super+Tab into an Alt+Tab Sway does not bind.
 
 ## Keybindings help panel
 
@@ -94,7 +124,6 @@ letter, Cmd+a through Cmd+z, sends the same letter under Ctrl instead:
 | Cmd+Backspace | Shift+Home, then Backspace | Alt+Backspace | Ctrl+Backspace |
 | Alt+Left | Ctrl+Left | Alt+Right | Ctrl+Right |
 | Alt+Shift+Left | Ctrl+Shift+Left | Alt+Shift+Right | Ctrl+Shift+Right |
-| Cmd+Tab | Alt+Tab | Cmd+Shift+Tab | Alt+Shift+Tab |
 | Cmd+Shift+[ | Ctrl+PageUp | Cmd+Shift+] | Ctrl+PageDown |
 | Cmd+comma | Ctrl+comma | | |
 

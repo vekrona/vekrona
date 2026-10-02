@@ -130,6 +130,11 @@ bindsym $hyper+Shift+Up move up
 #: Move window right
 bindsym $hyper+Shift+Right move right
 
+#: Switch to the next app (hold Super, Tab to keep cycling)
+bindsym Mod4+Tab exec vekrona-app-switch next
+#: Switch to the previous app (hold Super, Shift+Tab to keep cycling back)
+bindsym Mod4+Shift+Tab exec vekrona-app-switch prev
+
 #: Enter resize mode
 bindsym --to-code $hyper+r mode "resize"
 #: Toggle fullscreen
@@ -198,5 +203,7 @@ mode "resize" {
     #: Exit resize mode
     bindsym Escape mode "default"
 }
+
+exec vekrona-app-switch daemon
 
 for_window [class="^[Ss]team$"] floating enable
