@@ -172,6 +172,14 @@ bindsym XF86AudioRaiseVolume exec dms ipc call audio increment 5
 bindsym XF86AudioLowerVolume exec dms ipc call audio decrement 5
 #: Mute audio
 bindsym XF86AudioMute exec dms ipc call audio mute
+#: Play or pause media
+bindsym XF86AudioPlay exec dms ipc call mpris playPause
+#: Pause media
+bindsym XF86AudioPause exec dms ipc call mpris pause
+#: Next track
+bindsym XF86AudioNext exec dms ipc call mpris next
+#: Previous track
+bindsym XF86AudioPrev exec dms ipc call mpris previous
 #: Brightness up
 bindsym XF86MonBrightnessUp exec dms ipc call brightness increment 5 ""
 #: Brightness down

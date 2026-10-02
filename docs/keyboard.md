@@ -38,7 +38,8 @@ launch/focus layer on it:
 | Hyper+Shift+c | `vekrona-caffeine` |
 | Hyper+Shift+n | `dms ipc call night toggle` |
 | Hyper+Shift+t | `vekrona-theme next` |
-| XF86Audio* / XF86MonBrightness* | `dms ipc call audio ...` / `dms ipc call brightness ...` |
+| XF86AudioRaiseVolume/LowerVolume/Mute, XF86MonBrightness* | `dms ipc call audio ...` / `dms ipc call brightness ...` |
+| XF86AudioPlay/Pause/Next/Prev | `dms ipc call mpris playPause` / `pause` / `next` / `previous` |
 
 Hyper+Shift is the second layer, used for moving things instead of focusing
 them:
