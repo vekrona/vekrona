@@ -216,3 +216,6 @@ mode "resize" {
 exec vekrona-app-switch daemon
 
 for_window [class="^[Ss]team$"] floating enable
+# Games get a workspace of their own, so the floating Steam client never draws over them.
+for_window [app_id="^gamescope$"] exec vekrona-workspace-new --games
+for_window [class="^steam_app_"] exec vekrona-workspace-new --games
