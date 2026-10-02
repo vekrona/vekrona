@@ -2,32 +2,50 @@
 set -euo pipefail
 
 usage() {
-  printf 'usage: %s [--move]\n' "$(basename "$0")" >&2
+  printf 'usage: %s [--move | --games]\n' "$(basename "$0")" >&2
   exit 1
 }
 
 move=0
+games=0
 case "${1:-}" in
   "") ;;
   --move) move=1 ;;
+  --games) games=1 ;;
   *) usage ;;
 esac
 
-used="$(swaymsg -t get_workspaces | jq -r '.[].num')"
-
-free=""
-for n in 1 2 3 4 5 6 7 8 9 10; do
-  if ! grep -qx "$n" <<<"$used"; then
-    free="$n"
-    break
-  fi
-done
-
-if [[ -z "$free" ]]; then
+first_free() {
+  local used n
+  used="$(swaymsg -t get_workspaces | jq -r '.[].num')"
+  for n in 1 2 3 4 5 6 7 8 9 10; do
+    if ! grep -qx "$n" <<<"$used"; then
+      printf '%s' "$n"
+      return 0
+    fi
+  done
   notify-send -a vekrona "Workspaces" "all 10 workspaces are in use"
   echo "vekrona-workspace-new: all 10 workspaces are in use" >&2
-  exit 1
+  return 1
+}
+
+# --games: give every game window (gamescope, or a Steam game run without it) a workspace of its own,
+# so the floating Steam client is not drawn on top of it. Sway's for_window runs this on each new one.
+if [[ $games -eq 1 ]]; then
+  swaymsg -t get_tree | jq -r '
+    recurse(.nodes[]?, .floating_nodes[]?) | select(.type == "workspace" and .name != "__i3_scratch")
+    | [recurse(.nodes[]?, .floating_nodes[]?) | select(.pid != null)] as $views
+    | ($views | length) as $n
+    | $views[] | select(.app_id == "gamescope" or ((.window_properties.class // "") | startswith("steam_app_")))
+    | select($n > 1) | .id' |
+    while read -r id; do
+      free="$(first_free)" || exit 1
+      swaymsg "[con_id=$id] move container to workspace number $free, workspace number $free" >/dev/null
+    done
+  exit 0
 fi
+
+free="$(first_free)" || exit 1
 
 if [[ $move -eq 1 ]]; then
   swaymsg "move container to workspace number $free, workspace number $free" >/dev/null
