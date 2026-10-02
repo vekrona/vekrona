@@ -187,9 +187,12 @@ and tag:
   working tree (the ISO embeds a `git clone` of HEAD, so uncommitted changes
   would silently be missing from it) — commit or stash first. It points the
   cloned checkout's `origin` remote at the source repo's own `origin` URL, so
-  the installed system can `git pull` for real, and every kickstart `%post`
-  uses `--erroronfail` so a failing step aborts the install instead of
-  continuing silently. It then runs `mkksiso` (Fedora 44 host, `lorax`
+  the installed system can `git pull` for real. First boot copies that clone
+  to `~/.local/share/vekrona` and runs `install.sh --no-pull`, so the first
+  install matches the ISO; every later `./install.sh` fast-forwards it from
+  GitHub first. Every kickstart `%post` uses `--erroronfail` so a failing step
+  aborts the install instead of continuing silently. It then runs `mkksiso`
+  (Fedora 44 host, `lorax`
   installed) to produce the release ISO: interactive on boot, with no
   storage, user, root-password, timezone, language or keyboard kickstart
   commands at all (it boots with `inst.geoloc-use-with-ks` so Anaconda still

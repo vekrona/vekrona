@@ -5,6 +5,11 @@ shopt -s inherit_errexit
 VEKRONA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export VEKRONA_ROOT
 VEKRONA_USER="$(id -un)"
+# The system copy: a separate clone that install.sh keeps updated; everything in $HOME links into it.
+VEKRONA_SYSTEM_ROOT="$HOME/.local/share/vekrona"
+VEKRONA_REPO_URL="https://github.com/vekrona/vekrona"
+# Where the pre-clone installs lived; links into it are legacy and get repointed or pruned.
+VEKRONA_LEGACY_ROOT="$HOME/vekrona"
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
@@ -159,9 +164,28 @@ ensure_gsettings() {
   [[ "$current" == "$want" ]] || die "gsettings not applied: $schema $key"
 }
 
+# Prints the first symlinked directory between $HOME and DST's parent (nothing when there is none).
+# Such a directory is managed by someone else (e.g. ~/.config/ghostty -> ~/.dotfiles/config/ghostty).
+# $HOME itself and anything above it may be symlinks legitimately, so only components below it count.
+symlinked_parent_below_home() {
+  local dst="$1" home_lex dir
+  home_lex="$(realpath -sm "$HOME")"
+  dir="$(realpath -sm "$(dirname "$dst")")"
+  while [[ "$dir" == "$home_lex"/* ]]; do
+    if [[ -L "$dir" ]]; then printf '%s' "$dir"; return 0; fi
+    dir="$(dirname "$dir")"
+  done
+  return 0
+}
+
 ensure_symlink() {
-  local src="$1" dst="$2"
+  local src="$1" dst="$2" managed
   [[ -e "$src" ]] || die "symlink source missing: $src"
+  managed="$(symlinked_parent_below_home "$dst")"
+  if [[ -n "$managed" ]]; then
+    warn "skipping $dst: $managed is a symlink to $(readlink -f "$managed"), managed elsewhere"
+    return 0
+  fi
   if [[ -L "$dst" && "$(readlink -f "$dst")" == "$(readlink -f "$src")" ]]; then log "linked: $dst"; return 0; fi
   if [[ -L "$dst" ]]; then
     warn "replacing symlink $dst, previous target: $(readlink "$dst")"
@@ -184,6 +208,56 @@ ensure_symlink_tree() {
   while IFS= read -r -d '' f; do
     ensure_symlink "$f" "$dstdir/${f#"$srcdir"/}"
   done < <(find "$srcdir" -type f -print0)
+}
+
+# Prints every symlink under the given dirs whose raw target is under one of the vekrona roots; with
+# --dangling, only those whose target no longer exists. A dir that is itself a symlink is someone else's.
+vekrona_links() {
+  local dangling=0 d link target
+  [[ "${1:-}" == --dangling ]] && { dangling=1; shift; }
+  for d in "$@"; do
+    [[ -d "$d" && ! -L "$d" ]] || continue
+    while IFS= read -r -d '' link; do
+      target="$(readlink "$link")"
+      case "$target" in
+        "$VEKRONA_LEGACY_ROOT"/*|"$VEKRONA_ROOT"/*|"$VEKRONA_SYSTEM_ROOT"/*) ;;
+        *) continue ;;
+      esac
+      # A link into the legacy root is stale even while that tree still exists, unless it is the tree in use.
+      if [[ $dangling -eq 1 && -e "$link" ]]; then
+        [[ "$target" == "$VEKRONA_LEGACY_ROOT"/* && "$VEKRONA_ROOT" != "$VEKRONA_LEGACY_ROOT" ]] || continue
+      fi
+      printf '%s\n' "$link"
+    done < <(find "$d" -type l -print0)
+  done
+}
+
+# Removes links into a vekrona checkout whose file is gone from it (renamed or deleted upstream), and
+# links still into the legacy root. ensure_symlink has already repointed every legacy link whose file
+# exists in this checkout, so this only catches leftovers.
+prune_vekrona_links() {
+  local link
+  while IFS= read -r link; do
+    log "removing dangling link: $link -> $(readlink "$link")"
+    rm -f "$link"
+    [[ ! -L "$link" ]] || die "failed to remove $link"
+  done < <(vekrona_links --dangling "$@")
+}
+
+# Every directory stage 50 links into, one per line (70-verify scans the same set).
+vekrona_link_dirs() {
+  local d
+  printf '%s\n' \
+    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/ghostty" \
+    "$HOME/.config/systemd/user" "$HOME/.config/fontconfig/conf.d" \
+    "$HOME/.config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/vekrona-themes" \
+    "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/bin" \
+    "$HOME/.config/scopebuddy" "$HOME/.config/MangoHud" \
+    "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"
+  for d in "$(firefox_profile_root)"/vekrona-*; do
+    [[ -d "$d" ]] && printf '%s\n' "$d"
+  done
+  return 0
 }
 
 ensure_dir() {
