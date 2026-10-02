@@ -412,6 +412,9 @@ assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftW
     check assert "$webapp webapp profile registered" grep -q "vekrona-$webapp" "$firefox_profiles_ini"
   done
   check assert "vekrona-theme installed" file_exists "$HOME/.local/bin/vekrona-theme"
+  check assert_file_contains "$HOME/.config/gtk-3.0/gtk.css" "^/\\* vekrona-gtk-theme: "
+  check assert_file_contains "$HOME/.config/gtk-4.0/gtk.css" "^/\\* vekrona-gtk-theme: "
+  check assert "GTK theme is adw-gtk3-dark" gsettings_eq org.gnome.desktop.interface gtk-theme adw-gtk3-dark
 
   ghostty_theme_dir="/usr/share/ghostty/themes"
   for theme_json in "$VEKRONA_ROOT"/config/dms-themes/*.json; do

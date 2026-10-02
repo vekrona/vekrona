@@ -233,6 +233,7 @@ else
   log "seeding active theme name: $theme_name_file"
   printf '%s\n' "$default_theme_name" > "$theme_name_file"
 fi
+"$VEKRONA_ROOT/bin/vekrona-gtk-theme"
 
 active_theme_name="$(cat "$theme_name_file")"
 active_ghostty_theme="$(ghostty_theme_for "$active_theme_name")"

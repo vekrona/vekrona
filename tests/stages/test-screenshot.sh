@@ -41,6 +41,8 @@ stub notify-send 'echo "$*" >> "$SCRATCH/logs/notify"
 [[ "${NOTIFY_FAIL:-}" != 1 ]] || exit 1
 printf "%s" "${NOTIFY_ACTION:-}"'
 stub swappy 'echo "$*" >> "$SCRATCH/logs/swappy"'
+stub gio 'echo "$*" >> "$SCRATCH/logs/gio"
+[[ "${GIO_FAIL:-}" != 1 ]] || exit 1'
 
 run_shot() {
   rm -rf "$logs" "$HOME/Pictures"
@@ -134,4 +136,17 @@ log "ok: a notification failure keeps the saved file"
 NOTIFY_ACTION="" run_shot screen
 expect_rc 0 "dismissed"
 logged swappy && die "dismissed: no editor expected"
+logged gio && die "dismissed: no trash action expected"
 log "ok: a dismissed notification opens no editor"
+
+NOTIFY_ACTION=delete run_shot screen
+expect_rc 0 "Delete"
+file="$(saved_file)"
+[[ -n "$file" ]] || die "Delete: file must be saved"
+[[ "$(cat "$logs/gio")" == "trash $file" ]] || die "Delete: gio must be called with trash: $(cat "$logs/gio")"
+logged swappy && die "Delete: no editor expected"
+log "ok: Delete action moves the saved file to the trash"
+
+GIO_FAIL=1 NOTIFY_ACTION=delete run_shot screen
+expect_rc 1 "trash failure"
+log "ok: a trash failure is reported"

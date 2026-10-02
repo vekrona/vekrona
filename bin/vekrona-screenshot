@@ -65,7 +65,12 @@ if ! grim "${grim_args[@]}" "$FILE"; then
 fi
 wl-copy --type image/png <"$FILE" || fail "saved $FILE, but copying to clipboard failed"
 
-action="$(notify-send -a vekrona -i "$FILE" -A edit=Edit "Screenshot" "Saved to $FILE and copied")"
-if [[ "$action" == "edit" ]]; then
-  exec swappy -f "$FILE"
-fi
+action="$(notify-send -a vekrona -i "$FILE" -A edit=Edit -A delete=Delete "Screenshot" "Saved to $FILE and copied")"
+case "$action" in
+  edit)
+    exec swappy -f "$FILE"
+    ;;
+  delete)
+    gio trash "$FILE"
+    ;;
+esac

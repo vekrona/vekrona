@@ -870,7 +870,7 @@ declare -A VEKRONA_PINNED_PKGS=(
 )
 
 VEKRONA_DESKTOP_PKGS=(
-  1password 1password-cli NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl btop
+  adw-gtk3-theme 1password 1password-cli NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl btop
   danksearch dconf dgop dms ffmpeg firefox flatpak gamemode gamescope ghostty
   gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver
   jetbrains-mono-fonts jq kanshi

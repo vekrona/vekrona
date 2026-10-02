@@ -167,6 +167,7 @@ vekrona/
     vekrona-rollback      # mount subvolid=5, writable snapshot, rename+promote, move .snapshots, write rollback marker holding the backup subvolume name
     vekrona-caffeine      # systemd-run --user transient unit wrapping systemd-inhibit --what=sleep; 30m/1h/2h/off/status, no-arg toggles
     vekrona-theme         # dms ipc call settings set customThemeFile <path>
+    vekrona-gtk-theme     # active-theme.json -> ~/.config/gtk-{3,4}.0/gtk.css @define-color overrides + gsettings adw-gtk3-dark/prefer-dark; called by vekrona-theme and stage 50
     vekrona-webapp        # firefox --name vekrona-<app> -P vekrona-<app> --new-window <url>
     vekrona-screenshot    # grim+slurp, clipboard, notify with swappy Edit action
     vekrona-record        # wf-recorder

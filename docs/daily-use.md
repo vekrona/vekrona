@@ -83,6 +83,13 @@ vekrona-theme next
 vekrona-theme list
 ```
 
+Each `vekrona-theme` call also runs `vekrona-gtk-theme`, which writes
+`~/.config/gtk-3.0/gtk.css` and `~/.config/gtk-4.0/gtk.css` from the same
+active theme and selects `adw-gtk3-dark` with `prefer-dark`, so GTK apps
+(file choosers, swappy, Firefox dialogs) match the desktop instead of light
+Adwaita. It refuses to overwrite a `gtk.css` it did not generate. GTK apps
+that are already running keep their old colors until restarted.
+
 Caffeine (a fixed wall-clock duration is the point, not something to work
 around): `vekrona-caffeine` starts a transient systemd user unit
 (`systemd-run --user --unit=vekrona-caffeine`) that wraps `systemd-inhibit
@@ -110,7 +117,7 @@ vekrona-screenshot --clipboard window   # copy to clipboard, no file
 vekrona-record                  # slurp region select, systemd-run transient user unit toggle, saved to ~/Videos/Recordings
 ```
 
-Super+Shift+3/4/5 work like Cmd+Shift+3/4/5 on macOS, and adding Ctrl copies to the clipboard without saving a file. In area mode, click a window or drag a rectangle. Saved shots are also copied to the clipboard, and the Edit button in the notification opens swappy.
+Super+Shift+3/4/5 work like Cmd+Shift+3/4/5 on macOS, and adding Ctrl copies to the clipboard without saving a file. In area mode, click a window or drag a rectangle. Saved shots are also copied to the clipboard, and the notification has Edit (opens swappy) and Delete (moves the shot to the trash) buttons.
 
 Webapps (each opens a dedicated Firefox profile and window, set up by stage
 `50-user` from `config/firefox/webapps/<app>/`):

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+
+usage() {
+  echo "usage: $(basename "$0")" >&2
+  echo "writes ~/.config/gtk-{3,4}.0/gtk.css (adw-gtk3 / libadwaita colors) from $(vekrona_active_theme_file)" >&2
+  echo "and selects adw-gtk3-dark + prefer-dark; apps that are already running keep their old colors until restarted" >&2
+  exit "${1:-2}"
+}
+
+[[ $# -eq 0 ]] || { [[ "$1" != -h && "$1" != --help ]] || usage 0; usage; }
+
+die() { echo "vekrona-gtk-theme: $*" >&2; exit 1; }
+
+MARKER="/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */"
+REQUIRED_KEYS=(
+  background backgroundText surface surfaceText surfaceContainer surfaceContainerHigh
+  outlineVariant primary primaryText error errorText
+)
+
+theme_file="$(vekrona_active_theme_file)"
+[[ -f "$theme_file" ]] || die "active theme file not found: $theme_file (run vekrona-theme <name> first)"
+jq -e '.dark | type == "object"' "$theme_file" >/dev/null 2>&1 || die "$theme_file is not valid JSON with a 'dark' section"
+
+declare -A c
+for key in "${REQUIRED_KEYS[@]}"; do
+  value="$(jq -r --arg k "$key" '.dark[$k] // empty' "$theme_file")"
+  [[ "$value" =~ ^#[0-9A-Fa-f]{6}$ ]] || die "$theme_file: dark.$key is missing or not a #rrggbb color: '$value'"
+  c[$key]="$value"
+done
+
+css="$MARKER
+@define-color accent_color ${c[primary]};
+@define-color accent_bg_color ${c[primary]};
+@define-color accent_fg_color ${c[primaryText]};
+@define-color destructive_color ${c[error]};
+@define-color destructive_bg_color ${c[error]};
+@define-color destructive_fg_color ${c[errorText]};
+@define-color error_color ${c[error]};
+@define-color window_bg_color ${c[background]};
+@define-color window_fg_color ${c[backgroundText]};
+@define-color view_bg_color ${c[surface]};
+@define-color view_fg_color ${c[surfaceText]};
+@define-color headerbar_bg_color ${c[surfaceContainer]};
+@define-color headerbar_fg_color ${c[backgroundText]};
+@define-color headerbar_border_color ${c[outlineVariant]};
+@define-color headerbar_backdrop_color ${c[background]};
+@define-color sidebar_bg_color ${c[surfaceContainer]};
+@define-color sidebar_fg_color ${c[backgroundText]};
+@define-color card_bg_color ${c[surfaceContainerHigh]};
+@define-color card_fg_color ${c[surfaceText]};
+@define-color popover_bg_color ${c[surfaceContainerHigh]};
+@define-color popover_fg_color ${c[surfaceText]};
+@define-color dialog_bg_color ${c[surfaceContainerHigh]};
+@define-color dialog_fg_color ${c[surfaceText]};
+"
+
+targets=("$HOME/.config/gtk-3.0/gtk.css" "$HOME/.config/gtk-4.0/gtk.css")
+for target in "${targets[@]}"; do
+  if [[ -e "$target" || -L "$target" ]]; then
+    [[ "$(head -n 1 "$target" 2>/dev/null || true)" == "$MARKER" ]] || die "$target exists and is not managed by vekrona (no marker header); move it away first"
+  fi
+done
+
+for target in "${targets[@]}"; do
+  mkdir -p "$(dirname "$target")"
+  tmp="$(mktemp "$target.XXXXXX")"
+  printf '%s' "$css" > "$tmp" || { rm -f "$tmp"; die "could not write $tmp"; }
+  mv -f "$tmp" "$target" || { rm -f "$tmp"; die "could not replace $target"; }
+done
+
+user_gsettings set org.gnome.desktop.interface gtk-theme adw-gtk3-dark || die "gsettings set gtk-theme failed"
+user_gsettings set org.gnome.desktop.interface color-scheme prefer-dark || die "gsettings set color-scheme failed"
+echo "gtk theme: adw-gtk3-dark (colors from $theme_file)"
