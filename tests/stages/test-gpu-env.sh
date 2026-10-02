@@ -124,7 +124,7 @@ log "ok: unknown argument rejected"
 
 # What Sway actually receives: config/sway/environment is sourced by start-sway's shell, and its variables must reach sway.
 sway_sees() {
-  VEKRONA_SYSFS_ROOT="$VEKRONA_SYSFS_ROOT" PATH="$ROOT/bin:$PATH" HOME="$scratch/home" \
+  env -u WLR_DRM_DEVICES VEKRONA_SYSFS_ROOT="$VEKRONA_SYSFS_ROOT" PATH="$ROOT/bin:$PATH" HOME="$scratch/home" \
     sh -c 'set -a; . "$1"; set +a; sh -c "echo \"\${WLR_DRM_DEVICES-unset}\""' sh "$ROOT/config/sway/environment" 2>/dev/null
 }
 
