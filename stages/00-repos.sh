@@ -20,7 +20,7 @@ ensure_rpmfusion_release() {
     log "package present: $pkg"
   else
     log "downloading: $url"
-    curl --fail --silent --show-error --location --output "$rpm_file" "$url" || die "download failed: $url"
+    download_file "$url" "$rpm_file"
     assert_rpm_signed_by_pinned_key "$key_repo" "$rpm_file"
     log "installing: $pkg (signature verified against pinned key $key_repo)"
     root dnf install -y "$rpm_file"

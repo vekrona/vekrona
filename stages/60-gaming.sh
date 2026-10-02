@@ -11,10 +11,7 @@ SCOPEBUDDY_LINK="/usr/local/bin/scb"
 
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
-curl -sfL "$SCOPEBUDDY_URL" -o "$tmp" || die "failed to download scopebuddy: $SCOPEBUDDY_URL"
-[[ -s "$tmp" ]] || die "downloaded scopebuddy is empty"
-tmp_sha256="$(sha256sum "$tmp" | awk '{print $1}')"
-[[ "$tmp_sha256" == "$SCOPEBUDDY_SHA256" ]] || die "scopebuddy sha256 mismatch: got $tmp_sha256, expected $SCOPEBUDDY_SHA256"
+fetch_pinned "$SCOPEBUDDY_URL" "$SCOPEBUDDY_SHA256" "$tmp"
 
 if [[ -f "$SCOPEBUDDY_BIN" ]] && cmp -s "$tmp" "$SCOPEBUDDY_BIN"; then
   log "scopebuddy up to date: $SCOPEBUDDY_BIN"
