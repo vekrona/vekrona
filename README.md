@@ -78,6 +78,12 @@ cd ~/wrk/vekrona
 ./install.sh
 ```
 
+The installed system lives in `~/.local/share/vekrona`, a separate clone that
+`install.sh` manages: wherever you run `./install.sh` from, it clones or
+fast-forwards that copy from GitHub and runs the stages from there, so push
+your changes first. It refuses to touch the copy if it has local changes.
+`./install.sh --no-pull` runs the stages from the current tree instead.
+
 Reboot and log in at the greeter. `./install.sh --list` shows the stages that
 apply to your machine: `10-nvidia` runs only with a Turing to Ada NVIDIA GPU outside a Mac (older and newer GPUs keep nouveau; Secure Boot with an unenrolled akmods key also skips it),
 `15-mac` only on a Mac.

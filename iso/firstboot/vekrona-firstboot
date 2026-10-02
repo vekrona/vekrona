@@ -51,7 +51,15 @@ uid="$(id -u "$user")"
 home="$(getent passwd "$user" | cut -d: -f6)"
 [[ -n "$home" && -d "$home" ]] || die "home directory not found for $user"
 
-target="$home/vekrona"
+target="$home/.local/share/vekrona"
+# Create parent directories if needed, owned by the user
+for dir in "$home/.local" "$home/.local/share"; do
+  if [[ ! -d "$dir" ]]; then
+    mkdir -p "$dir"
+    chown "$user:$user" "$dir"
+  fi
+done
+
 if [[ -e "$target" ]]; then
   [[ -d "$target/.git" ]] || die "$target already exists and is not a git checkout; refusing to overwrite"
   log "$target already present, skipping payload copy"
@@ -85,7 +93,7 @@ log "running ./install.sh as $user"
 sudo -iu "$user" env \
   "XDG_RUNTIME_DIR=/run/user/$uid" \
   "DBUS_SESSION_BUS_ADDRESS=unix:path=$bus" \
-  "$target/install.sh"
+  "$target/install.sh" --no-pull
 
 touch "$STATE_DIR/firstboot.done"
 systemctl disable vekrona-firstboot.service

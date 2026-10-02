@@ -370,6 +370,9 @@ ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
 ensure_symlink "$VEKRONA_ROOT/config/scopebuddy/scb.conf" "$HOME/.config/scopebuddy/scb.conf"
 ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/MangoHud/MangoHud.conf"
 
+mapfile -t link_dirs < <(vekrona_link_dirs)
+prune_vekrona_links "${link_dirs[@]}"
+
 require_cmd nix
 if nix profile list --json | jq -e '.elements | has("devbox")' >/dev/null; then
   log "devbox already installed via nix profile"

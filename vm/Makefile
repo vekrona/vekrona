@@ -206,19 +206,19 @@ test: require-harness-key
 	echo "vm ip: $$ip"; \
 	wait_for_ssh "$(VM_USER)@$$ip" || exit 1; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo loginctl enable-linger $(VM_USER)'; \
-	rsync -a --delete --exclude=.git --exclude=vm/.ssh -e "ssh $(SSH_OPTS)" "$(REPO_ROOT)/" "$(VM_USER)@$$ip:vekrona/"; \
-	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'cd vekrona && ./install.sh --skip 10-nvidia'; \
+	rsync -a --delete --exclude=.git --exclude=vm/.ssh --mkpath -e "ssh $(SSH_OPTS)" "$(REPO_ROOT)/" "$(VM_USER)@$$ip:.local/share/vekrona/"; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'cd .local/share/vekrona && ./install.sh --no-pull --skip 10-nvidia'; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo systemctl restart "user@$$(id -u).service"'; \
-	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/session-check.sh'; \
-	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agents-check.sh'; \
-	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/errors-check.sh'; \
-	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/agent-launch-check.sh'; \
-	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/session-teardown.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash .local/share/vekrona/vm/session-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash .local/share/vekrona/vm/agents-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash .local/share/vekrona/vm/errors-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash .local/share/vekrona/vm/agent-launch-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash .local/share/vekrona/vm/session-teardown.sh'; \
 	snap_n="$$(ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'sudo /home/$(VM_USER)/.local/bin/vekrona-snapshot vm-test')"; \
 	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" "sudo /home/$(VM_USER)/.local/bin/vekrona-rollback --yes $$snap_n"; \
 	python3 "$(WAIT_FOR_REBOOT_SCRIPT)" "$(VM_NAME)" $(REBOOT_EVENT_TIMEOUT) $(AGENT_RECONNECT_TIMEOUT); \
 	wait_for_ssh "$(VM_USER)@$$ip" || exit 1; \
-	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" "sudo bash vekrona/vm/rollback-check.sh $$snap_n"; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" "sudo bash .local/share/vekrona/vm/rollback-check.sh $$snap_n"; \
 	state="$$(ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'systemctl is-system-running --wait' 2>/dev/null || true)"; \
 	if [ "$$state" != "running" ]; then \
 		failed="$$(ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'systemctl --failed --no-legend' 2>/dev/null || true)"; \
@@ -226,5 +226,5 @@ test: require-harness-key
 		[ -z "$$failed" ] || { echo "failed units:" >&2; echo "$$failed" >&2; }; \
 		exit 1; \
 	fi; \
-	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash vekrona/vm/login-manager-check.sh'; \
+	ssh $(SSH_OPTS) "$(VM_USER)@$$ip" 'bash .local/share/vekrona/vm/login-manager-check.sh'; \
 	echo "vm test passed"

@@ -317,6 +317,16 @@ if ran 15-mac; then
 fi
 
 if ran 50-user; then
+  mapfile -t link_dirs < <(vekrona_link_dirs)
+  warn_check "stages run from the system copy $VEKRONA_SYSTEM_ROOT (running from $VEKRONA_ROOT; a dev tree needs --no-pull)" \
+    eq "$(realpath "$VEKRONA_ROOT")" "$(realpath -m "$VEKRONA_SYSTEM_ROOT")"
+  # A dev tree at the legacy path legitimately owns links into it.
+  if [[ "$(realpath "$VEKRONA_ROOT")" != "$(realpath -m "$VEKRONA_LEGACY_ROOT")" ]]; then
+    legacy_links="$(vekrona_links "${link_dirs[@]}" | while IFS= read -r l; do
+      case "$(readlink "$l")" in "$VEKRONA_LEGACY_ROOT"/*) printf '%s ' "$l" ;; esac
+    done)"
+    check assert "no managed symlink points into the legacy $VEKRONA_LEGACY_ROOT/ (found: ${legacy_links:-none})" eq "$legacy_links" ""
+  fi
   check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
   check assert "sway panel scale drop-in present iff an internal panel is connected" present_iff has_internal_panel file_exists "$SWAY_PANEL_SCALE_DROPIN"

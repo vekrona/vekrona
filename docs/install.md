@@ -106,7 +106,7 @@ Once the install finishes and the machine reboots, the disk prompt will ask for
 that same password (or the security key, if you registered one) to unlock the
 encrypted root before vekrona's first-boot
 service (`vekrona-firstboot.service`) copies the checkout baked into the ISO
-to `~/vekrona` in the new user's home and runs `./install.sh`
+to `~/.local/share/vekrona` in the new user's home and runs `./install.sh`
 unattended, ending at the same greetd login prompt. See [ISO and CI](development.md#iso-and-ci)
 for how the ISO and addon are built, what first boot does, and how it is
 tested.
