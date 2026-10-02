@@ -143,9 +143,11 @@ sends it as ESC DEL (`\e\x7f`), which bash's readline already binds to
 Ctrl+Backspace like the Cmd layer does for GUI apps does not work here:
 Ghostty encodes Ctrl+Backspace as a bare Ctrl-H byte (`^H`, 0x08), and
 readline binds plain Ctrl-H to `backward-delete-char`, so it would delete one
-character instead of a word. Copy and paste in ghostty come from ghostty's
-own keybinds instead (`config/ghostty/config`: `super+c=copy_to_clipboard`,
-`super+v=paste_from_clipboard`), not from xremap.
+character instead of a word.
+
+With the Cmd layer off, Super+C and Super+V do nothing in these terminals.
+vekrona ships no Ghostty config, so copy and paste are Ghostty's own
+Ctrl+Shift+C and Ctrl+Shift+V.
 
 Keyboard layouts are not hardcoded in `config/sway/config`: they follow the
 system X11 keymap, the layouts chosen in the installer (Anaconda writes

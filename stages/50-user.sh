@@ -28,7 +28,6 @@ else
   log "absent: $stale_gpu_env_file"
 fi
 ensure_symlink "$VEKRONA_ROOT/config/xremap/config.yml" "$HOME/.config/xremap/config.yml"
-ensure_symlink "$VEKRONA_ROOT/config/ghostty/config" "$HOME/.config/ghostty/config"
 
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/xremap.service" "$HOME/.config/systemd/user/xremap.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/dms.service.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"
@@ -235,12 +234,6 @@ else
 fi
 "$VEKRONA_ROOT/bin/vekrona-gtk-theme"
 
-active_theme_name="$(cat "$theme_name_file")"
-active_ghostty_theme="$(ghostty_theme_for "$active_theme_name")"
-log "writing ghostty theme include: $active_theme_name -> $active_ghostty_theme"
-write_ghostty_theme_include "$active_theme_name"
-assert "ghostty theme include: theme = $active_ghostty_theme" grep -qxF "theme = $active_ghostty_theme" "$GHOSTTY_THEME_INCLUDE"
-
 dms_settings_dir="$HOME/.config/DankMaterialShell"
 dms_settings="$dms_settings_dir/settings.json"
 dms_session_dir="$HOME/.local/state/DankMaterialShell"
@@ -306,11 +299,13 @@ else
   touch "$dms_changelog_seen"
 fi
 
-assert "DMS matugen Ghostty template enabled" python3 -c "
+ensure_dms_setting_enforced matugenTemplateGhostty false
+assert "DMS matugen templates: GTK on, Ghostty off" python3 -c "
 import json
 d = json.load(open('$dms_settings'))
 assert d.get('runDmsMatugenTemplates', True) is True
-assert d.get('matugenTemplateGhostty', True) is True
+assert d.get('matugenTemplateGtk', True) is True
+assert d.get('matugenTemplateGhostty', True) is False
 "
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/dms-themes" "$HOME/.config/DankMaterialShell/vekrona-themes"

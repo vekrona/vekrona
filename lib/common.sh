@@ -244,7 +244,9 @@ prune_vekrona_links() {
   done < <(vekrona_links --dangling "$@")
 }
 
-# Every directory stage 50 links into, one per line (70-verify scans the same set).
+# Every directory stage 50 links into, one per line (70-verify scans the same set). ~/.config/ghostty is
+# listed only so prune_vekrona_links retires the config link earlier installs made there (vekrona no longer
+# ships a Ghostty config); a dotfiles-managed or regular ~/.config/ghostty/config is never touched.
 vekrona_link_dirs() {
   local d
   printf '%s\n' \
@@ -937,31 +939,6 @@ ensure_flatpak_app_system() {
   log "installing flatpak: $app_id"
   root flatpak install --system -y --noninteractive "$remote" "$app_id"
   flatpak_installed "$app_id" || die "flatpak app not installed: $app_id"
-}
-
-declare -A GHOSTTY_THEME_MAP=(
-  [tokyo-night]="TokyoNight"
-  [nord]="Nord"
-  [gruvbox-dark]="Gruvbox Dark"
-  [catppuccin-mocha]="Catppuccin Mocha"
-)
-
-GHOSTTY_THEME_INCLUDE="$HOME/.config/ghostty/vekrona-theme"
-
-ghostty_theme_for() {
-  local name="$1"
-  [[ -n "${GHOSTTY_THEME_MAP[$name]+x}" ]] || die "no Ghostty built-in theme mapped for vekrona theme: $name"
-  printf '%s' "${GHOSTTY_THEME_MAP[$name]}"
-}
-
-write_ghostty_theme_include() {
-  local vekrona_name="$1" ghostty_name include_dir tmp
-  ghostty_name="$(ghostty_theme_for "$vekrona_name")"
-  include_dir="$(dirname "$GHOSTTY_THEME_INCLUDE")"
-  ensure_dir "$include_dir"
-  tmp="$(mktemp "$include_dir/.$(basename "$GHOSTTY_THEME_INCLUDE").XXXXXX")"
-  printf 'theme = %s\n' "$ghostty_name" > "$tmp"
-  mv "$tmp" "$GHOSTTY_THEME_INCLUDE"
 }
 
 vekrona_state_dir() { printf '%s' "${XDG_STATE_HOME:-$HOME/.local/state}/vekrona"; }

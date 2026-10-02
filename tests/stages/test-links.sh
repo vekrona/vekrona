@@ -73,6 +73,23 @@ prune_vekrona_links "$HOME/.config/foreign-dir" 2>/dev/null
 [[ -L "$scratch/other/dangling" ]] || die "pruned inside a symlinked destination dir"
 log "ok: a symlinked destination dir is not pruned"
 
+# Ghostty migration: the config link an earlier install made (now dangling) is retired through the
+# regular prune; a regular file and a link into somebody's dotfiles stay.
+rm -f "$HOME/.config/ghostty"
+mkdir -p "$HOME/.config/ghostty"
+ln -s "$VEKRONA_ROOT/config/ghostty/config" "$HOME/.config/ghostty/config"
+mapfile -t link_dirs < <(vekrona_link_dirs)
+prune_vekrona_links "${link_dirs[@]}" 2>/dev/null
+[[ ! -L "$HOME/.config/ghostty/config" ]] || die "the dangling vekrona ghostty config link was not retired"
+echo mine > "$HOME/.config/ghostty/config"
+prune_vekrona_links "${link_dirs[@]}" 2>/dev/null
+[[ "$(<"$HOME/.config/ghostty/config")" == mine ]] || die "a regular ghostty config was touched"
+rm "$HOME/.config/ghostty/config"
+ln -s "$scratch/dotfiles/ghostty-config" "$HOME/.config/ghostty/config"
+prune_vekrona_links "${link_dirs[@]}" 2>/dev/null
+[[ -L "$HOME/.config/ghostty/config" ]] || die "a dotfiles ghostty config link was removed"
+log "ok: only the vekrona ghostty config link is retired"
+
 # install.sh --list and --no-pull never reach for the network or the system copy.
 fakebin="$scratch/fakebin"
 mkdir -p "$fakebin"

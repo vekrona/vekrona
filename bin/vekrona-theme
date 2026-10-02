@@ -8,11 +8,8 @@ THEMES_DIR="$HOME/.config/DankMaterialShell/vekrona-themes"
 STATE_DIR="$(vekrona_state_dir)"
 STATE_FILE="$(vekrona_theme_name_file)"
 ACTIVE_THEME_FILE="$(vekrona_active_theme_file)"
-DANKCOLORS_FILE="$HOME/.config/ghostty/themes/dankcolors"
+GTK_COLORS_FILE="$HOME/.config/gtk-4.0/dank-colors.css"
 WAIT_SECONDS=10
-
-GHOSTTY_BUS_NAME="com.mitchellh.ghostty"
-GHOSTTY_OBJECT_PATH="/com/mitchellh/ghostty"
 
 INOTIFY_PID=""
 
@@ -44,7 +41,7 @@ dms_settings_set() {
   local key="$1" value="$2" output rc=0
   output="$(dms ipc call settings set "$key" "$value" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 || "$output" == *INVALID* || "$output" == *FAILURE* || "$output" == *ERROR* ]]; then
-    echo "vekrona-theme: dms ipc call settings set $key $value failed: $output (Ghostty and the recorded theme are unchanged)" >&2
+    echo "vekrona-theme: dms ipc call settings set $key $value failed: $output (the recorded theme is unchanged)" >&2
     exit 1
   fi
 }
@@ -53,17 +50,23 @@ dms_wallpaper_set() {
   local png="$1" output rc=0
   output="$(dms ipc call wallpaper set "$png" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 || "$output" != SUCCESS* ]]; then
-    echo "vekrona-theme: dms ipc call wallpaper set $png failed: $output (DMS and Ghostty are already on the new theme; the wallpaper and the recorded theme name were not updated, re-run to retry)" >&2
+    echo "vekrona-theme: dms ipc call wallpaper set $png failed: $output (DMS is already on the new theme; the wallpaper and the recorded theme name were not updated, re-run to retry)" >&2
     exit 1
   fi
 }
 
-current_background() {
-  [[ -f "$DANKCOLORS_FILE" ]] || return 0
-  sed -n 's/^background = //p' "$DANKCOLORS_FILE"
+# DMS renders window_bg_color from the custom theme's .dark.surface
+# (matugen/templates/gtk-colors.css), so that is the value to wait for.
+current_window_bg() {
+  [[ -f "$GTK_COLORS_FILE" ]] || return 0
+  sed -n 's/^@define-color window_bg_color \(#[0-9A-Fa-f]*\);$/\1/p' "$GTK_COLORS_FILE"
 }
 
-stop_dankcolors_watch() {
+window_bg_is() {
+  [[ "${1,,}" == "${2,,}" ]]
+}
+
+stop_gtk_colors_watch() {
   if [[ -n "$INOTIFY_PID" ]]; then
     pkill -TERM -P "$INOTIFY_PID" 2>/dev/null || true
     kill "$INOTIFY_PID" 2>/dev/null || true
@@ -73,9 +76,9 @@ stop_dankcolors_watch() {
   INOTIFY_FD=""
 }
 
-start_dankcolors_watch() {
+start_gtk_colors_watch() {
   local watch_dir line
-  watch_dir="$(dirname "$DANKCOLORS_FILE")"
+  watch_dir="$(dirname "$GTK_COLORS_FILE")"
   mkdir -p "$watch_dir"
 
   coproc INOTIFY_CP { inotifywait -m -e close_write,moved_to,create "$watch_dir" 2>&1; }
@@ -96,9 +99,9 @@ start_dankcolors_watch() {
   return 1
 }
 
-wait_for_background() {
+wait_for_window_bg() {
   local expected="$1"
-  [[ "$(current_background)" == "$expected" ]] && return 0
+  window_bg_is "$(current_window_bg)" "$expected" && return 0
   local deadline now remaining line
   deadline=$(( $(date +%s) + WAIT_SECONDS ))
   while :; do
@@ -106,18 +109,8 @@ wait_for_background() {
     remaining=$(( deadline - now ))
     (( remaining > 0 )) || return 1
     IFS= read -r -t "$remaining" -u "$INOTIFY_FD" line 2>/dev/null || return 1
-    [[ "$(current_background)" == "$expected" ]] && return 0
+    window_bg_is "$(current_window_bg)" "$expected" && return 0
   done
-}
-
-ghostty_running() {
-  busctl --user list 2>/dev/null | awk -v n="$GHOSTTY_BUS_NAME" '$1==n && $2!="-"{f=1} END{exit !f}'
-}
-
-reload_ghostty() {
-  ghostty_running || return 0
-  busctl --user call "$GHOSTTY_BUS_NAME" "$GHOSTTY_OBJECT_PATH" org.gtk.Actions Activate "sava{sv}" reload-config 0 0 >/dev/null \
-    || echo "vekrona-theme: could not reload running ghostty windows, reload manually (ctrl+shift+,)" >&2
 }
 
 dms_answers() {
@@ -128,7 +121,7 @@ RESTORE_ACTIVE_THEME_ON_EXIT=0
 ACTIVE_THEME_BACKUP=""
 
 cleanup() {
-  stop_dankcolors_watch
+  stop_gtk_colors_watch
   if [[ "$RESTORE_ACTIVE_THEME_ON_EXIT" == "1" ]]; then
     if [[ -n "$ACTIVE_THEME_BACKUP" && -f "$ACTIVE_THEME_BACKUP" ]]; then
       cp "$ACTIVE_THEME_BACKUP" "$ACTIVE_THEME_FILE"
@@ -147,20 +140,18 @@ apply_theme() {
   [[ -f "$png" ]] || { echo "missing wallpaper: $png" >&2; exit 1; }
 
   local expected_bg
-  expected_bg="$(jq -r '.dark.background' "$json")"
-  [[ -n "$expected_bg" && "$expected_bg" != null ]] || {
-    echo "vekrona-theme: $json has no .dark.background" >&2
+  expected_bg="$(jq -r '.dark.surface' "$json")"
+  [[ "$expected_bg" =~ ^#[0-9A-Fa-f]{6}$ ]] || {
+    echo "vekrona-theme: $json has no .dark.surface hex color" >&2
     exit 1
   }
-
-  ghostty_theme_for "$name" >/dev/null
 
   dms_answers || {
-    echo "vekrona-theme: DMS is not responding to IPC (Ghostty and the recorded theme are unchanged)" >&2
+    echo "vekrona-theme: DMS is not responding to IPC (the recorded theme is unchanged)" >&2
     exit 1
   }
 
-  start_dankcolors_watch || exit 1
+  start_gtk_colors_watch || exit 1
 
   mkdir -p "$STATE_DIR"
   ACTIVE_THEME_BACKUP=""
@@ -176,15 +167,12 @@ apply_theme() {
   dms_settings_set customThemeFile "$ACTIVE_THEME_FILE"
   dms_settings_set currentThemeName custom
 
-  if ! wait_for_background "$expected_bg"; then
-    echo "vekrona-theme: theme '$name' did not take in DMS (background is '$(current_background)', expected '$expected_bg'). Ghostty and the recorded theme are unchanged." >&2
+  if ! wait_for_window_bg "$expected_bg"; then
+    echo "vekrona-theme: theme '$name' did not take in DMS (GTK window_bg_color is '$(current_window_bg)', expected '$expected_bg'). The recorded theme is unchanged." >&2
     exit 1
   fi
   RESTORE_ACTIVE_THEME_ON_EXIT=0
-  stop_dankcolors_watch
-
-  write_ghostty_theme_include "$name"
-  reload_ghostty
+  stop_gtk_colors_watch
 
   dms_wallpaper_set "$png"
 

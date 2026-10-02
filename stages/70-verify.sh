@@ -329,6 +329,8 @@ if ran 50-user; then
     done)"
     check assert "no managed symlink points into the legacy $VEKRONA_LEGACY_ROOT/ (found: ${legacy_links:-none})" eq "$legacy_links" ""
   fi
+  ghostty_links="$(vekrona_links "$HOME/.config/ghostty" | tr '\n' ' ')"
+  check assert "no vekrona symlink left under ~/.config/ghostty (vekrona ships no Ghostty config; found: ${ghostty_links:-none})" eq "$ghostty_links" ""
   check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
   check assert "sway panel scale drop-in present iff an internal panel is connected" present_iff has_internal_panel file_exists "$SWAY_PANEL_SCALE_DROPIN"
@@ -420,29 +422,16 @@ assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftW
   check assert_file_contains "$HOME/.config/gtk-4.0/gtk.css" "^/\\* vekrona-gtk-theme: "
   check assert "GTK theme is adw-gtk3-dark" gsettings_eq org.gnome.desktop.interface gtk-theme adw-gtk3-dark
 
-  ghostty_theme_dir="/usr/share/ghostty/themes"
-  for theme_json in "$VEKRONA_ROOT"/config/dms-themes/*.json; do
-    theme_name="$(basename "$theme_json" .json)"
-    ghostty_theme_name="$(ghostty_theme_for "$theme_name")"
-    check assert "ghostty built-in theme exists: $theme_name -> $ghostty_theme_name" \
-      file_exists "$ghostty_theme_dir/$ghostty_theme_name"
-  done
-
   recorded_theme_name="$(cat "$(vekrona_theme_name_file)" 2>/dev/null || true)"
   nonempty() { [[ -n "$1" ]]; }
   check assert "recorded theme name present" nonempty "$recorded_theme_name"
-  recorded_ghostty_theme="$(ghostty_theme_for "$recorded_theme_name")"
-  check assert "ghostty theme include present" file_exists "$GHOSTTY_THEME_INCLUDE"
-  check assert_file_contains "$GHOSTTY_THEME_INCLUDE" "^theme = $recorded_ghostty_theme\$"
 
-  check assert_file_contains "$HOME/.config/ghostty/config" '^config-file = vekrona-theme$'
-  check assert "ghostty config validates" ghostty +validate-config
-
-  check assert "DMS matugen Ghostty template enabled" python3 -c "
+  check assert "DMS matugen templates: GTK on, Ghostty off (nothing is written under ~/.config/ghostty)" python3 -c "
 import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('runDmsMatugenTemplates', True) is True
-assert d.get('matugenTemplateGhostty', True) is True
+assert d.get('matugenTemplateGtk', True) is True
+assert d.get('matugenTemplateGhostty', True) is False
 "
 
   check assert "no stale vekrona-gpu.conf from an earlier install (the GPU is chosen at login by vekrona-gpu-env)" file_absent "$HOME/.config/environment.d/vekrona-gpu.conf"

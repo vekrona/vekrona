@@ -32,36 +32,30 @@ vekrona-webapp discord
 
 ## Daily operations
 
-Theme (applies the DMS color scheme, the terminal colors, and a matching 4K
+Theme (applies the DMS color scheme and a matching 4K
 wallpaper, and remembers the current theme in `~/.local/state/vekrona/theme`
 so `next` cycles correctly; the four themes are `tokyo-night`,
 `catppuccin-mocha`, `gruvbox-dark`, `nord`, and their wallpapers are
 generated solid/gradient placeholders, swap them for real images if wanted).
 
-Terminal colors come from Ghostty's own built-in themes, not from DMS. Each
-vekrona theme maps to one Ghostty built-in theme, in the single mapping
-`ghostty_theme_for` in `lib/common.sh` that `vekrona-theme`,
-`stages/50-user.sh` and `stages/70-verify.sh` all read; a vekrona theme with
-no entry in that mapping is a hard, immediate error, never a silent
-fallback. `vekrona-theme` writes the mapped name into
-`~/.config/ghostty/vekrona-theme` (a single `theme = <name>` line, written
-atomically), which `config/ghostty/config` pulls in with `config-file =
-vekrona-theme`, and then reloads any already-running Ghostty windows over
-Ghostty's own D-Bus `org.gtk.Actions` interface (the same `reload-config`
-action its default `ctrl+shift+,` keybind runs), so open terminals update
-immediately without the user doing anything. `stages/50-user.sh` writes
-this same include for the seeded default theme on a fresh install, or for
-whichever theme is recorded in `~/.local/state/vekrona/theme` on an
-existing one, so a terminal opened in the very first session already has
-the right colors: it does not depend on DMS at all.
+vekrona leaves terminal colors alone. Ghostty uses its own defaults, or
+whatever your Ghostty config sets. vekrona ships no Ghostty config and writes
+nothing under `~/.config/ghostty`, because that directory is often a symlink
+into a dotfiles repo. Stage `50-user` sets the DMS setting
+`matugenTemplateGhostty` to `false`, so DMS does not write its
+`themes/dankcolors` file there either. The one thing stage `50-user` removes
+there is the config link older installs made into the vekrona checkout, and
+only while it points there. Copy and paste in Ghostty are Ghostty's own
+Ctrl+Shift+C and Ctrl+Shift+V, because the Super layer skips terminals (see
+keyboard.md).
 
 DMS and GTK application colors are a separate path and still come from DMS.
 The theme content lives in `~/.local/state/vekrona/active-theme.json`,
 which `customThemeFile` in the DMS settings seed points at from the first
 session onward, so DMS watches that one file and reloads it on every
 write; the script writes the new theme into it, then waits for DMS to
-confirm the new colors (via `inotifywait` on the ghostty theme file DMS
-still generates as a side effect, so it needs `inotify-tools`) and exits
+confirm the new colors (via `inotifywait` on `~/.config/gtk-4.0/dank-colors.css`, which DMS
+generates as a side effect, so it needs `inotify-tools`) and exits
 non-zero with a clear message if the theme did not take within the wait,
 without retrying or restarting the shell itself. DMS seeds the wallpaper
 for the first session from `~/.local/state/DankMaterialShell/session.json`,
@@ -71,16 +65,16 @@ race between checking whether `matugen` is available and loading the
 custom theme file, and when it loses that race it does not retry, so GTK
 application colors can stay at GTK defaults until the first
 `vekrona-theme <name>` call. No event exists to reliably wait on for that
-race from outside DMS, so this is not automated. The terminal no longer has
-this problem: Ghostty reads its colors from its own built-in themes, so
-they are correct from the first session, with no DMS involvement.
+race from outside DMS, so this is not automated.
 
-That startup race is also why DMS's matugen template switches,
-`runDmsMatugenTemplates` and `matugenTemplateGhostty` in the settings seed,
-must stay enabled: they are what makes DMS regenerate the Ghostty color
-files at all once it wins the race, and stage `50-user` and stage `70-verify`
-both assert they are `true` (the seed omits them, so DMS's own default of
-`true` applies; the assertion catches anyone turning them off by hand).
+The same startup race is why `runDmsMatugenTemplates` and
+`matugenTemplateGtk` must stay on. Without them DMS never regenerates the GTK
+color files after it wins the race, and `vekrona-theme` waits on one of those
+files. The seed leaves both keys out, so DMS's default of `true` applies.
+Stages `50-user` and `70-verify` assert that neither is `false`, which
+catches anyone turning them off by hand. `matugenTemplateGhostty` goes the
+other way. Stage `50-user` sets it to `false` on fresh and existing installs,
+and stage `70-verify` checks it.
 
 ```
 vekrona-theme <name>
