@@ -410,6 +410,8 @@ assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftW
   for webapp_dir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
     webapp="$(basename "$webapp_dir")"
     check assert "$webapp webapp profile registered" grep -q "vekrona-$webapp" "$firefox_profiles_ini"
+    check assert "$webapp webapp icon installed" file_exists "$HOME/.local/share/icons/hicolor/scalable/apps/vekrona-$webapp.svg"
+    check assert_file_contains "$HOME/.local/share/applications/vekrona-$webapp.desktop" "^Icon=vekrona-$webapp\$"
   done
   check assert "vekrona-theme installed" file_exists "$HOME/.local/bin/vekrona-theme"
   check assert_file_contains "$HOME/.config/gtk-3.0/gtk.css" "^/\\* vekrona-gtk-theme: "

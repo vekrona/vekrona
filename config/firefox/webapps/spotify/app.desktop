@@ -2,6 +2,6 @@
 Name=Spotify
 Exec=vekrona-webapp spotify
 StartupWMClass=vekrona-spotify
-Icon=web-browser
+Icon=vekrona-spotify
 Type=Application
 Categories=AudioVideo;Audio;

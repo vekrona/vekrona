@@ -363,6 +363,7 @@ for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
   ensure_symlink "$appdir/user.js" "$profiledir/user.js"
   ensure_symlink "$appdir/userChrome.css" "$profiledir/chrome/userChrome.css"
   ensure_symlink "$appdir/app.desktop" "$HOME/.local/share/applications/$profile.desktop"
+  ensure_symlink "$appdir/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/$profile.svg"
 done
 shopt -u nullglob
 
