@@ -136,7 +136,7 @@ vekrona/
       xremap.service
       dms.service.d/vekrona.conf  # [Unit] ConditionEnvironment=XDG_CURRENT_DESKTOP=sway PartOf=sway-session.target
                                    # (no [Service], no [Install]; QSG_RHI_BACKEND is never set, see decision #6)
-    firefox/webapps/{youtube,whatsapp,spotify}/{user.js,userChrome.css,app.desktop,url}
+    firefox/webapps/{youtube,whatsapp,spotify,soundcloud,telegram,discord}/{user.js,userChrome.css,app.desktop,url,icon.svg}
     scopebuddy/scb.conf           # -f -W 3840 -H 2160 -r 240
     mangohud/MangoHud.conf
   etc/
@@ -168,7 +168,7 @@ vekrona/
     vekrona-caffeine      # systemd-run --user transient unit wrapping systemd-inhibit --what=sleep; 30m/1h/2h/off/status, no-arg toggles
     vekrona-theme         # dms ipc call settings set customThemeFile <path>
     vekrona-gtk-theme     # active-theme.json -> ~/.config/gtk-{3,4}.0/gtk.css @define-color overrides + gsettings adw-gtk3-dark/prefer-dark; called by vekrona-theme and stage 50
-    vekrona-webapp        # firefox --name vekrona-<app> -P vekrona-<app> --new-window <url>
+    vekrona-webapp        # MOZ_APP_REMOTINGNAME=vekrona-<app> firefox --name vekrona-<app> -P vekrona-<app> --new-window <url>
     vekrona-screenshot    # grim+slurp, clipboard, notify with swappy Edit action
     vekrona-record        # wf-recorder
     vekrona-update        # snapper pre snapshot -> dnf upgrade --refresh -> flatpak update -> mise_system upgrade+reshim -> snapper post snapshot (EXIT trap), prints the pre number and the rollback hint

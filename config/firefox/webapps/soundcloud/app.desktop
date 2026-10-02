@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=SoundCloud
+Exec=vekrona-webapp soundcloud
+StartupWMClass=vekrona-soundcloud
+Icon=vekrona-soundcloud
+Type=Application
+Categories=AudioVideo;Audio;

@@ -45,13 +45,13 @@ vekrona is a recipe. It installs and configures software other people build:
 | Terminal and keyboard | [Ghostty](https://ghostty.org/), [xremap](https://github.com/xremap/xremap) |
 | Login and filesystem | [greetd](https://sr.ht/~kennylevinsen/greetd/) with [tuigreet](https://github.com/tuigreet/tuigreet), [Btrfs](https://btrfs.readthedocs.io/en/latest/), [snapper](https://github.com/openSUSE/snapper), [pam-u2f](https://github.com/Yubico/pam-u2f) and [fprintd](https://fprint.freedesktop.org/) for security keys and fingerprints |
 | Gaming | [Steam](https://store.steampowered.com/), [ScopeBuddy](https://github.com/OpenGamingCollective/ScopeBuddy), [gamescope](https://github.com/ValveSoftware/gamescope), [MangoHud](https://github.com/flightlessmango/MangoHud), [GameMode](https://github.com/FeralInteractive/gamemode) |
-| Apps | [Firefox](https://www.firefox.com/) (YouTube, WhatsApp and Spotify run as Firefox web apps), [Zed](https://zed.dev/), [1Password](https://1password.com/), [Tailscale](https://tailscale.com/), [Nix](https://nixos.org/) with [devbox](https://www.jetify.com/devbox), [btop](https://github.com/aristocratos/btop), [herdr](https://herdr.dev/) |
+| Apps | [Firefox](https://www.firefox.com/) (YouTube, WhatsApp, Spotify, SoundCloud, Telegram and Discord run as Firefox web apps), [Zed](https://zed.dev/), [Signal](https://signal.org/), [OBS Studio](https://obsproject.com/), [1Password](https://1password.com/), [Tailscale](https://tailscale.com/), [Nix](https://nixos.org/) with [devbox](https://www.jetify.com/devbox), [btop](https://github.com/aristocratos/btop), [herdr](https://herdr.dev/) |
 | Coding agents | [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), [Pi](https://github.com/earendil-works/pi), [Cursor CLI](https://cursor.com/cli), the last four installed with [mise](https://mise.jdx.dev/) |
 | MacBook | [facetimehd](https://github.com/patjak/facetimehd) camera driver |
 | Fonts | [JetBrainsMono Nerd Font](https://www.nerdfonts.com/), [Atkinson Hyperlegible Next](https://www.brailleinstitute.org/freefont/), [Inter](https://rsms.me/inter/) |
 
 The install creates a local user and asks you to sign up for nothing. Steam,
-Spotify, WhatsApp, 1Password, Tailscale and the coding agents need their own
+Spotify, WhatsApp, Telegram, Discord, 1Password, Tailscale and the coding agents need their own
 accounts. Claude Code and Codex are locked to subscription logins; the
 launcher removes API-key variables for all agents
 ([details](docs/agents.md#subscription-only-enforcement-per-tool)).

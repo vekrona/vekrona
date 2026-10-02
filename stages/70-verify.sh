@@ -213,7 +213,9 @@ if ran 30-packages; then
     busctl introspect net.hadess.PowerProfiles /net/hadess/PowerProfiles
 
   check assert "flathub flatpak remote present and enabled system-wide" flatpak_remote_system_enabled flathub
-  check assert "dev.zed.Zed flatpak installed" flatpak_installed dev.zed.Zed
+  for app_id in "${VEKRONA_FLATPAKS[@]}"; do
+    check assert "$app_id flatpak installed" flatpak_installed "$app_id"
+  done
 
   declare -a desktop_pkgs
   read_pkg_list desktop_pkgs vekrona_desktop_pkgs

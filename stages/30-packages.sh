@@ -28,7 +28,9 @@ mark_user_installed "${desktop_pkgs[@]}"
 ensure_system_unit enabled tuned tuned-ppd
 
 ensure_flatpak_remote_system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-ensure_flatpak_app_system flathub dev.zed.Zed
+for app_id in "${VEKRONA_FLATPAKS[@]}"; do
+  ensure_flatpak_app_system flathub "$app_id"
+done
 
 declare -a versionlock_pkgs
 read_pkg_list versionlock_pkgs vekrona_versionlock_pkgs

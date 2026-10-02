@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Telegram
+Exec=vekrona-webapp telegram
+StartupWMClass=vekrona-telegram
+Icon=vekrona-telegram
+Type=Application
+Categories=Network;InstantMessaging;Chat;

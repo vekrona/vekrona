@@ -861,7 +861,10 @@ VEKRONA_COPRS=(blakegardner/xremap scottames/ghostty avengemedia/dms avengemedia
 copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 
 # shellcheck disable=SC2034
-VEKRONA_X11_FLATPAKS=(com.discordapp.Discord md.obsidian.Obsidian org.signal.Signal)
+VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio)
+
+# shellcheck disable=SC2034
+VEKRONA_X11_FLATPAKS=(md.obsidian.Obsidian org.signal.Signal)
 
 # shellcheck disable=SC2034
 declare -A VEKRONA_PINNED_PKGS=(
