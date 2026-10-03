@@ -82,13 +82,20 @@ vekrona-theme next
 vekrona-theme list
 ```
 
-Each `vekrona-theme` call also runs `vekrona-gtk-theme`, which writes
-`~/.config/gtk-3.0/gtk.css` and `~/.config/gtk-4.0/gtk.css` from the same
-active theme and selects `adw-gtk3-dark` with `prefer-dark`, so GTK apps
+Each `vekrona-theme` call also runs `bin/vekrona-render-theme gtk`, which
+writes `~/.config/gtk-3.0/gtk.css` and `~/.config/gtk-4.0/gtk.css` from the
+same active theme and selects `adw-gtk3-dark` with `prefer-dark`, so GTK apps
 (file choosers, swappy, Firefox dialogs) are dark even when DMS's own GTK
 color generation lost its startup race. It refuses to overwrite a `gtk.css`
 it did not generate. GTK apps that are already running keep their old colors
-until restarted.
+until restarted. Firefox and Qt applications need a restart to pick up the new
+theme; Qt apps additionally need one re-login for the `QT_QPA_PLATFORMTHEME=qt6ct`
+environment variable to take effect.
+
+To change the desktop look, edit `config/design.json` (shape constants: radius,
+gap, and padding) or pick a new theme with `vekrona-theme`, then run
+`./install.sh 50-user` to apply. This re-applies DMS settings, so GUI tweaks to
+the shape keys via DMS settings will revert.
 
 Caffeine (a fixed wall-clock duration is the point, not something to work
 around): `vekrona-caffeine` starts a transient systemd user unit
