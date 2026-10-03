@@ -5,7 +5,7 @@ include /etc/sway/config.d/*.conf
 include /usr/share/sway-systemd/95-xdg-desktop-autostart.conf
 include ~/.config/sway/config.d/*.conf
 
-output DP-7 mode 3840x2160@119.880Hz adaptive_sync off scale 1.5
+output DP-7 mode 3840x2160@119.880Hz adaptive_sync off scale 1.0
 
 font pango:Atkinson Hyperlegible Next 10
 
@@ -35,26 +35,26 @@ smart_gaps on
 focus_follows_mouse yes
 
 #: Open terminal
-bindsym $hyper+Return exec $term
+bindsym --no-repeat $hyper+Return exec $term
 #: Toggle clipboard history
-bindsym --to-code $hyper+v exec dms ipc call clipboard toggle
+bindsym --no-repeat --to-code $hyper+v exec dms ipc call clipboard toggle
 #: Toggle notification center
-bindsym --to-code $hyper+n exec dms ipc call notifications toggle
+bindsym --no-repeat --to-code $hyper+n exec dms ipc call notifications toggle
 #: Toggle control center
-bindsym $hyper+comma exec dms ipc call control-center toggle
+bindsym --no-repeat $hyper+comma exec dms ipc call control-center toggle
 #: Lock screen
-bindsym $hyper+Escape exec dms ipc call lock lock
+bindsym --no-repeat $hyper+Escape exec dms ipc call lock lock
 #: Toggle power menu
-bindsym $hyper+BackSpace exec dms ipc call powermenu toggle
+bindsym --no-repeat $hyper+BackSpace exec dms ipc call powermenu toggle
 #: Show keybindings help
-bindsym $hyper+slash exec vekrona-keybindings
+bindsym --no-repeat $hyper+slash exec vekrona-keybindings
 #: Open the coding agent
-bindsym --to-code $hyper+a exec vekrona-agent --pick
+bindsym --no-repeat --to-code $hyper+a exec vekrona-agent --pick
 #: Pick a recorded error and open the agent on it
-bindsym --to-code $hyper+Shift+a exec vekrona-error pick
+bindsym --no-repeat --to-code $hyper+Shift+a exec vekrona-error pick
 
 #: Toggle spotlight launcher
-bindsym Mod4+Space exec dms ipc call spotlight toggle
+bindsym --no-repeat Mod4+Space exec dms ipc call spotlight toggle
 
 #: Switch to workspace 1
 bindsym Mod4+1 workspace number 1
@@ -122,62 +122,62 @@ bindsym Mod4+Tab exec vekrona-app-switch next
 bindsym Mod4+Shift+Tab exec vekrona-app-switch prev
 
 #: Enter resize mode
-bindsym --to-code $hyper+r mode "resize"
+bindsym --no-repeat --to-code $hyper+r mode "resize"
 #: Toggle fullscreen
-bindsym Mod4+Return fullscreen toggle
+bindsym --no-repeat Mod4+Return fullscreen toggle
 #: Close window
-bindsym --to-code Mod4+q kill
+bindsym --no-repeat --to-code Mod4+q kill
 #: Toggle floating
-bindsym --to-code $hyper+t floating toggle
+bindsym --no-repeat --to-code $hyper+t floating toggle
 #: Toggle split layout
-bindsym --to-code $hyper+e layout toggle split
+bindsym --no-repeat --to-code $hyper+e layout toggle split
 #: Split horizontally (next window opens below)
 bindsym --to-code Mod4+minus splitv
 #: Split vertically (next window opens to the right)
 bindsym --to-code Mod4+backslash splith
 
 #: Go to a new (first empty) workspace
-bindsym --to-code $hyper+equal exec vekrona-workspace-new
+bindsym --no-repeat --to-code $hyper+equal exec vekrona-workspace-new
 #: Move window to a new (first empty) workspace
-bindsym --to-code $hyper+Shift+equal exec vekrona-workspace-new --move
+bindsym --no-repeat --to-code $hyper+Shift+equal exec vekrona-workspace-new --move
 
 #: Take a screenshot
-bindsym $hyper+Print exec vekrona-screenshot
+bindsym --no-repeat $hyper+Print exec vekrona-screenshot
 #: Screenshot the focused screen
-bindsym Mod4+Shift+3 exec vekrona-screenshot screen
+bindsym --no-repeat Mod4+Shift+3 exec vekrona-screenshot screen
 #: Screenshot an area or click a window
-bindsym Mod4+Shift+4 exec vekrona-screenshot area
+bindsym --no-repeat Mod4+Shift+4 exec vekrona-screenshot area
 #: Screenshot a window
-bindsym Mod4+Shift+5 exec vekrona-screenshot window
+bindsym --no-repeat Mod4+Shift+5 exec vekrona-screenshot window
 #: Copy screenshot of the focused screen
-bindsym Mod4+Ctrl+Shift+3 exec vekrona-screenshot --clipboard screen
+bindsym --no-repeat Mod4+Ctrl+Shift+3 exec vekrona-screenshot --clipboard screen
 #: Copy screenshot of an area or window
-bindsym Mod4+Ctrl+Shift+4 exec vekrona-screenshot --clipboard area
+bindsym --no-repeat Mod4+Ctrl+Shift+4 exec vekrona-screenshot --clipboard area
 #: Copy screenshot of a window
-bindsym Mod4+Ctrl+Shift+5 exec vekrona-screenshot --clipboard window
+bindsym --no-repeat Mod4+Ctrl+Shift+5 exec vekrona-screenshot --clipboard window
 #: Record the screen
-bindsym $hyper+Shift+Print exec vekrona-record
+bindsym --no-repeat $hyper+Shift+Print exec vekrona-record
 #: Toggle caffeine (prevent sleep)
-bindsym --to-code $hyper+Shift+c exec vekrona-caffeine
+bindsym --no-repeat --to-code $hyper+Shift+c exec vekrona-caffeine
 #: Toggle night light
-bindsym --to-code $hyper+Shift+n exec dms ipc call night toggle
+bindsym --no-repeat --to-code $hyper+Shift+n exec dms ipc call night toggle
 #: Switch to the next theme
-bindsym --to-code $hyper+Shift+t exec vekrona-theme next
+bindsym --no-repeat --to-code $hyper+Shift+t exec vekrona-theme next
 
 #: Volume up
 bindsym XF86AudioRaiseVolume exec dms ipc call audio increment 5
 #: Volume down
 bindsym XF86AudioLowerVolume exec dms ipc call audio decrement 5
 #: Mute audio
-bindsym XF86AudioMute exec dms ipc call audio mute
+bindsym --no-repeat XF86AudioMute exec dms ipc call audio mute
 #: Play or pause media
-bindsym XF86AudioPlay exec dms ipc call mpris playPause
+bindsym --no-repeat XF86AudioPlay exec dms ipc call mpris playPause
 #: Pause media
-bindsym XF86AudioPause exec dms ipc call mpris pause
+bindsym --no-repeat XF86AudioPause exec dms ipc call mpris pause
 #: Next track
-bindsym XF86AudioNext exec dms ipc call mpris next
+bindsym --no-repeat XF86AudioNext exec dms ipc call mpris next
 #: Previous track
-bindsym XF86AudioPrev exec dms ipc call mpris previous
+bindsym --no-repeat XF86AudioPrev exec dms ipc call mpris previous
 #: Brightness up
 bindsym XF86MonBrightnessUp exec dms ipc call brightness increment 5 ""
 #: Brightness down
