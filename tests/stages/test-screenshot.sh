@@ -72,6 +72,14 @@ expect_rc 0 "area"
 grep -q -- "-g 100,200 400x300 " "$logs/grim" || die "area: grim must get slurp's geometry: $(cat "$logs/grim")"
 log "ok: area offers visible windows as click targets"
 
+cp "$scratch/tree.json" "$scratch/tree-with-windows.json"
+echo '{"type":"root","rect":{"x":0,"y":0,"width":1920,"height":1080},"nodes":[]}' > "$scratch/tree.json"
+SLURP_OUT="100,200 400x300" run_shot area
+expect_rc 0 "empty workspace"
+[[ ! -s "$logs/slurp.stdin" ]] || die "empty workspace: slurp must get no boxes, got: $(od -c "$logs/slurp.stdin" | head -2)"
+cp "$scratch/tree-with-windows.json" "$scratch/tree.json"
+log "ok: area on an empty workspace offers slurp no boxes"
+
 SLURP_OUT="0,0 960x1080" run_shot window
 expect_rc 0 "window"
 grep -qx -- "-r" "$logs/slurp" || die "window: slurp must get -r: $(cat "$logs/slurp")"
