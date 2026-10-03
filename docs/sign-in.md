@@ -4,9 +4,8 @@ Security key, fingerprint and password sign-in, as set up by the installer's VEK
 
 The installer's **VEKRONA SIGN-IN** screen (which also sets the password) offers to enroll a security
 key (YubiKey or equivalent FIDO2 device) or a USB fingerprint reader. Either
-device then works for sudo, polkit, the lock screen and, if greetd's PAM file
-includes the system stack (unverified, see below), the login greeter, with
-your password always available as a fallback.
+device then works for sudo, polkit, the lock screen and the login greeter,
+with your password always available as a fallback.
 
 **Security key (FIDO2, PIN + touch):** unlocks the disk at boot and signs you in.
 - Disk unlock needs an encrypted disk. With the automatic layout the installer
@@ -41,12 +40,11 @@ your password always available as a fallback.
 - sudo and polkit go through the system PAM stack (`system-auth`, from the
   `vekrona` authselect profile that stage `45-auth` selects), where the key
   needs its PIN and a touch (`pinverification=1`). The repo ships no PAM file
-  for greetd; the Fedora `greetd` package provides it. That greetd's PAM file
-  includes `system-auth`, so the greeter also asks for PIN and touch, is
-  unverified.
-- Testing in the dev VM (`iso/dev-vm.sh`): USB passthrough of the key fails
-  while a host smartcard daemon (`pcscd`) holds it. `dev-vm.sh up` refuses and
-  names the remedy: `sudo systemctl stop pcscd.socket pcscd.service`.
+  for greetd; the Fedora `greetd` package provides it, and it has
+  `auth substack system-auth`, so the greeter also asks for PIN and touch.
+- Testing in the dev VM: `vekrona-dev usb attach 1050:0407` hands the key to
+  the guest. It refuses while a host smartcard daemon (`pcscd`) holds the key
+  and names the remedy: `sudo systemctl stop pcscd.socket pcscd.service`.
 
 **Fingerprint (USB reader via libfprint):** signs you in but does not unlock the disk.
 - A fingerprint reader returns only match/no-match, not a cryptographic secret,
@@ -55,11 +53,14 @@ your password always available as a fallback.
   scope here.
 - After install, enroll another finger with `fprintd-enroll <finger>`.
 
-**Lock screen:** touch-only (no PIN prompt, `etc/pam.d/dankshell-u2f`) to avoid burning through FIDO2 PIN
-retries on mistyped patterns. The screen sends its password answer to every
-PAM prompt, so a PIN dialog would lock you out after too many wrong answers.
+**Lock screen:** touch-only (no PIN prompt, `etc/pam.d/dankshell-u2f`): click
+the security key button, then touch the key. DankMaterialShell's key unlock
+never answers a PAM prompt, so a PIN prompt would hang it until it gives up.
 That is why the credential must not carry `+pin`: pam_u2f would ask for the PIN
-despite `pinverification=0`.
+despite `pinverification=0`. The password field uses DankMaterialShell's own
+password-only stack, so a typed password never reaches the key as a PIN. The
+wait for the touch is bounded by the lock screen itself (DankMaterialShell
+cancels it after 30 seconds); pam_u2f has no timeout option.
 
 **Password:** always works, regardless of key/fingerprint enrollment.
 
