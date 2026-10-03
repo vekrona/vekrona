@@ -51,15 +51,21 @@ KEY_MAP = {
 }
 
 MOD_MAP = {
-    "Mod4": "Super",
+    "Mod4": "Cmd",
     "Mod1": "Alt",
     "Ctrl": "Ctrl",
     "Control": "Ctrl",
     "Shift": "Shift",
     "Hyper": "Hyper",
     "C": "Ctrl",
-    "Super": "Super",
+    "Super": "Cmd",
     "Alt": "Alt",
+}
+
+# xremap names a few keys differently from the xkb keysyms Sway binds.
+XREMAP_TO_SWAY_KEY = {
+    "LeftBrace": "bracketleft",
+    "RightBrace": "bracketright",
 }
 
 
@@ -243,7 +249,7 @@ def collapse_workspace_range(bindings, command_re, expected_mods, synthetic_desc
     remaining = [b for b in bindings if id(b) not in removed]
     synthetic = Binding(
         mods=list(expected_mods),
-        key="1…0",
+        key="1…10",
         key_raw=None,
         command=None,
         description=synthetic_description,
@@ -337,11 +343,20 @@ def pretty_xremap_value(value):
     return pretty_xremap_combo(value)
 
 
-def load_xremap_rows(path):
+def load_xremap(path):
     if not os.path.isfile(path):
         die(f"xremap config missing: {path}")
     with open(path) as f:
         data = yaml.safe_load(f)
+    keymaps = {km["name"]: km.get("remap", {}) for km in data.get("keymap", [])}
+    for name in ("cmd-layer", "terminal"):
+        if name not in keymaps:
+            die(f"xremap config {path} has no keymap named '{name}'")
+    return data, keymaps["cmd-layer"], keymaps["terminal"]
+
+
+def load_xremap_rows(path):
+    data, cmd_layer, term_layer = load_xremap(path)
 
     rows = []
     order = 0
@@ -361,10 +376,6 @@ def load_xremap_rows(path):
                                  None, (91, order)))
                 order += 1
 
-    keymaps = {km["name"]: km.get("remap", {}) for km in data.get("keymap", [])}
-    cmd_layer = keymaps.get("cmd-layer", {})
-    term_layer = keymaps.get("terminal-word-nav", {})
-
     letter_re = re.compile(r'^Super-([a-z])$')
     regular_letter_keys = set()
     for k, v in cmd_layer.items():
@@ -373,23 +384,24 @@ def load_xremap_rows(path):
             regular_letter_keys.add(k)
 
     if regular_letter_keys:
-        rows.append(Row("Super + A…Z", "Ctrl + A…Z (everywhere except terminals)",
+        rows.append(Row("Cmd + A…Z", "Ctrl + A…Z (everywhere except terminals)",
                          None, (92, order)))
         order += 1
 
     for key in sorted(set(cmd_layer) | set(term_layer)):
-        if key in regular_letter_keys:
-            continue
         in_cmd, in_term = key in cmd_layer, key in term_layer
         if in_cmd and in_term and cmd_layer[key] == term_layer[key]:
-            scope, value = "everywhere", cmd_layer[key]
-        elif in_cmd:
-            scope, value = "everywhere except terminals", cmd_layer[key]
+            scoped = [("everywhere", cmd_layer[key])]
         else:
-            scope, value = "terminals only", term_layer[key]
-        rows.append(Row(pretty_xremap_combo(key), f"{pretty_xremap_value(value)} ({scope})",
-                         None, (93, order)))
-        order += 1
+            scoped = []
+            if in_cmd and key not in regular_letter_keys:
+                scoped.append(("everywhere except terminals", cmd_layer[key]))
+            if in_term:
+                scoped.append(("terminals only", term_layer[key]))
+        for scope, value in scoped:
+            rows.append(Row(pretty_xremap_combo(key), f"{pretty_xremap_value(value)} ({scope})",
+                             None, (93, order)))
+            order += 1
 
     return rows
 
@@ -418,15 +430,15 @@ def rofi_theme_str():
     return result.stdout
 
 
-HEADER_TEXT = "Hyper = CapsLock held, or Super+Ctrl+Alt"
+HEADER_TEXT = "Cmd = Super · Hyper = Caps Lock held (or Super+Ctrl+Alt)"
 
 
 def rows_from_sway(variables, raw_binds):
     bindings = build_bindings(variables, raw_binds)
     bindings = collapse_workspace_range(bindings, re.compile(r'^workspace number (\d+)$'),
-                                         ("Hyper",), "Switch to workspace 1…10")
+                                         ("Cmd",), "Switch to workspace 1…10")
     bindings = collapse_workspace_range(bindings, re.compile(r'^move container to workspace number (\d+)$'),
-                                         ("Hyper", "Shift"), "Move window to workspace 1…10")
+                                         ("Hyper",), "Move window to workspace 1…10")
     bindings = merge_alternative_chords(bindings)
     return binding_rows(bindings)
 
@@ -448,13 +460,38 @@ def render_rows(rows):
     return [f"{r.keys.ljust(column)} → {r.description}" for r in rows]
 
 
-def cmd_check(sway_main_path):
-    _, raw_binds, missing = parse_sway(sway_main_path)
-    if missing:
-        for path, lineno, line in missing:
-            print(f"{path}:{lineno}: missing '#:' description above: {line.strip()}", file=sys.stderr)
+def xremap_shadowed_chords(cmd_layer):
+    """(modifiers, sway key) of every Cmd or Cmd+Shift chord that xremap's cmd-layer remaps."""
+    chords = set()
+    for token in cmd_layer:
+        *mods, key = token.split("-")
+        pretty_mods = frozenset(MOD_MAP.get(m) or die(f"xremap config uses an unrecognized modifier: {m} (in {token})")
+                                for m in mods)
+        if pretty_mods in (frozenset({"Cmd"}), frozenset({"Cmd", "Shift"})) and len(pretty_mods) == len(mods):
+            chords.add((pretty_mods, XREMAP_TO_SWAY_KEY.get(key, key).lower()))
+    return chords
+
+
+def shadowed_sway_bindings(variables, raw_binds, cmd_layer):
+    """Sway bindings on a chord xremap rewrites first, so Sway never sees them."""
+    chords = xremap_shadowed_chords(cmd_layer)
+    bindings = build_bindings(variables, raw_binds)
+    return [rb for rb, b in zip(raw_binds, bindings)
+            if (frozenset(b.mods), b.key_raw.lower()) in chords]
+
+
+def cmd_check(sway_main_path, xremap_path):
+    variables, raw_binds, missing = parse_sway(sway_main_path)
+    _, cmd_layer, _ = load_xremap(xremap_path)
+    shadowed = shadowed_sway_bindings(variables, raw_binds, cmd_layer)
+    for path, lineno, line in missing:
+        print(f"{path}:{lineno}: missing '#:' description above: {line.strip()}", file=sys.stderr)
+    for rb in shadowed:
+        print(f"{rb.path}:{rb.lineno}: can never fire, xremap's cmd-layer remaps this chord first: {rb.line.strip()}",
+              file=sys.stderr)
+    if missing or shadowed:
         sys.exit(1)
-    print(f"{PROG}: ok, every bindsym has a description ({len(raw_binds)} bindings checked)")
+    print(f"{PROG}: ok, every bindsym has a description and none is shadowed by xremap ({len(raw_binds)} bindings checked)")
 
 
 def cmd_list(sway_main_path, xremap_path):
@@ -491,7 +528,7 @@ def cmd_menu(sway_main_path, xremap_path):
 def main():
     parser = argparse.ArgumentParser(prog=PROG)
     parser.add_argument("--list", action="store_true", help="print keybindings to stdout instead of showing rofi")
-    parser.add_argument("--check", action="store_true", help="validate that every bindsym has a description")
+    parser.add_argument("--check", action="store_true", help="validate that every bindsym has a description and none is shadowed by xremap")
     args = parser.parse_args()
 
     home = os.path.expanduser("~")
@@ -501,7 +538,7 @@ def main():
         die(f"sway config not found: {sway_main_path}")
 
     if args.check:
-        cmd_check(sway_main_path)
+        cmd_check(sway_main_path, xremap_path)
     elif args.list:
         cmd_list(sway_main_path, xremap_path)
     else:

@@ -36,8 +36,6 @@ focus_follows_mouse yes
 
 #: Open terminal
 bindsym $hyper+Return exec $term
-#: Toggle spotlight launcher
-bindsym $hyper+Space exec dms ipc call spotlight toggle
 #: Toggle clipboard history
 bindsym --to-code $hyper+v exec dms ipc call clipboard toggle
 #: Toggle notification center
@@ -55,81 +53,68 @@ bindsym --to-code $hyper+a exec vekrona-agent --pick
 #: Pick a recorded error and open the agent on it
 bindsym --to-code $hyper+Shift+a exec vekrona-error pick
 
+#: Toggle spotlight launcher
+bindsym Mod4+Space exec dms ipc call spotlight toggle
+
 #: Switch to workspace 1
-bindsym $hyper+1 workspace number 1
+bindsym Mod4+1 workspace number 1
 #: Switch to workspace 2
-bindsym $hyper+2 workspace number 2
+bindsym Mod4+2 workspace number 2
 #: Switch to workspace 3
-bindsym $hyper+3 workspace number 3
+bindsym Mod4+3 workspace number 3
 #: Switch to workspace 4
-bindsym $hyper+4 workspace number 4
+bindsym Mod4+4 workspace number 4
 #: Switch to workspace 5
-bindsym $hyper+5 workspace number 5
+bindsym Mod4+5 workspace number 5
 #: Switch to workspace 6
-bindsym $hyper+6 workspace number 6
+bindsym Mod4+6 workspace number 6
 #: Switch to workspace 7
-bindsym $hyper+7 workspace number 7
+bindsym Mod4+7 workspace number 7
 #: Switch to workspace 8
-bindsym $hyper+8 workspace number 8
+bindsym Mod4+8 workspace number 8
 #: Switch to workspace 9
-bindsym $hyper+9 workspace number 9
+bindsym Mod4+9 workspace number 9
 #: Switch to workspace 10
-bindsym $hyper+0 workspace number 10
+bindsym Mod4+0 workspace number 10
 
 #: Move window to workspace 1
-bindsym $hyper+Shift+1 move container to workspace number 1
+bindsym $hyper+1 move container to workspace number 1
 #: Move window to workspace 2
-bindsym $hyper+Shift+2 move container to workspace number 2
+bindsym $hyper+2 move container to workspace number 2
 #: Move window to workspace 3
-bindsym $hyper+Shift+3 move container to workspace number 3
+bindsym $hyper+3 move container to workspace number 3
 #: Move window to workspace 4
-bindsym $hyper+Shift+4 move container to workspace number 4
+bindsym $hyper+4 move container to workspace number 4
 #: Move window to workspace 5
-bindsym $hyper+Shift+5 move container to workspace number 5
+bindsym $hyper+5 move container to workspace number 5
 #: Move window to workspace 6
-bindsym $hyper+Shift+6 move container to workspace number 6
+bindsym $hyper+6 move container to workspace number 6
 #: Move window to workspace 7
-bindsym $hyper+Shift+7 move container to workspace number 7
+bindsym $hyper+7 move container to workspace number 7
 #: Move window to workspace 8
-bindsym $hyper+Shift+8 move container to workspace number 8
+bindsym $hyper+8 move container to workspace number 8
 #: Move window to workspace 9
-bindsym $hyper+Shift+9 move container to workspace number 9
+bindsym $hyper+9 move container to workspace number 9
 #: Move window to workspace 10
-bindsym $hyper+Shift+0 move container to workspace number 10
+bindsym $hyper+0 move container to workspace number 10
 
 #: Focus left
-bindsym --to-code $hyper+h focus left
+bindsym Mod4+Left focus left
 #: Focus down
-bindsym --to-code $hyper+j focus down
+bindsym Mod4+Down focus down
 #: Focus up
-bindsym --to-code $hyper+k focus up
+bindsym Mod4+Up focus up
 #: Focus right
-bindsym --to-code $hyper+l focus right
-#: Focus left
-bindsym $hyper+Left focus left
-#: Focus down
-bindsym $hyper+Down focus down
-#: Focus up
-bindsym $hyper+Up focus up
-#: Focus right
-bindsym $hyper+Right focus right
+bindsym Mod4+Right focus right
 
 #: Move window left
-bindsym --to-code $hyper+Shift+h move left
+bindsym Mod4+Shift+Left move left
 #: Move window down
-bindsym --to-code $hyper+Shift+j move down
+bindsym Mod4+Shift+Down move down
 #: Move window up
-bindsym --to-code $hyper+Shift+k move up
+bindsym Mod4+Shift+Up move up
 #: Move window right
-bindsym --to-code $hyper+Shift+l move right
-#: Move window left
-bindsym $hyper+Shift+Left move left
-#: Move window down
-bindsym $hyper+Shift+Down move down
-#: Move window up
-bindsym $hyper+Shift+Up move up
-#: Move window right
-bindsym $hyper+Shift+Right move right
+bindsym Mod4+Shift+Right move right
 
 #: Switch to the next app (hold Super, Tab to keep cycling)
 bindsym Mod4+Tab exec vekrona-app-switch next
@@ -139,17 +124,17 @@ bindsym Mod4+Shift+Tab exec vekrona-app-switch prev
 #: Enter resize mode
 bindsym --to-code $hyper+r mode "resize"
 #: Toggle fullscreen
-bindsym --to-code $hyper+f fullscreen toggle
+bindsym Mod4+Return fullscreen toggle
 #: Close window
-bindsym --to-code $hyper+w kill
+bindsym --to-code Mod4+q kill
 #: Toggle floating
 bindsym --to-code $hyper+t floating toggle
 #: Toggle split layout
 bindsym --to-code $hyper+e layout toggle split
 #: Split horizontally (next window opens below)
-bindsym --to-code $hyper+minus splitv
+bindsym --to-code Mod4+minus splitv
 #: Split vertically (next window opens to the right)
-bindsym --to-code $hyper+backslash splith
+bindsym --to-code Mod4+backslash splith
 
 #: Go to a new (first empty) workspace
 bindsym --to-code $hyper+equal exec vekrona-workspace-new

@@ -23,10 +23,11 @@ I want a desktop I can rebuild from scratch and update without fear.
 - **Looks good.** Sway tiles, DankMaterialShell draws the bar, launcher and
   panels. Four themes (Tokyo Night, Catppuccin Mocha, Gruvbox Dark, Nord)
   switch the shell, GTK apps, the terminal and the wallpaper together.
-- **Keyboard.** Caps Lock is Esc when tapped and a Hyper key when held.
-  Hyper plus a key switches workspaces, moves windows and opens the shell's
-  panels. Outside terminals, Super works like Cmd on a Mac: Cmd+C,
-  Cmd+Z, Cmd+Left. Terminals keep Ctrl for the shell.
+- **Keyboard.** Caps Lock is a Hyper key when held and a plain Caps Lock
+  when tapped. Cmd (Super) handles workspaces, focus, splits and the
+  launcher; Hyper opens the shell's panels and moves windows. Outside
+  terminals, Cmd also works like on a Mac: Cmd+C, Cmd+Z. In terminals Cmd+C
+  and Cmd+V copy and paste, and Ctrl stays for the shell.
 - **Games.** Steam with Proton on for every title, gamescope through
   ScopeBuddy, MangoHud and GameMode.
 
