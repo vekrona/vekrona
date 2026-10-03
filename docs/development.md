@@ -108,7 +108,7 @@ login manager stage leaves the machine booting straight into the greeter.
 
 What a VM cannot test, because it has none of the hardware involved: the
 NVIDIA stage and every GPU feature that depends on it (stage `10-nvidia` is
-always skipped), the named 4K 119.88 Hz output, and Bluetooth.
+always skipped), the real monitor's modes, and Bluetooth.
 
 ### VM session lifecycle
 

@@ -93,8 +93,9 @@ On hardware other than mine:
 
 - `10-nvidia` installs the proprietary driver and sets kernel arguments chosen
   for my RTX 4090. Read the stage first, or run `./install.sh --skip 10-nvidia`.
-- Change the `output DP-7` line in `config/sway/config` and the 3840x2160,
-  240 Hz in `config/scopebuddy/scb.conf` to match your monitor.
+- Sway starts at your monitor's preferred mode with VRR off; put a per-monitor
+  `output` line in `~/.config/sway/config.d/` (see [daily use](docs/daily-use.md#display-settings)).
+  Set the 3840x2160, 240 Hz in `config/scopebuddy/scb.conf` to match your monitor too.
 - On a MacBook Pro, read [the MacBook notes](docs/macbook.md) first: with
   the BCM4360 Wi-Fi chip you need Ethernet or USB tethering until stage
   `15-mac` has built the driver and you have rebooted.

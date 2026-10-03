@@ -3,9 +3,6 @@ set $term ghostty
 
 include /etc/sway/config.d/*.conf
 include /usr/share/sway-systemd/95-xdg-desktop-autostart.conf
-include ~/.config/sway/config.d/*.conf
-
-output DP-7 mode 3840x2160@119.880Hz adaptive_sync off scale 1.5
 
 font pango:Atkinson Hyperlegible Next 12
 
@@ -216,3 +213,6 @@ for_window [class="^[Ss]team$"] floating enable
 # Games get a workspace of their own, so the floating Steam client never draws over them.
 for_window [app_id="^gamescope$"] exec vekrona-workspace-new --games
 for_window [class="^steam_app_"] exec vekrona-workspace-new --games
+
+# Last, so your own per-machine settings in ~/.config/sway/config.d/ (outputs) override the shared ones above.
+include ~/.config/sway/config.d/*

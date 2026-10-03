@@ -335,6 +335,7 @@ if ran 50-user; then
   fi
   ghostty_links="$(vekrona_links "$HOME/.config/ghostty" | tr '\n' ' ')"
   check assert "no vekrona symlink left under ~/.config/ghostty (vekrona ships no Ghostty config; found: ${ghostty_links:-none})" eq "$ghostty_links" ""
+  check assert "sway config.d exists (personal Sway settings, included last by the shared config)" dir_exists "$HOME/.config/sway/config.d"
   check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
   check assert "sway panel scale drop-in present iff an internal panel is connected" present_iff has_internal_panel file_exists "$SWAY_PANEL_SCALE_DROPIN"

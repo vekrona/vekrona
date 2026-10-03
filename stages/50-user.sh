@@ -9,6 +9,7 @@ source "$ROOT/lib/dms-settings.sh"
 VEKRONA_RESET_DMS_SETTINGS="${VEKRONA_RESET_DMS_SETTINGS:-0}"
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/sway" "$HOME/.config/sway"
+mkdir -p "$HOME/.config/sway/config.d" # where personal settings (monitor outputs) go; config/sway/config includes it last
 ensure_internal_panel_scale
 ensure_symlink "$VEKRONA_ROOT/config/environment.d/vekrona.conf" "$HOME/.config/environment.d/vekrona.conf"
 

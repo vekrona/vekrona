@@ -32,6 +32,10 @@ vekrona-webapp discord
 
 ## Daily operations
 
+### Display settings
+
+Sway uses each monitor's preferred mode with VRR off. Put your own `output` lines (mode, scale, position) in a file in `~/.config/sway/config.d/`, which the repo does not track and `config/sway/config` includes last. Find the identifier with `swaymsg -t get_outputs`, for example `output "<make> <model> <serial>" mode 3840x2160@120Hz scale 1.5`.
+
 Theme (applies the DMS color scheme and a matching 4K
 wallpaper, and remembers the current theme in `~/.local/state/vekrona/theme`
 so `next` cycles correctly; the four themes are `tokyo-night`,
