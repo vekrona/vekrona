@@ -162,7 +162,7 @@ apply_theme() {
   cp "$json" "$ACTIVE_THEME_FILE"
   RESTORE_ACTIVE_THEME_ON_EXIT=1
 
-  "$ROOT/bin/vekrona-gtk-theme"
+  "$ROOT/bin/vekrona-render-theme"
 
   dms_settings_set customThemeFile "$ACTIVE_THEME_FILE"
   dms_settings_set currentThemeName custom

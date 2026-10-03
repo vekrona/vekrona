@@ -421,12 +421,12 @@ def load_layout_row():
 
 
 def rofi_theme_str():
-    theme_bin = vekrona_cli.resolve_tool(__file__, "vekrona-rofi-theme")
+    theme_bin = vekrona_cli.resolve_tool(__file__, "vekrona-render-theme")
     if not theme_bin:
-        die("vekrona-rofi-theme not found (needed to theme the rofi menu)")
-    result = subprocess.run([theme_bin], capture_output=True, text=True)
+        die("vekrona-render-theme not found (needed to theme the rofi menu)")
+    result = subprocess.run([theme_bin, "rofi"], capture_output=True, text=True)
     if result.returncode != 0:
-        die((result.stderr or "vekrona-rofi-theme failed").strip())
+        die((result.stderr or "vekrona-render-theme rofi failed").strip())
     return result.stdout
 
 

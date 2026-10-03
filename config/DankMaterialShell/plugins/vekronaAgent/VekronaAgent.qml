@@ -88,7 +88,7 @@ PluginComponent {
                 visible: root.unreadCount > 0
                 width: Math.max(12, unreadBadgeText.implicitWidth + 4)
                 height: 12
-                radius: 6
+                radius: height / 2
                 color: Theme.error
                 anchors.right: icon.right
                 anchors.top: icon.top
@@ -133,7 +133,7 @@ PluginComponent {
                 visible: root.unreadCount > 0
                 width: Math.max(12, unreadBadgeTextVertical.implicitWidth + 4)
                 height: 12
-                radius: 6
+                radius: height / 2
                 color: Theme.error
                 anchors.right: icon.right
                 anchors.top: icon.top

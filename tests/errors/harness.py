@@ -141,7 +141,7 @@ class Sandbox:
         shutil.copy(os.path.join(REPO, "bin", "vekrona-error"), self.bin)
         shutil.copy(os.path.join(REPO, "lib", "vekrona_cli.py"), self.lib)
         self.tool = os.path.join(self.bin, "vekrona-error")
-        write_executable(os.path.join(self.bin, "vekrona-rofi-theme"), FAKE_ROFI_THEME)
+        write_executable(os.path.join(self.bin, "vekrona-render-theme"), FAKE_ROFI_THEME)
         write_executable(os.path.join(self.bin, "vekrona-agent"), FAKE_LOGGING_TOOL)
         write_executable(os.path.join(self.fakes, "journalctl"), FAKE_JOURNALCTL)
         write_executable(os.path.join(self.fakes, "rofi"), FAKE_ROFI)
