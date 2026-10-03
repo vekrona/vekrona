@@ -424,6 +424,10 @@ assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftW
     override="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
     check assert "flatpak x11 override set: $app_id" contains x11 "$override"
   done
+  if flatpak_installed org.signal.Signal; then
+    override="$(flatpak override --user --show org.signal.Signal 2>/dev/null || true)"
+    check assert "signal flatpak keeps its key in gnome-keyring" contains SIGNAL_PASSWORD_STORE=gnome-libsecret "$override"
+  fi
 
   firefox_profiles_ini="$(firefox_profile_root)/profiles.ini"
   for webapp_dir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do

@@ -90,7 +90,7 @@ Second Opus review (post-fix) found 6 regressions (VM inotify race, virt-install
 - xremap-wlroots 0.15.14: binary `xremap-wlroots`, udev rule uinput only, `exact_match` default false, `--validate-config` works.
 - Omarchy user units enabled into graphical-session.target (`omarchy-fcitx5`, `omarchy-crash-watch`, `voxtype`…) and `/usr/lib/environment.d/10-omarchy-fcitx.conf` leak into Sway until 90b (docs/known-issues.md entry during rollout).
 - 1Password autostart via `~/.config/autostart` → needs `95-xdg-desktop-autostart.conf` included.
-- Flatpak Electron apps: Discord, Obsidian, Signal → `flatpak override --user --nosocket=wayland --socket=x11`. (Spotify moved to Firefox webapp.)
+- Flatpak Electron apps: Discord, Obsidian, Signal → `flatpak override --user --nosocket=wayland --socket=x11` (stage 50 `ensure_flatpak_override`). (Spotify moved to Firefox webapp.) Signal also gets `--env=SIGNAL_PASSWORD_STORE=gnome-libsecret` (encrypted key in gnome-keyring instead of the plaintext default; see docs/known-issues.md for the backend-flip failure) and `--env=XDG_SESSION_TYPE=x11` (Electron otherwise picks Wayland and exits).
 - VM: libvirt-daemon-kvm + qemu-kvm present, virt-install missing. `start-sway` already sets pixman under kvm.
 - GitHub: `vekrona` account exists, repo absent, `gh` unauthenticated, SSH agent unreachable here.
 

@@ -331,23 +331,45 @@ ensure_gsettings org.gnome.desktop.interface font-name "Atkinson Hyperlegible Ne
 ensure_gsettings org.gnome.desktop.interface document-font-name "Atkinson Hyperlegible Next 11"
 ensure_gsettings org.gnome.desktop.interface monospace-font-name "JetBrainsMono Nerd Font 11"
 
+# Whether `flatpak override --user --show` output ($2) reflects the override flag $1.
+flatpak_override_has() {
+  local flag="$1" shown="$2" name
+  case "$flag" in
+    --socket=*) grep -Eq "^sockets=(.*;)?${flag#--socket=};" <<<"$shown" ;;
+    --nosocket=*) grep -Eq "^sockets=(.*;)?!${flag#--nosocket=};" <<<"$shown" ;;
+    --env=*) grep -qxF "${flag#--env=}" <<<"$shown" ;;
+    --talk-name=*) name="${flag#--talk-name=}"; grep -qxF "$name=talk" <<<"$shown" ;;
+    *) die "flatpak_override_has: unsupported override flag: $flag" ;;
+  esac
+}
+
 ensure_flatpak_override() {
-  local app_id="$1" current
+  local app_id="$1" flag shown missing=()
+  shift
   flatpak_installed "$app_id" || { log "flatpak not installed, skipping override: $app_id"; return 0; }
-  current="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
-  if grep -q 'x11' <<<"$current" && grep -q '!wayland' <<<"$current"; then
+  shown="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
+  for flag in "$@"; do
+    flatpak_override_has "$flag" "$shown" || missing+=("$flag")
+  done
+  if ((${#missing[@]} == 0)); then
     log "flatpak override already set: $app_id"
     return 0
   fi
-  log "setting flatpak override: $app_id"
-  flatpak override --user --nosocket=wayland --socket=x11 "$app_id"
-  current="$(flatpak override --user --show "$app_id")"
-  { grep -q 'x11' <<<"$current" && grep -q '!wayland' <<<"$current"; } || die "flatpak override not applied: $app_id"
+  log "setting flatpak override: $app_id ${missing[*]}"
+  flatpak override --user "${missing[@]}" "$app_id"
+  shown="$(flatpak override --user --show "$app_id")"
+  for flag in "${missing[@]}"; do
+    flatpak_override_has "$flag" "$shown" || die "flatpak override not applied: $app_id $flag"
+  done
 }
 
 for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
-  ensure_flatpak_override "$app_id"
+  ensure_flatpak_override "$app_id" --nosocket=wayland --socket=x11
 done
+
+# Electron on Sway does not recognise XDG_CURRENT_DESKTOP and falls back to a plaintext key store; greetd's PAM unlocks gnome-keyring at login.
+# Electron also picks its Wayland backend from XDG_SESSION_TYPE=wayland and exits when the sandbox has no Wayland socket, so name X11.
+ensure_flatpak_override org.signal.Signal --env=SIGNAL_PASSWORD_STORE=gnome-libsecret --env=XDG_SESSION_TYPE=x11
 
 shopt -s nullglob
 for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
