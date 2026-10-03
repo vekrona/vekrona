@@ -17,8 +17,8 @@ stop_watcher() {
 }
 
 stop_watchers() {
-  stop_watcher sudo pkill -f "libinput debug-events --show-keycodes"
-  stop_watcher pkill -f "swaymsg -r -m -t subscribe"
+  stop_watcher sudo pkill -f "libinput-debug-events --show-keycodes"
+  stop_watcher pkill -f "sway-events.py binding"
 }
 trap stop_watchers EXIT
 
@@ -31,10 +31,10 @@ vekrona-dev session
 baseline="$(vekrona-dev see luma)"
 log "baseline luminance: $baseline"
 
-vekrona-dev sh setsid -f bash -c "exec stdbuf -oL swaymsg -r -m -t subscribe '[\"binding\"]' > $GUEST_BINDINGS"
-vekrona-dev run sudo setsid -f bash -c "exec stdbuf -oL libinput debug-events --show-keycodes > $GUEST_KEYS"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watch_line "$GUEST_BINDINGS" '"success": ?true'
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watch_line "$GUEST_KEYS" 'KEYBOARD_KEY'
+vekrona-dev events "$GUEST_BINDINGS" binding
+vekrona-dev spawn --root "$GUEST_KEYS" -- libinput debug-events --show-keycodes
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watch_line "$GUEST_BINDINGS" '"subscribed"'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watch_line "$GUEST_KEYS" 'DEVICE_ADDED'
 
 vekrona-dev hold super-shift-4 "$HOLD_MS"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watch_line "$GUEST_KEYS" 'KEY_4 \(5\) released'
