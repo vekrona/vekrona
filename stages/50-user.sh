@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/display-scale.sh"
+source "$ROOT/lib/dms-settings.sh"
 
 VEKRONA_RESET_DMS_SETTINGS="${VEKRONA_RESET_DMS_SETTINGS:-0}"
 
@@ -269,6 +270,11 @@ seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/session.seed.json" "$dms_s
 ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
 ensure_dms_setting_default monoFontFamily "JetBrainsMono Nerd Font"
 ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
+ensure_dms_setting_enforced cornerRadius "$(vekrona_design_get radius)"
+ensure_dms_bar_setting_enforced noBackground true
+ensure_dms_bar_setting_enforced widgetPadding "$(vekrona_design_get padding)"
+ensure_dms_bar_setting_enforced innerPadding "$(vekrona_design_get gap)"
+ensure_dms_bar_setting_enforced spacing "$(vekrona_design_get gap)"
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/plugins"
 ensure_dms_plugin_enabled vekronaSwayWorkspaces

@@ -384,6 +384,21 @@ import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('notificationPopupBodyInvokesAction') is True, d.get('notificationPopupBodyInvokesAction')
 "
+  check assert "DMS shape: cornerRadius and every bar's noBackground/widgetPadding/innerPadding/spacing match config/design.json, no widget outline" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+radius, gap, padding = $(vekrona_design_get radius), $(vekrona_design_get gap), $(vekrona_design_get padding)
+assert d.get('cornerRadius') == radius, d.get('cornerRadius')
+bars = d.get('barConfigs', [])
+assert bars, 'no barConfigs'
+for bar in bars:
+    assert bar.get('noBackground') is True, (bar.get('id'), 'noBackground', bar.get('noBackground'))
+    assert bar.get('widgetPadding') == padding, (bar.get('id'), 'widgetPadding', bar.get('widgetPadding'))
+    assert bar.get('innerPadding') == gap, (bar.get('id'), 'innerPadding', bar.get('innerPadding'))
+    assert bar.get('spacing') == gap, (bar.get('id'), 'spacing', bar.get('spacing'))
+    assert not bar.get('widgetOutlineEnabled'), (bar.get('id'), 'widgetOutlineEnabled')
+"
+  check assert "vekrona DMS plugins hardcode no corner radius (the shape comes from cornerRadius)" bash -c "! grep -nE 'radius: *[0-9]+' '$VEKRONA_ROOT'/config/DankMaterialShell/plugins/*/*.qml"
 
   check assert "vekronaSwayWorkspaces plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaSwayWorkspaces/plugin.json"
   check assert "vekronaSwayWorkspaces plugin enabled" bash -c "jq -e '.vekronaSwayWorkspaces.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"

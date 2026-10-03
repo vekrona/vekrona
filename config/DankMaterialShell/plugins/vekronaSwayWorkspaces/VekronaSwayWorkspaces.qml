@@ -85,18 +85,14 @@ PluginComponent {
             switchTo(numbers[nextIndex]);
     }
 
-    function pillColor(focused, occupied, urgent) {
+    function labelColor(focused, occupied, urgent) {
         if (urgent)
             return Theme.error;
         if (focused)
             return Theme.primary;
         if (occupied)
-            return Theme.secondary;
-        return Theme.surfaceTextAlpha;
-    }
-
-    function pillTextColor(focused, urgent) {
-        return (focused || urgent) ? Theme.surfaceContainer : Theme.surfaceText;
+            return Theme.surfaceText;
+        return Theme.withAlpha(Theme.surfaceVariantText, 0.5);
     }
 
     horizontalBarPill: Component {
@@ -108,12 +104,12 @@ PluginComponent {
             Row {
                 id: pillRow
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: Theme.spacingXS
+                spacing: Theme.spacingS
 
                 Repeater {
                     model: root.displayedNumbers
 
-                    Rectangle {
+                    Item {
                         id: pill
                         readonly property int number: modelData
                         readonly property var workspace: root.workspaceFor(number)
@@ -121,30 +117,41 @@ PluginComponent {
                         readonly property bool urgent: workspace?.urgent ?? false
                         readonly property bool occupied: root.isOccupied(number)
 
-                        width: focused ? Math.max(root.widgetThickness * 0.85, 22) : Math.max(root.widgetThickness * 0.6, 16)
-                        height: Math.max(root.widgetThickness * 0.6, 16)
-                        radius: Theme.cornerRadius
-                        color: root.pillColor(focused, occupied, urgent)
-
-                        Behavior on width {
-                            NumberAnimation {
-                                duration: Theme.shortDuration
-                                easing.type: Theme.standardEasing
-                            }
-                        }
-
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: Theme.shortDuration
-                            }
-                        }
+                        implicitWidth: label.implicitWidth
+                        implicitHeight: Math.max(root.widgetThickness * 0.6, 16)
+                        width: implicitWidth
+                        height: implicitHeight
 
                         StyledText {
+                            id: label
                             anchors.centerIn: parent
                             text: pill.number
-                            color: root.pillTextColor(pill.focused, pill.urgent)
+                            color: root.labelColor(pill.focused, pill.occupied, pill.urgent)
                             font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale, root.barConfig?.maximizeWidgetText)
                             font.weight: pill.focused ? Font.DemiBold : Font.Normal
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: Theme.shortDuration
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: label.implicitWidth
+                            height: 2
+                            radius: height / 2
+                            color: Theme.primary
+                            opacity: pill.focused ? 1 : 0
+
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: Theme.shortDuration
+                                    easing.type: Theme.standardEasing
+                                }
+                            }
                         }
 
                         MouseArea {
@@ -173,12 +180,12 @@ PluginComponent {
             Column {
                 id: pillColumn
                 anchors.horizontalCenter: parent.horizontalCenter
-                spacing: Theme.spacingXS
+                spacing: Theme.spacingS
 
                 Repeater {
                     model: root.displayedNumbers
 
-                    Rectangle {
+                    Item {
                         id: pill
                         readonly property int number: modelData
                         readonly property var workspace: root.workspaceFor(number)
@@ -186,30 +193,40 @@ PluginComponent {
                         readonly property bool urgent: workspace?.urgent ?? false
                         readonly property bool occupied: root.isOccupied(number)
 
-                        width: Math.max(root.widgetThickness * 0.6, 16)
-                        height: focused ? Math.max(root.widgetThickness * 0.85, 22) : Math.max(root.widgetThickness * 0.6, 16)
-                        radius: Theme.cornerRadius
-                        color: root.pillColor(focused, occupied, urgent)
-
-                        Behavior on height {
-                            NumberAnimation {
-                                duration: Theme.shortDuration
-                                easing.type: Theme.standardEasing
-                            }
-                        }
-
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: Theme.shortDuration
-                            }
-                        }
+                        implicitWidth: Math.max(root.widgetThickness * 0.6, 16)
+                        implicitHeight: label.implicitHeight
+                        width: implicitWidth
+                        height: implicitHeight
 
                         StyledText {
+                            id: label
                             anchors.centerIn: parent
                             text: pill.number
-                            color: root.pillTextColor(pill.focused, pill.urgent)
+                            color: root.labelColor(pill.focused, pill.occupied, pill.urgent)
                             font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale, root.barConfig?.maximizeWidgetText)
                             font.weight: pill.focused ? Font.DemiBold : Font.Normal
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: Theme.shortDuration
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            width: 2
+                            height: parent.height
+                            radius: height / 2
+                            color: Theme.primary
+                            opacity: pill.focused ? 1 : 0
+
+                            Behavior on opacity {
+                                NumberAnimation {
+                                    duration: Theme.shortDuration
+                                    easing.type: Theme.standardEasing
+                                }
+                            }
                         }
 
                         MouseArea {
