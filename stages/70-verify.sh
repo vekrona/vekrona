@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/authselect-vekrona.sh"
+source "$ROOT/lib/pam-u2f.sh"
 source "$ROOT/lib/luks-fido2.sh"
 source "$ROOT/lib/facetimehd.sh"
 source "$ROOT/lib/display-scale.sh"
@@ -268,6 +269,9 @@ if ran 45-auth; then
     check assert "the one enabled pam_u2f line pinned to pam://vekrona in /etc/pam.d/$f" vekrona_pam_u2f_lines_ok "/etc/pam.d/$f" 1
   done
   check assert "dankshell-u2f equals the repo file" root_files_equal "$VEKRONA_ROOT/etc/pam.d/dankshell-u2f" /etc/pam.d/dankshell-u2f
+  if [[ -e "$(u2f_keys_path)" ]]; then
+    check assert "$(u2f_keys_path) has no +pin credential flag (it makes pam_u2f ask the PIN on the touch-only lock screen; rerun ./install.sh 45)" not u2f_keys_have_pin_flag "$(u2f_keys_path)"
+  fi
   warn_check "fprintd sees a fingerprint reader (with-fingerprint is enabled regardless; none present, plug in a USB reader)" fprintd_sees_reader
 
   crypttab_content="$(read_crypttab)"

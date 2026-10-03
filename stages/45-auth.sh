@@ -5,14 +5,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/authselect-vekrona.sh"
 source "$ROOT/lib/luks-fido2.sh"
+source "$ROOT/lib/pam-u2f.sh"
 
 PROFILE_NAME=vekrona
 PROFILE_ID="custom/$PROFILE_NAME"
 PROFILE_DIR="/etc/authselect/custom/$PROFILE_NAME"
 PROFILE_FEATURES=(with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f)
 
-ensure_pkg pam-u2f pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam cryptsetup
-require_cmd authselect cryptsetup dracut lsinitrd jq findfs
+ensure_pkg pam-u2f pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam cryptsetup perl-interpreter
+require_cmd authselect cryptsetup dracut lsinitrd jq findfs perl
 
 render_profile() {
   render_authselect_profile "$(authselect_base_dir)" "$1"
@@ -81,7 +82,7 @@ ensure_authselect_selection() {
     root authselect select "$PROFILE_ID" "${PROFILE_FEATURES[@]}"
     if [[ "$previous" == custom/yubikey ]]; then
       warn "pam_u2f origin changed from the hostname to pam://vekrona: re-register your key once with:"
-      warn "  mkdir -p ~/.config/Yubico && pamu2fcfg -N -o pam://vekrona -i pam://vekrona > ~/.config/Yubico/u2f_keys"
+      warn "  mkdir -p ~/.config/Yubico && pamu2fcfg -o pam://vekrona -i pam://vekrona > ~/.config/Yubico/u2f_keys"
     fi
   fi
   [[ "$(current_authselect_selection)" == "$(wanted_authselect_selection)" ]] || die "authselect selection not applied: $PROFILE_ID"
@@ -157,5 +158,6 @@ ensure_luks_fido2_unlock() {
 }
 
 ensure_authselect_selection
+ensure_u2f_keys_without_pin_flag
 ensure_luks_fido2_unlock
 ensure_root_file "$ROOT/etc/pam.d/dankshell-u2f" /etc/pam.d/dankshell-u2f

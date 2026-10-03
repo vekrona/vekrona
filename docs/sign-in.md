@@ -27,9 +27,13 @@ your password always available as a fallback.
   password always works.
 - Later, to enroll the key on an already-installed machine, run:
   ```
-  pamu2fcfg -N -o pam://vekrona -i pam://vekrona > ~/.config/Yubico/u2f_keys
+  pamu2fcfg -o pam://vekrona -i pam://vekrona > ~/.config/Yubico/u2f_keys
   sudo systemd-cryptenroll --fido2-device=auto --fido2-with-client-pin=yes /dev/mapper/root
   ```
+  The credential carries `+presence` only: the PAM files decide about the PIN
+  (sudo, polkit and the greeter ask PIN and touch, the lock screen only a
+  touch), and a `+pin` in `u2f_keys` would override them. `./install.sh 45`
+  removes that flag from an existing file.
   then rerun `./install.sh 45` to update crypttab and rebuild the initramfs
   (it changes nothing on a system the installer already prepared).
 - PAM origin is fixed at `pam://vekrona` so later hostname changes do not break
@@ -54,6 +58,8 @@ your password always available as a fallback.
 **Lock screen:** touch-only (no PIN prompt, `etc/pam.d/dankshell-u2f`) to avoid burning through FIDO2 PIN
 retries on mistyped patterns. The screen sends its password answer to every
 PAM prompt, so a PIN dialog would lock you out after too many wrong answers.
+That is why the credential must not carry `+pin`: pam_u2f would ask for the PIN
+despite `pinverification=0`.
 
 **Password:** always works, regardless of key/fingerprint enrollment.
 

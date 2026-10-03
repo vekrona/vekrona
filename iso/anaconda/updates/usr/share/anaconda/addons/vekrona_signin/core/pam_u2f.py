@@ -20,7 +20,7 @@ def format_u2f_line(user, credential_id, public_key):
             base64.b64encode(credential_id).decode(),
             base64.b64encode(raw_public_key).decode(),
             "es256",
-            "+presence+pin",
+            "+presence",
         ]),
     ])
 

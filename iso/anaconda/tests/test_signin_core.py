@@ -87,8 +87,9 @@ class PamU2fLineTest(unittest.TestCase):
         self.assertEqual(base64.b64decode(public_key), self.x + self.y)
         self.assertEqual(algorithm, "es256")
 
-    def test_line_requires_presence_and_pin(self):
-        self.assertTrue(self.line.endswith(",es256,+presence+pin"))
+    def test_line_requires_presence_only_because_pin_policy_lives_in_pam(self):
+        self.assertTrue(self.line.endswith(",es256,+presence"))
+        self.assertNotIn("+pin", self.line)
 
 
 class FprintStoragePathTest(unittest.TestCase):

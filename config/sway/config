@@ -5,9 +5,9 @@ include /etc/sway/config.d/*.conf
 include /usr/share/sway-systemd/95-xdg-desktop-autostart.conf
 include ~/.config/sway/config.d/*.conf
 
-output DP-7 mode 3840x2160@119.880Hz adaptive_sync off scale 1.0
+output DP-7 mode 3840x2160@119.880Hz adaptive_sync off scale 1.5
 
-font pango:Atkinson Hyperlegible Next 10
+font pango:Atkinson Hyperlegible Next 12
 
 input "type:keyboard" {
     repeat_delay 250
@@ -42,6 +42,8 @@ bindsym --no-repeat --to-code $hyper+n exec dms ipc call notifications toggle
 bindsym --no-repeat $hyper+comma exec dms ipc call control-center toggle
 #: Lock screen
 bindsym --no-repeat $hyper+Escape exec dms ipc call lock lock
+#: Lock screen
+bindsym --no-repeat --to-code Mod4+Ctrl+q exec dms ipc call lock lock
 #: Toggle power menu
 bindsym --no-repeat $hyper+BackSpace exec dms ipc call powermenu toggle
 #: Show keybindings help
