@@ -73,7 +73,7 @@ same file also controls which tool versions mise tracks (`[tools]`).
 Release upgrade procedure:
 
 1. Pin the new release's RPM Fusion keys first. They are keyed by Fedora release (`rpmfusion-{free,nonfree}-fedora-<N>` in `VEKRONA_REPO_KEY_FINGERPRINTS`, see [Coding agents](agents.md)), and stage `00-repos` dies with "no pinned gpg key fingerprint for repo: rpmfusion-free-fedora-<N>" until they exist. Take `RPM-GPG-KEY-rpmfusion-{free,nonfree}-fedora-<N>` from `/usr/share/distribution-gpg-keys/rpmfusion/` (package `distribution-gpg-keys`, from Fedora's signed repos), compare their fingerprints with the ones published at <https://rpmfusion.org/keys>, copy them to `etc/pki/rpm-gpg/`, and add the two fingerprints to `VEKRONA_REPO_KEY_FINGERPRINTS` in one commit (the fingerprints stay the same while RPM Fusion keeps its 2020 keys).
-2. Smoke-test the new release in the VM first: bump `FEDORA_RELEASE` in `vm/Makefile`, then run `make -C vm destroy`, `make -C vm create` and `make -C vm test` (see [VM smoke test](development.md#vm-smoke-test)).
+2. Smoke-test the new release in the VM first: point vekrona-dev's `lima/vekrona.yaml` at the new release's Lima template (`template:_images/fedora-<N>`), then run `vekrona-dev destroy`, `vekrona-dev up`, `vekrona-dev install`, `vekrona-dev session` and `vekrona-dev checks` (see [Sandbox VM](development.md#sandbox-vm-vekrona-dev)).
 3. Upgrade the host:
 
 ```

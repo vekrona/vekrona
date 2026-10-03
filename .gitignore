@@ -1,8 +1,5 @@
 .claude/
 *.pre-vekrona
-vm/ks-*.cfg
-vm/.ssh/
-vm/__pycache__/
 iso/out/
 iso/downloads/
 iso/.cache/

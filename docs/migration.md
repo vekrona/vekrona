@@ -73,7 +73,7 @@ Layout".
 `docs/PLAN.md` prescribes a specific, gated rollout for migrating a machine for
 the first time, each step confirmed before moving to the next:
 
-1. VM first. `make -C vm create`, then `make -C vm test`, which runs `./install.sh --skip 10-nvidia` inside the VM, a headless Sway session check, a real snapshot/rollback round trip, and (post-reboot) the fresh-install login manager check (see [VM smoke test](development.md#vm-smoke-test)).
+1. VM first. `vekrona-dev up`, `vekrona-dev install` (runs `./install.sh --skip 10-nvidia` inside the VM), `vekrona-dev session`, then `vekrona-dev checks`: the guest checks, a real snapshot/rollback round trip, and (post-reboot) the fresh-install login manager check (see [Sandbox VM](development.md#sandbox-vm-vekrona-dev)).
 2. Host, no reboot needed: stages `00`, `20`, `30`, `40`, `50`, `60` (`65-login-manager` is skipped here on purpose: gdm is still enabled on a Workstation machine at this point, so it would only log and leave it alone; running it explicitly adds nothing until the cleanup step).
 3. Host, NVIDIA: stage `10`, reboot, `./install.sh 70`, then a real `vekrona-rollback` to the pre-`10` snapshot and back.
 4. Host, Sway validation: log into the Sway session (through GDM's Sway entry, or `start-sway` from a text console) and check the 120 Hz output, the Hyper layer, the Cmd layer in a browser versus a terminal, lock/idle/suspend, DMS features, all four themes, the webapps, and autostart apps such as 1Password.

@@ -26,7 +26,7 @@ Repo layout, tests, the VM smoke test, the ISO build and CI.
 | `bin/vekrona-gpu-env` | prints `export WLR_DRM_DEVICES=/dev/dri/cardN` only when the NVIDIA driver is loaded and every connected output is on the NVIDIA card, nothing otherwise (`VEKRONA_SYSFS_ROOT` prefixes `/sys` and `/proc` in tests); sourced by `config/sway/environment` at every login, never fails it; tested by `tests/stages/test-gpu-env.sh`; see [PLAN.md](PLAN.md) decision #6 |
 | `bin/vekrona-rofi-theme` | prints a `rofi -theme-str` string from the active vekrona/DMS theme; shared by `vekrona-keybindings` and `vekrona-agent` so the rofi styling lives in one place |
 | `bin/vekrona-gtk-theme` | writes `~/.config/gtk-{3,4}.0/gtk.css` (adw-gtk3/libadwaita `@define-color` overrides) from the active theme and selects `adw-gtk3-dark` + `prefer-dark`; run by `vekrona-theme` and stage `50-user`, independent of DMS's own GTK generation; refuses a `gtk.css` it did not write |
-| `vm/` | libvirt smoke-test harness: Makefile, kickstart, session, agents, error-pipeline, agent-launch, rollback, and login-manager checks |
+| `vm/` | checks that run inside a vekrona guest (session, agents, error pipeline, agent launch, rollback, login manager), driven by `vekrona-dev checks` and `iso/qemu-test.sh` |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (install-and-boot test of a test ISO), `lib-vm.sh` + `dev-vm.sh` (the QEMU VM lifetime library and its REPL CLI), `dev-installer.sh` (installer window with a freshly packed `updates.img`), `firstboot/`, `kickstart/` |
 | `iso/anaconda/` | the two Anaconda add-ons (`updates/`: `vekrona_account`, `vekrona_signin`, `90-vekrona.conf`), `pack-updates.sh` (builds `updates.img`), `bundle.list` (pinned RPMs layered into it) and `tests/` (add-on unit tests) |
 | `tests/` | `run.sh` (single entry point for every headless suite), `errors/` (error pipeline), `stages/` (hardware predicates, stage list, panel scale), `vm/` (serial-console helpers), `fixtures/` (sysfs trees of MacBooks, a desktop and a laptop, used through `VEKRONA_SYSFS_ROOT`) |
@@ -87,61 +87,29 @@ the VM through `vekrona-dev` and read like specifications of what the user
 sees. A scenario must fail against the commit before its fix
 (`vekrona-dev install --rev <commit>`) and pass after it.
 
-## VM smoke test
+## Guest checks
 
-`VM_NAME` and `VM_USER` (default `vekrona-test` and `vekrona`) are validated
-by the Makefile against `[A-Za-z0-9._-]+`, starting with a letter or digit,
-before any target runs.
+`vm/` holds checks that run inside a vekrona guest: `session-check.sh`,
+`agents-check.sh`, `errors-check.sh`, `agent-launch-check.sh`,
+`session-teardown.sh`, `rollback-check.sh` and `login-manager-check.sh`.
+`vekrona-dev checks` runs the first five in that order, then a
+`vekrona-snapshot`/`vekrona-rollback` round trip with a reboot,
+`vm/rollback-check.sh` against that snapshot, requires `systemctl
+is-system-running --wait` to report `running`, and finishes with
+`vm/login-manager-check.sh`. `iso/qemu-test.sh` runs the session,
+login-manager and rollback checks against a freshly installed test ISO.
 
-`VM_MEMORY_MB`, `VM_VCPUS` and `VM_DISK_GB` (default `8192`, `4` and `40`) size
-the domain `make -C vm create` defines, e.g. `make -C vm create VM_NAME=foo
-VM_MEMORY_MB=6144` when the host cannot spare 8 GB for a second VM.
-
-```
-make -C vm deps      # installs virt-install/virt-viewer/libvirt-client/inotify-tools/ImageMagick/python3-libvirt if missing, enables the virtqemud/virtnetworkd/virtstoraged sockets, starts and autostarts the libvirt "default" network, adds you to the libvirt group (log out and back in for that to take effect)
-make -C vm create     # generates vm/ks-$(VM_NAME).cfg from vm/ks.cfg.in (one generated kickstart per VM name, gitignored, so `make create VM_NAME=foo` next to an existing vekrona-test VM regenerates the right file instead of reusing a stale hostname), generating a dedicated harness SSH key pair at vm/.ssh/id_ed25519 (ed25519, no passphrase, gitignored) if it doesn't exist yet, and substituting your personal SSH public key (first of ~/.ssh/id_ed25519.pub, id_rsa.pub, *.pub, or set VM_SSH_PUBKEY), the harness key, and VM_NAME (as the guest hostname) into the kickstart; virt-install: Fedora Everything netinstall of the release set by FEDORA_RELEASE in vm/Makefile (currently 44), with vm/install-tree.sh resolving the Fedora geo-redirector to one concrete mirror and verifying it serves the install tree before virt-install ever touches it (no retries: a redirector that does not itself redirect is rejected outright), + that kickstart (btrfs autopart, NOPASSWD sudo, password `vekrona` for graphical login, system sleep disabled in the guest because virtio-gpu does not survive suspend and resume (DMS would otherwise suspend an idle VM after 30 min and wedge Sway on its display), `%packages` limited to what the harness itself needs before any stage has run: `@core rsync qemu-guest-agent`; openssh-server is already an @core mandatory package; both the harness key and your personal key are authorized for the VM user); the --os-variant hardware profile is fedora<release> when the host's osinfo database knows it, otherwise the newest known profile plus a warning naming `osinfo-db-import --user --latest`; the VM gets a virtio video device, a local-only SPICE display (`--graphics spice,listen=127.0.0.1`), and a guest-agent channel requested explicitly; the serial console is logged to `/var/log/libvirt/qemu/$(VM_NAME)-serial0.log` (root-owned, read it with sudo) so an install or boot failure can be diagnosed afterwards; the domain is marked as owned by this harness in its libvirt metadata (see `destroy` below); the kickstart shuts the VM down after %post, then this target boots it with `virsh start`
-make -C vm test       # connects only with the harness key (-i vm/.ssh/id_ed25519, IdentitiesOnly=yes, -F /dev/null and IdentityAgent=none so your ~/.ssh/config and any SSH agent, including 1Password, are never touched); waits for an IPv4 lease (vm/wait-for-ip.sh, event-driven: it watches the libvirt dnsmasq lease file with inotifywait rather than polling on a sleep), waits for SSH, enables linger for the VM user, rsyncs the repo in with --delete (so a file removed or renamed in the repo disappears from the guest too; .git and vm/.ssh are excluded, which also protects them from deletion, so the harness key never leaves the host), runs ./install.sh --skip 10-nvidia (which installs everything the harness scripts below need: python3/inotify-tools are not in the kickstart, stage 30-packages installs them before session-check.sh ever runs; git is not installed by any stage or needed in the VM, since the repo arrives by rsync, not by clone), vm/session-check.sh (brings up one headless Sway session and leaves it running for the checks below, see "VM session lifecycle"), vm/agents-check.sh, vm/errors-check.sh, vm/agent-launch-check.sh, vm/session-teardown.sh (tears that session down cleanly), a vekrona-snapshot/vekrona-rollback round trip, reboots the VM and waits for it to actually reboot and for qemu-guest-agent to reconnect, both through libvirt domain events (vm/wait-for-reboot.py), then waits for SSH again, runs vm/rollback-check.sh against that snapshot number, requires `systemctl is-system-running --wait` to report `running` (a degraded boot, with any failed unit, fails the test and prints the failed units), and finally runs vm/login-manager-check.sh to prove the fresh-install login manager (stage 65-login-manager): greetd active, greetd enabled, default target graphical.target. One timed wall-clock wait remains, unlike every other wait here: SSH reachability itself, retried up to `SSH_CONNECT_ATTEMPTS` times, isolated in one `wait_for_ssh` helper in vm/Makefile (see TODO.md)
-make -C vm destroy    # refuses to act on a domain that is not marked as owned by this harness (see `create` above); virsh destroy if running, then virsh undefine --remove-all-storage, then removes the generated vm/ks-$(VM_NAME).cfg
-make -C vm adopt      # marks an existing domain as owned by this harness, for a domain `create` made before the ownership mark existed; requires its generated vm/ks-$(VM_NAME).cfg to already exist, as evidence this harness actually created it
-make -C vm screenshot OUT=path.png   # saves a PNG of the current VM display to OUT, which must be an absolute path (virsh screenshot to PPM, converted with ImageMagick); fails if OUT is unset, relative, or the VM is not running
-make -C vm viewer     # opens the VM display for a human with virt-viewer against qemu:///system
-make -C vm type TEXT='hello'   # types TEXT into the VM as keystrokes, mapped to keycodes by vm/keymap.sh (US layout) and sent with virsh send-key
-make -C vm key KEYS='KEY_LEFTMETA KEY_ENTER'   # sends one key combination to the VM with virsh send-key
-```
-
-Automation (`test` and `ssh`) authenticates as the VM user `vekrona` with a
-throwaway harness key pair generated on demand at `vm/.ssh/id_ed25519`
-(gitignored, never committed) by `make create`; `test` and `ssh` fail with a
-clear message, instead of regenerating it, if that key pair is missing or
-only half present (one of the two files without the other). It never uses
-your personal key or any SSH agent. The kickstart also authorizes your
-personal public key (`VM_SSH_PUBKEY`) for the same user, so you can log in by
-hand at handover, and the password `vekrona` also works; this is a throwaway
-VM on the libvirt NAT network, so a shared plaintext password is fine.
-
-Four timeouts, all overridable on the `make` command line, bound the waits in
-`test`: `IP_WAIT_TIMEOUT` (default 120s, for the DHCP lease),
-`REBOOT_EVENT_TIMEOUT` (default 60s, for libvirt's reboot event),
-`AGENT_RECONNECT_TIMEOUT` (default 300s, for qemu-guest-agent to reconnect
-after reboot), and `SSH_CONNECT_ATTEMPTS` (default 60, retry count rather
-than a duration, for the one remaining timed SSH wait above).
-
-`vm/rollback-check.sh` then confirms the
-rollback left both `root` and a `root.old-*` subvolume at the top level, `/`
-mounted from `[/root]`, and the `/.vekrona-rolled-back-from-<N>` marker in
-place, and that the backup subvolume named in the marker exists. After the reboot that follows, `vm/login-manager-check.sh` confirms
+`vm/rollback-check.sh` confirms the rollback left both `root` and a
+`root.old-*` subvolume at the top level, `/` mounted from `[/root]`, and the
+`/.vekrona-rolled-back-from-<N>` marker in place, and that the backup
+subvolume named in the marker exists. `vm/login-manager-check.sh` confirms
 `systemctl is-active greetd`, `systemctl is-enabled greetd`, and
 `systemctl get-default` is `graphical.target`, proving the fresh-install
-login manager stage actually leaves the VM bootable straight into the
-greeter. `make -C vm console` and `make -C vm ssh` give interactive access to
-the VM in between, and `make -C vm viewer` gives graphical access.
+login manager stage leaves the machine booting straight into the greeter.
 
-What the VM cannot smoke-test, because the VM has none of the hardware
-involved: the NVIDIA stage and every GPU feature that depends on it (stage
-`10-nvidia` is always skipped in `make -C vm test`), the named 4K 119.88 Hz
-output, Bluetooth, and anything that needs pointer input, such as an area
-screenshot or a screen-recording region selection, since `make -C vm type`
-and `make -C vm key` only send keystrokes.
+What a VM cannot test, because it has none of the hardware involved: the
+NVIDIA stage and every GPU feature that depends on it (stage `10-nvidia` is
+always skipped), the named 4K 119.88 Hz output, and Bluetooth.
 
 ### VM session lifecycle
 
@@ -169,7 +137,7 @@ config with `xremap-wlroots --validate-config`) and leaves the session
 running either way; `vm/errors-check.sh` and `vm/agent-launch-check.sh` call
 `session_attach_existing` to use that same session instead of starting
 their own; and `vm/session-teardown.sh`, run once after all three (wired
-into `vm/Makefile`), applies the ownership rule above, so nothing
+into `vekrona-dev checks`), applies the ownership rule above, so nothing
 (`dms.service`, `vekrona-errors.service`, …) is ever left running against a
 dead compositor, and nothing this test run did not start is ever torn down
 out from under someone else.
@@ -296,7 +264,7 @@ and tag:
   `vm/session-check.sh`, `vm/login-manager-check.sh`, `./install.sh --skip
   10-nvidia 70` (verify: warnings allowed, no `FAIL:`), and a
   `vekrona-snapshot`/`vekrona-rollback` round trip, over SSH with the same
-  options as `vm/Makefile` (harness key only, `IdentitiesOnly`, `-F
+  options throughout (test key only, `IdentitiesOnly`, `-F
   /dev/null`, `IdentityAgent=none`, no known-hosts file). Timeouts are
   env-overridable (`VEKRONA_INSTALL_TIMEOUT`, `VEKRONA_SSH_TIMEOUT`,
   `VEKRONA_FIRSTBOOT_TIMEOUT`, `VEKRONA_REBOOT_TIMEOUT`, and
