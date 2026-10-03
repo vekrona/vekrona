@@ -15,3 +15,11 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
 Each webapp ships `url`, `user.js`, `userChrome.css`, `app.desktop` and an
 `icon.svg` (a Simple Icons glyph on a brand-colored rounded square). Stage 50
 installs the icon as `vekrona-<app>` in the hicolor theme.
+
+## Verifying changes
+
+Never verify a change on the host desktop or install test dependencies
+there. Use the vekrona-dev VM (`~/wrk/vekrona-dev`, see its CLAUDE.md):
+`vekrona-dev install`, `vekrona-dev session`, reproduce with real key
+presses, check the screen with `vekrona-dev see`, and capture the behavior
+as a `tests/e2e/` scenario that fails before the fix and passes after it.

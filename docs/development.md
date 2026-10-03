@@ -38,7 +38,10 @@ Repo layout, tests, the VM smoke test, the ISO build and CI.
 
 `bash tests/run.sh` is the single entry point: it runs all headless
 suites, keeps going after a failing one and exits non-zero if any failed.
-They need no VM, desktop session or root. There are six suites. CI runs the same command in a
+They need no desktop session or root, but several need Fedora packages
+(`anaconda-core`, `authselect`) that do not belong on a desktop, so run them
+in the vekrona-dev VM (`vekrona-dev test`, see below) rather than on the
+host. There are six suites. CI runs the same command in a
 Fedora container (job `unit-tests` in `.github/workflows/iso.yml`), and the
 ISO build waits for it.
 
@@ -61,6 +64,28 @@ ISO build waits for it.
   against a fake sysfs tree selected with `VEKRONA_SYSFS_ROOT`.
 - `tests/vm/test-lock.sh`: the start lock of `iso/lib-vm.sh` is released after
   a VM is up, so one script can start its phases back to back.
+
+## Sandbox VM (vekrona-dev)
+
+Changes are verified in [vekrona-dev](https://github.com/vekrona/vekrona-dev),
+a Lima VM (Fedora 44 cloud image under QEMU/KVM) that mounts this checkout
+read-only, installs it with the real `install.sh`, logs into Sway by typing
+at the greeter, drives it with QMP key presses, and checks the screen with
+OCR and image metrics computed inside the guest. Nothing under test, and no
+test dependency, touches the host desktop.
+
+```
+vekrona-dev up                  # once
+vekrona-dev install             # after every edit; reloads a running sway
+vekrona-dev session             # logged-in sway session
+vekrona-dev e2e tests/e2e/*.sh  # end-to-end scenarios
+vekrona-dev test                # tests/run.sh, inside the VM
+```
+
+`tests/e2e/` holds the end-to-end scenarios: host-side scripts that drive
+the VM through `vekrona-dev` and read like specifications of what the user
+sees. A scenario must fail against the commit before its fix
+(`vekrona-dev install --rev <commit>`) and pass after it.
 
 ## VM smoke test
 
