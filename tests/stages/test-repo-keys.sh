@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/lib/common.sh"
+source "$ROOT/tests/stages/lib.sh"
 FIXTURES="$ROOT/tests/fixtures/rpmfusion"
 KEYS="$ROOT/etc/pki/rpm-gpg"
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/lib/common.sh"
+source "$ROOT/tests/stages/lib.sh"
 source "$ROOT/lib/display-scale.sh"
 
 work="$(mktemp -d)"

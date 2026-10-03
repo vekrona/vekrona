@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/lib/common.sh"
+source "$ROOT/tests/stages/lib.sh"
 tool="$ROOT/bin/vekrona-xkb-env"
 
 scratch="$(mktemp -d)"

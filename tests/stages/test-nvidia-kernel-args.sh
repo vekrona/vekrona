@@ -2,8 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/lib/common.sh"
-report_error_for_die() { :; }  # die must not write into the real error journal
+source "$ROOT/tests/stages/lib.sh"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

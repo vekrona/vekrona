@@ -14,10 +14,10 @@ VEKRONA_LEGACY_ROOT="$HOME/vekrona"
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
 
+VEKRONA_ERROR_REPORTER="${VEKRONA_ERROR_REPORTER:-$VEKRONA_ROOT/bin/vekrona-error}"
+
 report_error_for_die() {
-  local msg="$1" bin="$VEKRONA_ROOT/bin/vekrona-error"
-  [[ -x "$bin" ]] || return 0
-  timeout 5 "$bin" report --title "$msg" --source vekrona >/dev/null 2>&1
+  timeout 5 "$VEKRONA_ERROR_REPORTER" report --title "$1" --source vekrona >/dev/null 2>&1
 }
 
 die()  {
