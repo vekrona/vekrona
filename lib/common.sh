@@ -35,6 +35,37 @@ sudo_refresh() {
   sudo -v || die "sudo credentials required"
 }
 
+# Prints the IPC socket of the user's sway session, or nothing when none runs. A terminal inside sway has SWAYSOCK;
+# a TTY or SSH login does not, so look for the session's socket where sway creates it (sway-ipc.UID.PID.sock).
+# A crashed sway leaves its socket behind, so only sockets whose sway PID is alive count.
+sway_socket() {
+  local socket pid live=()
+  if [[ -n "${SWAYSOCK:-}" ]]; then
+    printf '%s\n' "$SWAYSOCK"
+    return 0
+  fi
+  for socket in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/sway-ipc.*.sock; do
+    [[ -S "$socket" ]] || continue
+    pid="${socket%.sock}"
+    pid="${pid##*.}"
+    [[ -d "/proc/$pid" ]] && live+=("$socket")
+  done
+  ((${#live[@]} <= 1)) || die "more than one running sway session, cannot tell which to reload: ${live[*]}"
+  ((${#live[@]} == 0)) || printf '%s\n' "${live[0]}"
+}
+
+# The sway config is symlinked into the checkout, so a running session keeps the old one until it is told to reload.
+reload_running_sway() {
+  local socket
+  socket="$(sway_socket)"
+  if [[ -z "$socket" ]]; then
+    log "no running sway session, skipping the sway reload"
+    return 0
+  fi
+  log "reloading the running sway session"
+  swaymsg -s "$socket" reload >/dev/null || die "swaymsg reload failed (socket $socket)"
+}
+
 require_cmd() {
   local c
   for c in "$@"; do command -v "$c" >/dev/null 2>&1 || die "missing command: $c"; done

@@ -75,7 +75,7 @@ test dependency, touches the host desktop.
 
 ```
 vekrona-dev up                  # once
-vekrona-dev install             # after every edit; reloads a running sway
+vekrona-dev install             # after every edit (install.sh reloads a running sway)
 vekrona-dev session             # logged-in sway session
 vekrona-dev e2e tests/e2e/*.sh  # end-to-end scenarios
 vekrona-dev test                # tests/run.sh, inside the VM

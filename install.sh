@@ -139,4 +139,5 @@ for stage in "${run[@]}"; do
   sudo_refresh
   bash "$ROOT/stages/$stage.sh"
 done
+reload_running_sway
 log "done: ${run[*]}"
