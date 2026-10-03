@@ -433,8 +433,17 @@ assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftW
     check assert_file_contains "$HOME/.local/share/applications/vekrona-$webapp.desktop" "^Icon=vekrona-$webapp\$"
   done
   check assert "vekrona-theme installed" file_exists "$HOME/.local/bin/vekrona-theme"
-  check assert_file_contains "$HOME/.config/gtk-3.0/gtk.css" "^/\\* vekrona-gtk-theme: "
-  check assert_file_contains "$HOME/.config/gtk-4.0/gtk.css" "^/\\* vekrona-gtk-theme: "
+  check assert_file_contains "$HOME/.config/gtk-3.0/gtk.css" "^/\\* vekrona-render-theme: "
+  check assert_file_contains "$HOME/.config/gtk-4.0/gtk.css" "^/\\* vekrona-render-theme: "
+  check assert_file_contains "$HOME/.config/qt6ct/qt6ct.conf" "^# vekrona-render-theme: "
+  check assert_file_contains "$HOME/.config/qt6ct/colors/vekrona.conf" "^# vekrona-render-theme: "
+  check assert_file_contains "$HOME/.config/sway/config.d/90-vekrona-design.conf" "^# vekrona-render-theme: "
+  firefox_default_profile="$(awk -F= '/^\[Install/ {in_install=1; next} /^\[/ {in_install=0} in_install && $1 == "Default" {print $2; exit}' "$firefox_profiles_ini" 2>/dev/null || true)"
+  if [[ -n "$firefox_default_profile" ]]; then
+    firefox_default_profile="$(firefox_profile_root)/$firefox_default_profile"
+    check assert_file_contains "$firefox_default_profile/user.js" "^// vekrona-render-theme: "
+    check assert_file_contains "$firefox_default_profile/chrome/userChrome.css" "^/\\* vekrona-render-theme: "
+  fi
   check assert "GTK theme is adw-gtk3-dark" gsettings_eq org.gnome.desktop.interface gtk-theme adw-gtk3-dark
 
   recorded_theme_name="$(cat "$(vekrona_theme_name_file)" 2>/dev/null || true)"

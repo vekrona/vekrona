@@ -733,16 +733,16 @@ def cmd_mark_launched(args):
 
 
 def rofi_theme_str_or_die():
-    theme_bin = resolve_tool("vekrona-rofi-theme")
+    theme_bin = resolve_tool("vekrona-render-theme")
     if not theme_bin:
-        die("vekrona-rofi-theme not found (needed to theme the rofi picker)")
+        die("vekrona-render-theme not found (needed to theme the rofi picker)")
     try:
-        result = subprocess.run([theme_bin], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        result = subprocess.run([theme_bin, "rofi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  text=True, timeout=10)
     except OSError as exc:
-        die(f"failed to run vekrona-rofi-theme: {exc}")
+        die(f"failed to run vekrona-render-theme: {exc}")
     if result.returncode != 0:
-        die(f"vekrona-rofi-theme failed: {(result.stderr or '').strip()}")
+        die(f"vekrona-render-theme rofi failed: {(result.stderr or '').strip()}")
     return result.stdout
 
 

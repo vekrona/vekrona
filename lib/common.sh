@@ -880,7 +880,7 @@ VEKRONA_DESKTOP_PKGS=(
   gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver
   jetbrains-mono-fonts jq kanshi
   libnotify mangohud matugen mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
-  python3 python3-gobject python3-pyyaml python3-vdf quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
+  python3 python3-gobject python3-pyyaml python3-vdf qt6ct quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd tailscale tuigreet tuned-ppd wf-recorder wireplumber wl-clipboard wlr-randr
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
 )
@@ -939,6 +939,13 @@ ensure_flatpak_app_system() {
   log "installing flatpak: $app_id"
   root flatpak install --system -y --noninteractive "$remote" "$app_id"
   flatpak_installed "$app_id" || die "flatpak app not installed: $app_id"
+}
+
+vekrona_design_get() {
+  local key="$1" value
+  value="$(jq -er --arg k "$key" '.[$k]' "$VEKRONA_ROOT/config/design.json")" || die "config/design.json: no value for '$key'"
+  [[ "$value" =~ ^[0-9]+$ ]] || die "config/design.json: '$key' is not a non-negative integer: '$value'"
+  printf '%s' "$value"
 }
 
 vekrona_state_dir() { printf '%s' "${XDG_STATE_HOME:-$HOME/.local/state}/vekrona"; }
