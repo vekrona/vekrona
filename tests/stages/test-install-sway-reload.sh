@@ -22,7 +22,7 @@ export HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/runtime"
 export VEKRONA_ERROR_REPORTER=/usr/bin/true
 unset SWAYSOCK
 
-run_install() { rm -f "$scratch/swaymsg.log"; "$repo/install.sh" --no-pull 50-user >"$scratch/stdout" 2>"$scratch/stderr"; }
+run_install() { rm -f "$scratch/swaymsg.log"; "$repo/install.sh" 50-user >"$scratch/stdout" 2>"$scratch/stderr"; }
 swaymsg_calls() { [[ -f "$scratch/swaymsg.log" ]] && wc -l < "$scratch/swaymsg.log" || echo 0; }
 
 run_install || die "install without sway failed: $(cat "$scratch/stderr")"

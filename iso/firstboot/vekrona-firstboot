@@ -93,7 +93,7 @@ log "running ./install.sh as $user"
 sudo -iu "$user" env \
   "XDG_RUNTIME_DIR=/run/user/$uid" \
   "DBUS_SESSION_BUS_ADDRESS=unix:path=$bus" \
-  "$target/install.sh" --no-pull
+  "$target/install.sh"
 
 touch "$STATE_DIR/firstboot.done"
 systemctl disable vekrona-firstboot.service

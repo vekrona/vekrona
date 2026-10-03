@@ -219,7 +219,7 @@ log "ok: wants_nvidia_stage follows Secure Boot"
 
 expect_refusal_warning() { # expect_refusal_warning <fixture> <substring>; naming the refused stage dies before any stage runs
   local warnings
-  warnings="$(VEKRONA_SYSFS_ROOT="$FIXTURES/$1" "$ROOT/install.sh" --no-pull 10-nvidia 2>&1 >/dev/null || true)"
+  warnings="$(VEKRONA_SYSFS_ROOT="$FIXTURES/$1" "$ROOT/install.sh" 10-nvidia 2>&1 >/dev/null || true)"
   [[ "$(grep -c 'keeping nouveau' <<<"$warnings")" == 1 && "$warnings" == *"$2"* ]] \
     || die "$1: install.sh warned '$warnings', expected one 'keeping nouveau' warning containing '$2'"
 }

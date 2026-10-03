@@ -243,8 +243,8 @@ ssh_guest "bash '$REPO_DIR/vm/session-check.sh'" || fail "session-check.sh faile
 log "running $REPO_DIR/vm/login-manager-check.sh"
 ssh_guest "bash '$REPO_DIR/vm/login-manager-check.sh'" || fail "login-manager-check.sh failed"
 
-log "running $REPO_DIR/install.sh --no-pull --skip 10-nvidia 70 (verify)"
-verify_output="$(ssh_guest "cd '$REPO_DIR' && ./install.sh --no-pull --skip 10-nvidia 70" 2>&1)" || {
+log "running $REPO_DIR/install.sh --skip 10-nvidia 70 (verify)"
+verify_output="$(ssh_guest "cd '$REPO_DIR' && ./install.sh --skip 10-nvidia 70" 2>&1)" || {
   echo "$verify_output" >&2
   fail "./install.sh 70 (verify) failed"
 }

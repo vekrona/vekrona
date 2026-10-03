@@ -181,9 +181,10 @@ and tag:
   would silently be missing from it) — commit or stash first. It points the
   cloned checkout's `origin` remote at the source repo's own `origin` URL, so
   the installed system can `git pull` for real. First boot copies that clone
-  to `~/.local/share/vekrona` and runs `install.sh --no-pull`, so the first
-  install matches the ISO; every later `./install.sh` fast-forwards it from
-  GitHub first. Every kickstart `%post` uses `--erroronfail` so a failing step
+  to `~/.local/share/vekrona` and runs `install.sh` from there, so the first
+  install matches the ISO; the installed links stay valid as long as that
+  directory stays, and rerunning `install.sh` from another checkout moves them.
+  Every kickstart `%post` uses `--erroronfail` so a failing step
   aborts the install instead of continuing silently. It then runs `mkksiso`
   (Fedora 44 host, `lorax`
   installed) to produce the release ISO: interactive on boot, with no

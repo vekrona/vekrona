@@ -324,15 +324,10 @@ fi
 
 if ran 50-user; then
   mapfile -t link_dirs < <(vekrona_link_dirs)
-  warn_check "stages run from the system copy $VEKRONA_SYSTEM_ROOT (running from $VEKRONA_ROOT; a dev tree needs --no-pull)" \
-    eq "$(realpath "$VEKRONA_ROOT")" "$(realpath -m "$VEKRONA_SYSTEM_ROOT")"
-  # A dev tree at the legacy path legitimately owns links into it.
-  if [[ "$(realpath "$VEKRONA_ROOT")" != "$(realpath -m "$VEKRONA_LEGACY_ROOT")" ]]; then
-    legacy_links="$(vekrona_links "${link_dirs[@]}" | while IFS= read -r l; do
-      case "$(readlink "$l")" in "$VEKRONA_LEGACY_ROOT"/*) printf '%s ' "$l" ;; esac
-    done)"
-    check assert "no managed symlink points into the legacy $VEKRONA_LEGACY_ROOT/ (found: ${legacy_links:-none})" eq "$legacy_links" ""
-  fi
+  stale_links="$(vekrona_links "${link_dirs[@]}" | while IFS= read -r l; do
+    if is_legacy_link_target "$(readlink "$l")"; then printf '%s ' "$l"; fi
+  done)"
+  check assert "every vekrona symlink points into $VEKRONA_ROOT (stale: ${stale_links:-none})" eq "$stale_links" ""
   ghostty_links="$(vekrona_links "$HOME/.config/ghostty" | tr '\n' ' ')"
   check assert "no vekrona symlink left under ~/.config/ghostty (vekrona ships no Ghostty config; found: ${ghostty_links:-none})" eq "$ghostty_links" ""
   check assert "sway config.d exists (personal Sway settings, included last by the shared config)" dir_exists "$HOME/.config/sway/config.d"

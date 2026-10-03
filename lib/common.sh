@@ -5,11 +5,9 @@ shopt -s inherit_errexit
 VEKRONA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export VEKRONA_ROOT
 VEKRONA_USER="$(id -un)"
-# The system copy: a separate clone that install.sh keeps updated; everything in $HOME links into it.
-VEKRONA_SYSTEM_ROOT="$HOME/.local/share/vekrona"
-VEKRONA_REPO_URL="https://github.com/vekrona/vekrona"
-# Where the pre-clone installs lived; links into it are legacy and get repointed or pruned.
-VEKRONA_LEGACY_ROOT="$HOME/vekrona"
+# Where earlier installs lived (a plain checkout, then install.sh's own clone); links into them are legacy and
+# get repointed or pruned, unless that tree is the one running.
+VEKRONA_LEGACY_ROOTS=("$HOME/vekrona" "$HOME/.local/share/vekrona")
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
@@ -243,7 +241,16 @@ ensure_symlink_tree() {
   done < <(find "$srcdir" -type f -print0)
 }
 
-# Prints every symlink under the given dirs whose raw target is under one of the vekrona roots; with
+# True when the link target lies in a legacy root other than the tree in use.
+is_legacy_link_target() {
+  local root
+  for root in "${VEKRONA_LEGACY_ROOTS[@]}"; do
+    [[ "$root" != "$VEKRONA_ROOT" && "$1" == "$root"/* ]] && return 0
+  done
+  return 1
+}
+
+# Prints every symlink under the given dirs whose raw target is under this checkout or a legacy root; with
 # --dangling, only those whose target no longer exists. A dir that is itself a symlink is someone else's.
 vekrona_links() {
   local dangling=0 d link target
@@ -253,12 +260,11 @@ vekrona_links() {
     while IFS= read -r -d '' link; do
       target="$(readlink "$link")"
       case "$target" in
-        "$VEKRONA_LEGACY_ROOT"/*|"$VEKRONA_ROOT"/*|"$VEKRONA_SYSTEM_ROOT"/*) ;;
-        *) continue ;;
+        "$VEKRONA_ROOT"/*) ;;
+        *) is_legacy_link_target "$target" || continue ;;
       esac
-      # A link into the legacy root is stale even while that tree still exists, unless it is the tree in use.
       if [[ $dangling -eq 1 && -e "$link" ]]; then
-        [[ "$target" == "$VEKRONA_LEGACY_ROOT"/* && "$VEKRONA_ROOT" != "$VEKRONA_LEGACY_ROOT" ]] || continue
+        is_legacy_link_target "$target" || continue
       fi
       printf '%s\n' "$link"
     done < <(find "$d" -type l -print0)

@@ -6,14 +6,16 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
-# A throwaway HOME, set before lib/common.sh derives the system and legacy roots from it.
+# A throwaway HOME, set before lib/common.sh derives the legacy roots from it.
 export HOME="$scratch/home"
 mkdir -p "$HOME"
 source "$REPO/tests/stages/lib.sh"
 
 # The sourced file turned errexit on; the checks below inspect failures themselves.
-VEKRONA_ROOT="$HOME/.local/share/vekrona"
-mkdir -p "$VEKRONA_ROOT/config" "$VEKRONA_LEGACY_ROOT/config"
+VEKRONA_ROOT="$HOME/wrk/vekrona"
+OLD_CHECKOUT="${VEKRONA_LEGACY_ROOTS[0]}"
+OLD_CLONE="${VEKRONA_LEGACY_ROOTS[1]}"
+mkdir -p "$VEKRONA_ROOT/config" "$OLD_CHECKOUT/config" "$OLD_CLONE/config"
 echo new > "$VEKRONA_ROOT/config/a"
 echo new > "$VEKRONA_ROOT/config/b"
 
@@ -45,26 +47,42 @@ ensure_symlink "$VEKRONA_ROOT/config/a" "$HOME/.config/normal/a" 2>/dev/null
 [[ "$(readlink "$HOME/.config/normal/a")" == "$VEKRONA_ROOT/config/a" ]] || die "normal link not created"
 log "ok: normal links are created"
 
-# Prune: dangling links into either root and any link into the legacy root go; live links into this
+# Prune: dangling links into this checkout and any link into a legacy root go; live links into this
 # checkout, foreign links and foreign dangling links stay.
 d="$HOME/.local/bin"
-mkdir -p "$d/sub" "$VEKRONA_LEGACY_ROOT/bin"
-echo x > "$VEKRONA_LEGACY_ROOT/bin/alive"
-ln -s "$VEKRONA_LEGACY_ROOT/bin/gone" "$d/legacy-dangling"
+mkdir -p "$d/sub" "$OLD_CHECKOUT/bin" "$OLD_CLONE/bin"
+echo x > "$OLD_CHECKOUT/bin/alive"
+echo x > "$OLD_CLONE/bin/alive"
+ln -s "$OLD_CHECKOUT/bin/gone" "$d/legacy-dangling"
 ln -s "$VEKRONA_ROOT/bin/gone" "$d/new-dangling"
-ln -s "$VEKRONA_LEGACY_ROOT/bin/gone" "$d/sub/nested-dangling"
-ln -s "$VEKRONA_LEGACY_ROOT/bin/alive" "$d/legacy-alive"
+ln -s "$OLD_CHECKOUT/bin/gone" "$d/sub/nested-dangling"
+ln -s "$OLD_CHECKOUT/bin/alive" "$d/legacy-alive"
+ln -s "$OLD_CLONE/bin/alive" "$d/clone-alive"
 ln -s "$VEKRONA_ROOT/config/a" "$d/new-alive"
 ln -s "$scratch/nowhere" "$d/foreign-dangling"
-ln -s "$VEKRONA_LEGACY_ROOT-other/gone" "$d/lookalike-dangling"
+ln -s "$OLD_CHECKOUT-other/gone" "$d/lookalike-dangling"
 prune_vekrona_links "$d" "$HOME/does-not-exist" 2>/dev/null
-for gone in legacy-dangling new-dangling sub/nested-dangling legacy-alive; do
+for gone in legacy-dangling new-dangling sub/nested-dangling legacy-alive clone-alive; do
   [[ ! -L "$d/$gone" ]] || die "stale vekrona link not pruned: $gone"
 done
 for kept in new-alive foreign-dangling lookalike-dangling; do
   [[ -L "$d/$kept" ]] || die "link wrongly pruned: $kept"
 done
 log "ok: prune_vekrona_links removes only stale links into a vekrona root"
+
+# Running from a dev checkout retargets every link into the old clone, and the verify scan sees none left.
+mkdir -p "$HOME/.config/sway" "$VEKRONA_ROOT/config/sway"
+echo new > "$VEKRONA_ROOT/config/sway/c"
+ln -s "$OLD_CLONE/config/sway/c" "$HOME/.config/sway/c"
+ensure_symlink "$VEKRONA_ROOT/config/sway/c" "$HOME/.config/sway/c" 2>/dev/null
+[[ "$(readlink "$HOME/.config/sway/c")" == "$VEKRONA_ROOT/config/sway/c" ]] || die "a link into the old clone was not retargeted"
+rm "$HOME/.config/sway/c"
+ln -s "$OLD_CLONE/config/sway/c" "$HOME/.config/sway/c"
+[[ "$(vekrona_links "$HOME/.config/sway")" == "$HOME/.config/sway/c" ]] || die "vekrona_links missed a link into the old clone"
+is_legacy_link_target "$OLD_CLONE/config/sway/c" || die "the old clone is not legacy while running from elsewhere"
+( VEKRONA_ROOT="$OLD_CLONE"; ! is_legacy_link_target "$OLD_CLONE/config/sway/c" ) || die "the tree in use counted as legacy"
+rm "$HOME/.config/sway/c"
+log "ok: links into the old clone are retargeted and recognised as legacy"
 
 # A symlinked destination dir is somebody else's: not scanned.
 ln -s "$VEKRONA_ROOT/bin/gone" "$scratch/other/dangling"
@@ -90,14 +108,12 @@ prune_vekrona_links "${link_dirs[@]}" 2>/dev/null
 [[ -L "$HOME/.config/ghostty/config" ]] || die "a dotfiles ghostty config link was removed"
 log "ok: only the vekrona ghostty config link is retired"
 
-# install.sh --list and --no-pull never reach for the network or the system copy.
+# install.sh never reaches for the network.
 fakebin="$scratch/fakebin"
 mkdir -p "$fakebin"
 printf '#!/bin/sh\necho "git called: $*" >> %q\nexit 1\n' "$scratch/git.log" > "$fakebin/git"
 chmod +x "$fakebin/git"
 PATH="$fakebin:$PATH" bash "$REPO/install.sh" --list 00-repos >/dev/null
-PATH="$fakebin:$PATH" bash "$REPO/install.sh" --no-pull --list 00-repos >/dev/null
 PATH="$fakebin:$PATH" bash "$REPO/install.sh" --help >/dev/null
-[[ ! -e "$scratch/git.log" ]] || die "install.sh --list/--help/--no-pull called git: $(<"$scratch/git.log")"
-[[ ! -e "$VEKRONA_SYSTEM_ROOT/.git" ]] || die "install.sh created a system copy without being asked"
-log "ok: --list, --help and --no-pull --list never call git"
+[[ ! -e "$scratch/git.log" ]] || die "install.sh --list/--help called git: $(<"$scratch/git.log")"
+log "ok: --list and --help never call git"
