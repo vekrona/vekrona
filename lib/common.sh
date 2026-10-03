@@ -70,7 +70,9 @@ ensure_pkg_swapped() {
   local from="$1" to="$2"
   if pkg_installed "$to" && ! pkg_installed "$from"; then log "already swapped: $from -> $to"; return 0; fi
   if ! pkg_installed "$from"; then
-    ensure_pkg "$to"
+    log "installing $to, replacing whatever of $from's libraries conflicts with it"
+    root dnf install -y --allowerasing "$to"
+    pkg_installed "$to" || die "package did not install: $to"
     return 0
   fi
   log "swapping: $from -> $to"
