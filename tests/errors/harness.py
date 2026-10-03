@@ -179,10 +179,15 @@ class Sandbox:
         self.notification_server.stdout.close()
         shutil.rmtree(self.root, ignore_errors=True)
 
-    def run(self, *args, extra_env=None, timeout=60):
+    def run(self, *args, extra_env=None, timeout=60, just_booted=False):
         env = {**self.env, **(extra_env or {})}
-        return subprocess.run([sys.executable, "-B", self.tool, *args], env=env,
-                              capture_output=True, text=True, timeout=timeout)
+        command = [sys.executable, "-B", self.tool, *args]
+        if just_booted:
+            with open("/proc/uptime") as f:
+                uptime = int(float(f.read().split()[0]))
+            command = ["unshare", "--user", "--map-current-user", "--time",
+                       "--monotonic", str(1 - uptime), *command]
+        return subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout)
 
     def install_default_mutes(self, text, name="10-test.conf"):
         os.makedirs(self.default_mutes_dir, exist_ok=True)
@@ -194,9 +199,9 @@ class Sandbox:
             for entry in entries:
                 f.write((entry if isinstance(entry, str) else json.dumps(entry)) + "\n")
 
-    def watch(self, entries):
+    def watch(self, entries, just_booted=False):
         self.write_journal(entries)
-        return self.run("watch")
+        return self.run("watch", just_booted=just_booted)
 
     def start_watch(self, entries, extra_env=None):
         self.write_journal(entries)

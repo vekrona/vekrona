@@ -961,8 +961,8 @@ def cmd_watch(args):
 
         def _toast_rate_limited(self, category, title, body):
             now = time.monotonic()
-            last = self.error_toast_times.get(category, 0)
-            if now - last < INTERNAL_TOAST_RATE_LIMIT:
+            last = self.error_toast_times.get(category)
+            if last is not None and now - last < INTERNAL_TOAST_RATE_LIMIT:
                 self.error_toast_suppressed[category] = self.error_toast_suppressed.get(category, 0) + 1
                 return
             suppressed = self.error_toast_suppressed.pop(category, 0)

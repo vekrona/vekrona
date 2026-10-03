@@ -12,6 +12,11 @@ class FailuresAreSurfacedTest(SandboxTestCase):
         self.assertIn("after the bad line", self.sandbox.run("list").stdout)
         self.assertEqual(self.sandbox.sent_notifications()[0]["summary"], "vekrona-errors")
 
+    def test_a_problem_right_after_boot_is_reported(self):
+        result = self.sandbox.watch(["{this is not json"], just_booted=True)
+        self.assertIn("not JSON", result.stderr)
+        self.assertEqual([n["summary"] for n in self.sandbox.sent_notifications()], ["vekrona-errors"])
+
     def test_a_corrupt_notification_map_is_reported_and_ignored(self):
         os.makedirs(self.sandbox.store_dir())
         with open(os.path.join(self.sandbox.store_dir(), "notifications.json"), "w") as f:
