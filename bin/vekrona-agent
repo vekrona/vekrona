@@ -133,7 +133,7 @@ build_env_unset_argv() {
 pick_tool() {
   command -v rofi >/dev/null 2>&1 || die "rofi not found (install the 'rofi' package)"
   local theme_str tools
-  theme_str="$(vekrona-rofi-theme)" || die "vekrona-rofi-theme failed"
+  theme_str="$(vekrona-render-theme rofi)" || die "vekrona-render-theme rofi failed"
   tools="$(installed_tools)"
   [[ -n "$tools" ]] || die "no agent harness is installed; run './install.sh 55-agents' or 'vekrona-update'"
 

@@ -232,7 +232,7 @@ else
   log "seeding active theme name: $theme_name_file"
   printf '%s\n' "$default_theme_name" > "$theme_name_file"
 fi
-"$VEKRONA_ROOT/bin/vekrona-gtk-theme"
+"$VEKRONA_ROOT/bin/vekrona-render-theme"
 
 dms_settings_dir="$HOME/.config/DankMaterialShell"
 dms_settings="$dms_settings_dir/settings.json"

@@ -29,8 +29,6 @@ input "type:touchpad" {
 }
 
 floating_modifier Mod4 normal
-default_border pixel 2
-gaps inner 6
 smart_gaps on
 focus_follows_mouse yes
 
