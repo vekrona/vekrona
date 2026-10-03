@@ -381,7 +381,8 @@ USER_CHROME = string.Template("""
   --toolbarbutton-border-radius: ${r}px !important;
   --panel-border-radius: ${r}px !important;
 }
-#navigator-toolbox, #nav-bar {
+#navigator-toolbox, #nav-bar, #TabsToolbar, #PersonalToolbar {
+  background-color: ${background} !important;
   border: none !important;
   box-shadow: none !important;
 }
@@ -406,13 +407,24 @@ USER_CHROME = string.Template("""
 .tabbrowser-tab[selected] > .tab-stack > .tab-background {
   background: ${high} !important;
 }
-#urlbar-background {
+#urlbar-background, .urlbar-background {
+  background-color: ${high} !important;
   border: none !important;
   border-radius: ${r}px !important;
   box-shadow: none !important;
 }
-#urlbar[focused] > #urlbar-background {
+#urlbar, #searchbar {
+  --toolbar-field-focus-background-color: ${high} !important;
+  --urlbar-box-focus-bgcolor: ${high} !important;
+  --arrowpanel-background: ${high} !important;
+  --focus-outline-color: ${primary} !important;
+}
+#urlbar:is([focused], [open]) > :is(#urlbar-background, .urlbar-background) {
+  background-color: ${high} !important;
   outline: 1px solid ${primary} !important;
+}
+.urlbarView {
+  background-color: ${high} !important;
 }
 #urlbar-input-container {
   padding-inline: ${padding}px !important;
