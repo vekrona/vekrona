@@ -26,3 +26,9 @@ for name in "${TOKEN_NAMES[@]}"; do
 done
 ! crypttab_line_has_fido2 "$expected" "luks-${UUID_PREFIX}2" || die "the tokenless device must not carry fido2-device"
 log "ok: crypttab_line_has_fido2 agrees with the prepared fixture"
+
+CRYPTTAB="$(mktemp -d)/crypttab"
+absent="$(read_crypttab)" || die "a system without $CRYPTTAB must not fail the stage"
+[[ -z "$absent" ]] || die "a system without $CRYPTTAB must read as empty, got: $absent"
+[[ -z "$(crypttab_fido2_tokens "$absent")" ]] || die "no crypttab must mean no devices to unlock"
+log "ok: a system without a crypttab has no LUKS devices"

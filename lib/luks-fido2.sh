@@ -6,6 +6,7 @@ LUKS_FIDO2_OPTIONS=(fido2-device=auto token-timeout=10s)
 initramfs_path_for() { printf '/boot/initramfs-%s.img' "$1"; }
 
 read_crypttab() {
+  [[ -e "$CRYPTTAB" ]] || return 0
   root cat "$CRYPTTAB" || die "cannot read $CRYPTTAB"
 }
 
