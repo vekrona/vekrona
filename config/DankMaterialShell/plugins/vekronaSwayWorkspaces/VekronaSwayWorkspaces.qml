@@ -117,7 +117,7 @@ PluginComponent {
                         readonly property bool urgent: workspace?.urgent ?? false
                         readonly property bool occupied: root.isOccupied(number)
 
-                        implicitWidth: label.implicitWidth
+                        implicitWidth: Math.max(label.implicitWidth, Math.max(root.widgetThickness * 0.6, 16))
                         implicitHeight: Math.max(root.widgetThickness * 0.6, 16)
                         width: implicitWidth
                         height: implicitHeight
@@ -217,7 +217,7 @@ PluginComponent {
                             anchors.left: parent.left
                             width: 2
                             height: parent.height
-                            radius: height / 2
+                            radius: width / 2
                             color: Theme.primary
                             opacity: pill.focused ? 1 : 0
 
