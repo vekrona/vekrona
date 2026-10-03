@@ -7,11 +7,11 @@ tool="$ROOT/bin/vekrona-screenshot"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
-export SCRATCH="$scratch" HOME="$scratch/home"
+export SCRATCH="$scratch" HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/run"
 logs="$scratch/logs"
 stubs="$scratch/stubs"
 shots="$HOME/Pictures/Screenshots"
-mkdir -p "$stubs" "$logs" "$HOME"
+mkdir -p "$stubs" "$logs" "$HOME" "$XDG_RUNTIME_DIR"
 
 # Tiled window, floating window, hidden-workspace window, and a pid-less container.
 cat > "$scratch/tree.json" <<'JSON'
@@ -33,6 +33,7 @@ if [[ "${*: -1}" == - ]]; then printf PNGBYTES; else printf PNGBYTES > "${*: -1}
 [[ "${GRIM_FAIL:-}" != 1 ]] || exit 1'
 stub slurp 'echo "$*" >> "$SCRATCH/logs/slurp"
 cat > "$SCRATCH/logs/slurp.stdin"
+[[ -z "${SLURP_SIGNAL:-}" ]] || exit $((128 + SLURP_SIGNAL))
 if [[ -n "${SLURP_OUT:-}" ]]; then echo "$SLURP_OUT"; else echo "${SLURP_ERR:-selection cancelled}" >&2; exit 1; fi'
 stub swaymsg 'case "$2" in get_tree) cat "$SCRATCH/tree.json";; get_outputs) cat "$SCRATCH/outputs.json";; *) exit 1;; esac'
 stub wl-copy 'cat > "$SCRATCH/logs/clip"
@@ -121,6 +122,24 @@ grep -q "wlr-layer-shell" "$scratch/stderr" || die "slurp error: must be reporte
 grep -q -- "-u critical" "$logs/notify" || die "slurp error: critical notification expected"
 logged grim && die "slurp error: nothing may be captured"
 log "ok: a slurp error other than cancel is reported"
+
+exec {held}>"$XDG_RUNTIME_DIR/vekrona-screenshot.lock"
+flock -n "$held"
+SLURP_OUT="100,200 400x300" run_shot area
+expect_rc 0 "second selection"
+logged slurp && die "second selection: a selection already on screen must not get another overlay"
+[[ ! -s "$scratch/stderr" ]] || die "second selection: must be silent: $(cat "$scratch/stderr")"
+exec {held}>&-
+SLURP_OUT="100,200 400x300" run_shot area
+logged slurp || die "after a selection ends, the next screenshot must select again"
+log "ok: a screenshot started during a selection exits quietly"
+
+SLURP_SIGNAL=11 SLURP_OUT="100,200 400x300" run_shot area
+expect_rc 1 "slurp crash"
+grep -q "slurp crashed (signal 11)" "$scratch/stderr" || die "slurp crash: the signal must be reported: $(cat "$scratch/stderr")"
+grep -q -- "-u critical" "$logs/notify" || die "slurp crash: critical notification expected"
+logged grim && die "slurp crash: nothing may be captured"
+log "ok: a crashed slurp is reported with its signal"
 
 WL_COPY_FAIL=1 run_shot screen
 expect_rc 1 "clipboard failure"

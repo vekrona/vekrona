@@ -35,12 +35,21 @@ case "$MODE" in
     slurp_args=()
     [[ "$MODE" == "area" ]] || slurp_args=(-r)
 
+    exec {selecting}>"${XDG_RUNTIME_DIR:?}/vekrona-screenshot.lock"
+    flock_rc=0
+    flock -n "$selecting" || flock_rc=$?
+    ((flock_rc != 1)) || exit 0
+    ((flock_rc == 0)) || fail "could not lock the selection (flock exit $flock_rc)"
     slurp_err="$(mktemp)"
     trap 'rm -f "$slurp_err"' EXIT
-    if ! geometry="$(slurp "${slurp_args[@]}" <<<"$boxes" 2>"$slurp_err")"; then
+    slurp_rc=0
+    geometry="$(slurp "${slurp_args[@]}" <<<"$boxes" 2>"$slurp_err")" || slurp_rc=$?
+    ((slurp_rc <= 128)) || fail "slurp crashed (signal $((slurp_rc - 128)))"
+    if ((slurp_rc != 0)); then
       [[ "$(<"$slurp_err")" == "selection cancelled" ]] && exit 0
       fail "slurp: $(<"$slurp_err")"
     fi
+    exec {selecting}>&-
     [[ -n "$geometry" ]] || fail "slurp: empty selection"
     grim_args=(-g "$geometry")
     ;;
