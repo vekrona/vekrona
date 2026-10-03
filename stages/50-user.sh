@@ -118,85 +118,6 @@ ensure_dms_setting_enforced() {
   jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$dms_settings" >/dev/null || die "DMS setting not enforced: $key"
 }
 
-ensure_dms_bar_widget_plugin() {
-  local stock_id="$1" plugin_id="$2"
-  local tmp
-  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
-  if ! python3 - "$dms_settings" "$stock_id" "$plugin_id" > "$tmp" <<'PYEOF'
-import json
-import sys
-
-path, stock_id, plugin_id = sys.argv[1], sys.argv[2], sys.argv[3]
-
-with open(path) as f:
-    data = json.load(f)
-
-for bar in data.get("barConfigs", []):
-    for key in ("leftWidgets", "centerWidgets", "rightWidgets"):
-        widgets = bar.get(key)
-        if not isinstance(widgets, list) or plugin_id in widgets:
-            continue
-        if stock_id in widgets:
-            widgets[widgets.index(stock_id)] = plugin_id
-
-json.dump(data, sys.stdout, indent=2)
-sys.stdout.write("\n")
-PYEOF
-  then
-    rm -f "$tmp"
-    die "python3 failed to migrate DMS bar widget: $stock_id -> $plugin_id"
-  fi
-  if cmp -s "$tmp" "$dms_settings"; then
-    rm -f "$tmp"
-    log "DMS bar widget already migrated or $stock_id not present: $dms_settings"
-  else
-    mv "$tmp" "$dms_settings"
-    log "migrated DMS bar widget: $stock_id -> $plugin_id"
-  fi
-}
-
-ensure_dms_bar_widget_inserted_before() {
-  local widget_id="$1" before_id="$2"
-  local tmp
-  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
-  if ! python3 - "$dms_settings" "$widget_id" "$before_id" > "$tmp" <<'PYEOF'
-import json
-import sys
-
-path, widget_id, before_id = sys.argv[1], sys.argv[2], sys.argv[3]
-
-with open(path) as f:
-    data = json.load(f)
-
-keys = ("leftWidgets", "centerWidgets", "rightWidgets")
-for bar in data.get("barConfigs", []):
-    already_placed = any(widget_id in (bar.get(k) or []) for k in keys)
-    if already_placed:
-        continue
-    for key in keys:
-        widgets = bar.get(key)
-        if not isinstance(widgets, list):
-            continue
-        if before_id in widgets:
-            widgets.insert(widgets.index(before_id), widget_id)
-            break
-
-json.dump(data, sys.stdout, indent=2)
-sys.stdout.write("\n")
-PYEOF
-  then
-    rm -f "$tmp"
-    die "python3 failed to insert DMS bar widget: $widget_id"
-  fi
-  if cmp -s "$tmp" "$dms_settings"; then
-    rm -f "$tmp"
-    log "DMS bar widget already present or insertion point missing: $widget_id"
-  else
-    mv "$tmp" "$dms_settings"
-    log "inserted DMS bar widget: $widget_id before $before_id"
-  fi
-}
-
 ensure_dms_plugin_enabled() {
   local plugin_id="$1"
   local plugin_settings="$dms_settings_dir/plugin_settings.json"
@@ -214,6 +135,7 @@ ensure_dms_plugin_enabled() {
   fi
   mv "$tmp" "$plugin_settings"
   jq -e --arg id "$plugin_id" '.[$id].enabled == true' "$plugin_settings" >/dev/null || die "DMS plugin not enabled: $plugin_id"
+  dms_restart_needed=1
 }
 
 theme_state_dir="$(vekrona_state_dir)"
@@ -272,31 +194,51 @@ ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
 ensure_dms_setting_default monoFontFamily "JetBrainsMono Nerd Font"
 ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
 ensure_dms_setting_enforced cornerRadius "$(vekrona_design_get radius)"
+ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get gap)"
 ensure_dms_bar_setting_enforced noBackground true
 ensure_dms_bar_setting_enforced widgetPadding "$(vekrona_design_get padding)"
 ensure_dms_bar_setting_enforced innerPadding "$(vekrona_design_get gap)"
 ensure_dms_bar_setting_enforced spacing "$(vekrona_design_get gap)"
 
+# Assert <plugin_id> sits in a bar widget list and, if <stock_id> is given, no bar still lists that stock widget.
+assert_dms_bar_plugin_placed() {
+  local plugin_id="$1" stock_id="${2:-}"
+  assert "DMS bar has the $plugin_id plugin placed in a widget list${stock_id:+ and no stock $stock_id}" python3 -c "
+import json
+import sys
+plugin_id, stock_id = sys.argv[1], sys.argv[2]
+d = json.load(open('$dms_settings'))
+names = [w.get('id') if isinstance(w, dict) else w
+         for bar in d.get('barConfigs', []) for k in ('leftWidgets', 'centerWidgets', 'rightWidgets') for w in (bar.get(k) or [])]
+assert plugin_id in names, plugin_id
+assert not stock_id or stock_id not in names, stock_id
+" "$plugin_id" "$stock_id"
+}
+
 ensure_symlink_tree "$VEKRONA_ROOT/config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/plugins"
+dms_restart_needed=0
 ensure_dms_plugin_enabled vekronaSwayWorkspaces
 ensure_dms_bar_widget_plugin workspaceSwitcher vekronaSwayWorkspaces
-assert "DMS bar has the vekrona workspace plugin or no stock workspaceSwitcher remains" python3 -c "
-import json
-d = json.load(open('$dms_settings'))
-bars = d.get('barConfigs', [])
-has_plugin = any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
-has_stock = any('workspaceSwitcher' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
-assert has_plugin or not has_stock, (has_plugin, has_stock)
-"
+ensure_dms_bar_separator_after vekronaSwayWorkspaces
+ensure_dms_bar_control_center_split
+assert_dms_bar_plugin_placed vekronaSwayWorkspaces workspaceSwitcher
 
 ensure_dms_plugin_enabled vekronaAgent
 ensure_dms_bar_widget_inserted_before vekronaAgent notificationButton
-assert "DMS bar has the vekrona agent plugin placed in a widget list" python3 -c "
-import json
-d = json.load(open('$dms_settings'))
-bars = d.get('barConfigs', [])
-assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
-"
+assert_dms_bar_plugin_placed vekronaAgent
+
+ensure_dms_plugin_enabled vekronaClock
+ensure_dms_bar_widget_plugin clock vekronaClock
+assert_dms_bar_plugin_placed vekronaClock clock
+ensure_dms_plugin_enabled vekronaWeather
+ensure_dms_bar_widget_plugin weather vekronaWeather
+assert_dms_bar_plugin_placed vekronaWeather weather
+
+# A running DMS does not pick up a plugin enabled after it started, so its bar widget stays blank.
+if [[ "$dms_restart_needed" == 1 ]] && systemctl --user is-active --quiet dms.service; then
+  log "restarting dms.service to load newly enabled plugins"
+  dms restart >/dev/null || warn "dms restart failed, log out and back in to load the new DMS plugins"
+fi
 
 dms_changelog_seen="$(dirname "$dms_settings")/.changelog-$(dms_changelog_version)"
 if [[ -e "$dms_changelog_seen" ]]; then

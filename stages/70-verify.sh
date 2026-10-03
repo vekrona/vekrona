@@ -414,14 +414,19 @@ bars = d.get('barConfigs', [])
 assert any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 "
 
-  check assert "vekronaAgent plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaAgent/plugin.json"
-  check assert "vekronaAgent plugin enabled" bash -c "jq -e '.vekronaAgent.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
-  check assert "vekronaAgent plugin placed in a DankBar widget list" python3 -c "
+  for plugin_id in vekronaAgent vekronaClock vekronaWeather; do
+    check assert "$plugin_id plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/$plugin_id/plugin.json"
+    check assert "$plugin_id plugin enabled" bash -c "jq -e '.$plugin_id.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
+    check assert "$plugin_id plugin placed in a DankBar widget list" python3 -c "
 import json
+import sys
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-bars = d.get('barConfigs', [])
-assert any('vekronaAgent' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
-"
+names = [w.get('id') if isinstance(w, dict) else w
+         for bar in d.get('barConfigs', []) for k in ('leftWidgets', 'centerWidgets', 'rightWidgets') for w in (bar.get(k) or [])]
+assert sys.argv[1] in names, sys.argv[1]
+" "$plugin_id"
+  done
+  check assert "vekronaShared VekronaEmphasizedPill.qml linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaShared/VekronaEmphasizedPill.qml"
   check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
 
   for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do

@@ -1,0 +1,12 @@
+{
+    "id": "vekronaWeather",
+    "name": "Vekrona Weather",
+    "description": "The stock DankBar weather drawn at 1.5x size inside a rounded outline; clicking opens the DankDash weather tab.",
+    "version": "1.0.0",
+    "author": "vekrona",
+    "type": "widget",
+    "capabilities": ["dankbar-widget"],
+    "component": "./VekronaWeather.qml",
+    "icon": "partly_cloudy_day",
+    "requires_dms": ">=1.6.0"
+}

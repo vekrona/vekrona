@@ -1,0 +1,12 @@
+{
+    "id": "vekronaClock",
+    "name": "Vekrona Clock",
+    "description": "The stock DankBar clock drawn at 1.5x size inside a rounded outline; clicking opens the DankDash overview tab.",
+    "version": "1.0.0",
+    "author": "vekrona",
+    "type": "widget",
+    "capabilities": ["dankbar-widget"],
+    "component": "./VekronaClock.qml",
+    "icon": "schedule",
+    "requires_dms": ">=1.6.0"
+}
