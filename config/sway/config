@@ -214,5 +214,13 @@ for_window [class="^[Ss]team$"] floating enable
 for_window [app_id="^gamescope$"] exec vekrona-workspace-new --games
 for_window [class="^steam_app_"] exec vekrona-workspace-new --games
 
+# DMS fixed-size dialogs set only minimumSize/maximumSize, which Sway ignores when it maps a window, so they open
+# at ~150x150. Size them by title. The titles are English and I18n-translated, so these rules are locale-dependent.
+for_window [app_id="^com\.danklinux\.dms$" title="^Authentication$"] floating enable, resize set 460 220, move position center
+for_window [app_id="^com\.danklinux\.dms$" title="^Rename Workspace$"] floating enable, resize set 400 160, move position center
+for_window [app_id="^com\.danklinux\.dms$" title="^(Create|Edit) Window Rule$"] floating enable, resize set 500 600, move position center
+for_window [app_id="^com\.danklinux\.dms$" title="^What's New$"] floating enable, resize set 680 680, move position center
+for_window [app_id="^com\.danklinux\.dms$" title="^Welcome$"] floating enable, resize set 720 680, move position center
+
 # Last, so your own per-machine settings in ~/.config/sway/config.d/ (outputs) override the shared ones above.
 include ~/.config/sway/config.d/*
