@@ -97,7 +97,7 @@ theme; Qt apps additionally need one re-login for the `QT_QPA_PLATFORMTHEME=qt6c
 environment variable to take effect.
 
 To change the desktop look, edit `config/design.json` (shape constants: radius,
-gap, and padding) or pick a new theme with `vekrona-theme`, then run
+gap, padding, widgetPadding, and trayIconSpacing) or pick a new theme with `vekrona-theme`, then run
 `./install.sh 50-user` to apply. This re-applies DMS settings, so GUI tweaks to
 the shape keys via DMS settings will revert.
 

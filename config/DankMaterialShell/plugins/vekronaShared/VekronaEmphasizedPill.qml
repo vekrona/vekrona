@@ -3,7 +3,7 @@ import qs.Common
 import qs.Services
 import qs.Modules.DankBar.Widgets
 
-// DMS styles (fontScale, outline, noBackground) only per bar, so the stock pill gets a derived barConfig.
+// DMS styles (fontScale, outline, noBackground, widgetPadding) only per bar, so the stock pill gets a derived barConfig.
 Item {
     id: root
 
@@ -40,6 +40,7 @@ Item {
     readonly property var emphasizedBarConfig: Object.assign({}, barConfig, {
         "fontScale": 1.5,
         "noBackground": false,
+        "widgetPadding": barConfig.pillPadding,
         "widgetTransparency": 0,
         "widgetOutlineEnabled": true,
         "widgetOutlineThickness": 1,
@@ -55,6 +56,8 @@ Item {
     height: pillLoader.item?.visible ? pillLoader.item.height : 0
 
     Component.onCompleted: {
+        if (barConfig?.pillPadding === undefined)
+            console.error("VekronaEmphasizedPill: barConfig.pillPadding is missing, stage 50-user did not enforce it");
         if (!kinds[kind])
             console.error("VekronaEmphasizedPill: unknown kind", JSON.stringify(kind));
     }

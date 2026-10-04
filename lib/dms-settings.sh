@@ -44,14 +44,16 @@ dms_rewrite_settings() {
   fi
 }
 
-# Put a thin separator right after <widget> in every bar, unless one is already there.
+# Leave exactly one <separator_id> right after <widget> in every list that has the widget, and no
+# <stock_id> (the stock separator it replaces) anywhere in that list. Other copies of both are
+# dropped, so every earlier layout converges.
 ensure_dms_bar_separator_after() {
-  local widget_id="$1"
-  dms_rewrite_settings "separator after $widget_id" "$widget_id" <<'PYEOF'
+  local widget_id="$1" separator_id="$2" stock_id="$3"
+  dms_rewrite_settings "$separator_id after $widget_id (no stock $stock_id)" "$widget_id" "$separator_id" "$stock_id" <<'PYEOF'
 import json
 import sys
 
-path, widget_id = sys.argv[1], sys.argv[2]
+path, widget_id, separator_id, stock_id = sys.argv[1:5]
 
 def widget_name(entry):
     return entry.get("id") if isinstance(entry, dict) else entry
@@ -64,12 +66,10 @@ for bar in data["barConfigs"]:
         widgets = bar.get(key)
         if not isinstance(widgets, list):
             continue
-        names = [widget_name(w) for w in widgets]
-        if widget_id not in names:
+        if widget_id not in [widget_name(w) for w in widgets]:
             continue
-        at = names.index(widget_id) + 1
-        if names[at:at + 1] != ["separator"]:
-            widgets.insert(at, "separator")
+        widgets[:] = [w for w in widgets if widget_name(w) not in (separator_id, stock_id)]
+        widgets.insert([widget_name(w) for w in widgets].index(widget_id) + 1, separator_id)
 
 json.dump(data, sys.stdout, indent=2)
 sys.stdout.write("\n")
@@ -166,6 +166,34 @@ for bar in data["barConfigs"]:
         if before_id in widgets:
             widgets.insert(widgets.index(before_id), widget_id)
             break
+
+json.dump(data, sys.stdout, indent=2)
+sys.stdout.write("\n")
+PYEOF
+}
+
+# Set <key> = <json_value> on every <widget_id> entry of every bar, turning a bare string entry into an object.
+ensure_dms_bar_widget_option() {
+  local widget_id="$1" key="$2" json_value="$3"
+  dms_rewrite_settings "$widget_id option $key = $json_value" "$widget_id" "$key" "$json_value" <<'PYEOF'
+import json
+import sys
+
+path, widget_id, key, value = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+
+with open(path) as f:
+    data = json.load(f)
+
+for bar in data["barConfigs"]:
+    for section in ("leftWidgets", "centerWidgets", "rightWidgets"):
+        widgets = bar.get(section)
+        if not isinstance(widgets, list):
+            continue
+        for i, entry in enumerate(widgets):
+            if entry == widget_id:
+                widgets[i] = {"id": widget_id, key: value}
+            elif isinstance(entry, dict) and entry.get("id") == widget_id:
+                entry[key] = value
 
 json.dump(data, sys.stdout, indent=2)
 sys.stdout.write("\n")

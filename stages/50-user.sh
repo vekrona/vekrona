@@ -194,9 +194,10 @@ ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
 ensure_dms_setting_default monoFontFamily "JetBrainsMono Nerd Font"
 ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
 ensure_dms_setting_enforced cornerRadius "$(vekrona_design_get radius)"
-ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get gap)"
+ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get trayIconSpacing)"
 ensure_dms_bar_setting_enforced noBackground true
-ensure_dms_bar_setting_enforced widgetPadding "$(vekrona_design_get padding)"
+ensure_dms_bar_setting_enforced widgetPadding "$(vekrona_design_get widgetPadding)"
+ensure_dms_bar_setting_enforced pillPadding "$(vekrona_design_get padding)"
 ensure_dms_bar_setting_enforced innerPadding "$(vekrona_design_get gap)"
 ensure_dms_bar_setting_enforced spacing "$(vekrona_design_get gap)"
 
@@ -219,9 +220,13 @@ ensure_symlink_tree "$VEKRONA_ROOT/config/DankMaterialShell/plugins" "$HOME/.con
 dms_restart_needed=0
 ensure_dms_plugin_enabled vekronaSwayWorkspaces
 ensure_dms_bar_widget_plugin workspaceSwitcher vekronaSwayWorkspaces
-ensure_dms_bar_separator_after vekronaSwayWorkspaces
+ensure_dms_plugin_enabled vekronaSeparator
+ensure_dms_bar_separator_after vekronaSwayWorkspaces vekronaSeparator separator
 ensure_dms_bar_control_center_split
+ensure_dms_bar_widget_option cpuUsage minimumWidth false
+ensure_dms_bar_widget_option memUsage minimumWidth false
 assert_dms_bar_plugin_placed vekronaSwayWorkspaces workspaceSwitcher
+assert_dms_bar_plugin_placed vekronaSeparator separator
 
 ensure_dms_plugin_enabled vekronaAgent
 ensure_dms_bar_widget_inserted_before vekronaAgent notificationButton

@@ -1,0 +1,12 @@
+{
+    "id": "vekronaSeparator",
+    "name": "Vekrona Separator",
+    "description": "The stock DankBar separator (a thin line at 60% of the bar) drawn in the text color so it stays visible on a dark bar.",
+    "version": "1.0.0",
+    "author": "vekrona",
+    "type": "widget",
+    "capabilities": ["dankbar-widget"],
+    "component": "./VekronaSeparator.qml",
+    "icon": "more_vert",
+    "requires_dms": ">=1.6.0"
+}

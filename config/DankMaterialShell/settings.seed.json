@@ -17,7 +17,7 @@
   "clockFormat": "24h",
   "notificationPopupBodyInvokesAction": true,
   "cornerRadius": 6,
-  "trayIconSpacing": 8,
+  "trayIconSpacing": 0,
   "barConfigs": [
     {
       "id": "default",
@@ -26,9 +26,12 @@
       "position": 0,
       "screenPreferences": ["all"],
       "showOnLastDisplay": true,
-      "leftWidgets": ["launcherButton", "vekronaSwayWorkspaces", "separator", "focusedWindow"],
+      "leftWidgets": ["launcherButton", "vekronaSwayWorkspaces", "vekronaSeparator", "focusedWindow"],
       "centerWidgets": ["music", "vekronaClock", "vekronaWeather"],
-      "rightWidgets": ["systemTray", "clipboard", "cpuUsage", "memUsage", "vekronaAgent", "notificationButton", "battery",
+      "rightWidgets": ["systemTray", "clipboard",
+        {"id": "cpuUsage", "minimumWidth": false},
+        {"id": "memUsage", "minimumWidth": false},
+        "vekronaAgent", "notificationButton", "battery",
         {"id": "controlCenterButton", "showAudioIcon": false},
         {"id": "controlCenterButton", "showNetworkIcon": false, "showBluetoothIcon": false, "showAudioIcon": true, "showAudioPercent": false, "showVpnIcon": false, "showBrightnessIcon": false, "showBrightnessPercent": false, "showMicIcon": false, "showMicPercent": false, "showBatteryIcon": false, "showPrinterIcon": false, "showScreenSharingIcon": false, "showIdleInhibitorIcon": false, "showDoNotDisturbIcon": false}
       ],
@@ -45,7 +48,8 @@
       "maximizeWidgetIcons": false,
       "maximizeWidgetText": false,
       "removeWidgetPadding": false,
-      "widgetPadding": 12,
+      "widgetPadding": 0,
+      "pillPadding": 12,
       "batteryColorMode": "theme",
       "gothCornersEnabled": false,
       "gothCornerRadiusOverride": false,

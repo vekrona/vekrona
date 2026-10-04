@@ -384,16 +384,19 @@ import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('notificationPopupBodyInvokesAction') is True, d.get('notificationPopupBodyInvokesAction')
 "
-  check assert "DMS shape: cornerRadius and every bar's noBackground/widgetPadding/innerPadding/spacing match config/design.json, no widget outline" python3 -c "
+  check assert "DMS shape: cornerRadius and every bar's noBackground/widgetPadding/pillPadding/innerPadding/spacing and trayIconSpacing match config/design.json, no widget outline" python3 -c "
 import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 radius, gap, padding = $(vekrona_design_get radius), $(vekrona_design_get gap), $(vekrona_design_get padding)
+widget_padding, tray_icon_spacing = $(vekrona_design_get widgetPadding), $(vekrona_design_get trayIconSpacing)
 assert d.get('cornerRadius') == radius, d.get('cornerRadius')
+assert d.get('trayIconSpacing') == tray_icon_spacing, d.get('trayIconSpacing')
 bars = d.get('barConfigs', [])
 assert bars, 'no barConfigs'
 for bar in bars:
     assert bar.get('noBackground') is True, (bar.get('id'), 'noBackground', bar.get('noBackground'))
-    assert bar.get('widgetPadding') == padding, (bar.get('id'), 'widgetPadding', bar.get('widgetPadding'))
+    assert bar.get('widgetPadding') == widget_padding, (bar.get('id'), 'widgetPadding', bar.get('widgetPadding'))
+    assert bar.get('pillPadding') == padding, (bar.get('id'), 'pillPadding', bar.get('pillPadding'))
     assert bar.get('innerPadding') == gap, (bar.get('id'), 'innerPadding', bar.get('innerPadding'))
     assert bar.get('spacing') == gap, (bar.get('id'), 'spacing', bar.get('spacing'))
     assert not bar.get('widgetOutlineEnabled'), (bar.get('id'), 'widgetOutlineEnabled')

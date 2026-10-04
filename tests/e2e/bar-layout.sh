@@ -22,7 +22,7 @@ export -f clock_shown dash_open
 vekrona-dev session
 vekrona-dev run bash -c "test -s $GUEST_SETTINGS" || die "DMS settings $GUEST_SETTINGS are missing: install did not seed them"
 
-found="$(bars_failing 'select((.leftWidgets | map(id)) as $w | ($w | index("vekronaSwayWorkspaces")) as $i | $i == null or $w[$i + 1] != "separator") | {name, leftWidgets}')"
+found="$(bars_failing 'select((.leftWidgets | map(id)) as $w | ($w | index("vekronaSwayWorkspaces")) as $i | $i == null or $w[$i + 1] != "vekronaSeparator") | {name, leftWidgets}')"
 [[ -z "$found" ]] || die "every bar must have a separator right after vekronaSwayWorkspaces in leftWidgets, but these do not: $found"
 log "ok: every bar separates the sway workspaces from the next widget"
 
@@ -34,10 +34,10 @@ found="$(bars_failing '[.rightWidgets[] | select(id == "controlCenterButton")] a
 [[ -z "$found" ]] || die "every bar must have two controlCenterButton entries, one without the audio icon and one with the audio icon but no network icon, but these do not: $found"
 log "ok: every bar splits the control center into a network button and an audio button"
 
-gap="$(vekrona_design_get gap)"
 spacing="$(vekrona-dev sh bash -c "jq -r .trayIconSpacing $GUEST_SETTINGS")"
-[[ "$spacing" == "$gap" ]] || die "trayIconSpacing must equal the design gap $gap, but it is $spacing"
-log "ok: tray icons are spaced by the design gap"
+tray_icon_spacing="$(vekrona_design_get trayIconSpacing)"
+[[ "$spacing" == "$tray_icon_spacing" ]] || die "trayIconSpacing must equal the design token $tray_icon_spacing, but it is $spacing"
+log "ok: tray icons are spaced by the design token"
 
 vekrona-dev move 100 400
 CLOCK_BEFORE="$(vekrona-dev run date +%H:%M)"
