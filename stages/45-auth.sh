@@ -160,4 +160,7 @@ ensure_luks_fido2_unlock() {
 ensure_authselect_selection
 ensure_u2f_keys_without_pin_flag
 ensure_luks_fido2_unlock
-ensure_root_file "$ROOT/etc/pam.d/dankshell-u2f" /etc/pam.d/dankshell-u2f
+for pam in vekrona-lock-password vekrona-lock-u2f vekrona-lock-fprint; do
+  ensure_root_file "$ROOT/etc/pam.d/$pam" "/etc/pam.d/$pam"
+done
+ensure_root_file_absent /etc/pam.d/dankshell-u2f # the lock screen was DMS's before vekrona-lock

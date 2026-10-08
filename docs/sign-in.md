@@ -53,14 +53,16 @@ with your password always available as a fallback.
   scope here.
 - After install, enroll another finger with `fprintd-enroll <finger>`.
 
-**Lock screen:** touch-only (no PIN prompt, `etc/pam.d/dankshell-u2f`): click
-the security key button, then touch the key. DankMaterialShell's key unlock
-never answers a PAM prompt, so a PIN prompt would hang it until it gives up.
-That is why the credential must not carry `+pin`: pam_u2f would ask for the PIN
-despite `pinverification=0`. The password field uses DankMaterialShell's own
-password-only stack, so a typed password never reaches the key as a PIN. The
-wait for the touch is bounded by the lock screen itself (DankMaterialShell
-cancels it after 30 seconds); pam_u2f has no timeout option.
+**Lock screen:** `vekrona-lock` (DankMaterialShell starts it on idle, suspend
+and the lock bindings). The key is touch-only (no PIN prompt,
+`etc/pam.d/vekrona-lock-u2f`): while a key is plugged in, just touch it, no
+click needed. The lock screen never answers a PAM prompt, so a PIN prompt
+would hang it. That is why the credential must not carry `+pin`: pam_u2f would
+ask for the PIN despite `pinverification=0`. The password field uses its own
+password-only stack (`etc/pam.d/vekrona-lock-password`), so a typed password
+never reaches the key as a PIN. pam_u2f has no timeout option; when a wait
+for the touch ends without one, `vekrona-lock` starts a new one while the key
+stays plugged in.
 
 **Password:** always works, regardless of key/fingerprint enrollment.
 
