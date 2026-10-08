@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
-THEMES_DIR="$HOME/.config/DankMaterialShell/vekrona-themes"
 STATE_DIR="$(vekrona_state_dir)"
 STATE_FILE="$(vekrona_theme_name_file)"
 ACTIVE_THEME_FILE="$(vekrona_active_theme_file)"
@@ -14,7 +13,7 @@ WAIT_SECONDS=10
 INOTIFY_PID=""
 
 usage() {
-  printf 'usage: %s <name>|next|list\n' "$(basename "$0")" >&2
+  printf 'usage: %s dark|light|next|list\n' "$(basename "$0")" >&2
   exit 1
 }
 
@@ -25,13 +24,7 @@ require_inotifywait() {
   }
 }
 
-list_themes() {
-  local f
-  for f in "$THEMES_DIR"/*.json; do
-    [[ -e "$f" ]] || continue
-    basename "$f" .json
-  done | sort
-}
+MODES=(dark light)
 
 current_theme() {
   [[ -f "$STATE_FILE" ]] && cat "$STATE_FILE"
@@ -46,16 +39,7 @@ dms_settings_set() {
   fi
 }
 
-dms_wallpaper_set() {
-  local png="$1" output rc=0
-  output="$(dms ipc call wallpaper set "$png" 2>&1)" || rc=$?
-  if [[ "$rc" -ne 0 || "$output" != SUCCESS* ]]; then
-    echo "vekrona-theme: dms ipc call wallpaper set $png failed: $output (DMS is already on the new theme; the wallpaper and the recorded theme name were not updated, re-run to retry)" >&2
-    exit 1
-  fi
-}
-
-# DMS renders window_bg_color from the custom theme's .dark.surface
+# DMS renders window_bg_color from the custom theme's <mode>.surface
 # (matugen/templates/gtk-colors.css), so that is the value to wait for.
 current_window_bg() {
   [[ -f "$GTK_COLORS_FILE" ]] || return 0
@@ -117,34 +101,50 @@ dms_answers() {
   dms ipc call theme getMode >/dev/null 2>&1
 }
 
-RESTORE_ACTIVE_THEME_ON_EXIT=0
+ROLLBACK_ON_EXIT=0
+MODE_BACKUP=""
 ACTIVE_THEME_BACKUP=""
+
+restore_backup() {
+  local backup="$1" dest="$2"
+  if [[ -n "$backup" ]]; then
+    cp "$backup" "$dest"
+  else
+    rm -f "$dest"
+  fi
+}
+
+# Put the files back, then re-render and re-flip DMS so GTK, Qt, Firefox, Sway and DMS agree with the
+# recorded mode again. A failing re-render is reported: the desktop would be left half-themed.
+rollback() {
+  local previous=""
+  restore_backup "$MODE_BACKUP" "$STATE_FILE"
+  restore_backup "$ACTIVE_THEME_BACKUP" "$ACTIVE_THEME_FILE"
+  [[ -n "$MODE_BACKUP" ]] && previous="$(cat "$STATE_FILE")"
+  # A legacy or absent recorded value (stage 50 migrates it) has no mode to go back to.
+  [[ "$previous" == dark || "$previous" == light ]] || return 0
+  "$ROOT/bin/vekrona-render-theme" || echo "vekrona-theme: re-rendering '$previous' after the failure failed; run 'vekrona-theme $previous'" >&2
+  dms ipc call theme "$previous" >/dev/null || echo "vekrona-theme: could not flip DMS back to '$previous'; run 'vekrona-theme $previous'" >&2
+}
 
 cleanup() {
   stop_gtk_colors_watch
-  if [[ "$RESTORE_ACTIVE_THEME_ON_EXIT" == "1" ]]; then
-    if [[ -n "$ACTIVE_THEME_BACKUP" && -f "$ACTIVE_THEME_BACKUP" ]]; then
-      cp "$ACTIVE_THEME_BACKUP" "$ACTIVE_THEME_FILE"
-    else
-      rm -f "$ACTIVE_THEME_FILE"
-    fi
-  fi
+  [[ "$ROLLBACK_ON_EXIT" == "1" ]] && rollback
+  [[ -n "$MODE_BACKUP" ]] && rm -f "$MODE_BACKUP"
   [[ -n "$ACTIVE_THEME_BACKUP" ]] && rm -f "$ACTIVE_THEME_BACKUP"
 }
 
-apply_theme() {
-  local name="$1"
-  local json="$THEMES_DIR/$name.json"
-  local png="$THEMES_DIR/wallpapers/$name.png"
-  [[ -f "$json" ]] || { echo "unknown theme: $name" >&2; exit 1; }
-  [[ -f "$png" ]] || { echo "missing wallpaper: $png" >&2; exit 1; }
+backup_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  local backup
+  backup="$(mktemp "$STATE_DIR/.$(basename "$file").backup.XXXXXX")"
+  cp "$file" "$backup"
+  printf '%s' "$backup"
+}
 
-  local expected_bg
-  expected_bg="$(jq -r '.dark.surface' "$json")"
-  [[ "$expected_bg" =~ ^#[0-9A-Fa-f]{6}$ ]] || {
-    echo "vekrona-theme: $json has no .dark.surface hex color" >&2
-    exit 1
-  }
+apply_theme() {
+  local mode="$1"
 
   dms_answers || {
     echo "vekrona-theme: DMS is not responding to IPC (the recorded theme is unchanged)" >&2
@@ -154,31 +154,30 @@ apply_theme() {
   start_gtk_colors_watch || exit 1
 
   mkdir -p "$STATE_DIR"
-  ACTIVE_THEME_BACKUP=""
-  if [[ -f "$ACTIVE_THEME_FILE" ]]; then
-    ACTIVE_THEME_BACKUP="$(mktemp "$STATE_DIR/.active-theme.json.backup.XXXXXX")"
-    cp "$ACTIVE_THEME_FILE" "$ACTIVE_THEME_BACKUP"
-  fi
-  cp "$json" "$ACTIVE_THEME_FILE"
-  RESTORE_ACTIVE_THEME_ON_EXIT=1
+  MODE_BACKUP="$(backup_file "$STATE_FILE")"
+  ACTIVE_THEME_BACKUP="$(backup_file "$ACTIVE_THEME_FILE")"
+  ROLLBACK_ON_EXIT=1
+  printf '%s\n' "$mode" > "$STATE_FILE"
 
   "$ROOT/bin/vekrona-render-theme"
 
+  local expected_bg
+  expected_bg="$(jq -r --arg m "$mode" '.[$m].surface' "$ACTIVE_THEME_FILE")"
+  [[ "$expected_bg" =~ ^#[0-9A-Fa-f]{6}$ ]] || {
+    echo "vekrona-theme: $ACTIVE_THEME_FILE has no .$mode.surface hex color" >&2
+    exit 1
+  }
+
+  dms ipc call theme "$mode" >/dev/null
   dms_settings_set customThemeFile "$ACTIVE_THEME_FILE"
   dms_settings_set currentThemeName custom
 
   if ! wait_for_window_bg "$expected_bg"; then
-    echo "vekrona-theme: theme '$name' did not take in DMS (GTK window_bg_color is '$(current_window_bg)', expected '$expected_bg'). The recorded theme is unchanged." >&2
+    echo "vekrona-theme: theme '$mode' did not take in DMS (GTK window_bg_color is '$(current_window_bg)', expected '$expected_bg'). The recorded theme is unchanged." >&2
     exit 1
   fi
-  RESTORE_ACTIVE_THEME_ON_EXIT=0
-  stop_gtk_colors_watch
-
-  dms_wallpaper_set "$png"
-
-  mkdir -p "$(dirname "$STATE_FILE")"
-  printf '%s\n' "$name" > "$STATE_FILE"
-  echo "theme: $name"
+  ROLLBACK_ON_EXIT=0
+  echo "theme: $mode"
 }
 
 cmd="${1:-}"
@@ -186,24 +185,20 @@ cmd="${1:-}"
 
 case "$cmd" in
   list)
-    list_themes
+    printf '%s\n' "${MODES[@]}"
     ;;
   next)
     require_inotifywait
-    mapfile -t names < <(list_themes)
-    [[ ${#names[@]} -gt 0 ]] || { echo "no themes found in $THEMES_DIR" >&2; exit 1; }
-    cur="$(current_theme || true)"
-    next_index=0
-    for i in "${!names[@]}"; do
-      if [[ "${names[$i]}" == "$cur" ]]; then
-        next_index=$(( (i + 1) % ${#names[@]} ))
-        break
-      fi
-    done
-    apply_theme "${names[$next_index]}"
+    case "$(current_theme || true)" in
+      dark) apply_theme light ;;
+      *) apply_theme dark ;;
+    esac
     ;;
-  *)
+  dark | light)
     require_inotifywait
     apply_theme "$cmd"
+    ;;
+  *)
+    usage
     ;;
 esac
