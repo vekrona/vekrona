@@ -13,7 +13,7 @@
   "currentThemeName": "custom",
   "customThemeFile": "__HOME__/.local/state/vekrona/active-theme.json",
   "fontFamily": "Atkinson Hyperlegible Next",
-  "monoFontFamily": "JetBrainsMono Nerd Font",
+  "monoFontFamily": "AtkynsonMono Nerd Font",
   "clockFormat": "24h",
   "notificationPopupBodyInvokesAction": true,
   "cornerRadius": 6,

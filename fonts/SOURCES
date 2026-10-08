@@ -1,0 +1,4 @@
+# Vendored fonts: one line per folder, "folder  family  source  version".
+jetbrains-mono-nerd           JetBrainsMono Nerd Font      https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.tar.xz              Nerd Fonts v3.5.1
+atkynson-mono-nerd            AtkynsonMono Nerd Font       https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/AtkinsonHyperlegibleMono.tar.xz    Nerd Fonts v3.5.1
+atkinson-hyperlegible-mono    Atkinson Hyperlegible Mono   https://github.com/google/fonts/tree/main/ofl/atkinsonhyperlegiblemono                              google/fonts commit 5e8a3ba899557829a76cfdac30fa512bda91d7ca

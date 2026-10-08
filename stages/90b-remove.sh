@@ -123,7 +123,7 @@ else
   warn "secrets service not reachable (not in a graphical session, or not yet started)"
 fi
 
-assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
+assert "AtkynsonMono Nerd Font installed" bash -c "fc-list | grep -q 'AtkynsonMono Nerd'"
 
 for f in /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/oomd.conf.d/vekrona.conf /etc/modprobe.d/vekrona-usb-autosuspend.conf; do
   assert "override still present: $f" test -f "$f"

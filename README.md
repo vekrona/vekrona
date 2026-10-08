@@ -49,7 +49,7 @@ vekrona is a recipe. It installs and configures software other people build:
 | Apps | [Firefox](https://www.firefox.com/) (YouTube, WhatsApp, Spotify, SoundCloud, Telegram and Discord run as Firefox web apps), [Zed](https://zed.dev/), [Signal](https://signal.org/), [OBS Studio](https://obsproject.com/), [1Password](https://1password.com/), [Tailscale](https://tailscale.com/), [Nix](https://nixos.org/) with [devbox](https://www.jetify.com/devbox), [btop](https://github.com/aristocratos/btop), [herdr](https://herdr.dev/) |
 | Coding agents | [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), [Pi](https://github.com/earendil-works/pi), [Cursor CLI](https://cursor.com/cli), the last four installed with [mise](https://mise.jdx.dev/) |
 | MacBook | [facetimehd](https://github.com/patjak/facetimehd) camera driver |
-| Fonts | [JetBrainsMono Nerd Font](https://www.nerdfonts.com/), [Atkinson Hyperlegible Next](https://www.brailleinstitute.org/freefont/), [Inter](https://rsms.me/inter/) |
+| Fonts | [AtkynsonMono Nerd Font](https://www.nerdfonts.com/) (Atkinson Hyperlegible Mono, patched; JetBrainsMono Nerd Font for box drawing), [Atkinson Hyperlegible Next](https://www.brailleinstitute.org/freefont/), [Inter](https://rsms.me/inter/) |
 
 The install creates a local user and asks you to sign up for nothing. Steam,
 Spotify, WhatsApp, Telegram, Discord, 1Password, Tailscale and the coding agents need their own

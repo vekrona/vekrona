@@ -53,6 +53,21 @@ only while it points there. Copy and paste in Ghostty are Ghostty's own
 Ctrl+Shift+C and Ctrl+Shift+V, because the Super layer skips terminals (see
 keyboard.md).
 
+### Terminal font (Ghostty)
+
+Ghostty ignores fontconfig's `monospace`, and vekrona ships no Ghostty config
+(PLAN decision 4), so Ghostty keeps its embedded JetBrains Mono until you opt
+in. To use the system mono font, add this line to your Ghostty config, with
+the absolute path of your vekrona checkout:
+
+```
+config-file = /path/to/vekrona/docs/ghostty-fonts.conf
+```
+
+or copy the two `font-family` lines from [ghostty-fonts.conf](ghostty-fonts.conf).
+Both lines are needed: the Nerd-patched AtkynsonMono lacks the backtick, so
+Ghostty takes it from Atkinson Hyperlegible Mono, the second family.
+
 DMS and GTK application colors are a separate path and still come from DMS.
 The theme content lives in `~/.local/state/vekrona/active-theme.json`,
 which `customThemeFile` in the DMS settings seed points at from the first

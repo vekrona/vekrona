@@ -200,7 +200,7 @@ seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/settings.seed.json" "$dms_
 seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/session.seed.json" "$dms_session" 0
 
 ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
-ensure_dms_setting_default monoFontFamily "JetBrainsMono Nerd Font"
+ensure_dms_setting_default monoFontFamily "AtkynsonMono Nerd Font"
 ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
 ensure_dms_setting_enforced cornerRadius "$(vekrona_design_get radius)"
 ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get trayIconSpacing)"
@@ -279,14 +279,17 @@ fc-cache -f >/dev/null
 if [[ -d "$VEKRONA_ROOT/fonts" ]] && find "$VEKRONA_ROOT/fonts" -type f -print -quit | grep -q .; then
   ensure_symlink_tree "$VEKRONA_ROOT/fonts" "$HOME/.local/share/fonts/vekrona"
   fc-cache -f >/dev/null
-  assert "JetBrainsMono Nerd Font registered" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
+  for family in "AtkynsonMono Nerd Font" "Atkinson Hyperlegible Mono" "JetBrainsMono Nerd Font"; do
+    assert "$family registered" bash -c 'fc-list : family | tr , "\n" | grep -qxF "$1"' _ "$family"
+  done
+  assert "Atkinson Hyperlegible Mono covers the backtick (U+0060)" bash -c "fc-list ':charset=60' family | grep -qF 'Atkinson Hyperlegible Mono'"
 else
   warn "fonts/ missing or empty, skipping font install"
 fi
 
 ensure_gsettings org.gnome.desktop.interface font-name "Atkinson Hyperlegible Next 11"
 ensure_gsettings org.gnome.desktop.interface document-font-name "Atkinson Hyperlegible Next 11"
-ensure_gsettings org.gnome.desktop.interface monospace-font-name "JetBrainsMono Nerd Font 11"
+ensure_gsettings org.gnome.desktop.interface monospace-font-name "AtkynsonMono Nerd Font 11"
 
 # Whether `flatpak override --user --show` output ($2) reflects the override flag $1.
 flatpak_override_has() {

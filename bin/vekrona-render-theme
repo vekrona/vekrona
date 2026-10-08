@@ -299,7 +299,7 @@ standard_dialogs=default
 
 [Fonts]
 general="Atkinson Hyperlegible Next,11"
-fixed="JetBrainsMono Nerd Font,11"
+fixed="AtkynsonMono Nerd Font,11"
 """
     active = qt_palette(theme, disabled=False)
     disabled = qt_palette(theme, disabled=True)
@@ -478,7 +478,7 @@ def render_rofi(theme, design):
     c, r, p = theme, design["radius"], design["padding"]
     return f"""
 * {{
-    font: "JetBrainsMono Nerd Font 11";
+    font: "AtkynsonMono Nerd Font 11";
     background: {c['background']};
     foreground: {c['backgroundText']};
     lightbg: {c['surfaceContainer']};

@@ -367,14 +367,14 @@ if ran 50-user; then
   else
     log "error store directory not created yet (vekrona-errors.service has not run in a live session), skipping its mode check"
   fi
-  check assert "JetBrainsMono Nerd Font installed" bash -c "fc-list | grep -q 'JetBrainsMono Nerd'"
+  check assert "AtkynsonMono Nerd Font installed" bash -c "fc-list | grep -q 'AtkynsonMono Nerd'"
   check assert "vekrona fontconfig linked" file_exists "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
   check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"
   check assert "fc-match sans-serif (Ukrainian i, U+0456) -> Inter" bash -c "fc-match 'sans-serif:charset=0456' | grep -q Inter"
-  check assert "fc-match monospace -> JetBrainsMono Nerd Font" bash -c "fc-match monospace | grep -q 'JetBrainsMono Nerd Font'"
+  check assert "fc-match monospace -> AtkynsonMono Nerd Font" bash -c "fc-match monospace | grep -q 'AtkynsonMono Nerd Font'"
   check assert "gsettings font-name: Atkinson Hyperlegible Next 11" gsettings_eq org.gnome.desktop.interface font-name "Atkinson Hyperlegible Next 11"
   check assert "gsettings document-font-name: Atkinson Hyperlegible Next 11" gsettings_eq org.gnome.desktop.interface document-font-name "Atkinson Hyperlegible Next 11"
-  check assert "gsettings monospace-font-name: JetBrainsMono Nerd Font 11" gsettings_eq org.gnome.desktop.interface monospace-font-name "JetBrainsMono Nerd Font 11"
+  check assert "gsettings monospace-font-name: AtkynsonMono Nerd Font 11" gsettings_eq org.gnome.desktop.interface monospace-font-name "AtkynsonMono Nerd Font 11"
   check assert "DankMaterialShell settings.json present" file_exists "$HOME/.config/DankMaterialShell/settings.json"
   check assert "DMS changelog for the installed version marked seen" file_exists "$HOME/.config/DankMaterialShell/.changelog-$(dms_changelog_version)"
   check assert "DMS settings: lockBeforeSuspend=true, acLockTimeout=300" python3 -c "
