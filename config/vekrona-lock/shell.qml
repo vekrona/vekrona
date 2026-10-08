@@ -14,6 +14,9 @@ import "Vekrona"
 
 ShellRoot {
     id: root
+    // A reload while locked (install or git checkout rewriting these files) tears
+    // the session lock down mid-lock: Quickshell aborts and Sway paints red.
+    settings.watchFiles: false
 
     readonly property string passwordPrompt: "Password"
     // The lock is always dark, in both themes (VekronaTheme.dark).
