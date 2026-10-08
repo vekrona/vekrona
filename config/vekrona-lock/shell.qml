@@ -138,6 +138,7 @@ ShellRoot {
     property int keyCount: 0
     // Bumped by every plug or unplug, so an attempt that outlived a key change retries.
     property int keyEvents: 0
+    readonly property int maxQuickFailures: 30
 
     function syncKey() {
         if (keyCount > 0 && !unlocking && !u2f.active) {
@@ -151,6 +152,7 @@ ShellRoot {
 
     onKeyCountChanged: {
         keyEvents++;
+        u2f.quickFailures = 0;
         syncKey();
     }
 
@@ -161,6 +163,8 @@ ShellRoot {
 
         property bool touched: false
         property int startedAt: 0
+        // Attempts that failed before the touch cue was shown, since the key last changed.
+        property int quickFailures: 0
 
         onMessageChanged: {
             if (message.toLowerCase().includes("touch"))
@@ -173,11 +177,23 @@ ShellRoot {
                 root.unlock();
                 return;
             }
-            // Retry only if the user could have touched (the prompt was shown) or the
-            // key changed meanwhile; otherwise an unplugged key would loop forever.
-            if (touched || startedAt !== root.keyEvents)
+            // Retry at once if the user could have touched (the prompt was shown) or the key
+            // changed meanwhile. A failure before the cue with the key still there means pam_u2f
+            // found the key not ready (it answers CTAP late after enumeration); try again a few
+            // times, spaced, but not forever: a key without a registered credential fails at once too.
+            if (touched || startedAt !== root.keyEvents) {
                 root.syncKey();
+            } else if (root.keyCount > 0 && quickFailures < root.maxQuickFailures) {
+                quickFailures++;
+                retry.restart();
+            }
         }
+    }
+
+    Timer {
+        id: retry
+        interval: 1000
+        onTriggered: root.syncKey()
     }
 
     Process {
