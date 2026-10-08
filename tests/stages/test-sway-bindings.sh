@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/tests/stages/lib.sh"
+source "$ROOT/tests/lib.sh"
 
 bind_re='^[[:space:]]*bindsym[[:space:]]+((--[^[:space:]]+[[:space:]]+)*)[^[:space:]]+[[:space:]]+(.+)$'
 repeating_re='^(focus |move |resize |workspace number |split[vh]$|mode "default"$|exec vekrona-app-switch |exec dms ipc call (audio|brightness) (increment|decrement) |exec brightnessctl )'

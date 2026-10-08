@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/tests/stages/lib.sh"
+source "$ROOT/tests/lib.sh"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
@@ -19,7 +19,6 @@ stub sudo 'exit 0'
 stub swaymsg 'echo "$@" >> "'"$scratch"'/swaymsg.log"; exit "$(cat "'"$scratch"'/swaymsg.status" 2>/dev/null || echo 0)"'
 export PATH="$scratch/stubs:$PATH"
 export HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/runtime"
-export VEKRONA_ERROR_REPORTER=/usr/bin/true
 unset SWAYSOCK
 
 run_install() { rm -f "$scratch/swaymsg.log"; "$repo/install.sh" 50-user >"$scratch/stdout" 2>"$scratch/stderr"; }

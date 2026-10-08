@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/lib/common.sh"
+source "$ROOT/tests/lib.sh"
 
 HOLD_MS=1500
 VISIBLE_STEP=10

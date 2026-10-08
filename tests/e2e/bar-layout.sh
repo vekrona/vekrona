@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/lib/common.sh"
+source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
 # shellcheck disable=SC2016 # $HOME expands in the guest

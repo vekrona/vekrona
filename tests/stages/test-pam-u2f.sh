@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/tests/stages/lib.sh"
+source "$ROOT/tests/lib.sh"
 source "$ROOT/lib/pam-u2f.sh"
 
 stripped() {

@@ -2,14 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/tests/stages/lib.sh"
+source "$ROOT/tests/lib.sh"
 source "$ROOT/lib/dms-settings.sh"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
-
-# die() reports through $VEKRONA_ROOT/bin/vekrona-error when it exists; point it at an empty tree.
-VEKRONA_ROOT="$scratch/no-root"
 
 dms_settings_dir="$scratch/dms"
 dms_settings="$dms_settings_dir/settings.json"

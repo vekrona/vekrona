@@ -6,7 +6,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
-source "$REPO/tests/stages/lib.sh"
+source "$REPO/tests/lib.sh"
 
 # A fake package database: one file per installed package. ffmpeg conflicts with the -free libraries.
 cat > "$work/bin/rpm" <<'F'

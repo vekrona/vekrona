@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/lib/common.sh"
+source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
 GUEST_PKEXEC_LOG=/tmp/vekrona-e2e-pkexec.log

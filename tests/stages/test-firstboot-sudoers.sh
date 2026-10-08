@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/tests/stages/lib.sh"
+source "$ROOT/tests/lib.sh"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

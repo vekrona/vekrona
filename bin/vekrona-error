@@ -47,7 +47,8 @@ UNIT_NAME_RE = re.compile(
 PID_RE = re.compile(r"[0-9]{1,10}")
 REPORT_SOURCES = ("vekrona", "manual")
 
-JOURNAL_SOCKET_PATH = "/run/systemd/journal/socket"
+DEFAULT_JOURNAL_SOCKET_PATH = "/run/systemd/journal/socket"
+JOURNAL_SOCKET_ENV = "VEKRONA_JOURNAL_SOCKET"  # tests point it at a missing path so a stray report fails loudly
 
 
 die = vekrona_cli.make_die(PROG, __file__, report=False)
@@ -606,7 +607,7 @@ def journald_send(fields):
     payload = b"".join(parts)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
     try:
-        sock.connect(JOURNAL_SOCKET_PATH)
+        sock.connect(os.environ.get(JOURNAL_SOCKET_ENV, DEFAULT_JOURNAL_SOCKET_PATH))
         sock.send(payload)
     finally:
         sock.close()

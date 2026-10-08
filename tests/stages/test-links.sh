@@ -9,7 +9,7 @@ trap 'rm -rf "$scratch"' EXIT
 # A throwaway HOME, set before lib/common.sh derives the legacy roots from it.
 export HOME="$scratch/home"
 mkdir -p "$HOME"
-source "$REPO/tests/stages/lib.sh"
+source "$REPO/tests/lib.sh"
 
 # The sourced file turned errexit on; the checks below inspect failures themselves.
 VEKRONA_ROOT="$HOME/wrk/vekrona"

@@ -15,6 +15,9 @@ which follows the journal and turns four kinds of entry into a recorded error:
 - a kernel OOM kill, or a `systemd-oomd` kill
 - any other journal entry logged at priority `err` or above
 
+Shell tests source `tests/lib.sh`, which isolates `die()` from the real reporter, so a
+failing test stage does not leave records in the store.
+
 `vekrona-error report --title T [--summary S] [--source vekrona|manual]` adds
 a fifth kind by hand: it writes one structured entry straight to
 `/run/systemd/journal/socket` in journald's own native protocol (no `logger`
