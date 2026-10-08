@@ -10,6 +10,7 @@ import Quickshell
 import Quickshell.I3
 import Quickshell.Io
 import Quickshell.Wayland
+import "Vekrona"
 
 ShellRoot {
     id: root
@@ -141,11 +142,17 @@ ShellRoot {
         visible: root.shown
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
-        implicitWidth: panel.width
-        implicitHeight: panel.height
+        anchors { top: true; bottom: true; left: true; right: true }
+        // Only the panel takes pointer input; clicks on the scrim reach the windows below, as before.
+        mask: Region { item: panel }
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "vekrona-app-switch"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.alpha(VekronaTheme.c.scrim, VekronaTheme.scrimOpacity)
+        }
 
         Item {
             id: keys
@@ -166,58 +173,72 @@ ShellRoot {
 
         Rectangle {
             id: panel
-            width: row.width + 32
-            height: row.height + 32
-            radius: 22
-            color: Qt.rgba(0.1, 0.1, 0.12, 0.88)
-            border.color: Qt.rgba(1, 1, 1, 0.12)
-            border.width: 1
+            anchors.centerIn: parent
+            width: row.width + 2 * VekronaTheme.space4
+            height: row.height + 2 * VekronaTheme.space4
+            radius: 0
+            color: VekronaTheme.c.surface1
+            border.color: VekronaTheme.c.line
+            border.width: VekronaTheme.borderHair
 
             Row {
                 id: row
                 anchors.centerIn: parent
-                spacing: 8
+                spacing: VekronaTheme.space2
 
                 Repeater {
                     model: root.items
 
-                    Rectangle {
+                    Item {
+                        id: tile
                         required property var modelData
                         required property int index
                         readonly property bool current: index === root.selected
 
-                        width: 104
-                        height: 120
-                        radius: 16
-                        color: current ? Qt.rgba(1, 1, 1, 0.16) : "transparent"
+                        width: VekronaTheme.iconXl + 2 * VekronaTheme.space4
+                        height: VekronaTheme.space2 + VekronaTheme.iconXl + VekronaTheme.space2
+                            + VekronaTheme.type.label.line + VekronaTheme.borderIndicator + VekronaTheme.space2
 
                         Image {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            y: 12
-                            width: 72
-                            height: 72
-                            sourceSize: Qt.size(144, 144)
-                            source: root.iconFor(modelData.app)
+                            y: VekronaTheme.space2
+                            width: VekronaTheme.iconXl
+                            height: VekronaTheme.iconXl
+                            sourceSize: Qt.size(2 * VekronaTheme.iconXl, 2 * VekronaTheme.iconXl)
+                            source: root.iconFor(tile.modelData.app)
                             smooth: true
                         }
 
                         Text {
+                            id: label
                             anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 10
-                            width: parent.width - 12
+                            y: VekronaTheme.space2 + VekronaTheme.iconXl + VekronaTheme.space2
+                            width: parent.width - 2 * VekronaTheme.space2
+                            height: VekronaTheme.type.label.line
                             horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
-                            text: root.nameFor(modelData.app)
-                            color: "white"
-                            opacity: current ? 1 : 0.6
-                            font.pixelSize: 12
+                            text: root.nameFor(tile.modelData.app)
+                            color: tile.current ? VekronaTheme.c.ink : VekronaTheme.c.inkMuted
+                            font.family: VekronaTheme.fontSans
+                            font.pixelSize: VekronaTheme.type.label.size
+                            font.weight: VekronaTheme.type.label.weight
+                            font.letterSpacing: VekronaTheme.type.label.tracking * VekronaTheme.type.label.size
+                        }
+
+                        Rectangle {
+                            visible: tile.current
+                            anchors.horizontalCenter: label.horizontalCenter
+                            y: label.y + label.height
+                            width: Math.min(label.contentWidth, label.width)
+                            height: VekronaTheme.borderIndicator
+                            color: VekronaTheme.c.accent
                         }
 
                         MouseArea {
                             anchors.fill: parent
                             onClicked: {
-                                root.selected = index;
+                                root.selected = tile.index;
                                 root.finish(true);
                             }
                         }
