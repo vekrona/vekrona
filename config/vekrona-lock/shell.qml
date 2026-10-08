@@ -88,12 +88,16 @@ ShellRoot {
     // ---- Status line. A PAM error wins over the hint of what to do.
     property string failure: ""
     property bool keyWatcherFailed: false
-    readonly property bool statusIsError: failure !== "" || keyWatcherFailed
+    // The key is plugged in but every attempt failed before the touch cue: give up until it is replugged.
+    readonly property bool keyGaveUp: keyCount > 0 && !u2f.active && u2f.quickFailures >= maxQuickFailures
+    readonly property bool statusIsError: failure !== "" || keyWatcherFailed || keyGaveUp
     readonly property string status: {
         if (failure !== "")
             return failure;
         if (keyWatcherFailed)
             return "Security key unavailable";
+        if (keyGaveUp)
+            return "Security key not responding; replug it";
         if (u2f.active)
             return "Touch your security key";
         if (fprint.active)
@@ -186,6 +190,8 @@ ShellRoot {
             } else if (root.keyCount > 0 && quickFailures < root.maxQuickFailures) {
                 quickFailures++;
                 retry.restart();
+            } else if (root.keyCount > 0) {
+                console.error("vekrona-lock: the security key failed", quickFailures, "times before the touch cue; waiting for a replug:", message);
             }
         }
     }
