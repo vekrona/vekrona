@@ -330,14 +330,19 @@ ShellRoot {
                     }
                 }
 
-                Text {
+                Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     // Fixed height so the layout does not jump when the line is empty.
+                    width: 420
                     height: 28
-                    text: root.status
-                    color: root.statusIsError ? root.danger : root.foreground
-                    font.family: "Atkinson Hyperlegible Next"
-                    font.pixelSize: 20
+
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: root.status
+                        color: root.statusIsError ? root.danger : root.foreground
+                        font.family: "Atkinson Hyperlegible Next"
+                        font.pixelSize: 20
+                    }
                 }
             }
         }
