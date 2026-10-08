@@ -7,7 +7,7 @@ The pictograms are found without knowing how many there are: the right-side bar 
 ink clusters (glyphs more than 3 px apart) that ends at the right edge and is not broken by a
 gap of SECTION_BREAK px or more. A percent label (a wide cluster at most LABEL_MAX_HEIGHT px tall such as "26%") belongs
 to the icon right before it, so icon plus label is one pictogram. Unread badges (red dots and counters)
-overhang their glyph by design, so they are not measured.
+overhang their glyph by design: their pixels are not measured as glyph ink, but a badge widens the pictogram it touches.
 Prints each pictogram's bounds, the gaps between neighbours and the vertical ink centers; exits 1
 when fewer than two pictograms are found, a gap exceeds MAX_GAP px, the smallest and largest gap
 differ by more than MAX_SPREAD px, or vertical ink centers differ by more than VERTICAL_TOLERANCE px.
@@ -97,7 +97,8 @@ def main():
     for group in groups:
         x0, x1 = group[0][0], group[-1][1]
         ys = [y for x in range(x0, x1 + 1) for y in ink[x]]
-        pictograms.append((x0, x1, (min(ys) + max(ys)) / 2))
+        touching = [b for b in badges if b[0] <= x1 + BADGE_JOIN_GAP and x0 - BADGE_JOIN_GAP <= b[1]]
+        pictograms.append((min([x0] + [b[0] for b in touching]), max([x1] + [b[1] for b in touching]), (min(ys) + max(ys)) / 2))
 
     gaps = [b[0] - a[1] - 1 for a, b in zip(pictograms, pictograms[1:])]
     centers = [p[2] for p in pictograms if not any(b[0] <= p[1] and p[0] <= b[1] for b in badges)]
