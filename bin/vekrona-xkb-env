@@ -16,7 +16,10 @@ conf="${VEKRONA_XKB_CONF:-/etc/X11/xorg.conf.d/00-keyboard.conf}"
 safe_value='^[A-Za-z0-9_:,.+()-]*$'
 
 has_option() {
-  grep -Eq "^[[:space:]]*Option[[:space:]]+\"$1\"[[:space:]]" "$conf"
+  local status=0
+  grep -Eq "^[[:space:]]*Option[[:space:]]+\"$1\"[[:space:]]" "$conf" || status=$?
+  [[ $status -le 1 ]] || die "cannot search $conf (grep exit status $status)"
+  return "$status"
 }
 
 option_value() {
@@ -26,6 +29,7 @@ option_value() {
   printf '%s' "$value"
 }
 
+# No X11 keymap configured is a valid state that means the default layout, so it is not reported.
 layout="us"
 variant=""
 model=""
@@ -39,8 +43,6 @@ if [[ -r "$conf" ]] && has_option XkbLayout; then
   system_options="$(option_value XkbOptions)"
 elif [[ -e "$conf" && ! -r "$conf" ]]; then
   die "cannot read $conf"
-else
-  echo "vekrona-xkb-env: no X11 keymap configured in $conf; using the explicit default layout us (set one with: localectl set-x11-keymap)" >&2
 fi
 
 options=()

@@ -163,7 +163,7 @@ because the config sets no `xkb_layout`. It always adds
 layout-switch option the installer chose (such as Alt+Shift) with
 `grp:alts_toggle`, so Left Alt and Right Alt pressed together cycle the
 layouts; with one layout there is no switch. A system with no X11 keymap gets
-`us`, with a notice. If the tool is missing or the file is unreadable or
+`us`, silently. If the tool is missing or the file is unreadable or
 malformed, the session still starts, with `us` and
 `shift:both_capslock_cancel`, and the cause is logged at priority `err`
 (`journalctl -t vekrona-xkb-env`); the error watcher (see [Errors](errors.md))

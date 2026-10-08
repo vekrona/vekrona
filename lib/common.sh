@@ -166,12 +166,20 @@ ensure_root_file() {
   cmp -s "$src" "$dst" || die "content mismatch after install: $dst"
 }
 
+# grep -q on a file: 0 match, 1 no match; any other grep status (unreadable file, a directory) is an error, not "absent".
+file_grep_q() {
+  local status=0
+  grep -q "$@" || status=$?
+  [[ $status -le 1 ]] || die "grep -q $* failed with exit status $status"
+  return "$status"
+}
+
 ensure_line() {
   local file="$1" line="$2"
-  if [[ -f "$file" ]] && grep -qxF -- "$line" "$file"; then log "line present in $file: $line"; return 0; fi
+  if [[ -f "$file" ]] && file_grep_q -xF -- "$line" "$file"; then log "line present in $file: $line"; return 0; fi
   log "appending to $file: $line"
   printf '%s\n' "$line" | root tee -a "$file" >/dev/null
-  grep -qxF -- "$line" "$file" || die "line not written to $file"
+  file_grep_q -xF -- "$line" "$file" || die "line not written to $file"
 }
 
 user_gsettings() {
@@ -723,9 +731,12 @@ root_owned_not_writable_file() {
 
 VERSIONLOCK_FILE=/etc/dnf/versionlock.toml
 
-versionlock_has() { grep -qE "^name = \"$1\"" "$VERSIONLOCK_FILE" 2>/dev/null; }
+versionlock_has() { [[ -e "$VERSIONLOCK_FILE" ]] && file_grep_q -E "^name = \"$1\"" "$VERSIONLOCK_FILE"; }
 
-versionlock_evrs() { grep -E '^value = ' "$VERSIONLOCK_FILE" 2>/dev/null | sed -E 's/^value = "(.*)"$/\1/'; }
+versionlock_evrs() {
+  [[ -e "$VERSIONLOCK_FILE" ]] || return 0
+  sed -nE 's/^value = "(.*)"$/\1/p' "$VERSIONLOCK_FILE"
+}
 
 versionlock_installed() {
   local p
@@ -863,7 +874,7 @@ assert() {
 
 assert_file_contains() {
   local file="$1" pattern="$2"
-  grep -qE -- "$pattern" "$file" || die "$file does not match: $pattern"
+  file_grep_q -E -- "$pattern" "$file" || die "$file does not match: $pattern"
   log "ok: $file matches $pattern"
 }
 

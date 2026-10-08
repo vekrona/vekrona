@@ -56,8 +56,25 @@ expect_output "a missing X11 keymap gets us explicitly" "XKB_DEFAULT_LAYOUT='us'
 XKB_DEFAULT_VARIANT=''
 XKB_DEFAULT_MODEL=''
 XKB_DEFAULT_OPTIONS='shift:both_capslock_cancel'"
-grep -q "no X11 keymap configured" "$scratch/stderr" || die "missing keymap must be reported on stderr"
-log "ok: missing keymap is reported"
+[[ ! -s "$scratch/stderr" ]] || die "a missing keymap is a valid state and must stay silent: $(cat "$scratch/stderr")"
+log "ok: missing keymap is silent"
+
+printf 'Section "InputClass"\nEndSection\n' > "$scratch/00-keyboard.conf"
+expect_output "a keymap file without XkbLayout gets us too" "XKB_DEFAULT_LAYOUT='us'
+XKB_DEFAULT_VARIANT=''
+XKB_DEFAULT_MODEL=''
+XKB_DEFAULT_OPTIONS='shift:both_capslock_cancel'"
+[[ ! -s "$scratch/stderr" ]] || die "a keymap file without XkbLayout must stay silent: $(cat "$scratch/stderr")"
+
+if [[ $EUID == 0 ]]; then
+  echo "NOT RUN: unreadable keymap file (root reads everything)" >&2
+else
+  chmod 000 "$scratch/00-keyboard.conf"
+  if run_tool >/dev/null; then die "an unreadable keymap file must fail"; fi
+  grep -q "cannot read" "$scratch/stderr" || die "unreadable keymap not reported: $(cat "$scratch/stderr")"
+  chmod 600 "$scratch/00-keyboard.conf"
+  log "ok: unreadable keymap is a failure"
+fi
 
 write_conf "" "" ""
 if run_tool >/dev/null; then die "an empty XkbLayout must be rejected"; fi
@@ -133,3 +150,10 @@ grep -qx 'XKB_DEFAULT_LAYOUT=us' <<<"$env_dump" || die "the session environment 
 if grep -q '^WLR_DRM_DEVICES=' <<<"$env_dump"; then die "a missing GPU tool must not set WLR_DRM_DEVICES"; fi
 grep -q "missing or failed" "$scratch/logged" || die "the missing GPU tool was not logged"
 log "ok: missing GPU tool leaves the choice to wlroots and is logged"
+
+mkdir "$scratch/a-directory"
+if VEKRONA_XKB_CONF="$scratch/a-directory" "$tool" >/dev/null 2>"$scratch/stderr"; then
+  die "a directory instead of the keymap file must fail, not fall back to the default layout"
+fi
+grep -q 'cannot search' "$scratch/stderr" || die "directory failure did not say why: $(cat "$scratch/stderr")"
+log "ok: unsearchable keymap path fails loudly"
