@@ -30,6 +30,8 @@ else
   log "absent: $stale_gpu_env_file"
 fi
 ensure_symlink "$VEKRONA_ROOT/config/xremap/config.yml" "$HOME/.config/xremap/config.yml"
+# Wayland session: `nvidia-settings -l` loads X11 settings and fails at every login when no NVIDIA driver is loaded.
+ensure_symlink "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" "$HOME/.config/autostart/nvidia-settings-user.desktop"
 
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/xremap.service" "$HOME/.config/systemd/user/xremap.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/dms.service.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"

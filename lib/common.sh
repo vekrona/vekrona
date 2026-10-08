@@ -302,7 +302,7 @@ prune_vekrona_links() {
 vekrona_link_dirs() {
   local d
   printf '%s\n' \
-    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/ghostty" \
+    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/ghostty" "$HOME/.config/autostart" \
     "$HOME/.config/systemd/user" "$HOME/.config/fontconfig/conf.d" \
     "$HOME/.config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/vekrona-themes" \
     "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/bin" \

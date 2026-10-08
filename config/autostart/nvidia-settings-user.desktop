@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=nvidia-settings Update
+Exec=nvidia-settings -l
+Hidden=true

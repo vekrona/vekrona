@@ -337,6 +337,8 @@ if ran 50-user; then
   check assert "every vekrona symlink points into $VEKRONA_ROOT (stale: ${stale_links:-none})" eq "$stale_links" ""
   ghostty_links="$(vekrona_links "$HOME/.config/ghostty" | tr '\n' ' ')"
   check assert "no vekrona symlink left under ~/.config/ghostty (vekrona ships no Ghostty config; found: ${ghostty_links:-none})" eq "$ghostty_links" ""
+  check assert "~/.config/autostart/nvidia-settings-user.desktop links to $VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" \
+    eq "$(readlink "$HOME/.config/autostart/nvidia-settings-user.desktop")" "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop"
   check assert "sway config.d exists (personal Sway settings, included last by the shared config)" dir_exists "$HOME/.config/sway/config.d"
   check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
