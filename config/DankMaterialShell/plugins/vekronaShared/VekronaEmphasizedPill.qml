@@ -40,7 +40,7 @@ Item {
     readonly property var emphasizedBarConfig: Object.assign({}, barConfig, {
         "fontScale": 1.5,
         "noBackground": false,
-        "widgetPadding": barConfig.pillPadding,
+        "widgetPadding": barConfig?.pillPadding,
         "widgetTransparency": 0,
         "widgetOutlineEnabled": true,
         "widgetOutlineThickness": 1,
@@ -55,9 +55,16 @@ Item {
     width: pillLoader.item?.visible ? pillLoader.item.width + 2 * edgeMargin : 0
     height: pillLoader.item?.visible ? pillLoader.item.height : 0
 
-    Component.onCompleted: {
-        if (barConfig?.pillPadding === undefined)
+    // DMS assigns barConfig after the item is created, so it is null at onCompleted; check once it is bound.
+    function checkBarConfig() {
+        if (barConfig && barConfig.pillPadding === undefined)
             console.error("VekronaEmphasizedPill: barConfig.pillPadding is missing, stage 50-user did not enforce it");
+    }
+
+    onBarConfigChanged: checkBarConfig()
+
+    Component.onCompleted: {
+        checkBarConfig();
         if (!kinds[kind])
             console.error("VekronaEmphasizedPill: unknown kind", JSON.stringify(kind));
     }
