@@ -21,8 +21,9 @@ I want a desktop I can rebuild from scratch and update without fear.
   Sway, DMS, Quickshell, Qt and the NVIDIA driver are version-locked, so a
   routine `dnf upgrade` leaves them alone.
 - **Looks good.** Sway tiles, DankMaterialShell draws the bar, launcher and
-  panels. Four themes (Tokyo Night, Catppuccin Mocha, Gruvbox Dark, Nord)
-  switch the shell, GTK apps, the terminal and the wallpaper together.
+  panels. One design system (Vekrona Design System) in a dark and a light mode
+  switches the shell, GTK and Qt apps, Firefox, Sway and the wallpaper
+  together. The terminal keeps its own colors.
 - **Keyboard.** Caps Lock is a Hyper key when held and a plain Caps Lock
   when tapped. Cmd (Super) handles workspaces, focus, splits and the
   launcher; Hyper opens the shell's panels and moves windows. Outside
