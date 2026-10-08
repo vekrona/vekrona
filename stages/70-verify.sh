@@ -587,7 +587,7 @@ if ran 90a-switch-dm || ran 90b-remove; then
   verify_greetd_active
   warn_check "gdm not present or disabled" gdm_absent_or_disabled
   warn_check "secrets service reachable" busctl --user status org.freedesktop.secrets
-  for p in omedora hyprland keyd; do
+  for p in omedora hyprland keyd dunst; do
     check assert "package absent: $p" pkg_absent "$p"
   done
   declare -a desktop_pkgs

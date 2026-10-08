@@ -29,6 +29,7 @@ REMOVE_GLOBS=(
   gdm
   'gnome-session*'
   gnome-control-center
+  dunst # DMS owns org.freedesktop.Notifications; dunst's D-Bus activation file competes with it
 )
 
 expand_installed() {
