@@ -86,9 +86,9 @@ PluginComponent {
 
             Rectangle {
                 visible: root.unreadCount > 0
-                width: Math.max(12, unreadBadgeText.implicitWidth + 4)
-                height: 12
-                radius: height / 2
+                width: Math.max(height, unreadBadgeText.implicitWidth + Theme.spacingXS)
+                height: unreadBadgeText.implicitHeight
+                radius: 0
                 color: Theme.error
                 anchors.right: icon.right
                 anchors.top: icon.top
@@ -99,7 +99,8 @@ PluginComponent {
                     id: unreadBadgeText
                     anchors.centerIn: parent
                     text: root.unreadCount > 99 ? "99+" : String(root.unreadCount)
-                    font.pixelSize: 9
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.features: {"tnum": 1}
                     color: Theme.errorText
                 }
             }
@@ -131,9 +132,9 @@ PluginComponent {
 
             Rectangle {
                 visible: root.unreadCount > 0
-                width: Math.max(12, unreadBadgeTextVertical.implicitWidth + 4)
-                height: 12
-                radius: height / 2
+                width: Math.max(height, unreadBadgeTextVertical.implicitWidth + Theme.spacingXS)
+                height: unreadBadgeTextVertical.implicitHeight
+                radius: 0
                 color: Theme.error
                 anchors.right: icon.right
                 anchors.top: icon.top
@@ -144,7 +145,8 @@ PluginComponent {
                     id: unreadBadgeTextVertical
                     anchors.centerIn: parent
                     text: root.unreadCount > 99 ? "99+" : String(root.unreadCount)
-                    font.pixelSize: 9
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.features: {"tnum": 1}
                     color: Theme.errorText
                 }
             }

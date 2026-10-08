@@ -1,8 +1,8 @@
 {
     "id": "vekronaSwayWorkspaces",
     "name": "Vekrona Sway Workspaces",
-    "description": "Sway workspace switcher always showing slots 1-5 plus any existing workspace 6-10, styled like the stock DankBar workspace switcher.",
-    "version": "1.0.0",
+    "description": "Sway workspace switcher always showing slots 1-5 plus any existing workspace 6-10, with 32px targets, a 2px square focus underline and design-token label colors.",
+    "version": "1.1.0",
     "author": "vekrona",
     "type": "widget",
     "capabilities": ["dankbar-widget"],
