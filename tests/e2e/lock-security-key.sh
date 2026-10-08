@@ -12,7 +12,7 @@ KEY_ATTACHED=0
 lock_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-lock; }
 lock_inactive() { ! lock_active; }
 key_watcher_running() { vekrona-dev sh pgrep -f fido-keys.sh >/dev/null; }
-# OCR drops the small texts when the 144px clock is in the picture, so only the lower part of the screen is read.
+# OCR drops the small texts when the clock is in the picture, so only the lower part of the screen is read.
 lock_text_shown() {
   local shot lower status=0
   shot="$(vekrona-dev shot)"

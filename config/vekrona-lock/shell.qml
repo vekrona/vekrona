@@ -15,31 +15,117 @@ ShellRoot {
     id: root
 
     readonly property string passwordPrompt: "Password"
+    // The design system fixes the focus ring offset (token "focus") at 2px; it has no size token of its own.
+    readonly property real focusOffset: 2
 
-    // ---- Theme: ~/.local/state/vekrona/active-theme.json, black/white if unreadable.
-    property var theme: ({})
+    // ---- Theme: tokens.json, the Vekrona Design System (config/tokens.json, linked next to this file).
+    // A lock screen must always render, so anything unreadable or missing falls back to fallback().
+    property var tokens: null
+    // dark unless the desktop asks for light; read once at lock start.
+    property string mode: "dark"
 
-    function themeColor(key, fallback) {
-        return theme.dark && theme.dark[key] ? theme.dark[key] : fallback;
+    function fallback(kind, name) {
+        switch (kind) {
+        case "color":
+            return name === "bg" ? "black" : "white";
+        case "px":
+            return 16;
+        default:
+            return {
+                family: "sans-serif",
+                size: 16,
+                weight: 400,
+                lineHeight: 24,
+                letterSpacing: 0
+            };
+        }
     }
 
-    readonly property color background: themeColor("background", "black")
-    readonly property color foreground: themeColor("backgroundText", "white")
-    readonly property color accent: themeColor("primary", "white")
-    readonly property color danger: themeColor("error", "white")
-    readonly property color outline: themeColor("outline", "white")
+    // The value of the named token in the first of the groups that has it.
+    function findToken(groups, name) {
+        for (const group of groups) {
+            const found = tokens[group].tokens.find(t => t.name === name);
+            if (found)
+                return found.value;
+        }
+        throw new Error("no token " + name);
+    }
+
+    // Runs read() against the loaded tokens; tokens is null until tokens.json is loaded.
+    function lookup(kind, name, read) {
+        if (tokens === null)
+            return fallback(kind, name);
+        try {
+            return read();
+        } catch (e) {
+            console.error("vekrona-lock: token", name, "unusable:", e);
+            return fallback(kind, name);
+        }
+    }
+
+    function token(name) {
+        return lookup("color", name, () => findToken(["color"], name)[mode]);
+    }
+
+    function size(name) {
+        return lookup("px", name, () => parseFloat(findToken(["size", "border", "spacing"], name)));
+    }
+
+    function typeStyle(name) {
+        return lookup("type", name, () => {
+            for (const group of tokens.type.groups) {
+                const style = group.styles.find(s => s.name === name);
+                if (!style)
+                    continue;
+                const family = tokens.type.families[group.family].split(",")[0].trim().replace(/^["']|["']$/g, "");
+                const fontSize = parseFloat(style.fontSize);
+                return {
+                    family: family,
+                    size: fontSize,
+                    weight: style.fontWeight,
+                    lineHeight: parseFloat(style.lineHeight),
+                    letterSpacing: style.letterSpacing ? parseFloat(style.letterSpacing) * fontSize : 0
+                };
+            }
+            throw new Error("no type style " + name);
+        });
+    }
+
+    function typeFont(name) {
+        const style = typeStyle(name);
+        return Qt.font({
+            family: style.family,
+            pixelSize: style.size,
+            weight: style.weight,
+            letterSpacing: style.letterSpacing
+        });
+    }
 
     FileView {
-        path: Quickshell.env("HOME") + "/.local/state/vekrona/active-theme.json"
+        path: Quickshell.shellPath("tokens.json")
         blockLoading: true
         onLoaded: {
             try {
-                root.theme = JSON.parse(text());
+                root.tokens = JSON.parse(text());
             } catch (e) {
-                console.error("vekrona-lock: active theme is not valid JSON:", e);
+                console.error("vekrona-lock: tokens.json is not valid JSON:", e);
             }
         }
-        onLoadFailed: error => console.error("vekrona-lock: cannot read the active theme:", error)
+        onLoadFailed: error => console.error("vekrona-lock: cannot read tokens.json:", error)
+    }
+
+    Process {
+        running: true
+        command: ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"]
+        stdout: StdioCollector {
+            id: colorScheme
+        }
+        onExited: exitCode => {
+            if (exitCode !== 0)
+                console.error("vekrona-lock: gsettings exited with", exitCode, "; using the dark tokens");
+            else if (colorScheme.text.includes("prefer-light"))
+                root.mode = "light";
+        }
     }
 
     // ---- Unlock sequence: loginctl unlock-session, LockedHint=false, unlock, quit.
@@ -285,50 +371,51 @@ ShellRoot {
         }
 
         WlSessionLockSurface {
-            color: root.background
+            color: root.token("bg")
 
             onVisibleChanged: field.forceActiveFocus()
 
             Column {
+                id: content
                 anchors.centerIn: parent
-                spacing: 32
+                spacing: root.size("space-8")
 
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: Qt.formatTime(clock.date, "HH:mm")
-                    color: root.foreground
-                    font.family: "Atkinson Hyperlegible Next"
-                    font.pixelSize: 144
+                    color: root.token("ink")
+                    font: root.typeFont("display")
                 }
 
                 Column {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 8
+                    spacing: root.size("space-2")
 
                     Text {
                         text: root.passwordPrompt
-                        color: root.foreground
-                        font.family: "Atkinson Hyperlegible Next"
-                        font.pixelSize: 20
+                        color: root.token("ink-muted")
+                        font: root.typeFont("label")
                     }
 
                     Rectangle {
-                        width: 420
-                        height: 56
-                        color: "transparent"
-                        border.width: 1
-                        border.color: field.activeFocus ? root.accent : root.outline
+                        id: fieldFrame
+                        // Twelve touch targets wide; tall enough for one body line plus the control padding.
+                        width: 12 * root.size("size-target")
+                        height: root.typeStyle("body").lineHeight + 2 * root.size("space-3")
+                        color: root.token("surface-2")
+                        border.width: root.size("border-control")
+                        border.color: root.token("line-strong")
 
                         TextInput {
                             id: field
                             anchors.fill: parent
-                            anchors.margins: 16
+                            anchors.margins: root.size("space-3")
                             verticalAlignment: TextInput.AlignVCenter
                             echoMode: TextInput.Password
-                            color: root.foreground
-                            selectionColor: root.accent
-                            font.family: "Atkinson Hyperlegible Next"
-                            font.pixelSize: 24
+                            color: root.token("ink")
+                            selectionColor: root.token("accent")
+                            selectedTextColor: root.token("on-accent")
+                            font: root.typeFont("body")
                             focus: true
 
                             onActiveFocusChanged: {
@@ -342,12 +429,24 @@ ShellRoot {
                             }
                         }
 
+                        // The highlight: the indicator underline in accent under the focused field.
                         Rectangle {
+                            visible: field.activeFocus
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            height: 2
-                            color: root.accent
+                            height: root.size("border-indicator")
+                            color: root.token("accent")
+                        }
+
+                        // Focus ring: offset so it lands on the surface, not on the control.
+                        Rectangle {
+                            visible: field.activeFocus
+                            anchors.fill: parent
+                            anchors.margins: -(root.focusOffset + root.size("border-focus"))
+                            color: "transparent"
+                            border.width: root.size("border-focus")
+                            border.color: root.token("focus")
                         }
                     }
                 }
@@ -355,15 +454,14 @@ ShellRoot {
                 Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     // Fixed height so the layout does not jump when the line is empty.
-                    width: 420
-                    height: 28
+                    width: fieldFrame.width
+                    height: root.typeStyle("label").lineHeight
 
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: root.status
-                        color: root.statusIsError ? root.danger : root.foreground
-                        font.family: "Atkinson Hyperlegible Next"
-                        font.pixelSize: 20
+                        color: root.token(root.statusIsError ? "danger-ink" : "ink")
+                        font: root.typeFont("label")
                     }
                 }
             }
