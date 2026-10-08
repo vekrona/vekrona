@@ -4,13 +4,13 @@
 // it, later ones step the selection. It commits (focuses the app) when Super
 // goes up, Return or a click picks, Escape cancels. It keeps its list of
 // windows and their recency from Sway's window events, so opening it needs no
-// query.
+// query. It reads its colors and metrics from the design's tokens.json (linked
+// next to this file) and follows the desktop's dark/light mode live.
 import QtQuick
 import Quickshell
 import Quickshell.I3
 import Quickshell.Io
 import Quickshell.Wayland
-import "Vekrona"
 
 ShellRoot {
     id: root
@@ -21,6 +21,137 @@ ShellRoot {
     property var items: []
     property int selected: 0
     property bool shown: false
+
+    // ---- Design tokens: tokens.json, the Vekrona Design System (config/tokens.json, linked next to
+    // this file). Every lookup is a call of token or typeStyle with a quoted name; tests/stages/
+    // test-app-switch-tokens.sh holds those names to the ones tokens.json defines.
+    // The switcher must still work without tokens, so anything unreadable or missing falls back to
+    // the monochrome set below, the only literals in this file.
+    readonly property var fallbacks: ({
+            "scrim": "black",
+            "surface-1": "black",
+            "line": "white",
+            "ink": "white",
+            "ink-muted": "white",
+            "accent": "white",
+            "space-2": 8,
+            "space-4": 16,
+            "size-icon-xl": 72,
+            "border-hair": 1,
+            "border-indicator": 2,
+            "opacity-scrim": 0.6
+        })
+    readonly property var fallbackStyle: ({
+            family: "sans-serif",
+            size: 13,
+            line: 18,
+            weight: 600,
+            tracking: 0
+        })
+
+    // The parsed tokens.json, null when it cannot be loaded (tokenView.onLoadFailed said why).
+    // Reading text() blocks until the first load; the binding re-runs on every reload.
+    readonly property var tokens: {
+        const raw = tokenView.text();
+        if (raw === "")
+            return null;
+        try {
+            return JSON.parse(raw);
+        } catch (e) {
+            console.error("vekrona-app-switch: tokens.json is not valid JSON:", e);
+            return null;
+        }
+    }
+
+    // $XDG_STATE_HOME/vekrona/theme holds the desktop's mode, `dark` or `light`.
+    readonly property string mode: {
+        const raw = modeView.text().trim();
+        if (raw === "light" || raw === "dark")
+            return raw;
+        // An empty text means the load failed, which modeView.onLoadFailed said.
+        if (raw !== "")
+            console.error("vekrona-app-switch: theme file holds '" + raw + "', not dark or light; using dark");
+        return "dark";
+    }
+
+    FileView {
+        id: tokenView
+        path: Quickshell.shellPath("tokens.json")
+        blockLoading: true
+        watchChanges: true
+        onFileChanged: reload()
+        onLoadFailed: error => console.error("vekrona-app-switch: cannot read tokens.json:", error)
+    }
+
+    FileView {
+        id: modeView
+        path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/vekrona/theme"
+        blockLoading: true
+        watchChanges: true
+        onFileChanged: reload()
+        onLoadFailed: error => console.error("vekrona-app-switch: cannot read the theme mode file:", error)
+    }
+
+    // The named token's value: a color for the current mode, or a number for spacing, border, size and opacity.
+    function resolve(name) {
+        const color = tokens.color.tokens.find(t => t.name === name);
+        if (color)
+            return color.value[mode];
+        for (const group of ["spacing", "border", "size", "opacity"]) {
+            const found = tokens[group].tokens.find(t => t.name === name);
+            if (found)
+                return parseFloat(found.value);
+        }
+        throw new Error("no token " + name);
+    }
+
+    function token(name) {
+        if (tokens === null)
+            return fallbacks[name];
+        try {
+            const value = resolve(name);
+            if (value === undefined || (typeof value === "number" && isNaN(value)))
+                throw new Error("no usable value for mode " + mode);
+            return value;
+        } catch (e) {
+            console.error("vekrona-app-switch: token", name, "unusable:", e);
+            return fallbacks[name];
+        }
+    }
+
+    // A type style as {family, size, line, weight, tracking}; tracking is in em.
+    function typeStyle(name) {
+        if (tokens === null)
+            return fallbackStyle;
+        try {
+            for (const group of tokens.type.groups) {
+                const style = group.styles.find(s => s.name === name);
+                if (!style)
+                    continue;
+                const family = tokens.type.families[group.family].split(",")[0].trim().replace(/^["']|["']$/g, "");
+                const result = {
+                    family: family,
+                    size: parseFloat(style.fontSize),
+                    line: parseFloat(style.lineHeight),
+                    weight: style.fontWeight,
+                    tracking: style.letterSpacing ? parseFloat(style.letterSpacing) : 0
+                };
+                if (family === "" || isNaN(result.size) || isNaN(result.line) || isNaN(result.tracking) || typeof result.weight !== "number")
+                    throw new Error("unusable style " + JSON.stringify(style));
+                return result;
+            }
+            throw new Error("no type style " + name);
+        } catch (e) {
+            console.error("vekrona-app-switch: type style", name, "unusable:", e);
+            return fallbackStyle;
+        }
+    }
+
+    readonly property var labelStyle: typeStyle("label")
+    readonly property real space2: token("space-2")
+    readonly property real space4: token("space-4")
+    readonly property real iconXl: token("size-icon-xl")
+    readonly property real borderIndicator: token("border-indicator")
 
     function track(node) {
         const known = windows[node.id];
@@ -151,7 +282,7 @@ ShellRoot {
 
         Rectangle {
             anchors.fill: parent
-            color: Qt.alpha(VekronaTheme.c.scrim, VekronaTheme.scrimOpacity)
+            color: Qt.alpha(root.token("scrim"), root.token("opacity-scrim"))
         }
 
         Item {
@@ -174,17 +305,17 @@ ShellRoot {
         Rectangle {
             id: panel
             anchors.centerIn: parent
-            width: row.width + 2 * VekronaTheme.space4
-            height: row.height + 2 * VekronaTheme.space4
+            width: row.width + 2 * root.space4
+            height: row.height + 2 * root.space4
             radius: 0
-            color: VekronaTheme.c.surface1
-            border.color: VekronaTheme.c.line
-            border.width: VekronaTheme.borderHair
+            color: root.token("surface-1")
+            border.color: root.token("line")
+            border.width: root.token("border-hair")
 
             Row {
                 id: row
                 anchors.centerIn: parent
-                spacing: VekronaTheme.space2
+                spacing: root.space2
 
                 Repeater {
                     model: root.items
@@ -195,16 +326,16 @@ ShellRoot {
                         required property int index
                         readonly property bool current: index === root.selected
 
-                        width: VekronaTheme.iconXl + 2 * VekronaTheme.space4
-                        height: VekronaTheme.space2 + VekronaTheme.iconXl + VekronaTheme.space2
-                            + VekronaTheme.type.label.line + VekronaTheme.borderIndicator + VekronaTheme.space2
+                        width: root.iconXl + 2 * root.space4
+                        height: root.space2 + root.iconXl + root.space2
+                            + root.labelStyle.line + root.borderIndicator + root.space2
 
                         Image {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            y: VekronaTheme.space2
-                            width: VekronaTheme.iconXl
-                            height: VekronaTheme.iconXl
-                            sourceSize: Qt.size(2 * VekronaTheme.iconXl, 2 * VekronaTheme.iconXl)
+                            y: root.space2
+                            width: root.iconXl
+                            height: root.iconXl
+                            sourceSize: Qt.size(2 * root.iconXl, 2 * root.iconXl)
                             source: root.iconFor(tile.modelData.app)
                             smooth: true
                         }
@@ -212,18 +343,18 @@ ShellRoot {
                         Text {
                             id: label
                             anchors.horizontalCenter: parent.horizontalCenter
-                            y: VekronaTheme.space2 + VekronaTheme.iconXl + VekronaTheme.space2
-                            width: parent.width - 2 * VekronaTheme.space2
-                            height: VekronaTheme.type.label.line
+                            y: root.space2 + root.iconXl + root.space2
+                            width: parent.width - 2 * root.space2
+                            height: root.labelStyle.line
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
                             text: root.nameFor(tile.modelData.app)
-                            color: tile.current ? VekronaTheme.c.ink : VekronaTheme.c.inkMuted
-                            font.family: VekronaTheme.fontSans
-                            font.pixelSize: VekronaTheme.type.label.size
-                            font.weight: VekronaTheme.type.label.weight
-                            font.letterSpacing: VekronaTheme.type.label.tracking * VekronaTheme.type.label.size
+                            color: tile.current ? root.token("ink") : root.token("ink-muted")
+                            font.family: root.labelStyle.family
+                            font.pixelSize: root.labelStyle.size
+                            font.weight: root.labelStyle.weight
+                            font.letterSpacing: root.labelStyle.tracking * root.labelStyle.size
                         }
 
                         Rectangle {
@@ -231,8 +362,8 @@ ShellRoot {
                             anchors.horizontalCenter: label.horizontalCenter
                             y: label.y + label.height
                             width: Math.min(label.contentWidth, label.width)
-                            height: VekronaTheme.borderIndicator
-                            color: VekronaTheme.c.accent
+                            height: root.borderIndicator
+                            color: root.token("accent")
                         }
 
                         MouseArea {

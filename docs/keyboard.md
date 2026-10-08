@@ -81,7 +81,10 @@ The overlay is a resident Quickshell instance, `config/vekrona-app-switch/shell.
 started once per session by `vekrona-app-switch.service` (wanted by
 `sway-session.target`, restarted by systemd if it dies) and hidden until
 needed. Stage 50 links the config to `~/.config/quickshell/vekrona-app-switch`
-so `qs -c vekrona-app-switch` finds it. Cmd+Tab and Cmd+Shift+Tab are plain
+so `qs -c vekrona-app-switch` finds it. The overlay reads `config/tokens.json`
+itself (the committed symlink `config/vekrona-app-switch/tokens.json`), in the
+mode that `$XDG_STATE_HOME/vekrona/theme` names, and restyles when either
+changes. Cmd+Tab and Cmd+Shift+Tab are plain
 Sway bindings that run `qs -c vekrona-app-switch ipc call appswitch next|prev`:
 the first call shows the overlay, later ones step it. A cold Quickshell start
 per switch (QML compile, desktop entry scan, icon lookup) used to cost ~250 ms

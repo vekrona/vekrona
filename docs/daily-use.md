@@ -72,8 +72,9 @@ Design System; never edit it by hand, re-import the design by copying the file.
 `bin/vekrona-render-theme` reads it with the mode and `config/design.json` and
 generates `~/.local/state/vekrona/active-theme.json`, GTK 3/4 css, gsettings,
 qt6ct, the Sway drop-in, Firefox userChrome and rofi from it. DMS and vekrona's
-own Quickshell apps (lock screen, app switcher, bar plugins) read the generated
-`active-theme.json`, so it is output, never input. `customThemeFile` in the DMS
+own Quickshell apps read the generated `active-theme.json` (lock screen, bar
+plugins) or `tokens.json` itself (app switcher), so the generated file is
+output, never input. `customThemeFile` in the DMS
 settings seed points at it from the first session onward and DMS reloads it on
 every write. `vekrona-theme` writes it through the renderer, then waits for DMS
 to confirm the new colors (via `inotifywait` on `~/.config/gtk-4.0/dank-colors.css`,
