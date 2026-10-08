@@ -44,13 +44,23 @@ run_tool() { "$tool" "$@" >"$scratch/stdout" 2>"$scratch/stderr"; }
 ok_run() { run_tool "$@" || die "$*: $(cat "$scratch/stderr")"; }
 fails() { # fails <why> <stderr-substring> <tool args...>
   local why="$1" needle="$2"; shift 2
+  [[ "$needle" == *$'\n'* ]] && die "fails: multi-line pattern, use expect_block"
   if run_tool "$@"; then die "$why: must fail"; fi
   grep -qF -- "$needle" "$scratch/stderr" || die "$why: error does not say '$needle': $(cat "$scratch/stderr")"
 }
-expect_line() { grep -qxF -- "$2" "$1" || die "$1: missing line: $2"; }
-expect_text() { grep -qF -- "$2" "$1" || die "$1: missing text: $2"; }
+expect_line() {
+  [[ "$2" == *$'\n'* ]] && die "expect_line: multi-line pattern, use expect_block"
+  grep -qxF -- "$2" "$1" || die "$1: missing line: $2"
+}
+expect_text() {
+  [[ "$2" == *$'\n'* ]] && die "expect_text: multi-line pattern, use expect_block"
+  grep -qF -- "$2" "$1" || die "$1: missing text: $2"
+}
 expect_block() { [[ "$(<"$1")" == *"$2"* ]] || die "$1: missing block: $2"; } # multi-line, unlike grep -F
-refute_text() { ! grep -qF -- "$2" "$1" || die "$1: must not contain: $2"; }
+refute_text() {
+  [[ "$2" == *$'\n'* ]] && die "refute_text: multi-line pattern, use expect_block"
+  ! grep -qF -- "$2" "$1" || die "$1: must not contain: $2"
+}
 swaymsg_calls() { [[ -f "$scratch/swaymsg.log" ]] && wc -l < "$scratch/swaymsg.log" || echo 0; }
 snapshot() { find "$HOME" "$XDG_STATE_HOME" -type f -print0 | sort -z | xargs -0 md5sum; }
 write_profiles_ini() {
