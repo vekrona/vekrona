@@ -11,7 +11,19 @@ PluginComponent {
     readonly property int highestAlwaysShown: 5
     readonly property int highestWorkspace: 10
 
+    // vekrona-render-theme writes the design metrics as a top-level `metrics` key of active-theme.json; DMS keeps
+    // the unknown top-level keys of the loaded custom theme in customThemeRawData. size.target is the minimum
+    // clickable extent.
+    readonly property var metrics: Theme.customThemeRawData?.metrics
+    readonly property int targetSize: metrics?.size?.target ?? 0
+    readonly property var tokens: Theme.currentThemeData.tokens
+
     property var occupiedNumbers: []
+
+    Component.onCompleted: {
+        if (targetSize <= 0)
+            console.error("vekronaSwayWorkspaces: the active theme carries no metrics.size.target; run vekrona-render-theme");
+    }
 
     function swayWorkspaces() {
         return I3.workspaces?.values ?? [];
@@ -87,12 +99,12 @@ PluginComponent {
 
     function labelColor(focused, occupied, urgent) {
         if (urgent)
-            return Theme.error;
+            return tokens.dangerInk;
         if (focused)
-            return Theme.primary;
+            return tokens.accentInk;
         if (occupied)
             return Theme.surfaceText;
-        return Theme.withAlpha(Theme.surfaceVariantText, 0.5);
+        return Theme.surfaceVariantText;
     }
 
     horizontalBarPill: Component {
@@ -117,17 +129,24 @@ PluginComponent {
                         readonly property bool urgent: workspace?.urgent ?? false
                         readonly property bool occupied: root.isOccupied(number)
 
-                        implicitWidth: Math.max(label.implicitWidth, Math.max(root.widgetThickness * 0.6, 16))
-                        implicitHeight: Math.max(root.widgetThickness * 0.6, 16)
+                        implicitWidth: Math.max(label.implicitWidth, root.targetSize)
+                        implicitHeight: Math.max(root.widgetThickness, root.targetSize)
                         width: implicitWidth
                         height: implicitHeight
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 0
+                            color: Theme.surfaceContainerHigh
+                            visible: pillMouse.containsMouse
+                        }
 
                         StyledText {
                             id: label
                             anchors.centerIn: parent
                             text: pill.number
                             color: root.labelColor(pill.focused, pill.occupied, pill.urgent)
-                            font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale, root.barConfig?.maximizeWidgetText)
+                            font.pixelSize: Theme.fontSizeMedium
                             font.weight: pill.focused ? Font.DemiBold : Font.Normal
 
                             Behavior on color {
@@ -142,7 +161,7 @@ PluginComponent {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: label.implicitWidth
                             height: 2
-                            radius: height / 2
+                            radius: 0
                             color: Theme.primary
                             opacity: pill.focused ? 1 : 0
 
@@ -155,7 +174,9 @@ PluginComponent {
                         }
 
                         MouseArea {
+                            id: pillMouse
                             anchors.fill: parent
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: root.switchTo(pill.number)
                         }
@@ -193,17 +214,24 @@ PluginComponent {
                         readonly property bool urgent: workspace?.urgent ?? false
                         readonly property bool occupied: root.isOccupied(number)
 
-                        implicitWidth: Math.max(root.widgetThickness * 0.6, 16)
-                        implicitHeight: label.implicitHeight
+                        implicitWidth: Math.max(root.widgetThickness, root.targetSize)
+                        implicitHeight: Math.max(label.implicitHeight, root.targetSize)
                         width: implicitWidth
                         height: implicitHeight
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 0
+                            color: Theme.surfaceContainerHigh
+                            visible: pillMouse.containsMouse
+                        }
 
                         StyledText {
                             id: label
                             anchors.centerIn: parent
                             text: pill.number
                             color: root.labelColor(pill.focused, pill.occupied, pill.urgent)
-                            font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale, root.barConfig?.maximizeWidgetText)
+                            font.pixelSize: Theme.fontSizeMedium
                             font.weight: pill.focused ? Font.DemiBold : Font.Normal
 
                             Behavior on color {
@@ -217,7 +245,7 @@ PluginComponent {
                             anchors.left: parent.left
                             width: 2
                             height: parent.height
-                            radius: width / 2
+                            radius: 0
                             color: Theme.primary
                             opacity: pill.focused ? 1 : 0
 
@@ -230,7 +258,9 @@ PluginComponent {
                         }
 
                         MouseArea {
+                            id: pillMouse
                             anchors.fill: parent
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: root.switchTo(pill.number)
                         }

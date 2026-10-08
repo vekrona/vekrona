@@ -36,11 +36,10 @@ vekrona-webapp discord
 
 Sway uses each monitor's preferred mode with VRR off. Put your own `output` lines (mode, scale, position) in a file in `~/.config/sway/config.d/`, which the repo does not track and `config/sway/config` includes last. Find the identifier with `swaymsg -t get_outputs`, for example `output "<make> <model> <serial>" mode 3840x2160@120Hz scale 1.5`.
 
-Theme (applies the DMS color scheme and a matching 4K
-wallpaper, and remembers the current theme in `~/.local/state/vekrona/theme`
-so `next` cycles correctly; the four themes are `tokyo-night`,
-`catppuccin-mocha`, `gruvbox-dark`, `nord`, and their wallpapers are
-generated solid/gradient placeholders, swap them for real images if wanted).
+Theme: `vekrona-theme dark|light|next|list` switches the Vekrona Design System
+between its two modes and remembers the mode in `~/.local/state/vekrona/theme`
+so `next` cycles correctly. The wallpaper is a solid color, the mode's `bg`
+token, set through the DMS per-mode wallpaper and a Sway `output * bg` line.
 
 vekrona leaves terminal colors alone. Ghostty uses its own defaults, or
 whatever your Ghostty config sets. vekrona ships no Ghostty config and writes
@@ -68,23 +67,26 @@ or copy the two `font-family` lines from [ghostty-fonts.conf](ghostty-fonts.conf
 Both lines are needed: the Nerd-patched AtkynsonMono lacks the backtick, so
 Ghostty takes it from Atkinson Hyperlegible Mono, the second family.
 
-DMS and GTK application colors are a separate path and still come from DMS.
-The theme content lives in `~/.local/state/vekrona/active-theme.json`,
-which `customThemeFile` in the DMS settings seed points at from the first
-session onward, so DMS watches that one file and reloads it on every
-write; the script writes the new theme into it, then waits for DMS to
-confirm the new colors (via `inotifywait` on `~/.config/gtk-4.0/dank-colors.css`, which DMS
-generates as a side effect, so it needs `inotify-tools`) and exits
-non-zero with a clear message if the theme did not take within the wait,
-without retrying or restarting the shell itself. DMS seeds the wallpaper
-for the first session from `~/.local/state/DankMaterialShell/session.json`,
-so it shows correctly without any `vekrona-theme` call. The DMS colors for
-that very first session are not guaranteed: DMS has an internal startup
-race between checking whether `matugen` is available and loading the
-custom theme file, and when it loses that race it does not retry, so GTK
-application colors can stay at GTK defaults until the first
-`vekrona-theme <name>` call. No event exists to reliably wait on for that
-race from outside DMS, so this is not automated.
+The design lives in `config/tokens.json`, copied verbatim from the Vekrona
+Design System; never edit it by hand, re-import the design by copying the file.
+`bin/vekrona-render-theme` reads it with the mode and `config/design.json` and
+generates `~/.local/state/vekrona/active-theme.json`, GTK 3/4 css, gsettings,
+qt6ct, the Sway drop-in, Firefox userChrome and rofi from it. DMS and vekrona's
+own Quickshell apps (lock screen, app switcher, bar plugins) read the generated
+`active-theme.json`, so it is output, never input. `customThemeFile` in the DMS
+settings seed points at it from the first session onward and DMS reloads it on
+every write. `vekrona-theme` writes it through the renderer, then waits for DMS
+to confirm the new colors (via `inotifywait` on `~/.config/gtk-4.0/dank-colors.css`,
+which DMS generates as a side effect, so it needs `inotify-tools`) and exits
+non-zero with a clear message, restoring the previous files, if the theme did
+not take within the wait. It never retries or restarts the shell itself.
+
+The DMS colors for the very first session are not guaranteed: DMS has an
+internal startup race between checking whether `matugen` is available and
+loading the custom theme file, and when it loses that race it does not retry,
+so GTK application colors can stay at GTK defaults until the first
+`vekrona-theme` call. No event exists to reliably wait on for that race from
+outside DMS, so this is not automated.
 
 The same startup race is why `runDmsMatugenTemplates` and
 `matugenTemplateGtk` must stay on. Without them DMS never regenerates the GTK
@@ -96,25 +98,32 @@ other way. Stage `50-user` sets it to `false` on fresh and existing installs,
 and stage `70-verify` checks it.
 
 ```
-vekrona-theme <name>
+vekrona-theme dark
+vekrona-theme light
 vekrona-theme next
 vekrona-theme list
 ```
 
-Each `vekrona-theme` call also runs `bin/vekrona-render-theme gtk`, which
-writes `~/.config/gtk-3.0/gtk.css` and `~/.config/gtk-4.0/gtk.css` from the
-same active theme and selects `adw-gtk3-dark` with `prefer-dark`, so GTK apps
-(file choosers, swappy, Firefox dialogs) are dark even when DMS's own GTK
-color generation lost its startup race. It refuses to overwrite a `gtk.css`
-it did not generate. GTK apps that are already running keep their old colors
-until restarted. Firefox and Qt applications need a restart to pick up the new
+Each `vekrona-theme` call also runs `bin/vekrona-render-theme`, which writes
+`~/.config/gtk-3.0/gtk.css` and `~/.config/gtk-4.0/gtk.css`, selects
+`adw-gtk3` (dark mode: `adw-gtk3-dark`) with `prefer-dark` or `prefer-light`,
+and sets the GTK font keys from the tokens, so GTK apps (file choosers,
+swappy, Firefox dialogs) follow the mode even when DMS's own GTK color
+generation lost its startup race. It refuses to overwrite a `gtk.css` it did
+not generate. GTK apps that are already running keep their old colors until
+restarted. Firefox and Qt applications need a restart to pick up the new
 theme; Qt apps additionally need one re-login for the `QT_QPA_PLATFORMTHEME=qt6ct`
-environment variable to take effect.
+environment variable to take effect. Qt's Fusion style keeps its small corners
+and filled selection, which the design does not allow elsewhere.
 
-To change the desktop look, edit `config/design.json` (shape constants: radius,
-gap, padding, widgetPadding, and trayIconSpacing) or pick a new theme with `vekrona-theme`, then run
+The design has radius 0, no shadows, and a 2px accent underline as the only
+selection highlight. `config/design.json` holds the few toolkit knobs that are
+not design tokens: `radius`, `widgetPadding`, `trayIconSpacing`,
+`barInnerPadding` and `dmsFontScale`. Gaps and padding come from the spacing
+tokens (`space-2` is 8, `space-3` is 12). To change the look, change
+`config/design.json` or re-import `config/tokens.json`, then run
 `./install.sh 50-user` to apply. This re-applies DMS settings, so GUI tweaks to
-the shape keys via DMS settings will revert.
+those keys via DMS settings will revert.
 
 Caffeine (a fixed wall-clock duration is the point, not something to work
 around): `vekrona-caffeine` starts a transient systemd user unit

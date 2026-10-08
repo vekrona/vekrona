@@ -1,0 +1,2 @@
+module Vekrona
+singleton VekronaTheme 1.0 VekronaTheme.qml

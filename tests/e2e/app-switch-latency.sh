@@ -12,7 +12,7 @@ FOCUS_MAX_MS=75
 STEP_TIMEOUT_SEC=30
 GUEST_PROBE=/mnt/vekrona/tests/e2e/app-switch-probe.py
 export GUEST_PROBE_OUT=/tmp/vekrona-e2e-app-switch.jsonl
-# A bright background makes the dark overlay stand out in the probe's screen sample.
+# A bright background makes the dimming scrim stand out in the probe's screen sample.
 APP_BACKGROUND=ff00ff
 
 focused_app() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -r '[recurse(.nodes[]?, .floating_nodes[]?) | select(.focused)][0].app_id'"; }

@@ -299,6 +299,7 @@ prune_vekrona_links() {
 # Every directory stage 50 links into, one per line (70-verify scans the same set). ~/.config/ghostty is
 # listed only so prune_vekrona_links retires the config link earlier installs made there (vekrona no longer
 # ships a Ghostty config); a dotfiles-managed or regular ~/.config/ghostty/config is never touched.
+# Likewise DankMaterialShell/vekrona-themes: it stays listed so prune retires the links earlier installs made there.
 vekrona_link_dirs() {
   local d
   printf '%s\n' \
@@ -308,10 +309,25 @@ vekrona_link_dirs() {
     "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/bin" \
     "$HOME/.config/scopebuddy" "$HOME/.config/MangoHud" \
     "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"
+  vekrona_webapp_profile_dirs
+}
+
+# Every vekrona-* Firefox webapp profile directory that exists, one per line.
+vekrona_webapp_profile_dirs() {
+  local d
   for d in "$(firefox_profile_root)"/vekrona-*; do
     [[ -d "$d" ]] && printf '%s\n' "$d"
   done
   return 0
+}
+
+# rmdir <dir> when it is an empty real directory; a missing, non-empty or symlinked one is left alone, any other failure dies.
+remove_dir_if_empty() {
+  local dir="$1"
+  [[ -d "$dir" && ! -L "$dir" ]] || return 0
+  [[ -z "$(ls -A "$dir")" ]] || return 0
+  log "removing empty directory: $dir"
+  rmdir "$dir" || die "failed to remove empty directory $dir"
 }
 
 ensure_dir() {
@@ -1045,7 +1061,22 @@ ensure_flatpak_app_system() {
 vekrona_design_get() {
   local key="$1" value
   value="$(jq -er --arg k "$key" '.[$k]' "$VEKRONA_ROOT/config/design.json")" || die "config/design.json: no value for '$key'"
-  [[ "$value" =~ ^[0-9]+$ ]] || die "config/design.json: '$key' is not a non-negative integer: '$value'"
+  [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "config/design.json: '$key' is not a non-negative number: '$value'"
+  printf '%s' "$value"
+}
+
+# vekrona_token_get <group> <name> [mode]: one value of config/tokens.json. The color group needs a
+# mode (dark|light); the others take none. A trailing "px" is stripped.
+vekrona_token_get() {
+  local group="$1" name="$2" mode="${3:-}" value
+  case "$group" in
+    color) [[ "$mode" == dark || "$mode" == light ]] || die "vekrona_token_get color $name: mode must be dark or light, got '$mode'" ;;
+    spacing | border | size | opacity) [[ -z "$mode" ]] || die "vekrona_token_get $group $name: only color tokens have a mode, got '$mode'" ;;
+    *) die "vekrona_token_get: unknown token group '$group'" ;;
+  esac
+  value="$(jq -er --arg g "$group" --arg n "$name" --arg m "$mode" \
+    '.[$g].tokens[] | select(.name == $n) | if $g == "color" then .value[$m] else .value end | tostring | sub("px$"; "")' \
+    "$VEKRONA_ROOT/config/tokens.json")" || die "config/tokens.json: no $group token '$name'${mode:+ for mode $mode}"
   printf '%s' "$value"
 }
 

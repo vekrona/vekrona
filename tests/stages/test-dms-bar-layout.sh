@@ -119,12 +119,20 @@ log "ok: bar without controlCenterButton unchanged"
 
 # --- plugin placement --------------------------------------------------------
 
-write_bar '[]' '["battery","clock"]'
-run ensure_dms_bar_widget_plugin clock vekronaClock || die "plugin swap failed: $(cat "$scratch/out")"
-expect_sections '[[],["battery","vekronaClock"]]' "stock widget not replaced in place by the plugin"
-run ensure_dms_bar_widget_plugin clock vekronaClock || die "second plugin swap failed"
-expect_sections '[[],["battery","vekronaClock"]]' "second plugin swap changed the bar"
+write_bar '[]' '["battery","workspaceSwitcher"]'
+run ensure_dms_bar_widget_replaced workspaceSwitcher vekronaSwayWorkspaces || die "plugin swap failed: $(cat "$scratch/out")"
+expect_sections '[[],["battery","vekronaSwayWorkspaces"]]' "stock widget not replaced in place by the plugin"
+run ensure_dms_bar_widget_replaced workspaceSwitcher vekronaSwayWorkspaces || die "second plugin swap failed"
+expect_sections '[[],["battery","vekronaSwayWorkspaces"]]' "second plugin swap changed the bar"
 log "ok: a stock widget is replaced in place by its plugin, once"
+
+write_bar '[]' '["battery",{"id":"clock","keep":1},"clock"]'
+run ensure_dms_bar_widget_replaced clock vekronaClock || die "object replace failed: $(cat "$scratch/out")"
+expect_sections '[[],["battery",{"id":"vekronaClock","keep":1},"vekronaClock"]]' "object entry not replaced with its keys kept"
+write_bar '[]' '[{"id":"clock","keep":1},"vekronaClock"]'
+run ensure_dms_bar_widget_replaced clock vekronaClock || die "replace beside existing new widget failed"
+expect_sections '[[],[{"id":"clock","keep":1},"vekronaClock"]]' "list already holding the new widget was changed"
+log "ok: an object entry is replaced keeping its keys, and a list already holding the new widget is left alone"
 
 write_bar '[]' '["battery","clock"]'
 run ensure_dms_bar_widget_inserted_before vekronaAgent clock || die "insert failed: $(cat "$scratch/out")"
@@ -143,7 +151,7 @@ log "ok: a widget option is set on bare and object entries, once"
 
 # --- missing bars ------------------------------------------------------------
 
-for helper in "ensure_dms_bar_separator_after workspaces plugSep stockSep" "ensure_dms_bar_control_center_split" "ensure_dms_bar_widget_plugin clock vekronaClock" "ensure_dms_bar_widget_inserted_before vekronaAgent clock" "ensure_dms_bar_widget_option cpuUsage minimumWidth false"; do
+for helper in "ensure_dms_bar_separator_after workspaces plugSep stockSep" "ensure_dms_bar_control_center_split" "ensure_dms_bar_widget_replaced workspaceSwitcher vekronaSwayWorkspaces" "ensure_dms_bar_widget_inserted_before vekronaAgent clock" "ensure_dms_bar_widget_option cpuUsage minimumWidth false"; do
   for broken in '{"keep":1}' '{"barConfigs":[]}'; do
     echo "$broken" > "$dms_settings"
     if run $helper; then die "$helper must die without bars: $broken"; fi

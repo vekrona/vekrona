@@ -29,9 +29,9 @@ found="$(bars_failing 'select((.leftWidgets | map(id)) as $w | ($w | index("vekr
 [[ -z "$found" ]] || die "every bar must have a separator right after vekronaSwayWorkspaces in leftWidgets, but these do not: $found"
 log "ok: every bar separates the sway workspaces from the next widget"
 
-found="$(bars_failing 'select((.centerWidgets | map(id)) as $w | ($w | index("vekronaClock")) == null or ($w | index("vekronaWeather")) == null or ($w | index("clock")) != null or ($w | index("weather")) != null) | {name, centerWidgets}')"
-[[ -z "$found" ]] || die "every bar must center vekronaClock and vekronaWeather and no stock clock or weather, but these do not: $found"
-log "ok: every bar centers the vekrona clock and weather instead of the stock ones"
+found="$(bars_failing 'select((.centerWidgets | map(id)) as $w | ($w | index("clock")) == null or ($w | index("weather")) == null or ($w | index("vekronaClock")) != null or ($w | index("vekronaWeather")) != null) | {name, centerWidgets}')"
+[[ -z "$found" ]] || die "every bar must center the stock clock and weather and not the removed vekronaClock and vekronaWeather, but these do not: $found"
+log "ok: every bar centers the stock clock and weather"
 
 found="$(bars_failing '[.rightWidgets[] | select(id == "controlCenterButton")] as $c | select(($c | length) != 2 or ([$c[] | select(type == "object" and .showAudioIcon == false)] | length) != 1 or ([$c[] | select(type == "object" and .showAudioIcon == true and .showNetworkIcon == false)] | length) != 1) | {name, controlCenterButtons: $c}')"
 [[ -z "$found" ]] || die "every bar must have two controlCenterButton entries, one without the audio icon and one with the audio icon but no network icon, but these do not: $found"
@@ -48,7 +48,7 @@ export CLOCK_BEFORE CLOCK_HOURS
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- clock_shown
 read -r x y <<<"$(vekrona-dev see find "$CLOCK_HOURS:($CLOCK_BEFORE|$(vekrona-dev run date +%M))")"
 [[ -n "${x:-}" && -n "${y:-}" ]] || die "the bar must show the guest minute $CLOCK_BEFORE, but OCR found no such text to click"
-log "ok: DMS renders the vekrona clock with the current time"
+log "ok: DMS renders the stock clock with the current time"
 
 vekrona-dev click "$x" "$y"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- dash_open

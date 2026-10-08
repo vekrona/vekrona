@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=30
+BORDER_PX="$(vekrona_token_get border border-hair)"
 GUEST_TERMINAL_LOG=/tmp/vekrona-e2e-terminal.log
 DROP_IN='~/.config/sway/config.d/90-vekrona-design.conf'
 
@@ -18,5 +19,5 @@ vekrona-dev run bash -c "test -s $DROP_IN" || die "the design drop-in $DROP_IN i
 vekrona-dev spawn "$GUEST_TERMINAL_LOG" -- ghostty
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- terminal_is_focused
 width="$(focused_terminal)"
-[[ "$width" == 1 ]] || die "a focused terminal must have a 1 px border from the design drop-in, but it has $width px"
-log "ok: the design drop-in gives focused windows a 1 px border"
+[[ "$width" == "$BORDER_PX" ]] || die "a focused terminal must have a $BORDER_PX px border (token border-hair) from the design drop-in, but it has $width px"
+log "ok: the design drop-in gives focused windows a $BORDER_PX px border"

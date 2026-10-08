@@ -1,0 +1,187 @@
+"""Loads, flattens and validates config/tokens.json (the Vekrona Design System export).
+
+The single place that knows the token names, the token -> DMS key table and the unit conversions.
+Every failure raises ThemeError naming the offending token.
+"""
+import json
+import re
+
+MODES = ("dark", "light")
+
+COLOR_NAMES = (
+    "bg", "surface-1", "surface-2", "surface-3", "ink", "ink-muted", "ink-disabled", "line", "line-strong",
+    "accent", "on-accent", "accent-ink", "focus", "danger", "on-danger", "danger-ink",
+    "warning", "on-warning", "success", "on-success", "info", "on-info", "scrim",
+)
+# Metric group -> (prefix stripped from the token name, required token names). The result is camelCased.
+METRIC_GROUPS = {
+    "spacing": ("", ("space-1", "space-2", "space-3", "space-4", "space-6", "space-8")),
+    "border": ("border-", ("border-hair", "border-control", "border-focus", "border-indicator")),
+    "size": ("size-", ("size-target", "size-bar", "size-icon-s", "size-icon-m", "size-icon-l", "size-icon-xl")),
+    "opacity": ("opacity-", ("opacity-scrim",)),
+}
+TYPE_STYLES = ("display", "headline", "title", "body", "body-strong", "label", "caption", "mono")
+FAMILIES = ("sans", "mono", "icons")
+GENERIC_FAMILIES = ("system-ui", "sans-serif", "ui-monospace", "monospace")
+
+# Design rules the tokens state only in prose ("offset 2px", "120 ms ... 200 ms").
+FOCUS_OFFSET_PX = 2
+MOTION_MS = {"fast": 120, "popover": 200}
+
+# DMS theme key -> token name, for every mode. Secondary and tertiary collapse onto accent.
+DMS_KEYS = {
+    "primary": "accent", "secondary": "accent", "tertiary": "accent",
+    "primaryText": "on-accent", "secondaryText": "on-accent", "tertiaryText": "on-accent",
+    "primaryContainer": "surface-3", "secondaryContainer": "surface-3",
+    "tertiaryContainer": "surface-3", "errorContainer": "surface-3",
+    "background": "bg", "surfaceContainerLowest": "bg",
+    "backgroundText": "ink", "surfaceText": "ink",
+    "surface": "surface-1", "surfaceContainer": "surface-1", "surfaceContainerLow": "surface-1",
+    "surfaceContainerHigh": "surface-2",
+    "surfaceVariant": "surface-3", "surfaceContainerHighest": "surface-3",
+    "surfaceVariantText": "ink-muted",
+    "outline": "line-strong", "outlineVariant": "line",
+    "error": "danger", "errorText": "on-danger",
+    "warning": "warning", "success": "success", "info": "info", "scrim": "scrim",
+}
+
+HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$")
+PX = re.compile(r"^(\d+)px$")
+EM = re.compile(r"^(-?\d+(?:\.\d+)?)em$")
+
+
+class ThemeError(Exception):
+    pass
+
+
+def camel(name):
+    head, *rest = name.split("-")
+    return head + "".join(part.capitalize() for part in rest)
+
+
+def px_to_pt(px):
+    return px * 0.75
+
+
+def fmt_pt(pt):
+    return f"{pt:g}"
+
+
+def _px(token, value):
+    match = PX.match(value) if isinstance(value, str) else None
+    if not match:
+        raise ThemeError(f"token {token}: '{value}' is not a size like 16px")
+    return int(match.group(1))
+
+
+def _tracking(token, value):
+    if value is None:
+        return 0
+    match = EM.match(value) if isinstance(value, str) else None
+    if not match:
+        raise ThemeError(f"token {token}: letterSpacing '{value}' is not like 0.02em")
+    number = float(match.group(1))
+    return int(number) if number == int(number) else number
+
+
+def _named(items, what, wanted):
+    """Index a list of {name, ...} entries by name and require every wanted name."""
+    if not isinstance(items, list):
+        raise ThemeError(f"{what} is not a list")
+    index = {item.get("name"): item for item in items if isinstance(item, dict)}
+    for name in wanted:
+        if name not in index:
+            raise ThemeError(f"token {name} is missing from {what}")
+    return index
+
+
+def _families(raw, name):
+    value = raw.get(name) if isinstance(raw, dict) else None
+    if not isinstance(value, str):
+        raise ThemeError(f"type.families.{name} is missing or not a string")
+    families = [part.strip().strip('"') for part in value.split(",")]
+    families = [family for family in families if family and family not in GENERIC_FAMILIES]
+    if not families:
+        raise ThemeError(f"type.families.{name} lists no concrete family: {value}")
+    return families
+
+
+class Theme:
+    """colors[mode][token-name] -> '#rrggbb'; metrics follows the active-theme.json contract."""
+
+    def __init__(self, colors, metrics, families):
+        self.colors = colors
+        self.metrics = metrics
+        self.families = families
+
+    def sans(self):
+        return self.families["sans"][0]
+
+    def mono(self):
+        return self.families["mono"][0]
+
+    def type_px(self, style):
+        return self.metrics["type"][camel(style)]["size"]
+
+    def dms_colors(self, mode):
+        colors = self.colors[mode]
+        return {key: colors[token] for key, token in DMS_KEYS.items()}
+
+    def active_theme(self, mode):
+        """The generated active-theme.json document: both modes plus the metrics."""
+        doc = {"name": "Vekrona", "mode": mode, "metrics": self.metrics}
+        for each in MODES:
+            doc[each] = {**self.dms_colors(each),
+                         "tokens": {camel(name): value for name, value in self.colors[each].items()}}
+        return doc
+
+
+def load(path):
+    try:
+        with open(path) as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        raise ThemeError(f"could not read {path}: {e}") from e
+    try:
+        return _build(raw)
+    except ThemeError as e:
+        raise ThemeError(f"{path}: {e}") from e
+    except (KeyError, TypeError, AttributeError) as e:
+        raise ThemeError(f"{path}: unexpected structure ({type(e).__name__}: {e})") from e
+
+
+def _build(raw):
+    color_index = _named(raw["color"]["tokens"], "color.tokens", COLOR_NAMES)
+    colors = {mode: {} for mode in MODES}
+    for name in COLOR_NAMES:
+        values = color_index[name].get("value")
+        for mode in MODES:
+            value = values.get(mode) if isinstance(values, dict) else None
+            if not isinstance(value, str) or not HEX_COLOR.match(value.lower()):
+                raise ThemeError(f"token {name}: {mode} value is missing or not a #rrggbb color: {value!r}")
+            colors[mode][name] = value.lower()
+
+    metrics = {}
+    for group, (prefix, names) in METRIC_GROUPS.items():
+        index = _named(raw[group]["tokens"], f"{group}.tokens", names)
+        parse = (lambda n, v: float(v)) if group == "opacity" else _px
+        metrics[group] = {camel(name.removeprefix(prefix)): parse(name, index[name].get("value")) for name in names}
+    metrics["border"]["focusOffset"] = FOCUS_OFFSET_PX
+    metrics["motion"] = dict(MOTION_MS)
+
+    families = {name: _families(raw["type"]["families"], name) for name in FAMILIES}
+    metrics["font"] = {"sans": families["sans"], "mono": families["mono"], "icon": families["icons"][0]}
+
+    all_styles = [style for group in raw["type"]["groups"] for style in group["styles"]]
+    style_index = _named(all_styles, "type.groups[].styles", TYPE_STYLES)
+    metrics["type"] = {}
+    for name in TYPE_STYLES:
+        style = style_index[name]
+        weight = style.get("fontWeight")
+        if isinstance(weight, bool) or not isinstance(weight, int):
+            raise ThemeError(f"token {name}: fontWeight {weight!r} is not an integer")
+        metrics["type"][camel(name)] = {
+            "size": _px(name, style.get("fontSize")), "line": _px(name, style.get("lineHeight")),
+            "weight": weight, "tracking": _tracking(name, style.get("letterSpacing")),
+        }
+    return Theme(colors, metrics, families)

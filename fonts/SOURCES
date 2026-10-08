@@ -2,3 +2,4 @@
 jetbrains-mono-nerd           JetBrainsMono Nerd Font      https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.tar.xz              Nerd Fonts v3.5.1
 atkynson-mono-nerd            AtkynsonMono Nerd Font       https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/AtkinsonHyperlegibleMono.tar.xz    Nerd Fonts v3.5.1
 atkinson-hyperlegible-mono    Atkinson Hyperlegible Mono   https://github.com/google/fonts/tree/main/ofl/atkinsonhyperlegiblemono                              google/fonts commit 5e8a3ba899557829a76cfdac30fa512bda91d7ca
+material-symbols-rounded      Material Symbols Rounded     https://github.com/google/material-design-icons/tree/master/variablefont                                    google/material-design-icons commit 737e3324305806514d7909874fa1818ae1808232 (Apache-2.0)

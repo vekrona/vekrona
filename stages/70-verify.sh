@@ -400,24 +400,40 @@ import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('notificationPopupBodyInvokesAction') is True, d.get('notificationPopupBodyInvokesAction')
 "
-  check assert "DMS shape: cornerRadius and every bar's noBackground/widgetPadding/pillPadding/innerPadding/spacing and trayIconSpacing match config/design.json, no widget outline" python3 -c "
+  check assert "DMS shape: cornerRadius, fontScale, animations, ripples, shadows and every bar's look match config/design.json and tokens.json, no widget outline" python3 -c "
 import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-radius, gap, padding = $(vekrona_design_get radius), $(vekrona_design_get gap), $(vekrona_design_get padding)
+radius, font_scale = $(vekrona_design_get radius), $(vekrona_design_get dmsFontScale)
 widget_padding, tray_icon_spacing = $(vekrona_design_get widgetPadding), $(vekrona_design_get trayIconSpacing)
+inner_padding, space2, space3 = $(vekrona_design_get barInnerPadding), $(vekrona_token_get spacing space-2), $(vekrona_token_get spacing space-3)
+motion_fast = json.load(open('$(vekrona_active_theme_file)'))['metrics']['motion']['fast']
 assert d.get('cornerRadius') == radius, d.get('cornerRadius')
+assert d.get('fontScale') == font_scale, d.get('fontScale')
+assert d.get('animationSpeed') == 4, d.get('animationSpeed')  # SettingsData.AnimationSpeed.Custom
+assert d.get('customAnimationDuration') == motion_fast, d.get('customAnimationDuration')
+assert d.get('enableRippleEffects') is False, d.get('enableRippleEffects')
+assert d.get('m3ElevationEnabled') is False, d.get('m3ElevationEnabled')
+assert d.get('notificationPopupShadowEnabled') is False, d.get('notificationPopupShadowEnabled')
 assert d.get('trayIconSpacing', 0) == tray_icon_spacing, d.get('trayIconSpacing')  # DMS drops a key equal to its default (0) when it rewrites the file
 bars = d.get('barConfigs', [])
 assert bars, 'no barConfigs'
 for bar in bars:
-    assert bar.get('noBackground') is True, (bar.get('id'), 'noBackground', bar.get('noBackground'))
-    assert bar.get('widgetPadding') == widget_padding, (bar.get('id'), 'widgetPadding', bar.get('widgetPadding'))
-    assert bar.get('pillPadding') == padding, (bar.get('id'), 'pillPadding', bar.get('pillPadding'))
-    assert bar.get('innerPadding') == gap, (bar.get('id'), 'innerPadding', bar.get('innerPadding'))
-    assert bar.get('spacing') == gap, (bar.get('id'), 'spacing', bar.get('spacing'))
+    want = {'noBackground': False, 'squareCorners': True, 'transparency': 1, 'widgetPadding': widget_padding, 'pillPadding': space3,
+            'innerPadding': inner_padding, 'spacing': space2, 'fontScale': font_scale}
+    for key, value in want.items():
+        assert bar.get(key) == value, (bar.get('id'), key, bar.get(key))
     assert not bar.get('widgetOutlineEnabled'), (bar.get('id'), 'widgetOutlineEnabled')
 "
-  check assert "vekrona DMS plugins hardcode no corner radius (the shape comes from cornerRadius)" bash -c "! grep -nE 'radius: *[0-9]+' '$VEKRONA_ROOT'/config/DankMaterialShell/plugins/*/*.qml"
+  check assert "DMS session: per-mode wallpaper is the solid bg of each mode, and the current one matches the theme mode" python3 -c "
+import json
+d = json.load(open('$HOME/.local/state/DankMaterialShell/session.json'))
+bg = {'dark': '$(vekrona_token_get color bg dark)', 'light': '$(vekrona_token_get color bg light)'}
+assert d.get('perModeWallpaper') is True, d.get('perModeWallpaper')
+assert d.get('wallpaperPathDark') == bg['dark'], d.get('wallpaperPathDark')
+assert d.get('wallpaperPathLight') == bg['light'], d.get('wallpaperPathLight')
+assert d.get('wallpaperPath') == bg['$(cat "$(vekrona_theme_name_file)")'], d.get('wallpaperPath')
+"
+  check assert "vekrona DMS plugins hardcode no corner radius, alpha, opacity or text below 13px (the look comes from the tokens)" bash -c "! grep -nE 'radius: *[1-9]|opacity: *0\\.|withAlpha\\(|pixelSize: *([0-9]|1[0-2])([^0-9]|\$)' '$VEKRONA_ROOT'/config/DankMaterialShell/plugins/*/*.qml"
 
   check assert "vekronaSwayWorkspaces plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaSwayWorkspaces/plugin.json"
   check assert "vekronaSwayWorkspaces plugin enabled" bash -c "jq -e '.vekronaSwayWorkspaces.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
@@ -428,7 +444,7 @@ bars = d.get('barConfigs', [])
 assert any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
 "
 
-  for plugin_id in vekronaAgent vekronaClock vekronaWeather; do
+  for plugin_id in vekronaAgent; do
     check assert "$plugin_id plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/$plugin_id/plugin.json"
     check assert "$plugin_id plugin enabled" bash -c "jq -e '.$plugin_id.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
     check assert "$plugin_id plugin placed in a DankBar widget list" python3 -c "
@@ -440,7 +456,14 @@ names = [w.get('id') if isinstance(w, dict) else w
 assert sys.argv[1] in names, sys.argv[1]
 " "$plugin_id"
   done
-  check assert "vekronaShared VekronaEmphasizedPill.qml linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaShared/VekronaEmphasizedPill.qml"
+  check assert "the stock clock and weather widgets sit in a DankBar widget list, the removed vekronaClock and vekronaWeather plugins in none" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+names = [w.get('id') if isinstance(w, dict) else w
+         for bar in d.get('barConfigs', []) for k in ('leftWidgets', 'centerWidgets', 'rightWidgets') for w in (bar.get(k) or [])]
+assert 'clock' in names and 'weather' in names, names
+assert 'vekronaClock' not in names and 'vekronaWeather' not in names, names
+"
   check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
 
   for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
@@ -453,10 +476,12 @@ assert sys.argv[1] in names, sys.argv[1]
     check assert "signal flatpak keeps its key in gnome-keyring" contains SIGNAL_PASSWORD_STORE=gnome-libsecret "$override"
   fi
 
-  firefox_profiles_ini="$(firefox_profile_root)/profiles.ini"
+  firefox_profiles_dir="$(firefox_profile_root)"
+  firefox_profiles_ini="$firefox_profiles_dir/profiles.ini"
   for webapp_dir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
     webapp="$(basename "$webapp_dir")"
     check assert "$webapp webapp profile registered" grep -q "vekrona-$webapp" "$firefox_profiles_ini"
+    check assert_file_contains "$firefox_profiles_dir/vekrona-$webapp/chrome/userChrome.css" "^/\\* vekrona-render-theme: "
     check assert "$webapp webapp icon installed" file_exists "$HOME/.local/share/icons/hicolor/scalable/apps/vekrona-$webapp.svg"
     check assert_file_contains "$HOME/.local/share/applications/vekrona-$webapp.desktop" "^Icon=vekrona-$webapp\$"
   done
@@ -472,11 +497,26 @@ assert sys.argv[1] in names, sys.argv[1]
     check assert_file_contains "$firefox_default_profile/user.js" "^// vekrona-render-theme: "
     check assert_file_contains "$firefox_default_profile/chrome/userChrome.css" "^/\\* vekrona-render-theme: "
   fi
-  check assert "GTK theme is adw-gtk3-dark" gsettings_eq org.gnome.desktop.interface gtk-theme adw-gtk3-dark
-
   recorded_theme_name="$(cat "$(vekrona_theme_name_file)" 2>/dev/null || true)"
-  nonempty() { [[ -n "$1" ]]; }
-  check assert "recorded theme name present" nonempty "$recorded_theme_name"
+  check assert "recorded theme is dark or light (got '$recorded_theme_name')" bash -c "[[ '$recorded_theme_name' == dark || '$recorded_theme_name' == light ]]"
+  case "$recorded_theme_name" in
+    light) expected_gtk_theme=adw-gtk3 expected_color_scheme=prefer-light ;;
+    *) expected_gtk_theme=adw-gtk3-dark expected_color_scheme=prefer-dark ;;
+  esac
+  check assert "GTK theme follows the $recorded_theme_name mode: $expected_gtk_theme" gsettings_eq org.gnome.desktop.interface gtk-theme "$expected_gtk_theme"
+  check assert "color-scheme follows the $recorded_theme_name mode: $expected_color_scheme" gsettings_eq org.gnome.desktop.interface color-scheme "$expected_color_scheme"
+  check assert "active-theme.json is valid, has both modes each with a tokens object, and matches the recorded mode" python3 -c "
+import json
+d = json.load(open('$(vekrona_active_theme_file)'))
+for mode in ('dark', 'light'):
+    assert isinstance(d.get(mode), dict), mode
+    assert isinstance(d[mode].get('tokens'), dict) and d[mode]['tokens'], (mode, 'tokens')
+assert d.get('mode') == '$recorded_theme_name', d.get('mode')
+assert isinstance(d.get('metrics'), dict), 'metrics'
+"
+  for qml_app in vekrona-lock vekrona-app-switch; do
+    check assert "$qml_app resolves import \"Vekrona\" through ~/.config/quickshell" file_exists "$HOME/.config/quickshell/$qml_app/Vekrona/qmldir"
+  done
 
   check assert "DMS matugen templates: GTK on, Ghostty off (nothing is written under ~/.config/ghostty)" python3 -c "
 import json
