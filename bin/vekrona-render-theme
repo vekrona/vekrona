@@ -3,7 +3,6 @@ import argparse
 import configparser
 import json
 import os
-import re
 import string
 import subprocess
 import sys
@@ -12,28 +11,20 @@ import tempfile
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
 import vekrona_cli
+import vekrona_theme
 
 PROG = "vekrona-render-theme"
-TARGETS = ("gtk", "qt", "firefox", "sway")
+TARGETS = ("dms", "gtk", "qt", "firefox", "sway")
 ALL_TARGETS = TARGETS + ("rofi",)
+DESIGN_INT_KEYS = ("radius", "widgetPadding", "trayIconSpacing", "barInnerPadding")
+DESIGN_KEYS = DESIGN_INT_KEYS + ("dmsFontScale",)
 
 die = vekrona_cli.make_die(PROG, __file__)
+REPO = vekrona_cli.repo_root(__file__)
 
-MARKER_TEXT = ("vekrona-render-theme: generated from the active vekrona theme, do not edit "
+MARKER_TEXT = ("vekrona-render-theme: generated from the vekrona design tokens, do not edit "
                "(run vekrona-theme or vekrona-render-theme)")
-# Existing installs carry the marker of the removed vekrona-gtk-theme; accepted so they migrate.
-LEGACY_MARKER = ("/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit "
-                 "(run vekrona-theme or vekrona-gtk-theme) */")
 COMMENT_STYLES = {"css": ("/* ", " */"), "hash": ("# ", ""), "slash": ("// ", "")}
-
-REQUIRED_KEYS = (
-    "background", "backgroundText", "surface", "surfaceText", "surfaceContainer",
-    "surfaceContainerLow", "surfaceContainerHigh", "surfaceVariant", "outline",
-    "outlineVariant", "primary", "primaryText", "primaryContainer", "secondary",
-    "tertiary", "error", "errorText",
-)
-DESIGN_KEYS = ("radius", "gap", "padding")
-HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 def marker(style):
@@ -41,50 +32,46 @@ def marker(style):
     return f"{prefix}{MARKER_TEXT}{suffix}"
 
 
-def active_theme_file():
-    return os.path.join(vekrona_cli.vekrona_state_dir(), "active-theme.json")
+# ---------------------------------------------------------------- inputs
+
+def load_mode():
+    path = os.path.join(vekrona_cli.vekrona_state_dir(), "theme")
+    text = read_text(path)
+    if text is None:
+        die(f"{path} not found (run `vekrona-theme dark`)")
+    mode = text.strip()
+    if mode not in vekrona_theme.MODES:
+        die(f"{path} says '{mode}', which is not dark or light (run `vekrona-theme dark`)")
+    return mode
 
 
-def load_theme():
-    theme_file = active_theme_file()
-    if not os.path.isfile(theme_file):
-        die(f"active theme file not found: {theme_file} (run vekrona-theme <name> first)")
+def load_tokens():
     try:
-        with open(theme_file) as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        die(f"could not read {theme_file}: {e}")
-    dark = data.get("dark") if isinstance(data, dict) else None
-    if not isinstance(dark, dict):
-        die(f"{theme_file} is not valid JSON with a 'dark' section")
-    for key in REQUIRED_KEYS:
-        value = dark.get(key)
-        if not isinstance(value, str) or not HEX_COLOR.match(value):
-            die(f"{theme_file}: dark.{key} is missing or not a #rrggbb color: '{value if value is not None else ''}'")
-    return dark
+        return vekrona_theme.load(os.path.join(REPO, "config", "tokens.json"))
+    except vekrona_theme.ThemeError as e:
+        die(str(e))
 
 
 def load_design():
-    design_file = os.path.join(vekrona_cli.repo_root(__file__), "config", "design.json")
+    design_file = os.path.join(REPO, "config", "design.json")
     try:
         with open(design_file) as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         die(f"could not read {design_file}: {e}")
-    for key in DESIGN_KEYS:
-        value = data.get(key) if isinstance(data, dict) else None
+    if not isinstance(data, dict) or set(data) != set(DESIGN_KEYS):
+        die(f"{design_file}: keys must be exactly {', '.join(DESIGN_KEYS)}")
+    for key in DESIGN_INT_KEYS:
+        value = data[key]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            die(f"{design_file}: {key} is missing or not a non-negative integer: {value!r}")
-    return {key: data[key] for key in DESIGN_KEYS}
+            die(f"{design_file}: {key} is not a non-negative integer: {value!r}")
+    scale = data["dmsFontScale"]
+    if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale <= 0:
+        die(f"{design_file}: dmsFontScale is not a positive number: {scale!r}")
+    return data
 
 
-def mix(a, b, t):
-    """Color t of the way from a to b (both #rrggbb)."""
-    channels = (
-        round(int(a[i:i + 2], 16) * (1 - t) + int(b[i:i + 2], 16) * t) for i in (1, 3, 5)
-    )
-    return "#" + "".join(f"{ch:02x}" for ch in channels)
-
+# ---------------------------------------------------------------- files
 
 def read_text(path):
     try:
@@ -96,12 +83,16 @@ def read_text(path):
         die(f"could not read {path}: {e}")
 
 
+def is_repo_symlink(path):
+    """An old install symlinked its config files into the repo; those are ours to replace."""
+    return os.path.islink(path) and os.path.realpath(path).startswith(REPO + os.sep)
+
+
 def check_writable(path, style):
-    if not os.path.lexists(path):
+    if not os.path.lexists(path) or is_repo_symlink(path):
         return
-    text = read_text(path)
-    first_line = (text or "").split("\n", 1)[0]
-    if first_line not in (marker(style), LEGACY_MARKER):
+    first_line = (read_text(path) or "").split("\n", 1)[0]
+    if first_line != marker(style):
         die(f"{path} exists and is not managed by vekrona (no marker header); move it away first")
 
 
@@ -130,10 +121,17 @@ def write_managed(files):
     changed = []
     for path, (style, body) in files.items():
         content = f"{marker(style)}\n{body}"
-        if read_text(path) == content:
+        if not os.path.islink(path) and read_text(path) == content:
             continue
         write_atomic(path, content)
         changed.append(path)
+    return changed
+
+
+def write_and_report(files):
+    changed = write_managed(files)
+    for path in files:
+        print(f"{'wrote' if path in changed else 'unchanged'}: {path}")
     return changed
 
 
@@ -141,91 +139,170 @@ def home_path(*parts):
     return os.path.join(os.path.expanduser("~"), *parts)
 
 
+def run_or_die(argv, what, env=None):
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        die(f"{what} failed: {e}")
+    if result.returncode != 0:
+        die(f"{what} failed (exit {result.returncode}): {result.stderr.strip()}")
+
+
+# ---------------------------------------------------------------- dms
+
+def apply_dms(theme, mode):
+    path = os.path.join(vekrona_cli.vekrona_state_dir(), "active-theme.json")
+    content = json.dumps(theme.active_theme(mode), indent=2) + "\n"
+    if read_text(path) == content:
+        print(f"unchanged: {path}")
+        return
+    write_atomic(path, content)
+    print(f"wrote: {path}")
+
+
 # ---------------------------------------------------------------- gtk
 
+class TokenTemplate(string.Template):
+    """${token-name} placeholders: token names contain hyphens."""
+    idpattern = r"[a-z][a-z0-9-]*"
+
+
+GTK_COLORS = TokenTemplate("""@define-color accent_color ${accent-ink};
+@define-color accent_bg_color ${accent};
+@define-color accent_fg_color ${on-accent};
+@define-color destructive_color ${danger-ink};
+@define-color destructive_bg_color ${danger};
+@define-color destructive_fg_color ${on-danger};
+@define-color error_color ${danger-ink};
+@define-color error_bg_color ${danger};
+@define-color error_fg_color ${on-danger};
+@define-color warning_color ${warning};
+@define-color warning_bg_color ${warning};
+@define-color warning_fg_color ${on-warning};
+@define-color success_color ${success};
+@define-color success_bg_color ${success};
+@define-color success_fg_color ${on-success};
+@define-color window_bg_color ${surface-1};
+@define-color window_fg_color ${ink};
+@define-color view_bg_color ${surface-2};
+@define-color view_fg_color ${ink};
+@define-color headerbar_bg_color ${surface-1};
+@define-color headerbar_fg_color ${ink};
+@define-color headerbar_border_color ${line};
+@define-color headerbar_backdrop_color ${surface-1};
+@define-color headerbar_shade_color transparent;
+@define-color sidebar_bg_color ${surface-1};
+@define-color sidebar_fg_color ${ink};
+@define-color sidebar_backdrop_color ${surface-1};
+@define-color sidebar_border_color ${line};
+@define-color sidebar_shade_color transparent;
+@define-color card_bg_color ${surface-2};
+@define-color card_fg_color ${ink};
+@define-color card_shade_color transparent;
+@define-color popover_bg_color ${surface-2};
+@define-color popover_fg_color ${ink};
+@define-color dialog_bg_color ${surface-2};
+@define-color dialog_fg_color ${ink};
+@define-color shade_color transparent;
+@define-color vk_focus ${focus};
+@define-color vk_line ${line};
+@define-color vk_line_strong ${line-strong};
+""")
+
+# Flat, square and quiet: the selection signal is a 2px accent underline, never a fill. Rows and tabs
+# reserve the underline's space with a transparent border so selecting one does not shift the layout.
 GTK3_SHAPE = string.Template("""
-button, entry, spinbutton,
-popover.background, .csd popover.background, menu, .menu, .popup,
-menuitem, notebook > header tab,
-window.csd.dialog decoration,
-.csd decoration:not(.maximized):not(.tiled) {
+* {
   border-radius: ${r}px;
+  box-shadow: none;
+  background-image: none;
+  -gtk-outline-radius: ${r}px;
 }
-.linked:not(.vertical) > button:first-child, .linked:not(.vertical) > entry:first-child,
-.linked:not(.vertical) > spinbutton:first-child:not(.vertical),
-headerbar .linked button:first-child:not(:only-child), .titlebar .linked button:first-child:not(:only-child),
-filechooser .path-bar.linked > button:dir(ltr):first-child, filechooser .path-bar.linked > button:dir(rtl):last-child {
-  border-top-left-radius: ${r}px;
-  border-bottom-left-radius: ${r}px;
+button, entry, spinbutton, combobox button, notebook > header > tabs > tab, scale trough, scrollbar slider {
+  border: 1px solid @vk_line_strong;
 }
-.linked:not(.vertical) > button:last-child, .linked:not(.vertical) > entry:last-child,
-.linked:not(.vertical) > spinbutton:last-child:not(.vertical),
-headerbar .linked button:last-child:not(:only-child), .titlebar .linked button:last-child:not(:only-child),
-filechooser .path-bar.linked > button:dir(ltr):last-child, filechooser .path-bar.linked > button:dir(rtl):first-child {
-  border-top-right-radius: ${r}px;
-  border-bottom-right-radius: ${r}px;
+button.flat, headerbar button:not(.suggested-action):not(.destructive-action), scale trough {
+  border-color: transparent;
 }
-.linked.vertical > button:first-child, .linked.vertical > entry:first-child {
-  border-top-left-radius: ${r}px;
-  border-top-right-radius: ${r}px;
-}
-.linked.vertical > button:last-child, .linked.vertical > entry:last-child {
-  border-bottom-left-radius: ${r}px;
-  border-bottom-right-radius: ${r}px;
+*:focus {
+  outline: 1px solid @vk_focus;
+  outline-offset: 2px;
 }
 headerbar, .titlebar {
-  border-bottom: none;
-  box-shadow: none;
+  border-bottom: 1px solid @vk_line;
+}
+separator {
+  background-color: @vk_line;
+  min-width: 1px;
+  min-height: 1px;
+}
+row, notebook > header > tabs > tab, stacksidebar row, button.flat:checked {
+  border-bottom: 2px solid transparent;
+}
+row:selected, row:selected:focus, stacksidebar row:selected, notebook > header > tabs > tab:checked,
+button.flat:checked, iconview:selected, iconview:selected:focus {
+  background-color: transparent;
+  color: @window_fg_color;
+  border-bottom-color: @accent_bg_color;
+}
+treeview.view:selected, treeview.view:selected:focus {
+  background-color: transparent;
+  color: @view_fg_color;
+  box-shadow: inset 0 -2px @accent_bg_color;
+}
+menu, .menu, .popup, popover.background, tooltip.background {
+  background-color: @popover_bg_color;
+  border: 1px solid @vk_line;
 }
 """)
 
 GTK4_SHAPE = string.Template("""
-button:not(.pill):not(.circular), entry, spinbutton, dropdown > button, .card,
-popover > contents, window.dialog.message {
+* {
   border-radius: ${r}px;
+  box-shadow: none;
+  background-image: none;
+}
+button, entry, spinbutton, dropdown > button, .card, scale trough {
+  border: 1px solid @vk_line_strong;
+}
+button.flat, headerbar button:not(.suggested-action):not(.destructive-action), scale trough {
+  border-color: transparent;
+}
+*:focus-visible, entry:focus-within, spinbutton:focus-within {
+  outline: 1px solid @vk_focus;
+  outline-offset: 2px;
 }
 headerbar, toolbarview > .top-bar {
-  box-shadow: none;
-  border-bottom: none;
+  border-bottom: 1px solid @vk_line;
 }
-.boxed-list {
-  border: none;
+separator {
+  background-color: @vk_line;
+  min-width: 1px;
+  min-height: 1px;
+}
+row, .navigation-sidebar > row, listview > row, columnview > listview > row, gridview > child, tab,
+button.flat:checked {
+  border-bottom: 2px solid transparent;
+}
+row:selected, .navigation-sidebar > row:selected, listview > row:selected, columnview > listview > row:selected,
+gridview > child:selected, tab:selected, button.flat:checked {
+  background-color: transparent;
+  color: @window_fg_color;
+  border-bottom-color: @accent_bg_color;
+}
+popover > contents, tooltip.background {
+  background-color: @popover_bg_color;
+  border: 1px solid @vk_line;
 }
 """)
 
 
-def render_gtk(theme, design):
-    c = theme
-    colors = f"""@define-color accent_color {c['primary']};
-@define-color accent_bg_color {c['primary']};
-@define-color accent_fg_color {c['primaryText']};
-@define-color destructive_color {c['error']};
-@define-color destructive_bg_color {c['error']};
-@define-color destructive_fg_color {c['errorText']};
-@define-color error_color {c['error']};
-@define-color window_bg_color {c['background']};
-@define-color window_fg_color {c['backgroundText']};
-@define-color view_bg_color {c['surface']};
-@define-color view_fg_color {c['surfaceText']};
-@define-color headerbar_bg_color {c['background']};
-@define-color headerbar_fg_color {c['backgroundText']};
-@define-color headerbar_border_color {c['background']};
-@define-color headerbar_backdrop_color {c['background']};
-@define-color headerbar_shade_color transparent;
-@define-color sidebar_bg_color {c['surfaceContainer']};
-@define-color sidebar_fg_color {c['backgroundText']};
-@define-color card_bg_color {c['surfaceContainerHigh']};
-@define-color card_fg_color {c['surfaceText']};
-@define-color popover_bg_color {c['surfaceContainerHigh']};
-@define-color popover_fg_color {c['surfaceText']};
-@define-color dialog_bg_color {c['surfaceContainerHigh']};
-@define-color dialog_fg_color {c['surfaceText']};
-@define-color shade_color transparent;
-"""
+def render_gtk(theme, mode, design):
+    palette = GTK_COLORS.substitute(theme.colors[mode])
     r = design["radius"]
     return {
-        home_path(".config", "gtk-3.0", "gtk.css"): ("css", colors + GTK3_SHAPE.substitute(r=r)),
-        home_path(".config", "gtk-4.0", "gtk.css"): ("css", colors + GTK4_SHAPE.substitute(r=r)),
+        home_path(".config", "gtk-3.0", "gtk.css"): ("css", palette + GTK3_SHAPE.substitute(r=r)),
+        home_path(".config", "gtk-4.0", "gtk.css"): ("css", palette + GTK4_SHAPE.substitute(r=r)),
     }
 
 
@@ -241,55 +318,50 @@ def gsettings_set(schema, key, value):
     run_or_die(argv, f"gsettings set {schema} {key}", env=env)
 
 
-def run_or_die(argv, what, env=None):
-    try:
-        result = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=30)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        die(f"{what} failed: {e}")
-    if result.returncode != 0:
-        die(f"{what} failed (exit {result.returncode}): {result.stderr.strip()}")
+def font_spec(family, px):
+    return f"{family} {vekrona_theme.fmt_pt(vekrona_theme.px_to_pt(px))}"
 
 
-def apply_gtk(theme, design):
-    write_and_report(render_gtk(theme, design))
-    gsettings_set("org.gnome.desktop.interface", "gtk-theme", "adw-gtk3-dark")
-    gsettings_set("org.gnome.desktop.interface", "color-scheme", "prefer-dark")
-    print("gtk theme: adw-gtk3-dark")
+def apply_gtk(theme, mode, design):
+    write_and_report(render_gtk(theme, mode, design))
+    gtk_theme = "adw-gtk3-dark" if mode == "dark" else "adw-gtk3"
+    interface = "org.gnome.desktop.interface"
+    body = font_spec(theme.sans(), theme.type_px("body"))
+    for key, value in (
+        ("gtk-theme", gtk_theme),
+        ("color-scheme", f"prefer-{mode}"),
+        ("font-name", body),
+        ("document-font-name", body),
+        ("monospace-font-name", font_spec(theme.mono(), theme.type_px("mono"))),
+    ):
+        gsettings_set(interface, key, value)
+    print(f"gtk theme: {gtk_theme}")
 
 
 # ---------------------------------------------------------------- qt
 
-# QPalette slot order of qtct color schemes (Qt 6): 21 roles.
-def qt_palette(c, disabled):
-    dim = mix(c["backgroundText"], c["background"], 0.55)
-    text = dim if disabled else c["backgroundText"]
-    surface_text = dim if disabled else c["surfaceText"]
-    return [
-        text,                       # WindowText
-        c["surfaceContainer"],      # Button
-        c["surfaceContainerHigh"],  # Light
-        c["surfaceContainerHigh"],  # Midlight
-        c["surfaceContainerLow"],   # Dark
-        c["outlineVariant"],        # Mid
-        surface_text,               # Text
-        text,                       # BrightText
-        surface_text,               # ButtonText
-        c["surface"],               # Base
-        c["background"],            # Window
-        "#000000",                  # Shadow
-        dim if disabled else c["primary"],  # Highlight
-        c["primaryText"],           # HighlightedText
-        c["tertiary"],              # Link
-        c["secondary"],             # LinkVisited
-        c["surfaceContainerLow"],   # AlternateBase
-        c["surface"],               # NoRole
-        c["surfaceContainerHigh"],  # ToolTipBase
-        c["surfaceText"],           # ToolTipText
-        dim,                        # PlaceholderText
-    ]
+# QPalette role order of qtct color schemes (Qt 6): 21 roles, each from a token.
+QT_ROLES = (
+    ("WindowText", "ink"), ("Button", "surface-2"), ("Light", "surface-3"), ("Midlight", "surface-2"),
+    ("Dark", "line"), ("Mid", "line-strong"), ("Text", "ink"), ("BrightText", "ink"),
+    ("ButtonText", "ink"), ("Base", "surface-2"), ("Window", "surface-1"), ("Shadow", "bg"),
+    ("Highlight", "accent"), ("HighlightedText", "on-accent"), ("Link", "accent-ink"),
+    ("LinkVisited", "ink-muted"), ("AlternateBase", "surface-1"), ("NoRole", "surface-1"),
+    ("ToolTipBase", "surface-2"), ("ToolTipText", "ink"), ("PlaceholderText", "ink-muted"),
+)
+QT_DISABLED = {
+    "WindowText": "ink-disabled", "Text": "ink-disabled", "ButtonText": "ink-disabled",
+    "BrightText": "ink-disabled", "ToolTipText": "ink-disabled", "PlaceholderText": "ink-disabled",
+    "HighlightedText": "ink-disabled", "Highlight": "surface-3",
+}
 
 
-def render_qt(theme, design):
+def qt_palette(colors, disabled):
+    return [colors[QT_DISABLED.get(role, token) if disabled else token] for role, token in QT_ROLES]
+
+
+def render_qt(theme, mode):
+    colors = theme.colors[mode]
     colors_path = home_path(".config", "qt6ct", "colors", "vekrona.conf")
     conf = f"""[Appearance]
 style=Fusion
@@ -298,11 +370,11 @@ color_scheme_path={colors_path}
 standard_dialogs=default
 
 [Fonts]
-general="Atkinson Hyperlegible Next,11"
-fixed="AtkynsonMono Nerd Font,11"
+general="{theme.sans()},{vekrona_theme.fmt_pt(vekrona_theme.px_to_pt(theme.type_px('body')))}"
+fixed="{theme.mono()},{vekrona_theme.fmt_pt(vekrona_theme.px_to_pt(theme.type_px('mono')))}"
 """
-    active = qt_palette(theme, disabled=False)
-    disabled = qt_palette(theme, disabled=True)
+    active = qt_palette(colors, disabled=False)
+    disabled = qt_palette(colors, disabled=True)
     scheme = "[ColorScheme]\n" + "".join(
         f"{name}_colors={', '.join(palette)}\n"
         for name, palette in (("active", active), ("inactive", active), ("disabled", disabled))
@@ -322,8 +394,8 @@ def firefox_profile_root():
     return os.path.join(vekrona_cli.xdg_config_home(), "mozilla", "firefox")
 
 
-def find_default_profile():
-    """Returns the default profile directory, or None when Firefox has no profiles yet."""
+def read_profiles_ini():
+    """Returns (root, parser), or None when Firefox has no profiles yet."""
     root = firefox_profile_root()
     ini = os.path.join(root, "profiles.ini")
     if not os.path.isfile(ini):
@@ -333,125 +405,182 @@ def find_default_profile():
         parser.read(ini)
     except (OSError, configparser.Error) as e:
         die(f"could not read {ini}: {e}")
+    return root, parser
 
-    def resolve(section):
-        path = parser[section].get("Default" if section.startswith("Install") else "Path")
-        if not path:
-            return None
-        relative = parser[section].get("IsRelative", "1") == "1" or section.startswith("Install")
-        return os.path.join(root, path) if relative and not os.path.isabs(path) else path
 
+def profile_dir(root, parser, section):
+    path = parser[section].get("Default" if section.startswith("Install") else "Path")
+    if not path:
+        return None
+    relative = parser[section].get("IsRelative", "1") == "1" or section.startswith("Install")
+    return os.path.join(root, path) if relative and not os.path.isabs(path) else path
+
+
+def find_default_profile(root, parser):
     installs = [s for s in parser.sections() if s.startswith("Install") and parser[s].get("Default")]
     if len(installs) > 1:
-        die(f"{ini} has several [Install*] sections, cannot tell the default profile: {', '.join(installs)}")
+        die(f"{os.path.join(root, 'profiles.ini')} has several [Install*] sections, "
+            f"cannot tell the default profile: {', '.join(installs)}")
     if installs:
-        return resolve(installs[0])
+        return profile_dir(root, parser, installs[0])
     for section in parser.sections():
         if not section.startswith("Profile") or parser[section].get("Default") != "1":
             continue
         if parser[section].get("Name", "").startswith("vekrona-"):
             continue
-        return resolve(section)
+        return profile_dir(root, parser, section)
     return None
 
 
-USER_JS = """user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
-user_pref("browser.theme.toolbar-theme", 0);
-user_pref("browser.theme.content-theme", 0);
+def find_webapp_profiles(root, parser):
+    dirs = [profile_dir(root, parser, s) for s in parser.sections()
+            if s.startswith("Profile") and parser[s].get("Name", "").startswith("vekrona-")]
+    return [d for d in dirs if d]
+
+
+def render_user_js(mode):
+    scheme = 0 if mode == "dark" else 1
+    return f"""user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+user_pref("browser.theme.toolbar-theme", {scheme});
+user_pref("browser.theme.content-theme", {scheme});
 """
 
-USER_CHROME = string.Template("""
+
+USER_CHROME = TokenTemplate("""
 :root {
-  --lwt-accent-color: ${background} !important;
-  --toolbar-bgcolor: ${background} !important;
-  --lwt-text-color: ${backgroundText} !important;
-  --toolbar-color: ${backgroundText} !important;
-  --toolbar-field-background-color: ${high} !important;
-  --toolbar-field-focus-background-color: ${high} !important;
-  --urlbar-box-bgcolor: ${high} !important;
-  --tab-selected-bgcolor: ${high} !important;
-  --arrowpanel-background: ${high} !important;
-  --toolbarbutton-hover-background: ${container} !important;
-  --focus-outline-color: ${primary} !important;
-  --toolbar-field-border-color: transparent !important;
-  --arrowpanel-border-color: transparent !important;
-  --chrome-content-separator-color: transparent !important;
-  --panel-separator-color: transparent !important;
+  --lwt-accent-color: ${surface-1} !important;
+  --lwt-text-color: ${ink} !important;
+  --toolbar-bgcolor: ${surface-1} !important;
+  --toolbar-color: ${ink} !important;
+  --toolbar-field-background-color: ${surface-2} !important;
+  --toolbar-field-focus-background-color: ${surface-2} !important;
+  --toolbar-field-color: ${ink} !important;
+  --toolbar-field-border-color: ${line-strong} !important;
+  --urlbar-box-bgcolor: ${surface-2} !important;
+  --tab-selected-bgcolor: transparent !important;
+  --arrowpanel-background: ${surface-2} !important;
+  --arrowpanel-color: ${ink} !important;
+  --arrowpanel-border-color: ${line} !important;
+  --toolbarbutton-hover-background: ${surface-2} !important;
+  --toolbarbutton-active-background: ${surface-3} !important;
+  --focus-outline-color: ${focus} !important;
+  --chrome-content-separator-color: ${line} !important;
+  --panel-separator-color: ${line} !important;
   --tab-border-radius: ${r}px !important;
   --toolbarbutton-border-radius: ${r}px !important;
   --panel-border-radius: ${r}px !important;
 }
-#navigator-toolbox, #nav-bar, #TabsToolbar, #PersonalToolbar {
-  background-color: ${background} !important;
-  border: none !important;
+* {
+  border-radius: ${r}px !important;
   box-shadow: none !important;
 }
-#nav-bar {
-  padding-block: ${half_gap}px !important;
+#navigator-toolbox, #nav-bar, #TabsToolbar, #PersonalToolbar {
+  background-color: ${surface-1} !important;
+  border: none !important;
 }
-.tabbrowser-tab {
-  padding-inline: ${half_gap}px !important;
+#nav-bar {
+  border-bottom: 1px solid ${line} !important;
 }
 .tabbrowser-tab::before, .tabbrowser-tab::after {
   display: none !important;
 }
 .tab-background {
   border: none !important;
-  border-radius: ${r}px !important;
-  box-shadow: none !important;
   background: transparent !important;
 }
 .tabbrowser-tab:hover > .tab-stack > .tab-background {
-  background: ${container} !important;
+  background: ${surface-2} !important;
 }
 .tabbrowser-tab[selected] > .tab-stack > .tab-background {
-  background: ${high} !important;
+  background: transparent !important;
+  border-bottom: 2px solid ${accent} !important;
+}
+toolbarbutton:hover, .footer-button:hover {
+  background-color: ${surface-2} !important;
+}
+toolbarbutton:is(:active, [open], [checked]), .footer-button:active {
+  background-color: ${surface-3} !important;
 }
 #urlbar-background, .urlbar-background {
-  background-color: ${high} !important;
-  border: none !important;
-  border-radius: ${r}px !important;
-  box-shadow: none !important;
-}
-#urlbar, #searchbar {
-  --toolbar-field-focus-background-color: ${high} !important;
-  --urlbar-box-focus-bgcolor: ${high} !important;
-  --arrowpanel-background: ${high} !important;
-  --focus-outline-color: ${primary} !important;
+  background-color: ${surface-2} !important;
+  border: 1px solid ${line-strong} !important;
 }
 #urlbar:is([focused], [open]) > :is(#urlbar-background, .urlbar-background) {
-  background-color: ${high} !important;
-  outline: 1px solid ${primary} !important;
+  outline: 1px solid ${focus} !important;
+  outline-offset: 2px !important;
+}
+:focus-visible {
+  outline: 1px solid ${focus} !important;
+  outline-offset: 2px !important;
 }
 .urlbarView {
-  background-color: ${high} !important;
-}
-#urlbar-input-container {
-  padding-inline: ${padding}px !important;
-}
-.urlbarView-row {
-  border-radius: ${r}px !important;
+  background-color: ${surface-2} !important;
 }
 .urlbarView-row[selected] {
-  background: ${container} !important;
+  background: transparent !important;
+  color: ${ink} !important;
+  border-bottom: 2px solid ${accent} !important;
 }
 menupopup, panel {
-  --panel-border-radius: ${r}px;
+  --panel-background: ${surface-2};
+  --panel-color: ${ink};
+  --panel-border-color: ${line};
+}
+menupopup {
+  background-color: ${surface-2} !important;
+  color: ${ink} !important;
+  border: 1px solid ${line} !important;
+}
+menuitem:where([_moz-menuactive]), menu:where([_moz-menuactive]) {
+  background-color: ${surface-3} !important;
+  color: ${ink} !important;
+}
+menuseparator {
+  border-top: 1px solid ${line} !important;
+}
+tooltip {
+  background-color: ${surface-2} !important;
+  color: ${ink} !important;
+  border: 1px solid ${line} !important;
 }
 """)
 
+# The webapp window has no browser chrome: its toolbars collapse (this is what the former per-app
+# config/firefox/webapps/<app>/userChrome.css files held).
+WEBAPP_CHROME = """
+#nav-bar,
+#TabsToolbar,
+#PersonalToolbar {
+  visibility: collapse !important;
+}
+"""
 
-def render_firefox(theme, design, profile):
-    css = USER_CHROME.substitute(
-        background=theme["background"], backgroundText=theme["backgroundText"],
-        high=theme["surfaceContainerHigh"], container=theme["surfaceContainer"],
-        primary=theme["primary"], r=design["radius"], half_gap=design["gap"] // 2,
-        padding=design["padding"],
-    )
-    return {
-        os.path.join(profile, "user.js"): ("slash", USER_JS),
-        os.path.join(profile, "chrome", "userChrome.css"): ("css", css),
+
+def render_user_chrome(theme, mode, design):
+    return USER_CHROME.substitute(theme.colors[mode], r=design["radius"])
+
+
+def apply_firefox(theme, mode, design, explicit):
+    profiles = read_profiles_ini()
+    default = find_default_profile(*profiles) if profiles else None
+    if default is None:
+        if explicit:
+            die(f"no default Firefox profile found under {firefox_profile_root()} (start Firefox once first)")
+        print(f"{PROG}: no default Firefox profile yet, skipping the firefox target "
+              "(run vekrona-render-theme firefox after Firefox has started once)", file=sys.stderr)
+        return
+    webapps = find_webapp_profiles(*profiles)
+    for profile in [default, *webapps]:
+        if not os.path.isdir(profile):
+            die(f"Firefox profile directory does not exist: {profile}")
+    chrome = render_user_chrome(theme, mode, design)
+    files = {
+        os.path.join(default, "user.js"): ("slash", render_user_js(mode)),
+        os.path.join(default, "chrome", "userChrome.css"): ("css", chrome),
     }
+    for profile in webapps:
+        files[os.path.join(profile, "chrome", "userChrome.css")] = ("css", chrome + WEBAPP_CHROME)
+    write_and_report(files)
 
 
 # ---------------------------------------------------------------- sway
@@ -459,127 +588,118 @@ def render_firefox(theme, design, profile):
 SWAY_DESIGN_CONF = home_path(".config", "sway", "config.d", "90-vekrona-design.conf")
 
 
-def render_sway(theme, design):
-    c = theme
-    body = f"""default_border pixel 1
+def render_sway(theme, mode):
+    c = theme.colors[mode]
+    inactive = f"{c['line']} {c['surface-1']} {c['ink-muted']} {c['line']} {c['line']}"
+    body = f"""font pango:{font_spec(theme.sans(), theme.type_px('body'))}
+default_border pixel 1
 default_floating_border pixel 1
-gaps inner {design['gap']}
-client.focused {c['primary']} {c['primary']} {c['primaryText']} {c['primary']} {c['primary']}
-client.focused_inactive {c['background']} {c['background']} {c['backgroundText']} {c['background']} {c['background']}
-client.unfocused {c['background']} {c['background']} {c['backgroundText']} {c['background']} {c['background']}
-client.urgent {c['error']} {c['error']} {c['errorText']} {c['error']} {c['error']}
+gaps inner {theme.metrics['spacing']['space2']}
+output * bg {c['bg']} solid_color
+client.focused {c['accent']} {c['accent']} {c['on-accent']} {c['accent']} {c['accent']}
+client.focused_inactive {inactive}
+client.unfocused {inactive}
+client.urgent {c['danger']} {c['danger']} {c['on-danger']} {c['danger']} {c['danger']}
 """
     return {SWAY_DESIGN_CONF: ("hash", body)}
 
 
+def apply_sway(theme, mode):
+    changed = write_and_report(render_sway(theme, mode))
+    if changed and os.environ.get("SWAYSOCK"):
+        run_or_die(["swaymsg", "reload"], "swaymsg reload")
+
+
 # ---------------------------------------------------------------- rofi
 
-def render_rofi(theme, design):
-    c, r, p = theme, design["radius"], design["padding"]
+def render_rofi(theme, mode, design):
+    c = theme.colors[mode]
+    space = theme.metrics["spacing"]
+    r = design["radius"]
     return f"""
 * {{
-    font: "AtkynsonMono Nerd Font 11";
-    background: {c['background']};
-    foreground: {c['backgroundText']};
-    lightbg: {c['surfaceContainer']};
-    lightfg: {c['surfaceText']};
-    border-color: {c['outline']};
-    separatorcolor: {c['outlineVariant']};
-    normal-background: {c['background']};
-    normal-foreground: {c['backgroundText']};
-    alternate-normal-background: {c['surfaceContainerLow']};
-    alternate-normal-foreground: {c['backgroundText']};
-    selected-normal-background: {c['primary']};
-    selected-normal-foreground: {c['primaryText']};
-    active-background: {c['background']};
-    active-foreground: {c['secondary']};
-    alternate-active-background: {c['surfaceContainerLow']};
-    alternate-active-foreground: {c['secondary']};
-    selected-active-background: {c['primary']};
-    selected-active-foreground: {c['primaryText']};
-    urgent-background: {c['background']};
-    urgent-foreground: {c['error']};
-    alternate-urgent-background: {c['surfaceContainerLow']};
-    alternate-urgent-foreground: {c['error']};
-    selected-urgent-background: {c['error']};
-    selected-urgent-foreground: {c['errorText']};
+    font: "{font_spec(theme.mono(), theme.type_px('mono'))}";
+    background: {c['bg']};
+    foreground: {c['ink']};
+    lightbg: {c['surface-1']};
+    lightfg: {c['ink']};
+    border-color: {c['line-strong']};
+    separatorcolor: {c['line']};
+    normal-background: {c['bg']};
+    normal-foreground: {c['ink']};
+    alternate-normal-background: {c['surface-1']};
+    alternate-normal-foreground: {c['ink']};
+    selected-normal-background: transparent;
+    selected-normal-foreground: {c['ink']};
+    active-background: {c['bg']};
+    active-foreground: {c['accent-ink']};
+    alternate-active-background: {c['surface-1']};
+    alternate-active-foreground: {c['accent-ink']};
+    selected-active-background: transparent;
+    selected-active-foreground: {c['accent-ink']};
+    urgent-background: {c['bg']};
+    urgent-foreground: {c['danger-ink']};
+    alternate-urgent-background: {c['surface-1']};
+    alternate-urgent-foreground: {c['danger-ink']};
+    selected-urgent-background: transparent;
+    selected-urgent-foreground: {c['danger-ink']};
 }}
 window {{
-    border: 0;
+    border: 1px;
     border-radius: {r}px;
-    padding: {p}px;
+    padding: {space['space3']}px;
     width: 60%;
 }}
 element {{
     border-radius: {r}px;
-    padding: {p // 2}px {p}px;
+    padding: {space['space1']}px {space['space3']}px;
+}}
+element selected.normal, element selected.active, element selected.urgent {{
+    border: 0 0 2px;
+    border-color: {c['accent']};
 }}
 inputbar {{
-    padding: {p}px;
+    padding: {space['space3']}px;
 }}
 listview {{
     lines: 18;
-    spacing: {design['gap'] // 2}px;
+    spacing: {space['space1']}px;
 }}
 mainbox {{
-    spacing: {design['gap']}px;
+    spacing: {space['space2']}px;
 }}
 """
 
 
 # ---------------------------------------------------------------- main
 
-def write_and_report(files):
-    changed = write_managed(files)
-    for path in files:
-        print(f"{'wrote' if path in changed else 'unchanged'}: {path}")
-    return changed
-
-
-def apply_firefox(theme, design, explicit):
-    profile = find_default_profile()
-    if profile is None:
-        if explicit:
-            die(f"no default Firefox profile found under {firefox_profile_root()} (start Firefox once first)")
-        print(f"{PROG}: no default Firefox profile yet, skipping the firefox target "
-              "(run vekrona-render-theme firefox after Firefox has started once)", file=sys.stderr)
-        return
-    if not os.path.isdir(profile):
-        die(f"default Firefox profile directory does not exist: {profile}")
-    write_and_report(render_firefox(theme, design, profile))
-
-
-def apply_sway(theme, design):
-    changed = write_and_report(render_sway(theme, design))
-    if changed and os.environ.get("SWAYSOCK"):
-        run_or_die(["swaymsg", "reload"], "swaymsg reload")
-
-
 def main():
     parser = argparse.ArgumentParser(
         prog=PROG,
-        description="Render the active vekrona theme and config/design.json into GTK, Qt, Firefox, "
-                    "Sway and rofi config. 'all' is gtk, qt, firefox, sway; 'rofi' prints a "
-                    "theme string to stdout and writes nothing. Running apps keep old looks "
-                    "until restarted.")
+        description="Render the vekrona design tokens (config/tokens.json, config/design.json) in the mode "
+                    "of the 'theme' state file into the DMS theme file, GTK, Qt, Firefox and Sway config. "
+                    "'all' is dms, gtk, qt, firefox, sway; 'rofi' prints a theme string to stdout and "
+                    "writes nothing. Running apps keep old looks until restarted.")
     parser.add_argument("target", nargs="?", default="all", choices=("all",) + ALL_TARGETS)
     target = parser.parse_args().target
 
-    theme = load_theme()
+    mode = load_mode()
+    theme = load_tokens()
     design = load_design()
     if target == "rofi":
-        print(render_rofi(theme, design))
+        print(render_rofi(theme, mode, design))
         return
-    selected = TARGETS if target == "all" else (target,)
-    for name in selected:
-        if name == "gtk":
-            apply_gtk(theme, design)
+    for name in TARGETS if target == "all" else (target,):
+        if name == "dms":
+            apply_dms(theme, mode)
+        elif name == "gtk":
+            apply_gtk(theme, mode, design)
         elif name == "qt":
-            write_and_report(render_qt(theme, design))
+            write_and_report(render_qt(theme, mode))
         elif name == "firefox":
-            apply_firefox(theme, design, explicit=target == "firefox")
+            apply_firefox(theme, mode, design, explicit=target == "firefox")
         else:
-            apply_sway(theme, design)
+            apply_sway(theme, mode)
 
 
 if __name__ == "__main__":
