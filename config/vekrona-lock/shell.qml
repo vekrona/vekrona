@@ -370,16 +370,6 @@ ShellRoot {
                             }
                         }
 
-                        // The highlight: the indicator underline in accent under the focused field.
-                        Rectangle {
-                            visible: field.activeFocus
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            height: VekronaTheme.borderIndicator
-                            color: VekronaTheme.dark.accent
-                        }
-
                         // Focus ring: offset so it lands on the surface, not on the control.
                         Rectangle {
                             visible: field.activeFocus
