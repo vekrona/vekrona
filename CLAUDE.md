@@ -13,7 +13,7 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
   sandbox contains them), Spotify, SoundCloud, YouTube, WhatsApp.
 
 Each webapp ships `url`, `user.js`, `userChrome.css`, `app.desktop` and an
-`icon.svg` (a Simple Icons glyph on a brand-colored rounded square). Stage 50
+`icon.svg` (a Simple Icons glyph on a brand-colored square, no rounded corners). Stage 50
 installs the icon as `vekrona-<app>` in the hicolor theme.
 
 ## Verifying changes
