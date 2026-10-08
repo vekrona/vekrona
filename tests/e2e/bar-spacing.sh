@@ -6,8 +6,11 @@ source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=90
 BAR_HEIGHT_PX="$(vekrona_token_get size size-bar)"
-# One pixel of glyph side bearing on top of the bar's widget spacing.
-MAX_GAP_PX=$(($(vekrona_token_get spacing space-2) + 1))
+# Two glyphs sit one widget gap (space-2) apart, plus the padding of the 24-unit pictogram grid on both facing sides:
+# 2 of 24 units each, at size-icon-s px.
+ICON_S_PX="$(vekrona_token_get size size-icon-s)"
+GLYPH_BEARING_PX=$(((ICON_S_PX * 2 + 23) / 24))
+MAX_GAP_PX=$(($(vekrona_token_get spacing space-2) + 2 * GLYPH_BEARING_PX))
 MAX_GAP_SPREAD_PX=6
 # A percent label is bar text (type token "label") scaled by the shell font scale; its glyphs are at most one em tall,
 # plus one pixel of antialiasing. Icons (size-icon-s and up) are taller, which is what tells them apart from labels.
