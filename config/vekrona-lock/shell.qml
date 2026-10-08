@@ -10,122 +10,29 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Pam
 import Quickshell.Wayland
+import "Vekrona"
 
 ShellRoot {
     id: root
 
     readonly property string passwordPrompt: "Password"
-    // The design system fixes the focus ring offset (token "focus") at 2px; it has no size token of its own.
-    readonly property real focusOffset: 2
+    // The lock is always dark, in both themes (VekronaTheme.dark).
+    component Label: Text {
+        required property var style
 
-    // ---- Theme: tokens.json, the Vekrona Design System (config/tokens.json, linked next to this file).
-    // A lock screen must always render, so anything unreadable or missing falls back to fallback().
-    property var tokens: null
-    // dark unless the desktop asks for light; read once at lock start.
-    property string mode: "dark"
-
-    function fallback(kind, name) {
-        switch (kind) {
-        case "color":
-            return name === "bg" ? "black" : "white";
-        case "px":
-            return 16;
-        default:
-            return {
-                family: "sans-serif",
-                size: 16,
-                weight: 400,
-                lineHeight: 24,
-                letterSpacing: 0
-            };
-        }
+        font.family: VekronaTheme.fontSans
+        font.pixelSize: style.size
+        font.weight: style.weight
+        font.letterSpacing: style.tracking * style.size
     }
 
-    // The value of the named token in the first of the groups that has it.
-    function findToken(groups, name) {
-        for (const group of groups) {
-            const found = tokens[group].tokens.find(t => t.name === name);
-            if (found)
-                return found.value;
-        }
-        throw new Error("no token " + name);
-    }
+    component Glyph: Text {
+        required property string name
+        required property int px
 
-    // Runs read() against the loaded tokens; tokens is null until tokens.json is loaded.
-    function lookup(kind, name, read) {
-        if (tokens === null)
-            return fallback(kind, name);
-        try {
-            return read();
-        } catch (e) {
-            console.error("vekrona-lock: token", name, "unusable:", e);
-            return fallback(kind, name);
-        }
-    }
-
-    function token(name) {
-        return lookup("color", name, () => findToken(["color"], name)[mode]);
-    }
-
-    function size(name) {
-        return lookup("px", name, () => parseFloat(findToken(["size", "border", "spacing"], name)));
-    }
-
-    function typeStyle(name) {
-        return lookup("type", name, () => {
-            for (const group of tokens.type.groups) {
-                const style = group.styles.find(s => s.name === name);
-                if (!style)
-                    continue;
-                const family = tokens.type.families[group.family].split(",")[0].trim().replace(/^["']|["']$/g, "");
-                const fontSize = parseFloat(style.fontSize);
-                return {
-                    family: family,
-                    size: fontSize,
-                    weight: style.fontWeight,
-                    lineHeight: parseFloat(style.lineHeight),
-                    letterSpacing: style.letterSpacing ? parseFloat(style.letterSpacing) * fontSize : 0
-                };
-            }
-            throw new Error("no type style " + name);
-        });
-    }
-
-    function typeFont(name) {
-        const style = typeStyle(name);
-        return Qt.font({
-            family: style.family,
-            pixelSize: style.size,
-            weight: style.weight,
-            letterSpacing: style.letterSpacing
-        });
-    }
-
-    FileView {
-        path: Quickshell.shellPath("tokens.json")
-        blockLoading: true
-        onLoaded: {
-            try {
-                root.tokens = JSON.parse(text());
-            } catch (e) {
-                console.error("vekrona-lock: tokens.json is not valid JSON:", e);
-            }
-        }
-        onLoadFailed: error => console.error("vekrona-lock: cannot read tokens.json:", error)
-    }
-
-    Process {
-        running: true
-        command: ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"]
-        stdout: StdioCollector {
-            id: colorScheme
-        }
-        onExited: exitCode => {
-            if (exitCode !== 0)
-                console.error("vekrona-lock: gsettings exited with", exitCode, "; using the dark tokens");
-            else if (colorScheme.text.includes("prefer-light"))
-                root.mode = "light";
-        }
+        text: VekronaTheme.icon(name)
+        font.family: VekronaTheme.fontIcon
+        font.pixelSize: px
     }
 
     // ---- Unlock sequence: loginctl unlock-session, LockedHint=false, unlock, quit.
@@ -190,6 +97,9 @@ ShellRoot {
             return "Touch the fingerprint reader";
         return "";
     }
+
+    // The icon in front of the status: an error, or the security key waiting for a touch.
+    readonly property string statusIcon: statusIsError ? "error" : u2f.active ? "key" : ""
 
     // ---- Password
     // The typed text waits here until PAM asks for it.
@@ -371,51 +281,70 @@ ShellRoot {
         }
 
         WlSessionLockSurface {
-            color: root.token("bg")
+            color: VekronaTheme.dark.bg
 
             onVisibleChanged: field.forceActiveFocus()
+
+            Rectangle {
+                anchors.fill: parent
+                color: Qt.alpha(VekronaTheme.dark.scrim, VekronaTheme.scrimOpacity)
+            }
 
             Column {
                 id: content
                 anchors.centerIn: parent
-                spacing: root.size("space-8")
+                spacing: VekronaTheme.space8
 
-                Text {
+                Column {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: Qt.formatTime(clock.date, "HH:mm")
-                    color: root.token("ink")
-                    font: root.typeFont("display")
+
+                    Label {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        style: VekronaTheme.type.display
+                        text: Qt.formatTime(clock.date, "HH:mm")
+                        color: VekronaTheme.dark.ink
+                    }
+
+                    Label {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        style: VekronaTheme.type.title
+                        text: Qt.formatDate(clock.date, "dddd, d MMMM")
+                        color: VekronaTheme.dark.ink
+                    }
                 }
 
                 Column {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: root.size("space-2")
+                    spacing: VekronaTheme.space2
 
-                    Text {
+                    Label {
+                        style: VekronaTheme.type.label
                         text: root.passwordPrompt
-                        color: root.token("ink-muted")
-                        font: root.typeFont("label")
+                        color: VekronaTheme.dark.inkMuted
                     }
 
                     Rectangle {
                         id: fieldFrame
                         // Twelve touch targets wide; tall enough for one body line plus the control padding.
-                        width: 12 * root.size("size-target")
-                        height: root.typeStyle("body").lineHeight + 2 * root.size("space-3")
-                        color: root.token("surface-2")
-                        border.width: root.size("border-control")
-                        border.color: root.token("line-strong")
+                        width: 12 * VekronaTheme.sizeTarget
+                        height: VekronaTheme.type.body.line + 2 * VekronaTheme.space3
+                        color: VekronaTheme.dark.surface2
+                        border.width: VekronaTheme.borderControl
+                        border.color: VekronaTheme.dark.lineStrong
 
                         TextInput {
                             id: field
                             anchors.fill: parent
-                            anchors.margins: root.size("space-3")
+                            anchors.margins: VekronaTheme.space3
                             verticalAlignment: TextInput.AlignVCenter
                             echoMode: TextInput.Password
-                            color: root.token("ink")
-                            selectionColor: root.token("accent")
-                            selectedTextColor: root.token("on-accent")
-                            font: root.typeFont("body")
+                            color: VekronaTheme.dark.ink
+                            selectionColor: VekronaTheme.dark.accent
+                            selectedTextColor: VekronaTheme.dark.onAccent
+                            font.family: VekronaTheme.fontSans
+                            font.pixelSize: VekronaTheme.type.body.size
+                            font.weight: VekronaTheme.type.body.weight
+                            font.letterSpacing: VekronaTheme.type.body.tracking * VekronaTheme.type.body.size
                             focus: true
 
                             onActiveFocusChanged: {
@@ -435,18 +364,18 @@ ShellRoot {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            height: root.size("border-indicator")
-                            color: root.token("accent")
+                            height: VekronaTheme.borderIndicator
+                            color: VekronaTheme.dark.accent
                         }
 
                         // Focus ring: offset so it lands on the surface, not on the control.
                         Rectangle {
                             visible: field.activeFocus
                             anchors.fill: parent
-                            anchors.margins: -(root.focusOffset + root.size("border-focus"))
+                            anchors.margins: -(VekronaTheme.focusOffset + VekronaTheme.borderFocus)
                             color: "transparent"
-                            border.width: root.size("border-focus")
-                            border.color: root.token("focus")
+                            border.width: VekronaTheme.borderFocus
+                            border.color: VekronaTheme.dark.focus
                         }
                     }
                 }
@@ -455,13 +384,27 @@ ShellRoot {
                     anchors.horizontalCenter: parent.horizontalCenter
                     // Fixed height so the layout does not jump when the line is empty.
                     width: fieldFrame.width
-                    height: root.typeStyle("label").lineHeight
+                    height: Math.max(VekronaTheme.iconS, VekronaTheme.type.label.line)
 
-                    Text {
+                    Row {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: root.status
-                        color: root.token(root.statusIsError ? "danger-ink" : "ink")
-                        font: root.typeFont("label")
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: VekronaTheme.space2
+
+                        Glyph {
+                            visible: root.statusIcon !== ""
+                            anchors.verticalCenter: parent.verticalCenter
+                            name: root.statusIcon
+                            px: VekronaTheme.iconS
+                            color: root.statusIsError ? VekronaTheme.dark.dangerInk : VekronaTheme.dark.ink
+                        }
+
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            style: VekronaTheme.type.label
+                            text: root.status
+                            color: root.statusIsError ? VekronaTheme.dark.dangerInk : VekronaTheme.dark.ink
+                        }
                     }
                 }
             }
