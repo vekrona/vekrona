@@ -25,7 +25,7 @@ bar_spacing_ok() {
   python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$LABEL_MAX_HEIGHT_PX" >/dev/null
 }
 export -f bar_spacing_ok
-export ROOT BAR_HEIGHT_PX MAX_GAP_PX MAX_GAP_SPREAD_PX GAPS
+export ROOT BAR_HEIGHT_PX MAX_GAP_PX MAX_GAP_SPREAD_PX LABEL_MAX_HEIGHT_PX GAPS
 
 vekrona-dev session
 vekrona-dev move 600 500

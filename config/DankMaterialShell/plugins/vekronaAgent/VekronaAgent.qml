@@ -73,26 +73,29 @@ PluginComponent {
     horizontalBarPill: Component {
         Item {
             id: horizontalContent
-            implicitWidth: icon.width
+            implicitWidth: icon.width + (badge.visible ? badge.width - badge.overhang : 0)
             implicitHeight: root.widgetThickness
 
             DankIcon {
                 id: icon
-                anchors.centerIn: parent
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
                 name: "smart_toy"
                 size: Theme.barIconSize(root.barThickness, -4, root.barConfig?.maximizeWidgetIcons, root.barConfig?.iconScale)
                 color: Theme.widgetIconColor
             }
 
             Rectangle {
+                id: badge
+                readonly property int overhang: 4
                 visible: root.unreadCount > 0
                 width: Math.max(height, unreadBadgeText.implicitWidth + Theme.spacingXS)
                 height: unreadBadgeText.implicitHeight
                 radius: 0
                 color: Theme.error
-                anchors.right: icon.right
+                anchors.left: icon.right
                 anchors.top: icon.top
-                anchors.rightMargin: -4
+                anchors.leftMargin: -overhang
                 anchors.topMargin: -4
 
                 StyledText {
