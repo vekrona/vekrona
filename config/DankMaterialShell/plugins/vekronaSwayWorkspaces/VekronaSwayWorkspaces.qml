@@ -11,15 +11,18 @@ PluginComponent {
     readonly property int highestAlwaysShown: 5
     readonly property int highestWorkspace: 10
 
-    // size-target from the design tokens: the minimum clickable extent.
-    readonly property int targetSize: 32
+    // vekrona-render-theme writes the design metrics as a top-level `metrics` key of active-theme.json; DMS keeps
+    // the unknown top-level keys of the loaded custom theme in customThemeRawData. size.target is the minimum
+    // clickable extent.
+    readonly property var metrics: Theme.customThemeRawData?.metrics
+    readonly property int targetSize: metrics?.size?.target ?? 0
     readonly property var tokens: Theme.currentThemeData.tokens
 
     property var occupiedNumbers: []
 
     Component.onCompleted: {
-        if (!tokens)
-            console.error("vekronaSwayWorkspaces: the active theme carries no `tokens` object; run vekrona-render-theme");
+        if (targetSize <= 0)
+            console.error("vekronaSwayWorkspaces: the active theme carries no metrics.size.target; run vekrona-render-theme");
     }
 
     function swayWorkspaces() {

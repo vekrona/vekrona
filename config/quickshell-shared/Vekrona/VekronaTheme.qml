@@ -73,16 +73,37 @@ Singleton {
         };
     }
 
+    // The names of the parts the bindings below read that doc lacks.
+    function missingParts(doc: var): var {
+        const missing = [];
+        if (doc === null || typeof doc !== "object")
+            return ["a JSON object"];
+        if (!doc.metrics)
+            missing.push("metrics");
+        for (const mode of ["dark", "light"]) {
+            if (!doc[mode] || !doc[mode].tokens)
+                missing.push(mode + ".tokens");
+        }
+        return missing;
+    }
+
     function parse(text: string): var {
         // An empty text means the load failed, which view.onLoadFailed reported.
         if (text === "")
             return fallback;
+        let doc;
         try {
-            return JSON.parse(text);
+            doc = JSON.parse(text);
         } catch (e) {
             console.error("VekronaTheme: " + path + " is not valid JSON:", e);
             return fallback;
         }
+        const missing = missingParts(doc);
+        if (missing.length > 0) {
+            console.error("VekronaTheme: " + path + " lacks " + missing.join(", ") + "; run vekrona-render-theme");
+            return fallback;
+        }
+        return doc;
     }
 
     // Reading text() blocks until the first load, so the first paint has colors;

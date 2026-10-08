@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Measure the gaps between the right-side bar pictograms on a screenshot.
 
-usage: bar-gaps.py SCREENSHOT.png BAR_HEIGHT MAX_GAP MAX_SPREAD
+usage: bar-gaps.py SCREENSHOT.png BAR_HEIGHT MAX_GAP MAX_SPREAD LABEL_MAX_HEIGHT
 
 The pictograms are found without knowing how many there are: the right-side bar is the run of
 ink clusters (glyphs more than 3 px apart) that ends at the right edge and is not broken by a
-gap of SECTION_BREAK px or more. A percent label (a short, wide cluster such as "26%") belongs
+gap of SECTION_BREAK px or more. A percent label (a wide cluster at most LABEL_MAX_HEIGHT px tall such as "26%") belongs
 to the icon right before it, so icon plus label is one pictogram. Unread badges (red dots and counters)
 overhang their glyph by design, so they are not measured.
 Prints each pictogram's bounds, the gaps between neighbours and the vertical ink centers; exits 1
@@ -22,15 +22,13 @@ BADGE_RED_DOMINANCE = 60
 BADGE_JOIN_GAP = 6
 VERTICAL_TOLERANCE = 2
 SECTION_BREAK = 80
-LABEL_MAX_HEIGHT_BAR_FRACTION = 3  # a label is at most this fraction of the bar tall
 LABEL_MIN_ASPECT = 1.5
 
 
 def main():
-    path, bar_height, max_gap, max_spread = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+    path, bar_height, max_gap, max_spread, label_max_height = sys.argv[1], *map(int, sys.argv[2:6])
     width, rows, channels = read_png_rows(path)
     rows = rows[:bar_height]
-    label_max_height = bar_height // LABEL_MAX_HEIGHT_BAR_FRACTION
     counts = {}
     for line in rows:
         for x in range(width):

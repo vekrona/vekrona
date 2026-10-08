@@ -9,7 +9,7 @@ source "$ROOT/tests/lib.sh"
 STEP_TIMEOUT_SEC=60
 SWITCHER_TIMEOUT_SEC=6
 SWITCHER_HOLD_MS=8000
-# The panel is far larger than this many surface-1 pixels; the bar sits above the rows that are counted.
+# The panel is far larger than this many surface-1 pixels; the measured bar height is where the counted rows start.
 PANEL_MIN_PIXELS=5000
 COLORS="$ROOT/tests/e2e/screen_colors.py"
 GUEST_SWAY_DROP_IN='~/.config/sway/config.d/90-vekrona-design.conf'
@@ -20,7 +20,13 @@ color() { vekrona_token_get color "$1" "$2"; }
 
 desktop_is() { [[ "$(python3 "$COLORS" center "$(vekrona-dev shot)")" == "$1" ]]; }
 bar_is_tall() { [[ "$(python3 "$COLORS" bar-height "$(vekrona-dev shot)" "$1")" == "$BAR_PX" ]]; }
-panel_shown() { (($(python3 "$COLORS" count "$(vekrona-dev shot)" "$1" "$BAR_PX") >= PANEL_MIN_PIXELS)); }
+# $1 is the panel color, $2 the bar's bg color: the rows counted start below the bar as measured on the same screenshot.
+panel_shown() {
+  local shot bar
+  shot="$(vekrona-dev shot)"
+  bar="$(python3 "$COLORS" bar-height "$shot" "$2")"
+  (($(python3 "$COLORS" count "$shot" "$1" "$bar") >= PANEL_MIN_PIXELS))
+}
 focused_is() { [[ "$(vekrona-dev sh bash -c "swaymsg -t get_tree | jq -r '[recurse(.nodes[]?, .floating_nodes[]?) | select(.focused)][0].app_id'")" == "$1" ]]; }
 export -f desktop_is bar_is_tall panel_shown focused_is
 
@@ -70,7 +76,7 @@ for app in switch-first switch-second; do
 done
 vekrona-dev hold super-tab "$SWITCHER_HOLD_MS" &
 holding=$!
-vekrona-dev until --timeout "$SWITCHER_TIMEOUT_SEC" -- panel_shown "$(color surface-1 dark)" \
+vekrona-dev until --timeout "$SWITCHER_TIMEOUT_SEC" -- panel_shown "$(color surface-1 dark)" "$(color bg dark)" \
   || { wait "$holding"; die "holding Super+Tab with two windows must show a $(color surface-1 dark) (surface-1) panel, but fewer than $PANEL_MIN_PIXELS such pixels are below the bar"; }
 wait "$holding"
 log "ok: the app switcher shows a surface-1 panel"
