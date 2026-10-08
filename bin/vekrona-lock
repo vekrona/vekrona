@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# The single entry point for locking the screen. DMS runs it on every lock
+# (customPowerActionLock). One Quickshell process per lock, kept by a
+# transient user unit: it exits on unlock, and a crashed locker restarts and
+# locks again.
+set -euo pipefail
+shopt -s inherit_errexit
+
+PROG="vekrona-lock"
+UNIT="vekrona-lock"
+
+if systemctl --user is-active --quiet "$UNIT"; then
+  exit 0
+fi
+
+if ! err="$(systemd-run --user --unit="$UNIT" --collect -p Restart=on-failure qs -c vekrona-lock 2>&1)"; then
+  printf '%s: %s\n' "$PROG" "$err" >&2
+  notify-send -u critical -a vekrona "$PROG" "Cannot start the lock screen: $err" || printf '%s: notify-send failed\n' "$PROG" >&2
+  exit 1
+fi
