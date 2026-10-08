@@ -1045,7 +1045,22 @@ ensure_flatpak_app_system() {
 vekrona_design_get() {
   local key="$1" value
   value="$(jq -er --arg k "$key" '.[$k]' "$VEKRONA_ROOT/config/design.json")" || die "config/design.json: no value for '$key'"
-  [[ "$value" =~ ^[0-9]+$ ]] || die "config/design.json: '$key' is not a non-negative integer: '$value'"
+  [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "config/design.json: '$key' is not a non-negative number: '$value'"
+  printf '%s' "$value"
+}
+
+# vekrona_token_get <group> <name> [mode]: one value of config/tokens.json. The color group needs a
+# mode (dark|light); the others take none. A trailing "px" is stripped.
+vekrona_token_get() {
+  local group="$1" name="$2" mode="${3:-}" value
+  case "$group" in
+    color) [[ "$mode" == dark || "$mode" == light ]] || die "vekrona_token_get color $name: mode must be dark or light, got '$mode'" ;;
+    spacing | border | size | opacity) [[ -z "$mode" ]] || die "vekrona_token_get $group $name: only color tokens have a mode, got '$mode'" ;;
+    *) die "vekrona_token_get: unknown token group '$group'" ;;
+  esac
+  value="$(jq -er --arg g "$group" --arg n "$name" --arg m "$mode" \
+    '.[$g].tokens[] | select(.name == $n) | if $g == "color" then .value[$m] else .value end | tostring | sub("px$"; "")' \
+    "$VEKRONA_ROOT/config/tokens.json")" || die "config/tokens.json: no $group token '$name'${mode:+ for mode $mode}"
   printf '%s' "$value"
 }
 
