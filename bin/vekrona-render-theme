@@ -685,19 +685,19 @@ def render_rofi(theme, mode, design):
     separatorcolor: {c['line']};
     normal-background: {c['bg']};
     normal-foreground: {c['ink']};
-    alternate-normal-background: {c['surface-1']};
+    alternate-normal-background: {c['bg']};
     alternate-normal-foreground: {c['ink']};
     selected-normal-background: transparent;
     selected-normal-foreground: {c['ink']};
     active-background: {c['bg']};
     active-foreground: {c['accent-ink']};
-    alternate-active-background: {c['surface-1']};
+    alternate-active-background: {c['bg']};
     alternate-active-foreground: {c['accent-ink']};
     selected-active-background: transparent;
     selected-active-foreground: {c['accent-ink']};
     urgent-background: {c['bg']};
     urgent-foreground: {c['danger-ink']};
-    alternate-urgent-background: {c['surface-1']};
+    alternate-urgent-background: {c['bg']};
     alternate-urgent-foreground: {c['danger-ink']};
     selected-urgent-background: transparent;
     selected-urgent-foreground: {c['danger-ink']};
@@ -722,6 +722,12 @@ inputbar {{
 listview {{
     lines: 18;
     spacing: {space['space1']}px;
+}}
+scrollbar {{
+    width: 1px;
+    handle-width: 1px;
+    handle-color: {c['line-strong']};
+    background-color: transparent;
 }}
 mainbox {{
     spacing: {space['space2']}px;

@@ -216,6 +216,12 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
   expect_line "$scratch/stdout" "    urgent-foreground: $danger_ink;"
   expect_line "$scratch/stdout" "    active-foreground: $accent_ink;"
   expect_line "$scratch/stdout" "    selected-normal-background: transparent;"
+  for state in normal active urgent; do
+    expect_line "$scratch/stdout" "    alternate-$state-background: $bg;"
+  done
+  expect_text "$scratch/stdout" "handle-width: 1px;"
+  expect_text "$scratch/stdout" "handle-color: $strong;"
+  expect_text "$scratch/stdout" "background-color: transparent;"
   expect_text "$scratch/stdout" "border: 0 0 2px;"
   expect_text "$scratch/stdout" "border-color: $accent;"
   expect_text "$scratch/stdout" "border-radius: 0px;"
