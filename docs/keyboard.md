@@ -77,20 +77,37 @@ the most recent window of the highlighted app, switching workspace if needed.
 A quick tap goes straight back to the previous app; Escape cancels and Return
 or a click picks.
 
-`bin/vekrona-app-switch` does the work. Its `daemon` subcommand, started by
-`exec` in the Sway config, follows Sway window events and keeps the
-most-recently-used window list in `$XDG_RUNTIME_DIR/vekrona-app-switch/mru`.
-`next`/`prev`, bound to Cmd+Tab and Cmd+Shift+Tab, open the Quickshell
-overlay in `config/vekrona-app-switch/shell.qml`, or step it over Quickshell
-IPC when it is already open. The overlay takes exclusive keyboard focus, but
-Sway bindings still run first, so Tab presses keep reaching the script.
+The overlay is a resident Quickshell instance, `config/vekrona-app-switch/shell.qml`,
+started once per session by `vekrona-app-switch.service` (wanted by
+`sway-session.target`, restarted by systemd if it dies) and hidden until
+needed. Stage 50 links the config to `~/.config/quickshell/vekrona-app-switch`
+so `qs -c vekrona-app-switch` finds it. Cmd+Tab and Cmd+Shift+Tab are plain
+Sway bindings that run `qs -c vekrona-app-switch ipc call appswitch next|prev`:
+the first call shows the overlay, later ones step it. A cold Quickshell start
+per switch (QML compile, desktop entry scan, icon lookup) used to cost ~250 ms
+in the VM and over a second on real hardware, which is why the overlay stays
+resident with its desktop entries and icons warm.
+
+The overlay tracks windows itself: it reads Sway's tree once at startup, then
+follows `window` events (new, close, focus), so the most-recently-used order
+needs no daemon or state file and opening it runs no query. Committing hides
+the overlay and focuses the window with `I3.dispatch("[con_id=N] focus")`.
+Quickshell's foreign-toplevel `activate()` is not usable here: Sway accepts the
+request but does not move focus. The overlay takes exclusive keyboard focus
+while shown, but Sway bindings still run first, so Tab presses keep reaching
+the overlay's IPC.
 
 Neither Sway nor the overlay sees Super go up reliably: a `bindsym --release
 Super_L` in a mode never fires after Super+Tab, and Qt gets no key event for
-it. So after opening the overlay the script polls the kernel's key state
-(`EVIOCGKEY`) on every `/dev/input/event*` keyboard, xremap's virtual one
-included, which the `input` group membership already allows, and commits over
-IPC once no Super key is down.
+it. So opening the overlay also starts `wait-super-release.py`, which asks the
+kernel for the key state (`EVIOCGKEY`) of every `/dev/input/event*` device,
+xremap's virtual keyboard included (the `input` group membership already
+allows it), and re-checks whenever any device reports an event. When no Super
+key is down it exits and the overlay commits.
+
+`tests/e2e/app-switch-latency.sh` guards the speed with real key presses: the
+overlay must be on screen within 200 ms of Cmd+Tab and focus must change within
+75 ms of releasing Cmd.
 
 xremap's Cmd layer must not remap Super+Tab: an earlier `Super-Tab: Alt-Tab`
 entry made xremap send a fake Super release, which ended the switch at once,

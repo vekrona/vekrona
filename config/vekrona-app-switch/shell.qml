@@ -1,34 +1,124 @@
-// Overlay for bin/vekrona-app-switch: a row of app icons in most-recently-used
-// order. Sway's Super+Tab bindings step the selection over IPC, and
-// bin/vekrona-app-switch commits it over IPC once Super is released; Return
-// also commits, Escape cancels.
+// Resident Cmd+Tab app switcher: a row of app icons in most-recently-used order,
+// started once per session by vekrona-app-switch.service and hidden until Sway's
+// Super+Tab bindings send `appswitch next|prev` over IPC. The first call opens
+// it, later ones step the selection. It commits (focuses the app) when Super
+// goes up, Return or a click picks, Escape cancels. It keeps its list of
+// windows and their recency from Sway's window events, so opening it needs no
+// query.
 import QtQuick
 import Quickshell
+import Quickshell.I3
 import Quickshell.Io
 import Quickshell.Wayland
 
 ShellRoot {
     id: root
 
-    readonly property var items: JSON.parse(Quickshell.env("VEKRONA_SWITCH_ITEMS") || "[]")
-    property int selected: Math.max(0, Math.min(items.length - 1, parseInt(Quickshell.env("VEKRONA_SWITCH_START") || "0")))
-    property bool done: false
+    // Sway container id -> {id, app, stamp}; `stamp` says when it was last focused.
+    property var windows: ({})
+    property int clock: 0
+    property var items: []
+    property int selected: 0
+    property bool shown: false
+
+    function track(node) {
+        const known = windows[node.id];
+        windows[node.id] = {
+            id: node.id,
+            app: node.app_id || node.window_properties?.class || "?",
+            stamp: known ? known.stamp : 0
+        };
+    }
+
+    function focused(id) {
+        windows[id].stamp = ++clock;
+    }
+
+    function trackTree(node) {
+        const children = (node.nodes || []).concat(node.floating_nodes || []);
+        if (node.pid != null && children.length === 0) {
+            track(node);
+            if (node.focused)
+                focused(node.id);
+        }
+        children.forEach(trackTree);
+    }
+
+    // Windows that exist before the first event arrives.
+    Process {
+        command: ["swaymsg", "-t", "get_tree"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: root.trackTree(JSON.parse(text))
+        }
+        onExited: code => {
+            if (code !== 0)
+                console.error("swaymsg -t get_tree exited with status " + code);
+        }
+    }
+
+    I3IpcListener {
+        subscriptions: ["window"]
+        onIpcEvent: event => {
+            const e = JSON.parse(event.data);
+            if (e.change === "new") {
+                root.track(e.container);
+            } else if (e.change === "close") {
+                delete root.windows[e.container.id];
+            } else if (e.change === "focus") {
+                root.track(e.container);
+                root.focused(e.container.id);
+            }
+        }
+    }
+
+    // The most recently focused window of each app, most recent first.
+    function recentApps() {
+        const seen = new Set();
+        return Object.values(windows).sort((a, b) => b.stamp - a.stamp).filter(w => !seen.has(w.app) && seen.add(w.app));
+    }
 
     function step(dir) {
-        if (items.length > 0)
+        if (!shown) {
+            const apps = recentApps();
+            if (apps.length < 2)
+                return;
+            items = apps;
+            selected = dir > 0 ? 1 : apps.length - 1;
+            shown = true;
+            superWatch.running = true;
+        } else {
             selected = (selected + dir + items.length) % items.length;
+        }
     }
 
     function finish(commit) {
-        if (done)
+        if (!shown)
             return;
-        done = true;
-        if (commit && items.length > 0) {
-            focuser.command = ["swaymsg", "[con_id=" + items[selected].id + "] focus"];
-            focuser.running = true;
-        } else {
-            Qt.quit();
+        shown = false;
+        superWatch.running = false;
+        if (commit)
+            I3.dispatch("[con_id=" + items[selected].id + "] focus");
+    }
+
+    // Neither Sway nor Qt sees Super go up reliably, so the helper watches the
+    // kernel's key state and exits once no Super key is down.
+    Process {
+        id: superWatch
+        command: ["python3", Quickshell.shellPath("wait-super-release.py")]
+        onExited: code => {
+            if (code !== 0)
+                console.error("wait-super-release.py exited with status " + code);
+            root.finish(true);
         }
+    }
+
+    IpcHandler {
+        target: "appswitch"
+        function next(): void { root.step(1); }
+        function prev(): void { root.step(-1); }
+        function commit(): void { root.finish(true); }
+        function cancel(): void { root.finish(false); }
     }
 
     // Desktop entries load asynchronously; reading this list makes the icon
@@ -47,20 +137,8 @@ ShellRoot {
         return entryFor(app)?.name || app;
     }
 
-    Process {
-        id: focuser
-        onExited: Qt.quit()
-    }
-
-    IpcHandler {
-        target: "appswitch"
-        function next(): void { root.step(1); }
-        function prev(): void { root.step(-1); }
-        function commit(): void { root.finish(true); }
-        function cancel(): void { root.finish(false); }
-    }
-
     PanelWindow {
+        visible: root.shown
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         implicitWidth: panel.width

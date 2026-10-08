@@ -35,12 +35,19 @@ ensure_symlink "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" "$H
 
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/xremap.service" "$HOME/.config/systemd/user/xremap.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/dms.service.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"
+ensure_symlink "$VEKRONA_ROOT/config/vekrona-app-switch" "$HOME/.config/quickshell/vekrona-app-switch"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-app-switch.service" "$HOME/.config/systemd/user/vekrona-app-switch.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$HOME/.config/systemd/user/tailscale-systray.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors.service" "$HOME/.config/systemd/user/vekrona-errors.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors-failed.service" "$HOME/.config/systemd/user/vekrona-errors-failed.service"
 
 systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service tailscale-systray.service vekrona-errors.service
+ensure_user_unit_enabled xremap.service vekrona-app-switch.service tailscale-systray.service vekrona-errors.service
+# Enabling only wires the unit into the next login; a live session needs the overlay now.
+if [[ -n "$(sway_socket)" ]]; then
+  log "restarting vekrona-app-switch.service for the running sway session"
+  systemctl --user restart vekrona-app-switch.service || die "vekrona-app-switch.service failed to start"
+fi
 
 for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
   ensure_symlink "$VEKRONA_ROOT/config/agents/skills/vekrona-diagnose" "$skills_dir/vekrona-diagnose"

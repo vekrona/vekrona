@@ -351,6 +351,7 @@ if ran 50-user; then
   check assert "dms.service wanted by sway-session.target" file_exists "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
   check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
+  check assert "vekrona-app-switch.service enabled" user_unit_enabled vekrona-app-switch.service
   check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
   check assert "vekrona-errors.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors.service"
   check assert "vekrona-errors-failed.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors-failed.service"

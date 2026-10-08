@@ -114,9 +114,9 @@ bindsym Mod4+Shift+Up move up
 bindsym Mod4+Shift+Right move right
 
 #: Switch to the next app (hold Super, Tab to keep cycling)
-bindsym Mod4+Tab exec vekrona-app-switch next
+bindsym Mod4+Tab exec qs -c vekrona-app-switch ipc call appswitch next
 #: Switch to the previous app (hold Super, Shift+Tab to keep cycling back)
-bindsym Mod4+Shift+Tab exec vekrona-app-switch prev
+bindsym Mod4+Shift+Tab exec qs -c vekrona-app-switch ipc call appswitch prev
 
 #: Enter resize mode
 bindsym --no-repeat --to-code $hyper+r mode "resize"
@@ -206,8 +206,6 @@ mode "resize" {
     #: Exit resize mode
     bindsym Escape mode "default"
 }
-
-exec vekrona-app-switch daemon
 
 for_window [class="^[Ss]team$"] floating enable
 # Games get a workspace of their own, so the floating Steam client never draws over them.

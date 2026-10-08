@@ -1,0 +1,11 @@
+[Unit]
+Description=Cmd+Tab app switcher overlay
+PartOf=sway-session.target
+After=sway-session.target
+
+[Service]
+ExecStart=/usr/bin/qs -c vekrona-app-switch
+Restart=on-failure
+
+[Install]
+WantedBy=sway-session.target
