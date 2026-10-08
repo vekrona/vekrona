@@ -110,22 +110,25 @@ ensure_dms_setting_default() {
   [[ "$(jq -r --arg k "$key" '.[$k]' "$dms_settings")" == "$value" ]] || die "DMS default not applied: $key"
 }
 
-ensure_dms_setting_enforced() {
-  local key="$1" json_value="$2"
-  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$dms_settings" >/dev/null 2>&1 && {
+# Set <key> = <json_value> in the JSON file <file> (DMS settings.json or session.json) unless it already is.
+ensure_json_key_enforced() {
+  local file="$1" key="$2" json_value="$3" tmp
+  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$file" >/dev/null 2>&1 && {
     log "DMS setting already enforced: $key = $json_value"
     return 0
   }
   log "enforcing DMS setting: $key = $json_value"
-  local tmp
-  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
-  if ! jq --arg k "$key" --argjson v "$json_value" '.[$k] = $v' "$dms_settings" > "$tmp"; then
+  tmp="$(mktemp "$(dirname "$file")/.$(basename "$file").XXXXXX")"
+  if ! jq --arg k "$key" --argjson v "$json_value" '.[$k] = $v' "$file" > "$tmp"; then
     rm -f "$tmp"
     die "jq failed to enforce DMS setting: $key"
   fi
-  mv "$tmp" "$dms_settings"
-  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$dms_settings" >/dev/null || die "DMS setting not enforced: $key"
+  mv "$tmp" "$file"
+  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$file" >/dev/null || die "DMS setting not enforced: $key"
 }
+
+ensure_dms_setting_enforced() { ensure_json_key_enforced "$dms_settings" "$1" "$2"; }
+ensure_dms_session_enforced() { ensure_json_key_enforced "$dms_session" "$1" "$2"; }
 
 ensure_dms_plugin_enabled() {
   local plugin_id="$1"
@@ -147,23 +150,31 @@ ensure_dms_plugin_enabled() {
   dms_restart_needed=1
 }
 
+# Drop the plugin_settings.json entries of plugins vekrona no longer ships.
+ensure_dms_plugin_forgotten() {
+  local plugin_settings="$dms_settings_dir/plugin_settings.json" id tmp
+  [[ -f "$plugin_settings" ]] || return 0
+  for id in "$@"; do
+    jq -e --arg id "$id" 'has($id)' "$plugin_settings" >/dev/null || continue
+    log "forgetting removed DMS plugin: $id"
+    tmp="$(mktemp "$dms_settings_dir/.plugin_settings.json.XXXXXX")"
+    jq --arg id "$id" 'del(.[$id])' "$plugin_settings" > "$tmp" || { rm -f "$tmp"; die "jq failed to forget DMS plugin: $id"; }
+    mv "$tmp" "$plugin_settings"
+  done
+}
+
 theme_state_dir="$(vekrona_state_dir)"
 theme_state_file="$(vekrona_active_theme_file)"
 theme_name_file="$(vekrona_theme_name_file)"
-default_theme_name="tokyo-night"
-default_theme_json="$VEKRONA_ROOT/config/dms-themes/$default_theme_name.json"
 ensure_dir "$theme_state_dir"
-if [[ -f "$theme_state_file" ]]; then
-  log "active theme file already present: $theme_state_file"
+if [[ ! -f "$theme_name_file" ]]; then
+  log "seeding theme mode: $theme_name_file = dark"
+  printf 'dark\n' > "$theme_name_file"
+elif [[ "$(cat "$theme_name_file")" != dark && "$(cat "$theme_name_file")" != light ]]; then
+  log "migrating legacy theme '$(cat "$theme_name_file")' to dark: $theme_name_file"
+  printf 'dark\n' > "$theme_name_file"
 else
-  log "seeding active theme file: $theme_state_file"
-  cp "$default_theme_json" "$theme_state_file"
-fi
-if [[ -f "$theme_name_file" ]]; then
-  log "active theme name already present: $theme_name_file"
-else
-  log "seeding active theme name: $theme_name_file"
-  printf '%s\n' "$default_theme_name" > "$theme_name_file"
+  log "theme mode already present: $theme_name_file"
 fi
 "$VEKRONA_ROOT/bin/vekrona-render-theme"
 
@@ -172,30 +183,6 @@ dms_settings="$dms_settings_dir/settings.json"
 dms_session_dir="$HOME/.local/state/DankMaterialShell"
 dms_session="$dms_session_dir/session.json"
 
-if [[ -f "$dms_settings" && "$VEKRONA_RESET_DMS_SETTINGS" != "1" ]]; then
-  current_custom_theme_file="$(jq -r '.customThemeFile // empty' "$dms_settings")"
-  current_theme_name="$(jq -r '.currentThemeName // empty' "$dms_settings")"
-  if [[ "$current_theme_name" == "custom" && -n "$current_custom_theme_file" && "$current_custom_theme_file" != "$theme_state_file" ]]; then
-    if [[ -f "$current_custom_theme_file" ]]; then
-      log "migrating customThemeFile: $current_custom_theme_file -> $theme_state_file"
-      cp "$current_custom_theme_file" "$theme_state_file"
-      dms_settings_tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
-      if ! jq --arg f "$theme_state_file" '.customThemeFile = $f | .currentThemeName = "custom"' "$dms_settings" > "$dms_settings_tmp"; then
-        rm -f "$dms_settings_tmp"
-        die "jq failed to migrate customThemeFile: $dms_settings"
-      fi
-      mv "$dms_settings_tmp" "$dms_settings"
-      [[ "$(jq -r .customThemeFile "$dms_settings")" == "$theme_state_file" ]] || die "customThemeFile migration failed: $dms_settings"
-      if systemctl --user is-active --quiet dms.service; then
-        log "restarting dms.service to pick up the migrated theme file"
-        dms restart >/dev/null || warn "dms restart failed, log out and back in to pick up the migrated theme"
-      fi
-    else
-      warn "customThemeFile referenced but missing, not migrating: $current_custom_theme_file"
-    fi
-  fi
-fi
-
 seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/settings.seed.json" "$dms_settings"
 seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/session.seed.json" "$dms_session" 0
 
@@ -203,15 +190,33 @@ ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
 ensure_dms_setting_default monoFontFamily "AtkynsonMono Nerd Font"
 ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
 ensure_dms_setting_enforced customPowerActionLock '"vekrona-lock"'
+ensure_dms_setting_enforced currentThemeName '"custom"'
+ensure_dms_setting_enforced customThemeFile "$(jq -n --arg f "$theme_state_file" '$f')"
 ensure_dms_setting_enforced cornerRadius "$(vekrona_design_get radius)"
+ensure_dms_setting_enforced fontScale "$(vekrona_design_get dmsFontScale)"
+ensure_dms_setting_enforced animationSpeed 4 # SettingsData.AnimationSpeed.Custom
+ensure_dms_setting_enforced customAnimationDuration "$(jq -er '.metrics.motion.fast' "$theme_state_file")"
+ensure_dms_setting_enforced enableRippleEffects false
+ensure_dms_setting_enforced m3ElevationEnabled false # the master switch of every popout, modal and bar shadow
+ensure_dms_setting_enforced notificationPopupShadowEnabled false
 ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get trayIconSpacing)"
-ensure_dms_bar_setting_enforced noBackground true
+ensure_dms_bar_setting_enforced noBackground false
+ensure_dms_bar_setting_enforced squareCorners true
+ensure_dms_bar_setting_enforced transparency 1
 ensure_dms_bar_setting_enforced widgetPadding "$(vekrona_design_get widgetPadding)"
-ensure_dms_bar_setting_enforced pillPadding "$(vekrona_design_get padding)"
-ensure_dms_bar_setting_enforced innerPadding "$(vekrona_design_get gap)"
-ensure_dms_bar_setting_enforced spacing "$(vekrona_design_get gap)"
+ensure_dms_bar_setting_enforced pillPadding "$(vekrona_token_get spacing space-3)"
+ensure_dms_bar_setting_enforced innerPadding "$(vekrona_design_get barInnerPadding)"
+ensure_dms_bar_setting_enforced spacing "$(vekrona_token_get spacing space-2)"
+ensure_dms_bar_setting_enforced fontScale "$(vekrona_design_get dmsFontScale)"
 
-# Assert <plugin_id> sits in a bar widget list and, if <stock_id> is given, no bar still lists that stock widget.
+# The wallpaper is the solid bg of the mode; DMS reads a leading # as a color and swaps it with the mode.
+theme_mode="$(cat "$theme_name_file")"
+ensure_dms_session_enforced perModeWallpaper true
+ensure_dms_session_enforced wallpaperPathDark "\"$(vekrona_token_get color bg dark)\""
+ensure_dms_session_enforced wallpaperPathLight "\"$(vekrona_token_get color bg light)\""
+ensure_dms_session_enforced wallpaperPath "\"$(vekrona_token_get color bg "$theme_mode")\""
+
+# Assert <plugin_id> sits in a bar widget list and, if <stock_id> is given, no bar still lists that widget id.
 assert_dms_bar_plugin_placed() {
   local plugin_id="$1" stock_id="${2:-}"
   assert "DMS bar has the $plugin_id plugin placed in a widget list${stock_id:+ and no stock $stock_id}" python3 -c "
@@ -242,12 +247,12 @@ ensure_dms_plugin_enabled vekronaAgent
 ensure_dms_bar_widget_inserted_before vekronaAgent notificationButton
 assert_dms_bar_plugin_placed vekronaAgent
 
-ensure_dms_plugin_enabled vekronaClock
-ensure_dms_bar_widget_plugin clock vekronaClock
-assert_dms_bar_plugin_placed vekronaClock clock
-ensure_dms_plugin_enabled vekronaWeather
-ensure_dms_bar_widget_plugin weather vekronaWeather
-assert_dms_bar_plugin_placed vekronaWeather weather
+# The clock and weather are the stock widgets (a click opens DankDash). Earlier installs ran them as plugins.
+ensure_dms_bar_widget_plugin vekronaClock clock
+ensure_dms_bar_widget_plugin vekronaWeather weather
+assert_dms_bar_plugin_placed clock vekronaClock
+assert_dms_bar_plugin_placed weather vekronaWeather
+ensure_dms_plugin_forgotten vekronaClock vekronaWeather
 
 # A running DMS does not pick up a plugin enabled after it started, so its bar widget stays blank.
 if [[ "$dms_restart_needed" == 1 ]] && systemctl --user is-active --quiet dms.service; then
@@ -272,25 +277,19 @@ assert d.get('matugenTemplateGtk', True) is True
 assert d.get('matugenTemplateGhostty', True) is False
 "
 
-ensure_symlink_tree "$VEKRONA_ROOT/config/dms-themes" "$HOME/.config/DankMaterialShell/vekrona-themes"
-
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
 
 if [[ -d "$VEKRONA_ROOT/fonts" ]] && find "$VEKRONA_ROOT/fonts" -type f -print -quit | grep -q .; then
   ensure_symlink_tree "$VEKRONA_ROOT/fonts" "$HOME/.local/share/fonts/vekrona"
   fc-cache -f >/dev/null
-  for family in "AtkynsonMono Nerd Font" "Atkinson Hyperlegible Mono" "JetBrainsMono Nerd Font"; do
+  for family in "AtkynsonMono Nerd Font" "Atkinson Hyperlegible Mono" "JetBrainsMono Nerd Font" "Material Symbols Rounded"; do
     assert "$family registered" bash -c 'fc-list : family | tr , "\n" | grep -qxF "$1"' _ "$family"
   done
   assert "Atkinson Hyperlegible Mono covers the backtick (U+0060)" bash -c "fc-list ':charset=60' family | grep -qF 'Atkinson Hyperlegible Mono'"
 else
   warn "fonts/ missing or empty, skipping font install"
 fi
-
-ensure_gsettings org.gnome.desktop.interface font-name "Atkinson Hyperlegible Next 11"
-ensure_gsettings org.gnome.desktop.interface document-font-name "Atkinson Hyperlegible Next 11"
-ensure_gsettings org.gnome.desktop.interface monospace-font-name "AtkynsonMono Nerd Font 11"
 
 # Whether `flatpak override --user --show` output ($2) reflects the override flag $1.
 flatpak_override_has() {
@@ -345,11 +344,12 @@ for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
     grep -q "Name=$profile$" "$(firefox_profile_root)/profiles.ini" || die "firefox profile not created: $profile"
   fi
   ensure_symlink "$appdir/user.js" "$profiledir/user.js"
-  ensure_symlink "$appdir/userChrome.css" "$profiledir/chrome/userChrome.css"
   ensure_symlink "$appdir/app.desktop" "$HOME/.local/share/applications/$profile.desktop"
   ensure_symlink "$appdir/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/$profile.svg"
 done
 shopt -u nullglob
+# The renderer themes the default profile and every vekrona-* profile, so the new ones get their userChrome.css now.
+"$VEKRONA_ROOT/bin/vekrona-render-theme" firefox
 
 ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
 
