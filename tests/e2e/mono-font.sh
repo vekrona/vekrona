@@ -9,8 +9,11 @@ GUEST_GHOSTTY_FONTS=/mnt/vekrona/docs/ghostty-fonts.conf
 
 show_face() { vekrona-dev run ghostty --config-default-files=false --config-file="$GUEST_GHOSTTY_FONTS" +show-face --string="$1"; }
 
+# The first mono family of the design tokens that is not a generic CSS family.
+TOKEN_MONO="$(jq -er '.type.families.mono | split(",")[0] | gsub("^\\s*\"|\"\\s*$"; "")' "$ROOT/config/tokens.json")"
+
 monospace="$(vekrona-dev run fc-match -f '%{family}' monospace)"
-[[ "$monospace" == "AtkynsonMono Nerd Font"* ]] || die "fc-match monospace must start with AtkynsonMono Nerd Font, but it is: $monospace"
+[[ "$monospace" == "$TOKEN_MONO"* ]] || die "fc-match monospace must start with the design's first mono family $TOKEN_MONO, but it is: $monospace"
 log "ok: fc-match monospace -> $monospace"
 
 backtick="$(show_face '`')"
@@ -18,5 +21,5 @@ backtick="$(show_face '`')"
 log "ok: $backtick"
 
 letter="$(show_face a)"
-[[ "$letter" == *"AtkynsonMono"* ]] || die "Ghostty must draw letters from AtkynsonMono Nerd Font, but it reports: $letter"
+[[ "$letter" == *"${TOKEN_MONO%% *}"* ]] || die "Ghostty must draw letters from $TOKEN_MONO, but it reports: $letter"
 log "ok: $letter"

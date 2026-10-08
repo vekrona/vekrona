@@ -5,13 +5,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=90
-BAR_HEIGHT_PX=60
-MAX_GAP_PX=9
+BAR_HEIGHT_PX="$(vekrona_token_get size size-bar)"
+# One pixel of glyph side bearing on top of the bar's widget spacing.
+MAX_GAP_PX=$(($(vekrona_token_get spacing space-2) + 1))
 MAX_GAP_SPREAD_PX=6
 GAPS="$ROOT/tests/e2e/bar-gaps.py"
 SEPARATOR="$ROOT/tests/e2e/bar-separator.py"
-SEPARATOR_MIN_HEIGHT_PX=20
-SEPARATOR_MIN_CONTRAST=60
+SEPARATOR_MIN_HEIGHT_PX=$((BAR_HEIGHT_PX / 2))
+# The separator is drawn in the line token on the surface-1 bar.
+SEPARATOR_MIN_CONTRAST="$(python3 "$ROOT/tests/e2e/screen_colors.py" contrast "$(vekrona_token_get color line dark)" "$(vekrona_token_get color surface-1 dark)")"
 
 bar_spacing_ok() {
   python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" >/dev/null

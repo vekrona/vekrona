@@ -22,7 +22,7 @@ BADGE_RED_DOMINANCE = 60
 BADGE_JOIN_GAP = 6
 VERTICAL_TOLERANCE = 2
 SECTION_BREAK = 80
-LABEL_MAX_HEIGHT = 9
+LABEL_MAX_HEIGHT_BAR_FRACTION = 3  # a label is at most this fraction of the bar tall
 LABEL_MIN_ASPECT = 1.5
 
 
@@ -30,6 +30,7 @@ def main():
     path, bar_height, max_gap, max_spread = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
     width, rows, channels = read_png_rows(path)
     rows = rows[:bar_height]
+    label_max_height = bar_height // LABEL_MAX_HEIGHT_BAR_FRACTION
     counts = {}
     for line in rows:
         for x in range(width):
@@ -76,7 +77,7 @@ def main():
         return max(ys) - min(ys) + 1
 
     def is_label(cluster):
-        return height(cluster) <= LABEL_MAX_HEIGHT and cluster[1] - cluster[0] + 1 >= LABEL_MIN_ASPECT * height(cluster)
+        return height(cluster) <= label_max_height and cluster[1] - cluster[0] + 1 >= LABEL_MIN_ASPECT * height(cluster)
 
     right_bar = clusters[-1:]
     for cluster in reversed(clusters[:-1]):
