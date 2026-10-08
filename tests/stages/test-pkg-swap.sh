@@ -66,7 +66,8 @@ ensure_pkg_swapped ffmpeg-free ffmpeg
 log "ok: an already swapped system is left alone"
 
 packages libswscale-free
-if (FAKE_DNF_FAIL=1 ensure_pkg_swapped ffmpeg-free ffmpeg); then
+if failure="$(FAKE_DNF_FAIL=1 ensure_pkg_swapped ffmpeg-free ffmpeg 2>&1)"; then
   die "a failing dnf must fail the swap"
 fi
+[[ "$failure" == *"package did not install: ffmpeg"* ]] || die "a failing dnf must say which package did not install: $failure"
 log "ok: a failing dnf fails the swap"
