@@ -41,6 +41,22 @@ ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$H
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors.service" "$HOME/.config/systemd/user/vekrona-errors.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors-failed.service" "$HOME/.config/systemd/user/vekrona-errors-failed.service"
 
+# The theme mode and the rendered theme come before any unit restart: the app switcher and DMS read active-theme.json on start.
+theme_state_dir="$(vekrona_state_dir)"
+theme_state_file="$(vekrona_active_theme_file)"
+theme_name_file="$(vekrona_theme_name_file)"
+ensure_dir "$theme_state_dir"
+if [[ ! -f "$theme_name_file" ]]; then
+  log "seeding theme mode: $theme_name_file = dark"
+  printf 'dark\n' > "$theme_name_file"
+elif [[ "$(cat "$theme_name_file")" != dark && "$(cat "$theme_name_file")" != light ]]; then
+  log "migrating legacy theme '$(cat "$theme_name_file")' to dark: $theme_name_file"
+  printf 'dark\n' > "$theme_name_file"
+else
+  log "theme mode already present: $theme_name_file"
+fi
+"$VEKRONA_ROOT/bin/vekrona-render-theme"
+
 systemctl --user daemon-reload
 ensure_user_unit_enabled xremap.service vekrona-app-switch.service tailscale-systray.service vekrona-errors.service
 # Enabling only wires the unit into the next login; a live session needs the overlay now.
@@ -163,21 +179,6 @@ ensure_dms_plugin_forgotten() {
   done
 }
 
-theme_state_dir="$(vekrona_state_dir)"
-theme_state_file="$(vekrona_active_theme_file)"
-theme_name_file="$(vekrona_theme_name_file)"
-ensure_dir "$theme_state_dir"
-if [[ ! -f "$theme_name_file" ]]; then
-  log "seeding theme mode: $theme_name_file = dark"
-  printf 'dark\n' > "$theme_name_file"
-elif [[ "$(cat "$theme_name_file")" != dark && "$(cat "$theme_name_file")" != light ]]; then
-  log "migrating legacy theme '$(cat "$theme_name_file")' to dark: $theme_name_file"
-  printf 'dark\n' > "$theme_name_file"
-else
-  log "theme mode already present: $theme_name_file"
-fi
-"$VEKRONA_ROOT/bin/vekrona-render-theme"
-
 dms_settings_dir="$HOME/.config/DankMaterialShell"
 dms_settings="$dms_settings_dir/settings.json"
 dms_session_dir="$HOME/.local/state/DankMaterialShell"
@@ -216,25 +217,27 @@ ensure_dms_session_enforced wallpaperPathDark "\"$(vekrona_token_get color bg da
 ensure_dms_session_enforced wallpaperPathLight "\"$(vekrona_token_get color bg light)\""
 ensure_dms_session_enforced wallpaperPath "\"$(vekrona_token_get color bg "$theme_mode")\""
 
-# Assert <plugin_id> sits in a bar widget list and, if <stock_id> is given, no bar still lists that widget id.
+# Assert <widget_id> sits in a bar widget list and, if <absent_id> is given, no bar still lists that widget id.
 assert_dms_bar_plugin_placed() {
-  local plugin_id="$1" stock_id="${2:-}"
-  assert "DMS bar has the $plugin_id plugin placed in a widget list${stock_id:+ and no stock $stock_id}" python3 -c "
+  local widget_id="$1" absent_id="${2:-}"
+  assert "DMS bar has $widget_id placed in a widget list${absent_id:+ and no $absent_id}" python3 -c "
 import json
 import sys
-plugin_id, stock_id = sys.argv[1], sys.argv[2]
+widget_id, absent_id = sys.argv[1], sys.argv[2]
 d = json.load(open('$dms_settings'))
 names = [w.get('id') if isinstance(w, dict) else w
          for bar in d.get('barConfigs', []) for k in ('leftWidgets', 'centerWidgets', 'rightWidgets') for w in (bar.get(k) or [])]
-assert plugin_id in names, plugin_id
-assert not stock_id or stock_id not in names, stock_id
-" "$plugin_id" "$stock_id"
+if widget_id not in names:
+    sys.exit(f'{widget_id} is in no bar widget list; the lists hold {names}')
+if absent_id and absent_id in names:
+    sys.exit(f'{absent_id} is still in a bar widget list; the lists hold {names}')
+" "$widget_id" "$absent_id"
 }
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/plugins"
 dms_restart_needed=0
 ensure_dms_plugin_enabled vekronaSwayWorkspaces
-ensure_dms_bar_widget_plugin workspaceSwitcher vekronaSwayWorkspaces
+ensure_dms_bar_widget_replaced workspaceSwitcher vekronaSwayWorkspaces
 ensure_dms_plugin_enabled vekronaSeparator
 ensure_dms_bar_separator_after vekronaSwayWorkspaces vekronaSeparator separator
 ensure_dms_bar_control_center_split
@@ -248,8 +251,8 @@ ensure_dms_bar_widget_inserted_before vekronaAgent notificationButton
 assert_dms_bar_plugin_placed vekronaAgent
 
 # The clock and weather are the stock widgets (a click opens DankDash). Earlier installs ran them as plugins.
-ensure_dms_bar_widget_plugin vekronaClock clock
-ensure_dms_bar_widget_plugin vekronaWeather weather
+ensure_dms_bar_widget_replaced vekronaClock clock
+ensure_dms_bar_widget_replaced vekronaWeather weather
 assert_dms_bar_plugin_placed clock vekronaClock
 assert_dms_bar_plugin_placed weather vekronaWeather
 ensure_dms_plugin_forgotten vekronaClock vekronaWeather
@@ -348,6 +351,14 @@ for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
   ensure_symlink "$appdir/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/$profile.svg"
 done
 shopt -u nullglob
+# Old installs linked chrome/userChrome.css into the checkout (possibly a legacy root); the renderer writes a real file there.
+while IFS= read -r profiledir; do
+  userchrome="$profiledir/chrome/userChrome.css"
+  [[ -L "$userchrome" ]] || continue
+  log "removing legacy userChrome.css link: $userchrome -> $(readlink "$userchrome")"
+  rm -f "$userchrome"
+  [[ ! -L "$userchrome" ]] || die "failed to remove $userchrome"
+done < <(vekrona_webapp_profile_dirs)
 # The renderer themes the default profile and every vekrona-* profile, so the new ones get their userChrome.css now.
 "$VEKRONA_ROOT/bin/vekrona-render-theme" firefox
 
@@ -361,6 +372,11 @@ ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/Mang
 
 mapfile -t link_dirs < <(vekrona_link_dirs)
 prune_vekrona_links "${link_dirs[@]}"
+# Pruning leaves the directories of the removed plugins and themes behind.
+for retired_dir in "$HOME/.config/DankMaterialShell/plugins"/{vekronaClock,vekronaWeather,vekronaShared} \
+  "$HOME/.config/DankMaterialShell/vekrona-themes/wallpapers" "$HOME/.config/DankMaterialShell/vekrona-themes"; do
+  remove_dir_if_empty "$retired_dir"
+done
 
 require_cmd nix
 if nix profile list --json | jq -e '.elements | has("devbox")' >/dev/null; then

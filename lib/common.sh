@@ -299,6 +299,7 @@ prune_vekrona_links() {
 # Every directory stage 50 links into, one per line (70-verify scans the same set). ~/.config/ghostty is
 # listed only so prune_vekrona_links retires the config link earlier installs made there (vekrona no longer
 # ships a Ghostty config); a dotfiles-managed or regular ~/.config/ghostty/config is never touched.
+# Likewise DankMaterialShell/vekrona-themes: it stays listed so prune retires the links earlier installs made there.
 vekrona_link_dirs() {
   local d
   printf '%s\n' \
@@ -308,10 +309,25 @@ vekrona_link_dirs() {
     "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/bin" \
     "$HOME/.config/scopebuddy" "$HOME/.config/MangoHud" \
     "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"
+  vekrona_webapp_profile_dirs
+}
+
+# Every vekrona-* Firefox webapp profile directory that exists, one per line.
+vekrona_webapp_profile_dirs() {
+  local d
   for d in "$(firefox_profile_root)"/vekrona-*; do
     [[ -d "$d" ]] && printf '%s\n' "$d"
   done
   return 0
+}
+
+# rmdir <dir> when it is an empty real directory; a missing, non-empty or symlinked one is left alone, any other failure dies.
+remove_dir_if_empty() {
+  local dir="$1"
+  [[ -d "$dir" && ! -L "$dir" ]] || return 0
+  [[ -z "$(ls -A "$dir")" ]] || return 0
+  log "removing empty directory: $dir"
+  rmdir "$dir" || die "failed to remove empty directory $dir"
 }
 
 ensure_dir() {
