@@ -2,7 +2,9 @@
 # The single entry point for locking the screen. DMS runs it on every lock
 # (customPowerActionLock). One Quickshell process per lock, kept by a
 # transient user unit: it exits on unlock, and a crashed locker restarts and
-# locks again.
+# locks again. A locker that keeps crashing must never be given up on (the unit
+# would fail, be collected, and leave the compositor locked red with no locker),
+# so the restart rate limit is off.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -13,7 +15,7 @@ if systemctl --user is-active --quiet "$UNIT"; then
   exit 0
 fi
 
-if ! err="$(systemd-run --user --unit="$UNIT" --collect -p Restart=on-failure qs -c vekrona-lock 2>&1)"; then
+if ! err="$(systemd-run --user --unit="$UNIT" --collect -p Restart=on-failure -p RestartSec=250ms -p StartLimitIntervalSec=0 qs -c vekrona-lock 2>&1)"; then
   printf '%s: %s\n' "$PROG" "$err" >&2
   notify-send -u critical -a vekrona "$PROG" "Cannot start the lock screen: $err" || printf '%s: notify-send failed\n' "$PROG" >&2
   exit 1

@@ -17,7 +17,7 @@ lock_text_shown() {
   local shot lower status=0
   shot="$(vekrona-dev shot)"
   lower="${shot%.png}-lower.png"
-  magick "$shot" -gravity south -crop 100%x45%+0+0 +repage "$lower" || die "cannot crop the screenshot $shot"
+  magick "$shot" -gravity south -crop 100%x55%+0+0 +repage "$lower" || die "cannot crop the screenshot $shot"
   vekrona-dev see text "$1" "$lower" || status=$?
   rm -f "$shot" "$lower"
   return "$status"

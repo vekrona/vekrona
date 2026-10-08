@@ -278,6 +278,15 @@ ShellRoot {
     WlSessionLock {
         id: lock
         locked: true
+        // Quickshell clears `locked` itself when Sway ends the lock (a second client
+        // while another holds it, or one that raced a dead locker's disconnect), and the
+        // process would idle unlocked. Exit non-zero so systemd restarts it to try again.
+        onLockedChanged: {
+            if (!locked && !root.unlocking) {
+                console.error("vekrona-lock: the compositor ended the session lock");
+                Qt.exit(1);
+            }
+        }
         onSecureChanged: {
             if (secure)
                 setHint.running = true;
