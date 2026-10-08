@@ -22,8 +22,11 @@ DESIGN_KEYS = DESIGN_INT_KEYS + ("dmsFontScale",)
 die = vekrona_cli.make_die(PROG, __file__)
 REPO = vekrona_cli.repo_root(__file__)
 
-MARKER_TEXT = ("vekrona-render-theme: generated from the vekrona design tokens, do not edit "
+MARKER_TEXT = ("vekrona-render-theme: generated from the active vekrona theme, do not edit "
                "(run vekrona-theme or vekrona-render-theme)")
+# Existing installs carry the marker of the removed vekrona-gtk-theme; accepted so they migrate.
+LEGACY_MARKER = ("/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit "
+                 "(run vekrona-theme or vekrona-gtk-theme) */")
 COMMENT_STYLES = {"css": ("/* ", " */"), "hash": ("# ", ""), "slash": ("// ", "")}
 
 
@@ -92,7 +95,7 @@ def check_writable(path, style):
     if not os.path.lexists(path) or is_repo_symlink(path):
         return
     first_line = (read_text(path) or "").split("\n", 1)[0]
-    if first_line != marker(style):
+    if first_line not in (marker(style), LEGACY_MARKER):
         die(f"{path} exists and is not managed by vekrona (no marker header); move it away first")
 
 
@@ -207,7 +210,58 @@ GTK_COLORS = TokenTemplate("""@define-color accent_color ${accent-ink};
 @define-color vk_focus ${focus};
 @define-color vk_line ${line};
 @define-color vk_line_strong ${line-strong};
+@define-color vk_surface_3 ${surface-3};
+@define-color vk_disabled ${ink-disabled};
 """)
+
+# Check boxes, radios and switches. The node names are shared by libadwaita (gtk4) and adw-gtk3 (gtk3):
+# check, radio, switch > slider. Boxes are square with a 1px line-strong edge on surface-2; checked is an
+# accent fill with an on-accent mark; a radio shows a filled inner square instead; a switch is a
+# surface-3 track (accent when on) with a square thumb. Disabled text uses ink-disabled.
+GTK_CONTROLS = """
+check, radio {
+  min-width: 24px;
+  min-height: 24px;
+  background-color: @view_bg_color;
+  border: 1px solid @vk_line_strong;
+}
+check:checked, check:indeterminate {
+  background-color: @accent_bg_color;
+  border-color: @accent_bg_color;
+  color: @accent_fg_color;
+}
+radio:checked {
+  background-color: @view_bg_color;
+  background-image: linear-gradient(@accent_bg_color, @accent_bg_color);
+  background-size: 12px 12px;
+  background-position: center;
+  background-repeat: no-repeat;
+  -gtk-icon-source: none;
+}
+switch {
+  min-width: 40px;
+  min-height: 24px;
+  background-color: @vk_surface_3;
+  border: 1px solid @vk_line_strong;
+}
+switch:checked {
+  background-color: @accent_bg_color;
+  border-color: @accent_bg_color;
+}
+switch slider {
+  min-width: 16px;
+  min-height: 16px;
+  margin: 3px;
+  background-color: @window_fg_color;
+  border: none;
+}
+switch:checked slider {
+  background-color: @accent_fg_color;
+}
+*:disabled, label:disabled {
+  color: @vk_disabled;
+}
+"""
 
 # Flat, square and quiet: the selection signal is a 2px accent underline, never a fill. Rows and tabs
 # reserve the underline's space with a transparent border so selecting one does not shift the layout.
@@ -301,8 +355,8 @@ def render_gtk(theme, mode, design):
     palette = GTK_COLORS.substitute(theme.colors[mode])
     r = design["radius"]
     return {
-        home_path(".config", "gtk-3.0", "gtk.css"): ("css", palette + GTK3_SHAPE.substitute(r=r)),
-        home_path(".config", "gtk-4.0", "gtk.css"): ("css", palette + GTK4_SHAPE.substitute(r=r)),
+        home_path(".config", "gtk-3.0", "gtk.css"): ("css", palette + GTK3_SHAPE.substitute(r=r) + GTK_CONTROLS),
+        home_path(".config", "gtk-4.0", "gtk.css"): ("css", palette + GTK4_SHAPE.substitute(r=r) + GTK_CONTROLS),
     }
 
 
@@ -563,21 +617,25 @@ def render_user_chrome(theme, mode, design):
 def apply_firefox(theme, mode, design, explicit):
     profiles = read_profiles_ini()
     default = find_default_profile(*profiles) if profiles else None
-    if default is None:
+    webapps = find_webapp_profiles(*profiles) if profiles else []
+    if default is None and not webapps:
         if explicit:
-            die(f"no default Firefox profile found under {firefox_profile_root()} (start Firefox once first)")
-        print(f"{PROG}: no default Firefox profile yet, skipping the firefox target "
+            die(f"no Firefox profile to theme under {firefox_profile_root()} "
+                "(start Firefox once, or install a vekrona webapp, then retry)")
+        print(f"{PROG}: no Firefox profile yet, skipping the firefox target "
               "(run vekrona-render-theme firefox after Firefox has started once)", file=sys.stderr)
         return
-    webapps = find_webapp_profiles(*profiles)
-    for profile in [default, *webapps]:
+    if default is None:
+        print(f"{PROG}: no default Firefox profile yet, theming only the vekrona webapp profiles "
+              "(run vekrona-render-theme firefox after Firefox has started once)", file=sys.stderr)
+    for profile in [p for p in [default, *webapps] if p]:
         if not os.path.isdir(profile):
             die(f"Firefox profile directory does not exist: {profile}")
     chrome = render_user_chrome(theme, mode, design)
-    files = {
-        os.path.join(default, "user.js"): ("slash", render_user_js(mode)),
-        os.path.join(default, "chrome", "userChrome.css"): ("css", chrome),
-    }
+    files = {}
+    if default:
+        files[os.path.join(default, "user.js")] = ("slash", render_user_js(mode))
+        files[os.path.join(default, "chrome", "userChrome.css")] = ("css", chrome)
     for profile in webapps:
         files[os.path.join(profile, "chrome", "userChrome.css")] = ("css", chrome + WEBAPP_CHROME)
     write_and_report(files)

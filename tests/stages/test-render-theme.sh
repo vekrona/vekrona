@@ -49,6 +49,7 @@ fails() { # fails <why> <stderr-substring> <tool args...>
 }
 expect_line() { grep -qxF -- "$2" "$1" || die "$1: missing line: $2"; }
 expect_text() { grep -qF -- "$2" "$1" || die "$1: missing text: $2"; }
+expect_block() { [[ "$(<"$1")" == *"$2"* ]] || die "$1: missing block: $2"; } # multi-line, unlike grep -F
 refute_text() { ! grep -qF -- "$2" "$1" || die "$1: must not contain: $2"; }
 swaymsg_calls() { [[ -f "$scratch/swaymsg.log" ]] && wc -l < "$scratch/swaymsg.log" || echo 0; }
 snapshot() { find "$HOME" "$XDG_STATE_HOME" -type f -print0 | sort -z | xargs -0 md5sum; }
@@ -125,6 +126,27 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
     expect_text "$css" "border-bottom: 2px solid transparent;"
     expect_text "$css" "border-bottom-color: @accent_bg_color;"
     expect_text "$css" "border-bottom: 1px solid @vk_line;"
+    expect_line "$css" "@define-color vk_surface_3 $s3;"
+    expect_line "$css" "@define-color vk_disabled $dis;"
+    expect_block "$css" "*:disabled, label:disabled {
+  color: @vk_disabled;"
+    expect_block "$css" "check, radio {
+  min-width: 24px;
+  min-height: 24px;
+  background-color: @view_bg_color;
+  border: 1px solid @vk_line_strong;"
+    expect_block "$css" "check:checked, check:indeterminate {
+  background-color: @accent_bg_color;
+  border-color: @accent_bg_color;
+  color: @accent_fg_color;"
+    expect_text "$css" "background-image: linear-gradient(@accent_bg_color, @accent_bg_color);"
+    expect_block "$css" "switch {
+  min-width: 40px;
+  min-height: 24px;
+  background-color: @vk_surface_3;"
+    expect_block "$css" "switch:checked {
+  background-color: @accent_bg_color;"
+    expect_text "$css" "switch slider {"
   done
   local scheme=prefer-$m theme=adw-gtk3-dark
   [[ "$m" == light ]] && theme=adw-gtk3
@@ -248,8 +270,25 @@ fails "a foreign gtk.css" "not managed by vekrona" gtk
 [[ "$(cat "$gtk4")" == '/* mine */' ]] || die "foreign gtk.css was modified"
 [[ ! -e "$gtk3" ]] || die "gtk-3.0/gtk.css was written although gtk-4.0/gtk.css is foreign (not two-phase)"
 printf '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */\n' > "$gtk4"
-fails "a legacy-marker gtk.css" "not managed by vekrona" gtk
 log "ok: a foreign gtk.css is refused, left alone, and nothing else is written"
+
+# files written by the previous renderer (and by vekrona-gtk-theme before it) stay ours across the upgrade
+old_text='vekrona-render-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-render-theme)'
+reset_home; set_mode dark
+mkdir -p "$(dirname "$gtk3")" "$(dirname "$gtk4")" "$(dirname "$qt_conf")/colors" "$(dirname "$sway_conf")" "$ff_profile/chrome" "$ff_webapp/chrome"
+printf '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */\nold\n' > "$gtk4"
+printf '/* %s */\nold\n' "$old_text" > "$gtk3"
+printf '/* %s */\nold\n' "$old_text" > "$ff_profile/chrome/userChrome.css"
+printf '/* %s */\nold\n' "$old_text" > "$ff_webapp/chrome/userChrome.css"
+printf '# %s\nold\n' "$old_text" > "$qt_conf"
+printf '# %s\nold\n' "$old_text" > "$qt_colors"
+printf '# %s\nold\n' "$old_text" > "$sway_conf"
+printf '// %s\nold\n' "$old_text" > "$ff_profile/user.js"
+ok_run all
+for f in "$gtk3" "$gtk4" "$qt_conf" "$qt_colors" "$sway_conf" "$ff_profile/user.js" "$ff_profile/chrome/userChrome.css" "$ff_webapp/chrome/userChrome.css"; do
+  refute_text "$f" "old"
+done
+log "ok: files carrying the previous renderer's header (every comment style) are overwritten"
 
 reset_home
 mkdir -p "$(dirname "$qt_conf")"; printf '# mine\n' > "$qt_conf"
@@ -281,10 +320,29 @@ fails "a symlink to a foreign file" "not managed by vekrona" firefox
 log "ok: a symlink into the repo is replaced, one to a foreign file is refused"
 
 rm -rf "$ff_root"
-fails "firefox without profiles.ini" "no default Firefox profile" firefox
+fails "firefox without profiles.ini" "no Firefox profile to theme" firefox
 ok_run all
-grep -q 'no default Firefox profile yet' "$scratch/stderr" || die "skipped firefox without a notice"
+grep -q 'no Firefox profile yet' "$scratch/stderr" || die "skipped firefox without a notice"
 log "ok: no Firefox profile fails 'firefox' and is skipped with a notice under 'all'"
+
+# a fresh HOME where only `firefox -CreateProfile` ran: vekrona-* profiles, no default, no [Install*]
+reset_home
+printf '[General]\nStartWithLastProfile=1\n\n[Profile0]\nName=vekrona-youtube\nIsRelative=1\nPath=vekrona-youtube\n' > "$ff_root/profiles.ini"
+ok_run firefox
+expect_text "$ff_webapp/chrome/userChrome.css" "visibility: collapse"
+[[ ! -e "$ff_profile/user.js" && ! -e "$ff_webapp/user.js" ]] || die "user.js written without a default profile"
+grep -q 'no default Firefox profile yet' "$scratch/stderr" || die "missing default profile was skipped without a notice"
+rm -rf "$ff_webapp/chrome"
+ok_run all
+expect_text "$ff_webapp/chrome/userChrome.css" "visibility: collapse"
+log "ok: vekrona-* webapp profiles are themed without a default profile"
+
+# profiles.ini exists but lists nothing to theme
+printf '[General]\nStartWithLastProfile=1\n' > "$ff_root/profiles.ini"
+fails "firefox with an empty profiles.ini" "no Firefox profile to theme" firefox
+ok_run all
+grep -q 'no Firefox profile yet' "$scratch/stderr" || die "empty profiles.ini skipped without a notice"
+log "ok: explicit 'firefox' fails with nothing to theme; 'all' skips with a notice"
 
 mkdir -p "$ff_root"
 printf '[Install1]\nDefault=a\n\n[Install2]\nDefault=b\n' > "$ff_root/profiles.ini"
