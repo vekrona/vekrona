@@ -133,6 +133,7 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
     expect_text "$css" "background-image: none;"
     expect_text "$css" "outline: 1px solid @vk_focus;"
     expect_text "$css" "outline-offset: 2px;"
+    refute_text "$css" "*:focus-visible, "
     expect_text "$css" "border-bottom: 2px solid transparent;"
     expect_text "$css" "border-bottom-color: @accent_bg_color;"
     expect_text "$css" "border-bottom: 1px solid @vk_line;"

@@ -322,7 +322,7 @@ button, entry, spinbutton, dropdown > button, .card, scale trough {
 button.flat, headerbar button:not(.suggested-action):not(.destructive-action), scale trough {
   border-color: transparent;
 }
-*:focus-visible, entry:focus-within, spinbutton:focus-within {
+*:focus:focus-visible, entry:focus-within, spinbutton:focus-within {
   outline: 1px solid @vk_focus;
   outline-offset: 2px;
 }
