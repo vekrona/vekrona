@@ -224,7 +224,9 @@ ShellRoot {
         }
         onExited: exitCode => {
             if (exitCode !== 0) {
-                console.warn("vekrona-lock: fprintd-list exited with", exitCode, "; no fingerprint unlock");
+                // No reader is a normal machine, not a failure.
+                if (!fprintList.text.includes("No devices available"))
+                    console.error("vekrona-lock: fprintd-list exited with", exitCode, fprintList.text.trim(), "; no fingerprint unlock");
                 return;
             }
             root.fprintEnrolled = root.hasEnrolledFingers(fprintList.text);
