@@ -117,25 +117,32 @@ sys.stdout.write("\n")
 PYEOF
 }
 
-# Replace <stock_id> by <plugin_id> in every bar widget list, unless the plugin is already there.
-ensure_dms_bar_widget_plugin() {
-  local stock_id="$1" plugin_id="$2"
-  dms_rewrite_settings "$stock_id -> $plugin_id" "$stock_id" "$plugin_id" <<'PYEOF'
+# Replace the widget <old_id> by <new_id> in every bar widget list, unless the list already has <new_id>. A bare
+# string entry becomes the new string; an object entry keeps its other keys and gets the new id.
+ensure_dms_bar_widget_replaced() {
+  local old_id="$1" new_id="$2"
+  dms_rewrite_settings "$old_id -> $new_id" "$old_id" "$new_id" <<'PYEOF'
 import json
 import sys
 
-path, stock_id, plugin_id = sys.argv[1], sys.argv[2], sys.argv[3]
+path, old_id, new_id = sys.argv[1], sys.argv[2], sys.argv[3]
 
 with open(path) as f:
     data = json.load(f)
 
+def widget_name(entry):
+    return entry.get("id") if isinstance(entry, dict) else entry
+
 for bar in data["barConfigs"]:
     for key in ("leftWidgets", "centerWidgets", "rightWidgets"):
         widgets = bar.get(key)
-        if not isinstance(widgets, list) or plugin_id in widgets:
+        if not isinstance(widgets, list) or any(widget_name(w) == new_id for w in widgets):
             continue
-        if stock_id in widgets:
-            widgets[widgets.index(stock_id)] = plugin_id
+        for i, entry in enumerate(widgets):
+            if entry == old_id:
+                widgets[i] = new_id
+            elif isinstance(entry, dict) and entry.get("id") == old_id:
+                widgets[i] = {**entry, "id": new_id}
 
 json.dump(data, sys.stdout, indent=2)
 sys.stdout.write("\n")
