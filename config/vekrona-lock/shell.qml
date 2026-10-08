@@ -211,6 +211,7 @@ ShellRoot {
     }
 
     function keyPressed() {
+        failure = "";
         if (fprintEnrolled && !unlocking && !fprint.active)
             fprint.start();
     }
