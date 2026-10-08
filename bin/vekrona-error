@@ -376,6 +376,12 @@ def field_str(value):
     return str(value)
 
 
+ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+# quickshell logs console.error as "<ESC>[31m ERROR<ESC>[97m qml<ESC>[0m: text" at journal priority 6 (info),
+# so the level marker in the text is the only signal that a QML error happened.
+QML_ERROR_RE = re.compile(r'\s*ERROR\s+qml: (.*)', re.DOTALL)
+
+
 UUID_RE = re.compile(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b')
 PATH_RE = re.compile(r'/[\w./-]+')
 HEX_RE = re.compile(r'\b(?:0x)?[0-9a-fA-F]{6,}\b')
@@ -495,6 +501,10 @@ def classify(entry, unit_exits):
     except (TypeError, ValueError):
         priority = 6
 
+    qml_error = QML_ERROR_RE.fullmatch(ANSI_RE.sub("", message)) if syslog_id == "dms" else None
+    if qml_error:
+        message, priority = qml_error.group(1), 3
+
     if message_id == MESSAGE_ID_UNIT_PROCESS_EXITED:
         return None
 
@@ -529,8 +539,12 @@ def classify(entry, unit_exits):
         }
 
     if priority <= 3:
-        first_line = message.splitlines()[0][:120] if message else ""
-        title = f"{syslog_id or 'journal'}: {first_line}" if first_line else (syslog_id or "journal error")
+        source_name = syslog_id or "journal"
+        if message.strip():
+            title = f"{source_name}: {message.strip().splitlines()[0][:120]}"
+        else:
+            title, message = f"{source_name}: empty error message", \
+                f"{source_name} logged an error-priority journal entry whose MESSAGE is empty."
         return {
             "source": "journal", "title": title, "summary": message,
             "identifier": syslog_id, "unit": "", "exe": field_str(entry.get("_EXE")),

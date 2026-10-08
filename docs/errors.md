@@ -15,7 +15,11 @@ which follows the journal and turns four kinds of entry into a recorded error:
 - a kernel OOM kill, or a `systemd-oomd` kill
 - any other journal entry logged at priority `err` or above
 
-Shell tests source `tests/lib.sh`, which isolates `die()` from the real reporter, so a
+The last kind also covers DMS QML `console.error` lines: quickshell logs them as
+`ERROR qml:` at journal priority 6 (ANSI colors stripped before matching), so the
+watcher records them although they are not `err` priority. An `err` entry whose
+`MESSAGE` is empty is titled `<identifier>: empty error message`. Shell tests
+source `tests/lib.sh`, which isolates `die()` from the real reporter, so a
 failing test stage does not leave records in the store.
 
 `vekrona-error report --title T [--summary S] [--source vekrona|manual]` adds
@@ -85,7 +89,7 @@ that is not valid TOML, or a rule that is incomplete or has a bad regex, is
 ignored and toasted once by name, like an invalid line in the user file.
 The files are read when `vekrona-errors.service` starts. Shipped rules cover
 the TDX kernel line and `greetd`'s `gkr-pam: unable to locate daemon control
-file` (see `docs/known-issues.md`); add a rule here, with its reason, rather
+file` (see `docs/known-issues.md`), plus the HP OMEN 45L BIOS F.18 ACPI errors, its empty initrd kernel entry and bluetoothd's MT7922 `Failed to set mode` (see `TODO.md`); add a rule here, with its reason, rather
 than muting per machine. `VEKRONA_ERRORS_MUTE_DIR` overrides the directory
 (the tests use it).
 

@@ -108,6 +108,17 @@ class ShippedDefaultMutesTest(SandboxTestCase):
         self.watch_journal_error("kernel", "virt/tdx: TDX module initialization failed")
         self.assertEqual(len(self.recorded()), 2)
 
+    def test_a_kernel_entry_with_an_empty_message_is_muted(self):
+        self.watch_journal_error("kernel", "")
+        self.assertEqual(self.recorded(), [])
+        self.assertEqual(self.sandbox.sent_notifications(), [])
+
+    def test_the_hp_omen_acpi_firmware_bug_is_muted_but_another_acpi_error_is_not(self):
+        self.watch_journal_error("kernel", "ACPI Error: Region SystemCMOS (ID=5) has no handler (20260408/exfldio-261)")
+        self.assertEqual(self.recorded(), [])
+        self.watch_journal_error("kernel", "ACPI Error: Region EmbeddedControl (ID=3) has no handler (20260408/exfldio-261)")
+        self.assertEqual(len(self.recorded()), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
