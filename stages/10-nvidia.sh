@@ -105,10 +105,16 @@ ensure_root_file "$ROOT/etc/systemd/system/akmods@.service.d/vekrona-dracut.conf
 root systemctl daemon-reload
 akmods_dropin_active "$target_kver" || die "akmods@$target_kver.service does not regenerate the initramfs after its build"
 
+# The proprietary module defaults NVreg_UseKernelSuspendNotifiers to 1 but only the open modules honour it; the
+# nvidia-suspend/resume units skip themselves unless it is 0, so video memory preservation then fails with -EIO.
+# nvidia loads from the initramfs, so this goes in before the regeneration below, which bakes it into the image.
+ensure_root_file "$ROOT/etc/modprobe.d/vekrona-nvidia.conf" "$NVIDIA_MODPROBE_CONF"
+
 if initramfs_needs_nvidia_regen "$target_kver"; then
   log "regenerating initramfs for $target_kver"
   root dracut -f --kver "$target_kver"
   initramfs_has_nvidia "$target_kver" || die "initramfs for $target_kver still lacks nvidia after dracut"
+  initramfs_has_nvidia_options "$target_kver" || die "initramfs for $target_kver lacks $NVIDIA_MODPROBE_CONF after dracut"
 else
   log "ok: initramfs for $target_kver contains nvidia and is newer than the module and its config"
 fi
@@ -116,20 +122,14 @@ fi
 mapfile -t kernel_args < <(nvidia_kernel_args)
 ensure_kernel_arg "${kernel_args[@]}"
 
-modprobe_option_active() {
-  local active
-  active="$(grep -rhE '^[[:space:]]*[^#[:space:]]' /etc/modprobe.d /usr/lib/modprobe.d 2>/dev/null || true)"
-  grep -qE -- "$1" <<<"$active"
-}
+ensure_system_unit enabled nvidia-suspend nvidia-resume nvidia-hibernate nvidia-suspend-then-hibernate
 
-if modprobe_option_active 'NVreg_PreserveVideoMemoryAllocations=1' \
-  && modprobe_option_active 'NVreg_TemporaryFilePath=/var/tmp'; then
-  log "ok: nvidia modprobe options present"
+# nvidia-powerd is the Dynamic Boost daemon for laptops; on a desktop it only logs "UnSupported CPU" every boot.
+if is_laptop; then
+  log "laptop: leaving nvidia-powerd at the package default"
 else
-  ensure_root_file "$ROOT/etc/modprobe.d/vekrona-nvidia.conf" /etc/modprobe.d/vekrona-nvidia.conf
+  ensure_system_unit --now disabled nvidia-powerd.service
 fi
-
-ensure_system_unit enabled nvidia-suspend nvidia-resume nvidia-hibernate
 
 lock_pkgs=()
 pkg_installed akmod-nvidia && lock_pkgs+=(akmod-nvidia)

@@ -137,12 +137,17 @@ if ran 10-nvidia; then
 
   check assert "nvidia module for kernel $(uname -r) is proprietary (license NVIDIA)" eq "$(nvidia_module_problem "$(uname -r)")" ""
   check assert "initramfs for kernel $(uname -r) contains nvidia" initramfs_has_nvidia "$(uname -r)"
+  check assert "initramfs for kernel $(uname -r) carries $NVIDIA_MODPROBE_CONF" initramfs_has_nvidia_options "$(uname -r)"
+  if [[ -e /proc/driver/nvidia/params ]]; then
+    warn_check "nvidia runs with NVreg_UseKernelSuspendNotifiers=0 (reboot pending)" nvidia_suspend_notifiers_off
+  fi
   check assert "akmods@$(uname -r) regenerates the initramfs after its build" akmods_dropin_active "$(uname -r)"
 
   for u in nvidia-suspend nvidia-resume nvidia-hibernate; do
     check assert "$u enabled" unit_enabled "$u"
   done
 
+  is_laptop || check assert "nvidia-powerd (Dynamic Boost, laptops only) not enabled on a desktop" not unit_enabled nvidia-powerd.service
   check assert "versionlock: akmod-nvidia" versionlock_has akmod-nvidia
 
   for d in /lib/modules/*/; do
@@ -245,8 +250,10 @@ if ran 40-system; then
   check assert "default error mutes installed" file_exists /etc/vekrona/errors-mute.d/10-vendor-noise.conf
   check assert "logind inhibit-delay drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
   check assert "oomd drop-in present" file_exists /etc/systemd/oomd.conf.d/vekrona.conf
+  check assert "hardware clock holds UTC" rtc_is_utc
   check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
   check assert "no stale dGPU udev rule from an earlier install" file_absent /etc/udev/rules.d/70-vekrona-dgpu.rules
+  warn_check "no dead /dev/dri/vekrona-dgpu node from the old udev rule (reboot pending)" file_absent /dev/dri/vekrona-dgpu
   check assert "$VEKRONA_USER in input group" group_member "$VEKRONA_USER" input
   check assert "/dev/uinput exists" file_exists /dev/uinput
 

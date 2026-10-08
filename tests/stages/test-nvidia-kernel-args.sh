@@ -6,7 +6,7 @@ source "$ROOT/tests/lib.sh"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/bin" "$work/proc" "$work/boot" "$work/etc/kernel" "$work/etc/dracut.conf.d"
+mkdir -p "$work/bin" "$work/proc" "$work/boot" "$work/etc/kernel" "$work/etc/dracut.conf.d" "$work/etc/modprobe.d"
 export VEKRONA_SYSFS_ROOT="$work"
 
 # Fakes: grubby keeps its args in $work/grubby-args and logs updates; lsinitrd prints $LSINITRD_OUT;
@@ -180,6 +180,8 @@ log "ok: a failing lsinitrd surfaces instead of reading as no nvidia"
 img="$work/boot/initramfs-7.0.img"
 module="$work/nvidia.ko"
 conf="$work$DRACUT_NVIDIA_CONF"
+modprobe_conf="$work$NVIDIA_MODPROBE_CONF"
+touch -d '2026-01-01' "$modprobe_conf"
 touch -d '2026-01-02' "$module"
 touch -d '2026-01-01' "$conf"
 export MODINFO_LICENSE=NVIDIA MODINFO_PATH="$module"
@@ -205,10 +207,41 @@ touch -d '2026-01-05' "$conf"
 LSINITRD_OUT="$HAS" initramfs_needs_nvidia_regen 7.0 || die "an initramfs older than the dracut config does not need regeneration"
 log "ok: an initramfs older than the dracut config needs regeneration"
 
+touch -d '2026-01-02' "$conf"
+touch -d '2026-01-05' "$modprobe_conf"
+LSINITRD_OUT="$HAS" initramfs_needs_nvidia_regen 7.0 || die "an initramfs older than the nvidia modprobe options does not need regeneration"
+log "ok: an initramfs older than the nvidia modprobe options needs regeneration"
+
 unset MODINFO_LICENSE
 if (LSINITRD_OUT="$HAS" initramfs_needs_nvidia_regen 7.0) 2>"$work/err"; then die "a missing module was not reported"; fi
 grep -q "nvidia module missing for 7.0" "$work/err" || die "a missing module did not surface its error"
 log "ok: a missing nvidia module surfaces instead of reading as current"
+
+# --- initramfs_has_nvidia_options ---
+
+printf 'options nvidia NVreg_UseKernelSuspendNotifiers=0\n' > "$modprobe_conf"
+has_options() { LSINITRD_OUT="$1" initramfs_has_nvidia_options 7.0; }
+
+has_options "$(<"$modprobe_conf")" || die "an initramfs carrying the current options was not recognised"
+log "ok: an initramfs carrying the current nvidia options counts"
+
+! has_options "" || die "an initramfs without the options file was recognised as carrying them"
+! has_options "options nvidia NVreg_UseKernelSuspendNotifiers=1" || die "an initramfs with stale options was recognised as current"
+log "ok: a missing or stale options file in the initramfs does not count"
+
+if (LSINITRD_STATUS=1 initramfs_has_nvidia_options 7.0) 2>"$work/err"; then die "a failing lsinitrd -f was not reported"; fi
+grep -q "lsinitrd -f etc/modprobe.d/vekrona-nvidia.conf failed" "$work/err" || die "a failing lsinitrd -f did not surface its error"
+log "ok: a failing lsinitrd -f surfaces instead of reading as stale"
+
+# --- nvidia_suspend_notifiers_off ---
+
+mkdir -p "$work/proc/driver/nvidia"
+params="$work/proc/driver/nvidia/params"
+printf 'ModifyDeviceFiles: 1\nUseKernelSuspendNotifiers: 0\n' > "$params"
+nvidia_suspend_notifiers_off || die "UseKernelSuspendNotifiers: 0 was not recognised"
+printf 'UseKernelSuspendNotifiers: 1\n' > "$params"
+! nvidia_suspend_notifiers_off || die "UseKernelSuspendNotifiers: 1 was recognised as off"
+log "ok: only UseKernelSuspendNotifiers: 0 counts as effective"
 
 # --- akmods_dropin_active ---
 
@@ -228,3 +261,13 @@ log "ok: no drop-in, a commented line and a near-miss do not count"
 if (SYSTEMCTL_STATUS=1 akmods_dropin_active 7.0) 2>"$work/err"; then die "a failing systemctl was not reported"; fi
 grep -q "cannot read unit akmods@7.0.service" "$work/err" || die "a failing systemctl did not surface its error"
 log "ok: an unreadable unit surfaces instead of reading as inactive"
+
+# --- shipped modprobe options ---
+
+# nvidia-suspend.service only runs when /proc/driver/nvidia/params says "UseKernelSuspendNotifiers: 0"; with video
+# memory preservation on and the units skipped, the proprietary module fails every suspend with -EIO.
+nvidia_options="$(grep -hE '^options nvidia ' "$ROOT/etc/modprobe.d/vekrona-nvidia.conf")"
+for option in NVreg_PreserveVideoMemoryAllocations=1 NVreg_UseKernelSuspendNotifiers=0; do
+  grep -qw -- "$option" <<<"$nvidia_options" || die "the shipped nvidia modprobe options lack $option"
+done
+log "ok: video memory preservation is on and kernel suspend notifiers are off, so nvidia-suspend.service runs"

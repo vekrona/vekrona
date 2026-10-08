@@ -28,8 +28,13 @@ root() {
   if [[ $EUID -eq 0 ]]; then "$@"; else sudo "$@"; fi
 }
 
+# Single chokepoint for acquiring sudo credentials. Without a terminal an interactive sudo cannot take the FIDO tap or
+# PIN and only logs a pam_unix "conversation failed" record, so that case dies before sudo is asked anything.
+# sudo prompts on /dev/tty, so the test is for a controlling terminal, not for a terminal on stdin.
 sudo_refresh() {
   [[ $EUID -eq 0 ]] && return 0
+  sudo -n true 2>/dev/null && return 0
+  { : </dev/tty; } 2>/dev/null || die "sudo needs a terminal for the FIDO tap/PIN: run $(basename "$0") from a terminal"
   sudo -v || die "sudo credentials required"
 }
 
@@ -314,18 +319,47 @@ ensure_dir() {
   for d in "$@"; do [[ -d "$d" ]] || mkdir -p "$d"; done
 }
 
+# ensure_system_unit [--now] enabled|disabled <unit>...  With --now the unit's running state follows too (started
+# when enabled, stopped when disabled). A masked or static unit cannot be enabled, so it already counts as disabled.
 ensure_system_unit() {
+  local now=""
+  if [[ "${1:-}" == --now ]]; then now=1; shift; fi
   local state="$1"; shift
   local u
   for u in "$@"; do
-    if [[ "$(systemctl is-enabled "$u" 2>/dev/null || true)" == "$state" ]]; then log "unit $u: $state"; continue; fi
-    case "$state" in
-      enabled)  root systemctl enable "$u" ;;
-      disabled) root systemctl disable "$u" ;;
-      *) die "unknown unit state: $state" ;;
-    esac
-    [[ "$(systemctl is-enabled "$u" 2>/dev/null || true)" == "$state" ]] || die "unit $u not $state"
+    if ! unit_matches_state "$u" "$state"; then
+      root systemctl "${state%d}" ${now:+--now} "$u" # enabled -> enable, disabled -> disable
+      unit_matches_state "$u" "$state" || die "unit $u not $state"
+    fi
+    if [[ -n "$now" ]]; then
+      case "$state" in
+        enabled)  [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]] || root systemctl start "$u" ;;
+        disabled) [[ "$(systemctl is-active "$u" 2>/dev/null || true)" != active ]] || root systemctl stop "$u" ;;
+      esac
+    fi
+    log "unit $u: $state"
   done
+}
+
+unit_matches_state() {
+  local current
+  current="$(systemctl is-enabled "$1" 2>/dev/null || true)"
+  case "$2" in
+    enabled)  [[ "$current" == enabled ]] ;;
+    disabled) [[ "$current" == disabled || "$current" == masked || "$current" == static ]] ;;
+    *) die "unknown unit state: $2" ;;
+  esac
+}
+
+# The hardware clock must hold UTC: with local time in the RTC, early-boot journal timestamps are off by the zone
+# offset and the clock steps once timesyncd runs.
+rtc_is_utc() { [[ "$(timedatectl show -p LocalRTC --value)" == no ]]; }
+
+ensure_utc_rtc() {
+  if rtc_is_utc; then log "hardware clock: UTC"; return 0; fi
+  log "hardware clock holds local time: switching it to UTC"
+  root timedatectl set-local-rtc 0
+  rtc_is_utc || die "hardware clock still not UTC after timedatectl set-local-rtc 0"
 }
 
 ensure_system_unit_active() {
@@ -797,6 +831,7 @@ nvidia_module_problem() {
 }
 
 DRACUT_NVIDIA_CONF=/etc/dracut.conf.d/99-nvidia-dracut.conf
+NVIDIA_MODPROBE_CONF=/etc/modprobe.d/vekrona-nvidia.conf
 
 initramfs_path() { printf '%s/boot/initramfs-%s.img' "${VEKRONA_SYSFS_ROOT:-}" "$1"; }
 
@@ -807,13 +842,29 @@ initramfs_has_nvidia() {
   grep -qE '/nvidia\.ko(\.[a-z0-9]+)?$' <<<"$listing"
 }
 
-# True when the initramfs is absent, lacks nvidia, or predates the module or the dracut config that adds it.
+# nvidia loads from the initramfs, where dracut copies /etc/modprobe.d, so its options only apply from the image.
+initramfs_has_nvidia_options() {
+  local img packed
+  img="$(initramfs_path "$1")"
+  packed="$(root lsinitrd "$img" -f "${NVIDIA_MODPROBE_CONF#/}")" || die "lsinitrd -f ${NVIDIA_MODPROBE_CONF#/} failed for $img"
+  [[ "$packed" == "$(<"${VEKRONA_SYSFS_ROOT:-}$NVIDIA_MODPROBE_CONF")" ]]
+}
+
+# True once the loaded nvidia module runs with NVreg_UseKernelSuspendNotifiers=0 (false while that is pending a reboot).
+nvidia_suspend_notifiers_off() {
+  local params="${VEKRONA_SYSFS_ROOT:-}/proc/driver/nvidia/params"
+  [[ -e "$params" ]] && file_grep_q -x 'UseKernelSuspendNotifiers: 0' "$params"
+}
+
+# True when the initramfs is absent, lacks nvidia, or predates the module or a config file that dracut bakes into it.
 initramfs_needs_nvidia_regen() {
-  local img module
+  local img module input
   img="$(initramfs_path "$1")"
   [[ -e "$img" ]] || return 0
   module="$(modinfo -k "$1" -n nvidia)" || die "nvidia module missing for $1"
-  [[ "$img" -ot "$module" || "$img" -ot "${VEKRONA_SYSFS_ROOT:-}$DRACUT_NVIDIA_CONF" ]] && return 0
+  for input in "$module" "${VEKRONA_SYSFS_ROOT:-}$DRACUT_NVIDIA_CONF" "${VEKRONA_SYSFS_ROOT:-}$NVIDIA_MODPROBE_CONF"; do
+    [[ "$img" -ot "$input" ]] && return 0
+  done
   initramfs_has_nvidia "$1" && return 1
   return 0
 }
