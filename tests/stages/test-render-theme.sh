@@ -361,9 +361,7 @@ PY
 log "ok: text pairs reach 7:1 and line-strong, focus and accent reach 3:1 in both modes"
 
 # ---- fontconfig drift guard
-# EXPECTED TO FAIL until the fontconfig chunk merges: it adds Atkinson Hyperlegible to the sans list.
-# Failing is reported as XFAIL; once the lists match this prints ok, and the XFAIL branch must then be deleted.
-if python3 - "$ROOT/config/tokens.json" "$ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" <<'PY'
+python3 - "$ROOT/config/tokens.json" "$ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" <<'PY' || die "fontconfig family lists differ from the token families (see above)"
 import json, sys
 import xml.etree.ElementTree as ET
 
@@ -382,8 +380,4 @@ for alias, key in (("sans-serif", "sans"), ("system-ui", "sans"), ("monospace", 
 if bad:
     sys.exit("\n".join(bad))
 PY
-then
-  log "ok: fontconfig family lists equal the token families"
-else
-  log "XFAIL (until the fontconfig chunk merges): fontconfig family lists differ from the token families"
-fi
+log "ok: fontconfig family lists equal the token families"
