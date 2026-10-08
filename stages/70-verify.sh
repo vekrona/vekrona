@@ -418,7 +418,7 @@ assert d.get('trayIconSpacing', 0) == tray_icon_spacing, d.get('trayIconSpacing'
 bars = d.get('barConfigs', [])
 assert bars, 'no barConfigs'
 for bar in bars:
-    want = {'noBackground': False, 'squareCorners': True, 'transparency': 1, 'widgetPadding': widget_padding, 'pillPadding': space3,
+    want = {'noBackground': False, 'squareCorners': True, 'attachToScreenEdge': True, 'transparency': 1, 'widgetPadding': widget_padding, 'pillPadding': space3,
             'innerPadding': inner_padding, 'spacing': space2, 'fontScale': font_scale}
     for key, value in want.items():
         assert bar.get(key) == value, (bar.get('id'), key, bar.get(key))

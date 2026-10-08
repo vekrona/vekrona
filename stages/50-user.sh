@@ -203,6 +203,7 @@ ensure_dms_setting_enforced notificationPopupShadowEnabled false
 ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get trayIconSpacing)"
 ensure_dms_bar_setting_enforced noBackground false
 ensure_dms_bar_setting_enforced squareCorners true
+ensure_dms_bar_setting_enforced attachToScreenEdge true
 ensure_dms_bar_setting_enforced transparency 1
 ensure_dms_bar_setting_enforced widgetPadding "$(vekrona_design_get widgetPadding)"
 ensure_dms_bar_setting_enforced pillPadding "$(vekrona_token_get spacing space-3)"

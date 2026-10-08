@@ -44,7 +44,7 @@
       "barInsetPadding": -1,
       "barLengthPadding": 0,
       "bottomGap": 0,
-      "attachToScreenEdge": false,
+      "attachToScreenEdge": true,
       "transparency": 1.0,
       "widgetTransparency": 1.0,
       "squareCorners": true,
