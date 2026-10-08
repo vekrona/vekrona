@@ -131,7 +131,7 @@ that marker says this test run started them — a session it merely attached
 to is left running. `vm/session-check.sh` calls `session_ensure_up`
 (`WLR_BACKENDS=headless` Sway under `systemd-run --user` when nothing is
 live yet; wait for the IPC socket, confirm `sway-session.target` is active,
-start `dms.service`, call `dms ipc call lock status`, validate the xremap
+start `dms.service`, call `systemctl --user status vekrona-lock`, validate the xremap
 config with `xremap-wlroots --validate-config`) and leaves the session
 running either way; `vm/errors-check.sh` and `vm/agent-launch-check.sh` call
 `session_attach_existing` to use that same session instead of starting

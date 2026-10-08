@@ -268,7 +268,10 @@ if ran 45-auth; then
     check assert "both pam_u2f template lines pinned to pam://vekrona in the profile's $f" vekrona_pam_u2f_lines_ok "/etc/authselect/custom/vekrona/$f" 2
     check assert "the one enabled pam_u2f line pinned to pam://vekrona in /etc/pam.d/$f" vekrona_pam_u2f_lines_ok "/etc/pam.d/$f" 1
   done
-  check assert "dankshell-u2f equals the repo file" root_files_equal "$VEKRONA_ROOT/etc/pam.d/dankshell-u2f" /etc/pam.d/dankshell-u2f
+  for pam in vekrona-lock-password vekrona-lock-u2f vekrona-lock-fprint; do
+    check assert "$pam equals the repo file" root_files_equal "$VEKRONA_ROOT/etc/pam.d/$pam" "/etc/pam.d/$pam"
+  done
+  check assert "stale dankshell-u2f removed" file_absent /etc/pam.d/dankshell-u2f
   if [[ -e "$(u2f_keys_path)" ]]; then
     check assert "$(u2f_keys_path) has no +pin credential flag (it makes pam_u2f ask the PIN on the touch-only lock screen; rerun ./install.sh 45)" not u2f_keys_have_pin_flag "$(u2f_keys_path)"
   fi
@@ -299,11 +302,6 @@ if ran 45-auth; then
   fi
 
   warn_check "u2f_keys or fingerprint prints registered for $VEKRONA_USER" user_has_touch_credentials
-  check assert "DMS seed enables fingerprint and security key" python3 -c "
-import json
-d = json.load(open('$VEKRONA_ROOT/config/DankMaterialShell/settings.seed.json'))
-assert d.get('enableFprint') is True and d.get('enableU2f') is True and d.get('u2fMode') == 'or'
-"
 fi
 
 if ran 15-mac; then
@@ -374,6 +372,13 @@ d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('lockBeforeSuspend') is True, d.get('lockBeforeSuspend')
 assert d.get('acLockTimeout') == 300, d.get('acLockTimeout')
 "
+  check assert "DMS settings: customPowerActionLock=vekrona-lock (DMS hands the lock to vekrona-lock)" python3 -c "
+import json
+d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
+assert d.get('customPowerActionLock') == 'vekrona-lock', d.get('customPowerActionLock')
+"
+  check assert "vekrona-lock resolves on PATH" bash -c "command -v vekrona-lock >/dev/null"
+  check assert "vekrona-lock Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-lock")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-lock")"
   check assert "DMS settings: fontFamily=Atkinson Hyperlegible Next" python3 -c "
 import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))

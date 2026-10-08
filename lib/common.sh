@@ -291,7 +291,7 @@ vekrona_link_dirs() {
   printf '%s\n' \
     "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/ghostty" \
     "$HOME/.config/systemd/user" "$HOME/.config/fontconfig/conf.d" \
-    "$HOME/.config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/vekrona-themes" \
+    "$HOME/.config/quickshell" "$HOME/.config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/vekrona-themes" \
     "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/bin" \
     "$HOME/.config/scopebuddy" "$HOME/.config/MangoHud" \
     "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"

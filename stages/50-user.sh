@@ -193,6 +193,7 @@ seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/session.seed.json" "$dms_s
 ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
 ensure_dms_setting_default monoFontFamily "JetBrainsMono Nerd Font"
 ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
+ensure_dms_setting_enforced customPowerActionLock '"vekrona-lock"'
 ensure_dms_setting_enforced cornerRadius "$(vekrona_design_get radius)"
 ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get trayIconSpacing)"
 ensure_dms_bar_setting_enforced noBackground true
@@ -339,6 +340,9 @@ done
 shopt -u nullglob
 
 ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
+
+# bin/vekrona-lock starts it as `qs -c vekrona-lock`, which looks under ~/.config/quickshell.
+ensure_symlink "$VEKRONA_ROOT/config/vekrona-lock" "$HOME/.config/quickshell/vekrona-lock"
 
 ensure_symlink "$VEKRONA_ROOT/config/scopebuddy/scb.conf" "$HOME/.config/scopebuddy/scb.conf"
 ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/MangoHud/MangoHud.conf"
