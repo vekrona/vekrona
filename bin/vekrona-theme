@@ -8,7 +8,7 @@ STATE_DIR="$(vekrona_state_dir)"
 STATE_FILE="$(vekrona_theme_name_file)"
 ACTIVE_THEME_FILE="$(vekrona_active_theme_file)"
 GTK_COLORS_FILE="$HOME/.config/gtk-4.0/dank-colors.css"
-WAIT_SECONDS=10
+WAIT_SECONDS="${VEKRONA_THEME_WAIT_SECONDS:-10}"
 
 INOTIFY_PID=""
 
@@ -105,24 +105,31 @@ ROLLBACK_ON_EXIT=0
 MODE_BACKUP=""
 ACTIVE_THEME_BACKUP=""
 
-restore_backup() {
-  local backup="$1" dest="$2"
-  if [[ -n "$backup" ]]; then
-    cp "$backup" "$dest"
-  else
-    rm -f "$dest"
-  fi
+# Replace <dest> by a copy of <source> with one rename, so DMS, which watches the file, never reads it half written.
+replace_file_from() {
+  local source="$1" dest="$2" tmp
+  tmp="$(mktemp "$(dirname "$dest")/.$(basename "$dest").restore.XXXXXX")"
+  cp "$source" "$tmp"
+  mv "$tmp" "$dest"
 }
 
 # Put the files back, then re-render and re-flip DMS so GTK, Qt, Firefox, Sway and DMS agree with the
-# recorded mode again. A failing re-render is reported: the desktop would be left half-themed.
+# recorded mode again. With no usable recorded mode (none yet, or a legacy value stage 50 would migrate) the
+# mode goes back to dark, stage 50's default, so the files and the desktop still agree. A failing re-render
+# is reported: the desktop would be left half-themed.
 rollback() {
-  local previous=""
-  restore_backup "$MODE_BACKUP" "$STATE_FILE"
-  restore_backup "$ACTIVE_THEME_BACKUP" "$ACTIVE_THEME_FILE"
-  [[ -n "$MODE_BACKUP" ]] && previous="$(cat "$STATE_FILE")"
-  # A legacy or absent recorded value (stage 50 migrates it) has no mode to go back to.
-  [[ "$previous" == dark || "$previous" == light ]] || return 0
+  local previous=dark recorded
+  if [[ -n "$MODE_BACKUP" ]]; then
+    recorded="$(cat "$MODE_BACKUP")"
+    [[ "$recorded" == dark || "$recorded" == light ]] && previous="$recorded"
+  fi
+  printf '%s\n' "$previous" > "$STATE_FILE.tmp.$$"
+  mv "$STATE_FILE.tmp.$$" "$STATE_FILE"
+  if [[ -n "$ACTIVE_THEME_BACKUP" ]]; then
+    replace_file_from "$ACTIVE_THEME_BACKUP" "$ACTIVE_THEME_FILE"
+  else
+    rm -f "$ACTIVE_THEME_FILE"
+  fi
   "$ROOT/bin/vekrona-render-theme" || echo "vekrona-theme: re-rendering '$previous' after the failure failed; run 'vekrona-theme $previous'" >&2
   dms ipc call theme "$previous" >/dev/null || echo "vekrona-theme: could not flip DMS back to '$previous'; run 'vekrona-theme $previous'" >&2
 }
