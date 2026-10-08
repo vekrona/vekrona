@@ -11,10 +11,13 @@ ID_OF='def id: if type == "string" then . else .id end;'
 
 bars_failing() { vekrona-dev sh bash -c "jq -c '$ID_OF .barConfigs[] | $1' $GUEST_SETTINGS"; }
 
+# OCR reads the clock's leading zero as 9 or O, so any two characters stand for the hour.
+CLOCK_HOURS='..'
+
 clock_shown() {
   local after
-  after="$(vekrona-dev run date +%H:%M)"
-  vekrona-dev see text "($CLOCK_BEFORE|$after)"
+  after="$(vekrona-dev run date +%M)"
+  vekrona-dev see text "$CLOCK_HOURS:($CLOCK_BEFORE|$after)"
 }
 dash_open() { vekrona-dev see text 'wallpapers'; }
 export -f clock_shown dash_open
@@ -34,17 +37,17 @@ found="$(bars_failing '[.rightWidgets[] | select(id == "controlCenterButton")] a
 [[ -z "$found" ]] || die "every bar must have two controlCenterButton entries, one without the audio icon and one with the audio icon but no network icon, but these do not: $found"
 log "ok: every bar splits the control center into a network button and an audio button"
 
-spacing="$(vekrona-dev sh bash -c "jq -r .trayIconSpacing $GUEST_SETTINGS")"
+spacing="$(vekrona-dev sh bash -c "jq -r '.trayIconSpacing // 0' $GUEST_SETTINGS")"
 tray_icon_spacing="$(vekrona_design_get trayIconSpacing)"
 [[ "$spacing" == "$tray_icon_spacing" ]] || die "trayIconSpacing must equal the design token $tray_icon_spacing, but it is $spacing"
 log "ok: tray icons are spaced by the design token"
 
 vekrona-dev move 100 400
-CLOCK_BEFORE="$(vekrona-dev run date +%H:%M)"
-export CLOCK_BEFORE
+CLOCK_BEFORE="$(vekrona-dev run date +%M)"
+export CLOCK_BEFORE CLOCK_HOURS
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- clock_shown
-read -r x y <<<"$(vekrona-dev see find "($CLOCK_BEFORE|$(vekrona-dev run date +%H:%M))")"
-[[ -n "${x:-}" && -n "${y:-}" ]] || die "the bar must show the guest time $CLOCK_BEFORE, but OCR found no such text to click"
+read -r x y <<<"$(vekrona-dev see find "$CLOCK_HOURS:($CLOCK_BEFORE|$(vekrona-dev run date +%M))")"
+[[ -n "${x:-}" && -n "${y:-}" ]] || die "the bar must show the guest minute $CLOCK_BEFORE, but OCR found no such text to click"
 log "ok: DMS renders the vekrona clock with the current time"
 
 vekrona-dev click "$x" "$y"

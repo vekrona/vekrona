@@ -390,7 +390,7 @@ d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 radius, gap, padding = $(vekrona_design_get radius), $(vekrona_design_get gap), $(vekrona_design_get padding)
 widget_padding, tray_icon_spacing = $(vekrona_design_get widgetPadding), $(vekrona_design_get trayIconSpacing)
 assert d.get('cornerRadius') == radius, d.get('cornerRadius')
-assert d.get('trayIconSpacing') == tray_icon_spacing, d.get('trayIconSpacing')
+assert d.get('trayIconSpacing', 0) == tray_icon_spacing, d.get('trayIconSpacing')  # DMS drops a key equal to its default (0) when it rewrites the file
 bars = d.get('barConfigs', [])
 assert bars, 'no barConfigs'
 for bar in bars:
