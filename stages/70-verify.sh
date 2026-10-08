@@ -337,6 +337,8 @@ if ran 50-user; then
   check assert "no vekrona symlink left under ~/.config/ghostty (vekrona ships no Ghostty config; found: ${ghostty_links:-none})" eq "$ghostty_links" ""
   check assert "~/.config/autostart/nvidia-settings-user.desktop links to $VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" \
     eq "$(readlink "$HOME/.config/autostart/nvidia-settings-user.desktop")" "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop"
+  check assert "the systemd user manager generates no nvidia-settings autostart unit (the Hidden=true override took effect)" \
+    file_absent "$XDG_RUNTIME_DIR/systemd/generator.late/app-nvidia\\x2dsettings\\x2duser@autostart.service"
   check assert "sway config.d exists (personal Sway settings, included last by the shared config)" dir_exists "$HOME/.config/sway/config.d"
   check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
     sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
