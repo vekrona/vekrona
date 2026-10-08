@@ -7,17 +7,26 @@ source "$ROOT/tests/lib.sh"
 STEP_TIMEOUT_SEC=60
 GUEST_PASSWORD=vekrona
 KEY_ID=1050:0407
-KEY_PROMPT='touch your security key'
 KEY_ATTACHED=0
 
 lock_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-lock; }
 lock_inactive() { ! lock_active; }
-key_watcher_running() { vekrona-dev sh pgrep -u "$USER" -f fido-keys.sh >/dev/null; }
-password_shown() { vekrona-dev see text 'password'; }
-key_prompt_shown() { vekrona-dev see text "$KEY_PROMPT"; }
+key_watcher_running() { vekrona-dev sh pgrep -f fido-keys.sh >/dev/null; }
+# OCR drops the small texts when the 144px clock is in the picture, so only the lower part of the screen is read.
+lock_text_shown() {
+  local shot lower status=0
+  shot="$(vekrona-dev shot)"
+  lower="${shot%.png}-lower.png"
+  magick "$shot" -gravity south -crop 100%x45%+0+0 +repage "$lower" || die "cannot crop the screenshot $shot"
+  vekrona-dev see text "$1" "$lower" || status=$?
+  rm -f "$shot" "$lower"
+  return "$status"
+}
+password_shown() { lock_text_shown 'password'; }
+key_prompt_shown() { lock_text_shown 'touch your security key'; }
 key_prompt_hidden() { ! key_prompt_shown; }
 locked_hint() { vekrona-dev sh loginctl show-session auto -p LockedHint --value; }
-export -f lock_active lock_inactive key_watcher_running password_shown key_prompt_shown key_prompt_hidden
+export -f lock_text_shown lock_active lock_inactive key_watcher_running password_shown key_prompt_shown key_prompt_hidden
 
 lock_screen() {
   vekrona-dev sh dms ipc call lock lock
@@ -40,6 +49,7 @@ detach_key() {
 }
 trap detach_key EXIT
 
+command -v magick >/dev/null || die "the e2e scenario needs ImageMagick (magick) to crop screenshots"
 vekrona-dev session
 
 lock_screen
