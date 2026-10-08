@@ -514,9 +514,8 @@ for mode in ('dark', 'light'):
 assert d.get('mode') == '$recorded_theme_name', d.get('mode')
 assert isinstance(d.get('metrics'), dict), 'metrics'
 "
-  for qml_app in vekrona-lock vekrona-app-switch; do
-    check assert "$qml_app resolves import \"Vekrona\" through ~/.config/quickshell" file_exists "$HOME/.config/quickshell/$qml_app/Vekrona/qmldir"
-  done
+  check assert "vekrona-lock resolves import \"Vekrona\" through ~/.config/quickshell" file_exists "$HOME/.config/quickshell/vekrona-lock/Vekrona/qmldir"
+  check assert "vekrona-app-switch reads tokens.json through ~/.config/quickshell" test -r "$HOME/.config/quickshell/vekrona-app-switch/tokens.json"
 
   check assert "DMS matugen templates: GTK on, Ghostty off (nothing is written under ~/.config/ghostty)" python3 -c "
 import json
