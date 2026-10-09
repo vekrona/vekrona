@@ -15,7 +15,7 @@ status_file="$(mktemp)"
 
 # The journal follower stops at the sentinel, which this script logs after the unit ended, so the unit's last lines
 # are shown before it does.
-exec {follow}< <(exec journalctl --follow --since now --output cat --unit "$unit" + SYSLOG_IDENTIFIER=vekrona-update-client)
+exec {follow}< <(exec journalctl --follow --since now --output cat _SYSTEMD_UNIT="$unit" + SYSLOG_IDENTIFIER=vekrona-update-client)
 follower=$!
 cleanup() {
   kill "$follower" 2>/dev/null || true

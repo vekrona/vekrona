@@ -10,9 +10,13 @@ mkdir "$work/bin"
 
 # A journal that is a file: journalctl --follow prints its lines as they appear (an inotify wait, no polling), logger
 # appends one, and the unit, as systemctl start --wait, appends its output and ends with the exit status in unit.rc.
+# The real journalctl, which prints no entry, vets the arguments first: a stub that ignores them hid a "+" it rejects.
 cat > "$work/bin/journalctl" <<'F'
 #!/usr/bin/env bash
 echo "journalctl $*" >> "$STUB_LOG"
+query=()
+for arg in "$@"; do [[ "$arg" == --follow ]] || query+=("$arg"); done
+/usr/bin/journalctl --lines=0 --no-pager "${query[@]}" >/dev/null || { echo "journalctl rejected its arguments" >&2; exit 2; }
 exec tail --follow=name --retry --lines=+1 "$JOURNAL"
 F
 cat > "$work/bin/logger" <<'F'
