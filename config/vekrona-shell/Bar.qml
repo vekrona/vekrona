@@ -61,6 +61,10 @@ PanelWindow {
 
         Perf {}
 
+        KeyboardLayout {
+            bar: root
+        }
+
         Sound {
             bar: root
         }

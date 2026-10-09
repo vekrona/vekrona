@@ -1,5 +1,6 @@
 singleton Exec 1.0 Exec.qml
 singleton Audio 1.0 Audio.qml
+singleton Keyboard 1.0 Keyboard.qml
 Bar 1.0 Bar.qml
 Desktops 1.0 Desktops.qml
 WindowTitle 1.0 WindowTitle.qml
@@ -8,6 +9,8 @@ Agent 1.0 Agent.qml
 Tray 1.0 Tray.qml
 Perf 1.0 Perf.qml
 Sound 1.0 Sound.qml
+KeyboardLayout 1.0 KeyboardLayout.qml
+LayoutRow 1.0 LayoutRow.qml
 Network 1.0 Network.qml
 singleton Wireless 1.0 Wireless.qml
 Battery 1.0 Battery.qml

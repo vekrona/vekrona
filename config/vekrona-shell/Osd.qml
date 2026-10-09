@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -10,12 +11,26 @@ PanelWindow {
 
     readonly property int hideAfterMs: 1500
     readonly property int trackWidth: 8 * VekronaTheme.sizeTarget
+    // "volume" shows a pictogram and a level; "layouts" lists the keyboard layouts with the current one marked.
+    property string mode: "volume"
+    readonly property real layoutsMinWidth: 240 - 2 * VekronaTheme.space4
     property string glyph
     property real fraction: 0
 
     function show(glyphName: string, level: real): void {
+        mode = "volume";
         glyph = glyphName;
         fraction = level;
+        restartTimer();
+    }
+
+    function showLayouts(): void {
+        mode = "layouts";
+        restartTimer();
+    }
+
+    // Every mode shows through here, so each press holds the panel for hideAfterMs from that press.
+    function restartTimer(): void {
         hide.restart();
     }
 
@@ -52,40 +67,66 @@ PanelWindow {
 
     Rectangle {
         id: panel
-        width: row.width + 2 * VekronaTheme.space4
-        height: row.height + 2 * VekronaTheme.space4
+        width: content.width + 2 * VekronaTheme.space4
+        height: content.height + 2 * VekronaTheme.space4
         color: VekronaTheme.c.surface1
         border.width: VekronaTheme.borderHair
         border.color: VekronaTheme.c.line
 
-        Row {
-            id: row
+        Item {
+            id: content
             anchors.centerIn: parent
-            spacing: VekronaTheme.space2
+            width: root.mode === "layouts" ? layoutsColumn.width : volumeRow.width
+            height: root.mode === "layouts" ? layoutsColumn.height : volumeRow.height
 
-            Pictogram {
-                anchors.verticalCenter: parent.verticalCenter
-                px: VekronaTheme.iconM
-                name: root.glyph
-            }
+            Row {
+                id: volumeRow
+                visible: root.mode !== "layouts"
+                spacing: VekronaTheme.space2
 
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: root.trackWidth
-                height: VekronaTheme.space2
-                color: VekronaTheme.c.surface3
+                Pictogram {
+                    anchors.verticalCenter: parent.verticalCenter
+                    px: VekronaTheme.iconM
+                    name: root.glyph
+                }
 
                 Rectangle {
-                    width: root.fraction * parent.width
-                    height: parent.height
-                    color: VekronaTheme.c.accent
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: root.trackWidth
+                    height: VekronaTheme.space2
+                    color: VekronaTheme.c.surface3
+
+                    Rectangle {
+                        width: root.fraction * parent.width
+                        height: parent.height
+                        color: VekronaTheme.c.accent
+                    }
+                }
+
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    style: VekronaTheme.type.label
+                    text: Math.round(100 * root.fraction) + " %"
                 }
             }
 
-            Label {
-                anchors.verticalCenter: parent.verticalCenter
-                style: VekronaTheme.type.label
-                text: Math.round(100 * root.fraction) + " %"
+            ColumnLayout {
+                id: layoutsColumn
+                visible: root.mode === "layouts"
+                width: Math.max(implicitWidth, root.layoutsMinWidth)
+                spacing: 0
+
+                Repeater {
+                    model: Keyboard.layouts
+
+                    LayoutRow {
+                        required property var modelData
+                        required property int index
+
+                        layout: modelData
+                        current: index === Keyboard.activeIndex
+                    }
+                }
             }
         }
     }
@@ -136,6 +177,16 @@ PanelWindow {
 
         function previous(): void {
             Audio.player?.previous();
+        }
+    }
+
+    IpcHandler {
+        target: "keyboard"
+
+        function announce(): void {
+            if (Keyboard.layouts.length < 2)
+                return;
+            root.showLayouts();
         }
     }
 }
