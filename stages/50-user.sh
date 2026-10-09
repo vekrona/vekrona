@@ -43,6 +43,7 @@ ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-weather.timer" "$HOME/
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-calendar.service" "$HOME/.config/systemd/user/vekrona-calendar.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-calendar.timer" "$HOME/.config/systemd/user/vekrona-calendar.timer"
 ensure_symlink "$VEKRONA_ROOT/config/khal/config" "$HOME/.config/khal/config"
+ensure_symlink "$VEKRONA_ROOT/config/vdirsyncer/config.example" "$HOME/.config/vdirsyncer/config.example"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$HOME/.config/systemd/user/tailscale-systray.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors.service" "$HOME/.config/systemd/user/vekrona-errors.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors-failed.service" "$HOME/.config/systemd/user/vekrona-errors-failed.service"
@@ -63,6 +64,7 @@ else
 fi
 "$VEKRONA_ROOT/bin/vekrona-render-theme"
 
+ensure_user_unit_stopped dms.service
 systemctl --user daemon-reload
 ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer
 # Enabling only wires the unit into the next login; a live session needs the overlay now.
@@ -73,6 +75,8 @@ if [[ -n "$(sway_socket)" ]]; then
   systemctl --user restart vekrona-idle.service || die "vekrona-idle.service failed to start"
   log "restarting vekrona-cliphist.service for the running sway session"
   systemctl --user restart vekrona-cliphist.service || die "vekrona-cliphist.service failed to start"
+  log "starting the weather and calendar timers for the running sway session"
+  systemctl --user start vekrona-weather.timer vekrona-calendar.timer || die "the weather and calendar timers failed to start"
   log "restarting vekrona-shell.service for the running sway session"
   systemctl --user restart vekrona-shell.service || die "vekrona-shell.service failed to start"
 fi

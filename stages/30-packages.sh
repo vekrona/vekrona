@@ -12,10 +12,7 @@ quickshell_vendor="$(rpm -q --qf '%{VENDOR}' quickshell)"
 [[ "$quickshell_vendor" != *agaspar* ]] || die "quickshell still built by agaspar/omedora: $quickshell_vendor"
 log "ok: quickshell vendor is $quickshell_vendor"
 
-if [[ "$(systemctl --user show -p LoadState --value dms.service)" == loaded ]]; then
-  log "stopping dms.service: vekrona-shell replaces it"
-  systemctl --user disable --now dms.service || die "cannot stop dms.service"
-fi
+ensure_user_unit_stopped dms.service
 ensure_pkg_absent "${VEKRONA_RETIRED_PKGS[@]}"
 versionlock_absent "${VEKRONA_RETIRED_PKGS[@]}"
 

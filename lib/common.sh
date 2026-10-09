@@ -404,6 +404,15 @@ ensure_user_unit_enabled() {
   done
 }
 
+ensure_user_unit_stopped() {
+  local u
+  for u in "$@"; do
+    [[ "$(systemctl --user show -p LoadState --value "$u")" == loaded ]] || { log "user unit not loaded: $u"; continue; }
+    log "stopping and disabling: $u"
+    systemctl --user disable --now "$u" || die "cannot stop $u"
+  done
+}
+
 ensure_user_in_group() {
   local group="$1"
   getent group "$group" >/dev/null || die "group missing: $group"

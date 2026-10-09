@@ -52,7 +52,8 @@ copr_enabled() { repo_enabled "$(copr_id "$1")"; }
 unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; }
 unit_active() { eq "$(systemctl is-active "$1" 2>/dev/null || true)" active; }
 user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" enabled; }
-pkg_absent() { ! pkg_installed "$1"; }
+# rpm -q exits 1 for an absent package and for a broken rpm database alike, so only its "is not installed" answer counts.
+pkg_absent() { [[ "$(LC_ALL=C rpm -q "$1" 2>&1 || true)" == "package $1 is not installed" ]]; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
 file_executable() { [[ -x "$1" ]]; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
@@ -83,6 +84,7 @@ present_iff() {
 }
 
 sway_runs() { [[ -n "$(sway_socket)" ]]; }
+active_when_sway_runs() { ! sway_runs || systemctl --user is-active --quiet "$1"; }
 
 verify_greetd_active() {
   check assert "greetd enabled" greetd_enabled
@@ -215,9 +217,9 @@ if ran 30-packages; then
   check assert "greetd user exists" bash -c "getent passwd greetd >/dev/null"
 
   check assert "package installed: tuned-ppd" pkg_installed tuned-ppd
-  check assert "rpm -q dms fails (retired)" bash -c "! rpm -q dms"
+  check assert "rpm -q dms finds nothing (retired)" pkg_absent dms
   check assert "command -v dms fails" bash -c "! command -v dms"
-  check assert "dnf versionlock list has no dms" bash -c "! dnf versionlock list 2>&1 | grep -qw dms"
+  check assert "versionlock has no dms" not versionlock_has dms
   check assert "tuned.service enabled" unit_enabled tuned
   check assert "tuned-ppd.service enabled" unit_enabled tuned-ppd
   warn_check "power profiles D-Bus name answers: net.hadess.PowerProfiles" \
@@ -366,7 +368,10 @@ if ran 50-user; then
   check assert "vekrona-night.service linked" file_exists "$HOME/.config/systemd/user/vekrona-night.service"
   check assert "vekrona-weather.timer enabled" user_unit_enabled vekrona-weather.timer
   check assert "vekrona-calendar.timer enabled" user_unit_enabled vekrona-calendar.timer
+  check assert "vekrona-weather.timer active while sway runs" active_when_sway_runs vekrona-weather.timer
+  check assert "vekrona-calendar.timer active while sway runs" active_when_sway_runs vekrona-calendar.timer
   check assert "khal config linked" eq "$(readlink -f "$HOME/.config/khal/config")" "$(readlink -f "$VEKRONA_ROOT/config/khal/config")"
+  check assert "vdirsyncer example linked" eq "$(readlink -f "$HOME/.config/vdirsyncer/config.example")" "$(readlink -f "$VEKRONA_ROOT/config/vdirsyncer/config.example")"
   check assert_file_contains /etc/geoclue/conf.d/90-vekrona.conf "^allowed=true\$"
   check assert "vekrona-errors.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors.service"
   check assert "vekrona-errors-failed.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors-failed.service"
