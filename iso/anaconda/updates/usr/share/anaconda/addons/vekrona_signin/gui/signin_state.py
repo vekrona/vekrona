@@ -146,6 +146,7 @@ class Problem(Enum):
     DISK_PASSPHRASE_NOT_SAVED = "disk_passphrase_not_saved"
     STATE_UNREADABLE = "state_unreadable"
     ENCRYPTION_FAILED = "encryption_failed"
+    ROOT_NOT_BTRFS = "root_not_btrfs"
 
 
 def _problem(snapshot, guard):
@@ -155,6 +156,8 @@ def _problem(snapshot, guard):
         return Problem.DISK_PASSPHRASE_NOT_SAVED
     if snapshot.error:
         return Problem.STATE_UNREADABLE
+    if snapshot.storage_state is StorageState.MANUAL_NOT_BTRFS:
+        return Problem.ROOT_NOT_BTRFS
     if (
         snapshot.has_account
         and snapshot.has_password
@@ -172,6 +175,7 @@ def _problem_detail(problem, snapshot, guard):
         Problem.DISK_PASSPHRASE_NOT_SAVED: guard.disk_passphrase_error,
         Problem.STATE_UNREADABLE: snapshot.error,
         Problem.ENCRYPTION_FAILED: guard.failure,
+        Problem.ROOT_NOT_BTRFS: "",
     }[problem]
 
 
@@ -180,6 +184,7 @@ _PROBLEM_STATUS = {
     Problem.DISK_PASSPHRASE_NOT_SAVED: guidance.STATUS_DISK_PASSPHRASE_NOT_SAVED,
     Problem.STATE_UNREADABLE: guidance.STATUS_STATE_UNREADABLE,
     Problem.ENCRYPTION_FAILED: guidance.STATUS_ENCRYPTION_FAILED,
+    Problem.ROOT_NOT_BTRFS: guidance.STATUS_ROOT_NOT_BTRFS,
 }
 
 _PROBLEM_NOTICE = {
@@ -187,6 +192,7 @@ _PROBLEM_NOTICE = {
     Problem.DISK_PASSPHRASE_NOT_SAVED: guidance.NOTICE_DISK_PASSPHRASE_NOT_SAVED,
     Problem.STATE_UNREADABLE: guidance.NOTICE_STATE_UNREADABLE,
     Problem.ENCRYPTION_FAILED: guidance.NOTICE_ENCRYPTION_FAILED,
+    Problem.ROOT_NOT_BTRFS: guidance.NOTICE_ROOT_NOT_BTRFS,
 }
 
 

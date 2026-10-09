@@ -15,12 +15,13 @@ def matching_request():
     return with_encryption(PartitioningRequest(), PASSWORD)
 
 
-def classified(request=None, *, method="AUTOMATIC", mounts_encrypted=True, has_luks=False, has_disks=True,
-               password=PASSWORD):
+def classified(request=None, *, method="AUTOMATIC", mounts_encrypted=True, root_is_btrfs=True, has_luks=False,
+               has_disks=True, password=PASSWORD):
     return classify(
         method,
         matching_request() if request is None else request,
         mounts_encrypted=mounts_encrypted,
+        root_is_btrfs=root_is_btrfs,
         has_luks=has_luks,
         password_matches=lambda candidate: candidate == password,
         has_disks=has_disks,
@@ -83,6 +84,15 @@ class ClassifyTest(unittest.TestCase):
             classified(None, method="INTERACTIVE", mounts_encrypted=False, password="other"),
             StorageState.MANUAL_PLAIN,
         )
+
+    def test_manual_layout_whose_root_is_not_btrfs_is_refused_even_when_encrypted(self):
+        for method in ("INTERACTIVE", "BLIVET", "CUSTOM", "MANUAL"):
+            with self.subTest(method):
+                for has_luks in (False, True):
+                    self.assertEqual(
+                        classified(None, method=method, root_is_btrfs=False, has_luks=has_luks),
+                        StorageState.MANUAL_NOT_BTRFS,
+                    )
 
     def test_manual_layout_without_a_disk_is_no_disk(self):
         self.assertEqual(classified(None, method="INTERACTIVE", has_disks=False), StorageState.NO_DISK)
