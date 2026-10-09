@@ -472,3 +472,39 @@ if bad:
     sys.exit("\n".join(bad))
 PY
 log "ok: fontconfig family lists equal the token families"
+
+# ---- an interrupted write leaves nothing behind
+# sway includes config.d/*, so a stray temp there would be loaded by every later reload.
+interrupted_write() { # interrupted_write <exception expression>: write_atomic's os.replace raises it; prints "<outcome> <leftover count>"
+  python3 - "$tool" "$sway_conf" "$1" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+
+tool, target, exc = sys.argv[1:]
+loader = importlib.machinery.SourceFileLoader("vekrona_render_theme", tool)
+module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+loader.exec_module(module)
+
+seen = []
+def failing_replace(src, dst):
+    seen.append(os.path.basename(src))
+    raise eval(exc)
+module.os.replace = failing_replace
+
+try:
+    module.write_atomic(target, "content\n")
+    outcome = "returned"
+except SystemExit:
+    outcome = "exit"
+except BaseException as e:
+    outcome = type(e).__name__
+if not all(name.startswith(".") for name in seen) or not seen:
+    outcome += " visible-temp"
+print(outcome, len(os.listdir(os.path.dirname(target))))
+PY
+}
+reset_home
+[[ "$(interrupted_write 'KeyboardInterrupt()')" == "KeyboardInterrupt 0" ]] \
+  || die "an interrupted write must re-raise and leave no temp file (and the temp must be a dotfile)"
+[[ "$(interrupted_write 'OSError("disk full")')" == "exit 0" ]] \
+  || die "a failed write must die and leave no temp file"
+log "ok: an interrupted or failed write removes its dot-prefixed temp file"
