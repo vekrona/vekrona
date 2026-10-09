@@ -63,7 +63,7 @@ pkg_desktop_files_present() {
   while IFS= read -r file; do [[ -f "$file" ]] || return 1; done <<<"$files"
 }
 file_executable() { [[ -x "$1" ]]; }
-logind_idle_action() { [[ "$(loginctl show -p IdleAction --value)" == suspend ]]; }
+logind_idle_action() { [[ "$(loginctl show-session -p IdleAction --value)" == suspend ]]; }
 mem_sleep_offers_deep() { grep -qw deep /sys/power/mem_sleep; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
 module_built_for_running_kernel() { modinfo -k "$(uname -r)" "$1" >/dev/null 2>&1; }

@@ -46,8 +46,8 @@ vekrona-dev session
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- unit_active vekrona-idle.service
 
 # The installed drop-in is live in the running logind (stage 40 reloads it), before any test override.
-[[ "$(vekrona-dev run loginctl show -p IdleAction --value)" == suspend ]] || die "logind does not run with IdleAction=suspend: the drop-in is not loaded"
-[[ "$(vekrona-dev run loginctl show -p IdleActionUSec --value)" == 25min ]] || die "logind's IdleActionSec is not 25min"
+[[ "$(vekrona-dev run loginctl show-session -p IdleAction --value)" == suspend ]] || die "logind does not run with IdleAction=suspend: the drop-in is not loaded"
+[[ "$(vekrona-dev run loginctl show-session -p IdleActionUSec --value)" == 25min ]] || die "logind's IdleActionSec is not 25min"
 log "ok: the running logind has IdleAction=suspend after 25min"
 
 trap cleanup EXIT
