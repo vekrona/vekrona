@@ -33,14 +33,32 @@ LauncherModule {
                             id: "delete",
                             label: "Delete",
                             destructive: true,
-                            exec: ["bash", "-c", "set -eo pipefail; printf '%s\\n' \"$1\" | cliphist delete", "_", item.line]
+                            run: () => root.deleteEntry(item)
                         }
                     ]
                 }));
     }
 
+    // Deletes the entry, then has the host query again. Returns false: the launcher stays open on the shorter list.
+    function deleteEntry(item: var): bool {
+        const argv = ["bash", "-c", "set -eo pipefail; printf '%s\\n' \"$1\" | cliphist delete", "_", item.line];
+        Shell.Exec.run(argv, (code, stdout, stderr) => {
+            if (code !== 0)
+                launcher.toast("Couldn’t delete: " + Shell.Exec.failure(argv, code, stderr));
+            else
+                root.changed();
+        });
+        return false;
+    }
+
     function query(text: string, reqId: int): var {
-        Shell.Exec.capture(["cliphist", "list"], output => root.resultsReady(reqId, root.rows(output, text)));
+        const argv = ["cliphist", "list"];
+        Shell.Exec.run(argv, (code, stdout, stderr) => {
+            if (code !== 0)
+                root.resultsReady(reqId, [root.errorRow("read the clipboard history", Shell.Exec.failure(argv, code, stderr))]);
+            else
+                root.resultsReady(reqId, root.rows(stdout, text));
+        });
         return null;
     }
 

@@ -25,7 +25,13 @@ PanelWindow {
     }
 
     function stepBrightness(step: int, sign: string): void {
-        Exec.capture(["brightnessctl", "--machine-readable", "set", step + "%" + sign], text => show("brightness_medium", parseInt(text.split(",")[3]) / 100));
+        const argv = ["brightnessctl", "--machine-readable", "set", step + "%" + sign];
+        Exec.run(argv, (code, stdout, stderr) => {
+            if (code !== 0)
+                Exec.failure(argv, code, stderr);
+            else
+                show("brightness_medium", parseInt(stdout.split(",")[3]) / 100);
+        });
     }
 
     visible: hide.running

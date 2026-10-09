@@ -12,22 +12,44 @@ Singleton {
         return terminal.concat(argv);
     }
 
-    readonly property var transientUnit: ["systemd-run", "--user", "--collect", "--quiet", "--property=ExitType=cgroup"]
+    // The command that runs argv as a transient user unit, which outlives the shell. With `wait`, the
+    // command returns when the unit finishes and exits with the unit's status.
+    function unit(argv: list<string>, wait: bool): list<string> {
+        return ["systemd-run", "--user", "--collect", "--quiet", "--property=ExitType=cgroup"].concat(wait ? ["--wait"] : [], ["--"], argv);
+    }
 
     function detached(argv: list<string>): void {
-        capture(transientUnit.concat(["--"], argv), null);
+        run(unit(argv, false), (code, stdout, stderr) => {
+            if (code !== 0)
+                failure(argv, code, stderr);
+        });
     }
 
-    // Like detached(), but waits for the unit to finish and calls onSuccess if it exited 0.
-    function detachedThen(argv: list<string>, onSuccess): void {
-        capture(transientUnit.concat(["--wait", "--"], argv), onSuccess);
+    // Logs a failed command and returns what to tell the user: the first line of its stderr, else its exit code.
+    function failure(argv: list<string>, code: int, stderr: string): string {
+        console.error(JSON.stringify(argv) + " exited " + code + ": " + stderr.trim());
+        return stderr.trim().split("\n")[0] || "exited " + code;
     }
 
-    function capture(argv: list<string>, onSuccess): void {
-        job.createObject(root, {
+    // The one process runner: runs argv and calls onDone(code, stdout, stderr) once it ended. The code is
+    // non-zero (-1 without an exit status) also when the binary could not be started. The returned
+    // handle's kill() stops the process; onDone is not called after that.
+    function run(argv: list<string>, onDone): var {
+        const lifetime = {
+            alive: true
+        };
+        const runner = job.createObject(root, {
             argv: argv,
-            onSuccess: onSuccess
-        }).running = true;
+            onDone: onDone,
+            lifetime: lifetime
+        });
+        runner.running = true;
+        return {
+            kill: () => {
+                if (lifetime.alive)
+                    runner.cancel();
+            }
+        };
     }
 
     Component {
@@ -37,18 +59,36 @@ Singleton {
             id: process
 
             required property list<string> argv
-            required property var onSuccess
+            required property var onDone
+            required property var lifetime
+            property bool cancelled: false
+            property bool started: false
+            property bool finished: false
             property int exitCode: -1
             property int pending: 3
+
+            function cancel(): void {
+                cancelled = true;
+                running = false;
+            }
+
+            function finish(code: int, out: string, err: string): void {
+                if (finished)
+                    return;
+                finished = true;
+                lifetime.alive = false;
+                try {
+                    if (!cancelled)
+                        onDone(code, out, err);
+                } finally {
+                    destroy();
+                }
+            }
 
             function settle(): void {
                 if (--pending > 0)
                     return;
-                if (exitCode !== 0)
-                    console.error(JSON.stringify(argv) + " exited " + exitCode + ": " + errors.text.trim());
-                else if (onSuccess)
-                    onSuccess(output.text);
-                destroy();
+                finish(exitCode, output.text, errors.text);
             }
 
             command: argv
@@ -60,9 +100,15 @@ Singleton {
                 id: errors
                 onStreamFinished: process.settle()
             }
+            onStarted: started = true
             onExited: code => {
                 exitCode = code;
                 settle();
+            }
+            // Quickshell emits no exited signal when the binary cannot be started, only this.
+            onRunningChanged: {
+                if (!running && !started)
+                    finish(-1, "", "failed to start " + argv[0]);
             }
         }
     }

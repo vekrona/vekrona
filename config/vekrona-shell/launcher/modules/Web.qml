@@ -29,8 +29,6 @@ LauncherModule {
                 glyph: "history"
             }
         })
-    // `launcher.mode` is the slash keyword of the active mode, "" in the root search.
-    readonly property bool searchMode: launcher?.mode === slash
     // Resolved once by the helper from the profile's search.json.mozlz4.
     property string engineName: ""
 
@@ -87,14 +85,27 @@ LauncherModule {
         return output.split("\n").filter(line => line !== "").map(line => placeRow(JSON.parse(line)));
     }
 
+    function placesRows(argv: list<string>, code: int, stdout: string, stderr: string): var {
+        if (code !== 0)
+            return [errorRow("search bookmarks and history", Shell.Exec.failure(argv, code, stderr))];
+        try {
+            return parsePlaces(stdout);
+        } catch (e) {
+            console.error("web: cannot read the output of " + JSON.stringify(argv) + ": " + e);
+            return [errorRow("read bookmarks and history", String(e))];
+        }
+    }
+
+    // In /search the search row comes first; in the root search it is only a fallback.
     function query(text: string, reqId: int): var {
         const term = text.trim();
         if (term === "")
             return [];
-        const head = searchMode ? [searchRow(term)] : [];
+        const head = inMode ? [searchRow(term)] : [];
         if (term.length < minPlacesChars)
             return head;
-        Shell.Exec.capture(["vekrona-firefox", "places", term, "--limit", String(placesPerKind)], output => root.resultsReady(reqId, head.concat(root.parsePlaces(output))));
+        const argv = ["vekrona-firefox", "places", term, "--limit", String(placesPerKind)];
+        Shell.Exec.run(argv, (code, stdout, stderr) => root.resultsReady(reqId, head.concat(root.placesRows(argv, code, stdout, stderr))));
         return null;
     }
 
@@ -103,7 +114,15 @@ LauncherModule {
         return term === "" ? [] : [searchRow(term)];
     }
 
-    Component.onCompleted: Shell.Exec.capture(["vekrona-firefox", "engine-name"], output => root.engineName = output.trim())
+    Component.onCompleted: {
+        const argv = ["vekrona-firefox", "engine-name"];
+        Shell.Exec.run(argv, (code, stdout, stderr) => {
+            if (code !== 0)
+                Shell.Exec.failure(argv, code, stderr);
+            else
+                root.engineName = stdout.trim();
+        });
+    }
     onEngineNameChanged: changed()
 
     moduleId: "web"

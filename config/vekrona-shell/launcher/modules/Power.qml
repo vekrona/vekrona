@@ -1,7 +1,7 @@
 import QtQuick
 import ".."
-import "../../Vekrona"
 import "../.." as Shell
+import "../../Vekrona"
 
 LauncherModule {
     id: root
@@ -131,6 +131,11 @@ LauncherModule {
                 event.accepted = false;
             }
             onCurrentChanged: armed = -1
+            // Disarming (any way) takes the "Press again" toast back.
+            onArmedChanged: {
+                if (armed < 0)
+                    launcher.toast("");
+            }
             onActiveFocusChanged: {
                 if (!activeFocus)
                     armed = -1;

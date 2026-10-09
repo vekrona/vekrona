@@ -1,7 +1,7 @@
 import QtCore
-import QtQuick
 import Quickshell.Io
 import ".."
+import "../.." as Shell
 
 LauncherModule {
     id: root
@@ -13,21 +13,15 @@ LauncherModule {
     property bool toolInFlight: false
     property bool errorsInFlight: false
 
-    function capture(argv: list<string>, onDone): void {
-        job.createObject(root, {
-            argv: argv,
-            onDone: onDone
-        }).running = true;
-    }
-
     function refreshTool(): void {
         if (toolInFlight)
             return;
         toolInFlight = true;
-        capture(["vekrona-agent", "get"], (code, stdout, stderr) => {
+        const argv = ["vekrona-agent", "get"];
+        Shell.Exec.run(argv, (code, stdout, stderr) => {
             toolInFlight = false;
             if (code !== 0)
-                console.warn("agent: vekrona-agent get exited " + code + ": " + stderr.trim());
+                Shell.Exec.failure(argv, code, stderr);
             const next = code === 0 ? stdout.trim() : "";
             if (next === defaultTool)
                 return;
@@ -72,11 +66,12 @@ LauncherModule {
         if (errorsInFlight)
             return;
         errorsInFlight = true;
-        capture(["vekrona-error", "list"], (code, stdout, stderr) => {
+        const argv = ["vekrona-error", "list"];
+        Shell.Exec.run(argv, (code, stdout, stderr) => {
             errorsInFlight = false;
             let next = null;
             if (code !== 0)
-                console.error("agent: vekrona-error list exited " + code + ": " + stderr.trim());
+                Shell.Exec.failure(argv, code, stderr);
             else
                 next = parseErrors(stdout).find(record => record.status === "new") ?? null;
             if (JSON.stringify(next) === JSON.stringify(latestError))
@@ -168,25 +163,18 @@ LauncherModule {
         return rows;
     }
 
-    function refreshIfOpening(text: string): void {
-        if (text !== "")
-            return;
+    function opened(): void {
         refreshTool();
         refreshErrors();
     }
 
+    // In /agent, what is typed is a question for the agent, so asking it comes first.
     function query(text: string, reqId: int): var {
-        refreshIfOpening(text);
-        return commandRows();
+        return inMode && text.trim() !== "" ? [askRow(text.trim())].concat(commandRows()) : commandRows();
     }
 
     function fallbacks(text: string): var {
-        return [askRow(text)];
-    }
-
-    function view(viewId: string, text: string, reqId: int): var {
-        refreshIfOpening(text);
-        return text === "" ? commandRows() : [askRow(text)].concat(commandRows());
+        return [askRow(text.trim())];
     }
 
     moduleId: "agent"
@@ -195,7 +183,6 @@ LauncherModule {
     slash: "agent"
     global: true
     weight: 0.7
-    Component.onCompleted: refreshTool()
 
     FileView {
         path: root.unreadPath
@@ -203,48 +190,5 @@ LauncherModule {
         onLoaded: root.refreshErrors()
         onLoadFailed: root.refreshErrors()
         onFileChanged: reload()
-    }
-
-    Component {
-        id: job
-
-        Process {
-            id: process
-
-            required property list<string> argv
-            required property var onDone
-            property bool started: false
-            property int exitCode: -1
-            property int pending: 3
-
-            function settle(): void {
-                if (--pending > 0)
-                    return;
-                onDone(exitCode, output.text, errors.text);
-                destroy();
-            }
-
-            command: argv
-            stdout: StdioCollector {
-                id: output
-                onStreamFinished: process.settle()
-            }
-            stderr: StdioCollector {
-                id: errors
-                onStreamFinished: process.settle()
-            }
-            onStarted: started = true
-            onExited: code => {
-                exitCode = code;
-                settle();
-            }
-            // Quickshell emits no exited signal when the binary cannot be started.
-            onRunningChanged: {
-                if (running || started)
-                    return;
-                onDone(-1, "", "failed to start " + argv[0]);
-                destroy();
-            }
-        }
     }
 }

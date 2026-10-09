@@ -28,6 +28,10 @@ LauncherModule {
             label: "2 hours"
         }
     ]
+    readonly property var audioView: ({
+            title: "Audio output",
+            viewId: "audio"
+        })
     readonly property var settingRows: buildRows()
     // What the Wi-Fi and audio views show, to tell the host to re-query only when it changes.
     readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? ""])
@@ -145,10 +149,7 @@ LauncherModule {
                 {
                     id: "open",
                     label: "Choose output",
-                    push: {
-                        title: "Audio output",
-                        viewId: "audio"
-                    }
+                    push: root.audioView
                 }
             ]
         }));
@@ -271,7 +272,13 @@ LauncherModule {
     }
 
     function loadAgents(reqId: int): void {
-        Shell.Exec.capture(["vekrona-agent", "list"], output => resultsReady(reqId, agentRows(output)));
+        const argv = ["vekrona-agent", "list"];
+        Shell.Exec.run(argv, (code, stdout, stderr) => {
+            if (code !== 0)
+                resultsReady(reqId, [errorRow("list the agent tools", Shell.Exec.failure(argv, code, stderr))]);
+            else
+                resultsReady(reqId, agentRows(stdout));
+        });
     }
 
     // Toasts why a toggle was refused and returns false then, so the launcher stays open to show it.
@@ -316,24 +323,39 @@ LauncherModule {
         return match[1];
     }
 
+    // Runs a status command and applies its output. A failure is logged and leaves the state as it was.
+    function readStatus(argv: list<string>, apply): void {
+        Shell.Exec.run(argv, (code, stdout, stderr) => {
+            if (code !== 0)
+                Shell.Exec.failure(argv, code, stderr);
+            else
+                apply(stdout);
+        });
+    }
+
     function refresh(): void {
-        Shell.Exec.capture(["systemctl", "--user", "show", "vekrona-night.service", "--property=ActiveState", "--value"], output => {
+        readStatus(["systemctl", "--user", "show", "vekrona-night.service", "--property=ActiveState", "--value"], output => {
             nightOn = output.trim() === "active";
         });
-        Shell.Exec.capture(["vekrona-caffeine", "status"], output => {
+        readStatus(["vekrona-caffeine", "status"], output => {
             caffeine = parseCaffeine(output);
         });
     }
 
-    // Runs a status-changing command like Exec.detached, then reads the state again.
+    // Runs a status-changing command in a transient unit like Exec.detached, waits for it, then reads the state again.
     function runAndRefresh(argv: list<string>): void {
-        Shell.Exec.detachedThen(argv, () => root.refresh());
+        Shell.Exec.run(Shell.Exec.unit(argv, true), (code, stdout, stderr) => {
+            if (code !== 0)
+                launcher.toast("Couldn’t run " + argv[0] + ": " + Shell.Exec.failure(argv, code, stderr));
+            root.refresh();
+        });
     }
 
-    // The host has no hook for "the launcher opened", but it queries the modules with an empty text then.
+    function opened(): void {
+        refresh();
+    }
+
     function query(text, reqId) {
-        if (text === "")
-            refresh();
         return settingRows;
     }
 
@@ -358,7 +380,6 @@ LauncherModule {
     weight: 0.9
     onSettingRowsChanged: changed()
     onSubviewStateChanged: changed()
-    Component.onCompleted: refresh()
 
     Connections {
         target: root.attempt
@@ -528,7 +549,7 @@ LauncherModule {
                     label: "Audio"
                     checkable: false
                     focused: strip.activeFocus && strip.current === audio
-                    onActivated: strip.launcher.setQuery("/settings audio")
+                    onActivated: strip.launcher.pushView(root.moduleId, root.audioView)
                 }
             }
         }

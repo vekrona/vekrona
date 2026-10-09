@@ -1,7 +1,7 @@
 import QtQuick
 
 // The base of every launcher module (modules/*.qml). The host (Launcher.qml) sets `launcher` and
-// calls query, fallbacks and view.
+// calls opened, query, fallbacks and view.
 //
 // A result is {id: "<moduleId>:<key>", title, subtitle?, iconPath?, glyph?, kind, keywords?, aliases?,
 // score?, card?: "calc", checked?, actions: [action]}. A result with a `score` (0..1) skips fuzzy matching
@@ -11,7 +11,8 @@ import QtQuick
 // url: string, push: {title, viewId}, setQuery: string, run: function() (the launcher closes unless it
 // returns false). With `confirm` the first activation only arms the row.
 Item {
-    // The host API: close(), setQuery(text), enterMode(slash), toast(text).
+    // The host API: close(), setQuery(text), enterMode(slash), pushView(moduleId, {title, viewId}),
+    // toast(text) (an empty text clears the toast).
     property var launcher
     property string moduleId
     property string title
@@ -32,6 +33,29 @@ Item {
     signal resultsReady(int reqId, var results)
     // The static results changed; the host queries again.
     signal changed
+
+    // Called on every module each time the launcher opens: refresh state that goes stale while it is closed.
+    function opened() {
+    }
+
+    // The row that tells an asynchronous request failed: "Couldn’t <what>" with the reason below it.
+    function errorRow(what: string, reason: string): var {
+        return {
+            id: moduleId + ":error",
+            title: "Couldn’t " + what,
+            subtitle: reason,
+            glyph: "error",
+            kind: "Error",
+            score: 1,
+            actions: [
+                {
+                    id: "copy-reason",
+                    label: "Copy message",
+                    copy: reason
+                }
+            ]
+        };
+    }
 
     // An array, or null when the results arrive later through resultsReady (the host drops stale reqIds).
     function query(text, reqId) {

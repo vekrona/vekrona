@@ -68,9 +68,13 @@ PanelWindow {
         shown = false;
     }
 
+    // An empty text clears the toast.
     function showToast(text: string): void {
         toastText = text;
-        toastTimer.restart();
+        if (text === "")
+            toastTimer.stop();
+        else
+            toastTimer.restart();
     }
 
     function moduleOf(resultId: string): var {
@@ -122,15 +126,19 @@ PanelWindow {
         refresh();
     }
 
-    function pushView(entry: var, push: var): void {
+    // Enters the sub-view `push` ({title, viewId}) of the module, on top of whatever is open.
+    function pushView(module: var, push: var): void {
         viewStack = viewStack.concat([
             {
                 title: push.title,
                 viewId: push.viewId,
-                module: entry.module,
+                module: module,
                 savedQuery: search.text
             }
         ]);
+        armed = null;
+        actionsOpen = false;
+        search.forceActiveFocus();
         applyQuery("");
     }
 
@@ -194,6 +202,16 @@ PanelWindow {
         } catch (e) {
             reportModuleFailure(module, e);
             return [];
+        }
+    }
+
+    function notifyOpened(): void {
+        for (const module of moduleList) {
+            try {
+                module.opened();
+            } catch (e) {
+                reportModuleFailure(module, e);
+            }
         }
     }
 
@@ -404,7 +422,7 @@ PanelWindow {
                 Exec.detached(["xdg-open", action.url]);
                 closeLauncher();
             } else if (action.push !== undefined) {
-                pushView(entry, action.push);
+                pushView(entry.module, action.push);
             } else if (action.setQuery !== undefined) {
                 setRootQuery(action.setQuery);
             } else if (action.run !== undefined) {
@@ -528,6 +546,7 @@ PanelWindow {
     onShownChanged: {
         if (shown) {
             search.forceActiveFocus();
+            notifyOpened();
         } else {
             requestId++;
             armed = null;
@@ -570,6 +589,13 @@ PanelWindow {
 
         function enterMode(slash: string): void {
             root.enterMode(slash);
+        }
+
+        function pushView(moduleId: string, push: var): void {
+            const module = root.moduleList.find(candidate => candidate.moduleId === moduleId);
+            if (module === undefined)
+                throw new Error("no module has the id " + moduleId);
+            root.pushView(module, push);
         }
 
         function toast(text: string): void {
