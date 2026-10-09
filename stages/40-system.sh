@@ -21,7 +21,22 @@ root install -d -m 0755 -o greetd -g greetd /var/cache/tuigreet
 assert "tuigreet cache dir exists" test -d /var/cache/tuigreet
 
 ensure_root_file "$VEKRONA_ROOT/etc/vekrona/errors-mute.d/10-vendor-noise.conf" /etc/vekrona/errors-mute.d/10-vendor-noise.conf
-ensure_root_file "$VEKRONA_ROOT/etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf" /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
+LOGIND_DROPINS=(/etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/logind.conf.d/vekrona-idle.conf)
+logind_dropins_fingerprint() {
+  local f
+  for f in "${LOGIND_DROPINS[@]}"; do
+    if [[ -e "$f" ]]; then cksum <"$f"; else echo absent; fi
+  done
+}
+logind_before="$(logind_dropins_fingerprint)"
+for dropin in "${LOGIND_DROPINS[@]}"; do
+  ensure_root_file "$VEKRONA_ROOT/etc/systemd/logind.conf.d/${dropin##*/}" "$dropin"
+done
+if [[ "$(logind_dropins_fingerprint)" != "$logind_before" ]]; then
+  log "logind drop-ins changed: reloading systemd-logind (SIGHUP, sessions stay up)"
+  root systemctl reload systemd-logind
+fi
+ensure_root_file "$VEKRONA_ROOT/etc/systemd/sleep.conf.d/vekrona.conf" /etc/systemd/sleep.conf.d/vekrona.conf
 ensure_root_file "$VEKRONA_ROOT/etc/systemd/oomd.conf.d/vekrona.conf" /etc/systemd/oomd.conf.d/vekrona.conf
 ensure_utc_rtc
 USB_AUTOSUSPEND_DROPIN=/etc/modprobe.d/vekrona-usb-autosuspend.conf

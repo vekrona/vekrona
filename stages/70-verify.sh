@@ -56,6 +56,8 @@ user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true
 pkg_absent() { [[ "$(LC_ALL=C rpm -q "$1" 2>&1 || true)" == "package $1 is not installed" ]]; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
 file_executable() { [[ -x "$1" ]]; }
+logind_idle_action() { [[ "$(loginctl show -p IdleAction --value)" == suspend ]]; }
+mem_sleep_offers_deep() { grep -qw deep /sys/power/mem_sleep; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
 module_built_for_running_kernel() { modinfo -k "$(uname -r)" "$1" >/dev/null 2>&1; }
 nvidia_module_present_for() { modinfo -k "$1" nvidia >/dev/null 2>&1; }
@@ -275,6 +277,10 @@ if ran 40-system; then
   check assert "/var/cache/tuigreet owned by greetd" owned_by /var/cache/tuigreet greetd
   check assert "default error mutes installed" file_exists /etc/vekrona/errors-mute.d/10-vendor-noise.conf
   check assert "logind inhibit-delay drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
+  check assert "logind idle drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-idle.conf
+  check assert "running logind has IdleAction=suspend (drop-ins reloaded)" logind_idle_action
+  check assert "sleep drop-in present" file_exists /etc/systemd/sleep.conf.d/vekrona.conf
+  warn_check "hardware offers deep suspend (/sys/power/mem_sleep lists deep); otherwise suspend falls back to s2idle" mem_sleep_offers_deep
   check assert "oomd drop-in present" file_exists /etc/systemd/oomd.conf.d/vekrona.conf
   check assert "hardware clock holds UTC" rtc_is_utc
   check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
@@ -603,7 +609,7 @@ if ran 90a-switch-dm || ran 90b-remove; then
   for p in "${desktop_pkgs[@]}"; do
     check assert "protected desktop package present: $p" pkg_installed "$p"
   done
-  for f in /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/oomd.conf.d/vekrona.conf; do
+  for f in /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/logind.conf.d/vekrona-idle.conf /etc/systemd/sleep.conf.d/vekrona.conf /etc/systemd/oomd.conf.d/vekrona.conf; do
     check assert "override still present: $f" file_exists "$f"
   done
   check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
