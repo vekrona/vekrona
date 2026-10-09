@@ -26,11 +26,14 @@ printf '%s\n' "installing" "all done" >> "$JOURNAL"
 exit "$(<"$UNIT_RC")"
 F
 chmod +x "$work/bin"/*
+# A deadline for a client that never sees the end of the unit, not a pause.
+CLIENT_DEADLINE_SEC=30
+update_client() { timeout "$CLIENT_DEADLINE_SEC" "$REPO/bin/vekrona-update" "$@"; }
 export PATH="$work/bin:$PATH" STUB_LOG="$work/log" JOURNAL="$work/journal" UNIT_RC="$work/unit.rc"
 : > "$JOURNAL"
 
 echo 0 > "$UNIT_RC"
-out="$("$REPO/bin/vekrona-update" 2>&1)"
+out="$(update_client 2>&1)"
 [[ "$out" == $'installing\nall done' ]] || die "the unit's output was not shown whole and alone: '$out'"
 grep -qx 'systemctl start --wait vekrona-update-now.service' "$STUB_LOG" || die "the unit was not started with --wait: $(cat "$STUB_LOG")"
 grep -q -- '--since now' "$STUB_LOG" || die "the journal was not followed from now: $(cat "$STUB_LOG")"
@@ -38,7 +41,7 @@ log "ok: starts the unit, shows everything it printed and ends when it ends"
 
 echo 3 > "$UNIT_RC"
 status=0
-"$REPO/bin/vekrona-update" >/dev/null 2>&1 || status=$?
+update_client >/dev/null 2>&1 || status=$?
 [[ "$status" -eq 3 ]] || die "exit status $status, expected the unit's 3"
 log "ok: exits with the unit's result"
 
