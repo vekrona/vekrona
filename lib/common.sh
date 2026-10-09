@@ -361,13 +361,11 @@ prune_vekrona_links() {
   done < <(vekrona_links --stale "$@")
 }
 
-# Every directory stage 50 links into, one per line (70-verify scans the same set). ~/.config/ghostty is
-# listed only so prune_vekrona_links retires the config link earlier installs made there (vekrona no longer
-# ships a Ghostty config); a dotfiles-managed or regular ~/.config/ghostty/config is never touched.
+# Every directory stage 50 links into, one per line (70-verify scans the same set).
 vekrona_link_dirs() {
   local d
   printf '%s\n' \
-    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/ghostty" "$HOME/.config/autostart" \
+    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/autostart" \
     "$HOME/.config/systemd/user" "$HOME/.config/fontconfig/conf.d" \
     "$HOME/.config/quickshell" \
     "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/bin" \

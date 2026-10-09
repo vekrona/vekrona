@@ -305,23 +305,13 @@ fails "a foreign gtk.css" "not managed by vekrona" gtk
 printf '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */\n' > "$gtk4"
 log "ok: a foreign gtk.css is refused, left alone, and nothing else is written"
 
-# files written by the previous renderer (and by vekrona-gtk-theme before it) stay ours across the upgrade
-old_text='vekrona-render-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-render-theme)'
+# the pre-rename vekrona-gtk-theme marker is now treated as foreign
 reset_home; set_mode dark
-mkdir -p "$(dirname "$gtk3")" "$(dirname "$gtk4")" "$(dirname "$qt_conf")/colors" "$(dirname "$sway_conf")" "$ff_profile/chrome" "$ff_webapp/chrome"
-printf '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */\nold\n' > "$gtk4"
-printf '/* %s */\nold\n' "$old_text" > "$gtk3"
-printf '/* %s */\nold\n' "$old_text" > "$ff_profile/chrome/userChrome.css"
-printf '/* %s */\nold\n' "$old_text" > "$ff_webapp/chrome/userChrome.css"
-printf '# %s\nold\n' "$old_text" > "$qt_conf"
-printf '# %s\nold\n' "$old_text" > "$qt_colors"
-printf '# %s\nold\n' "$old_text" > "$sway_conf"
-printf '// %s\nold\n' "$old_text" > "$ff_profile/user.js"
-ok_run all
-for f in "$gtk3" "$gtk4" "$qt_conf" "$qt_colors" "$sway_conf" "$ff_profile/user.js" "$ff_profile/chrome/userChrome.css" "$ff_webapp/chrome/userChrome.css"; do
-  refute_text "$f" "old"
-done
-log "ok: files carrying the previous renderer's header (every comment style) are overwritten"
+mkdir -p "$(dirname "$gtk4")"
+printf '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */\n' > "$gtk4"
+fails "a pre-rename gtk.css" "not managed by vekrona" gtk
+[[ "$(cat "$gtk4")" == '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */'* ]] || die "pre-rename gtk.css was modified"
+log "ok: a pre-rename vekrona-gtk-theme marker is now treated as foreign"
 
 reset_home
 mkdir -p "$(dirname "$qt_conf")"; printf '# mine\n' > "$qt_conf"
