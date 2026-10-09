@@ -152,6 +152,11 @@ fails() { # fails <why> <stderr-substring> <tool args...>
   grep -qF -- "$needle" "$scratch/stderr" || die "$why: error does not say '$needle': $(cat "$scratch/stderr")"
   [[ ! -s "$scratch/stdout" ]] || die "$why: printed to stdout despite failing: $(cat "$scratch/stdout")"
 }
+succeeds_empty() { # succeeds_empty <why> <tool args...>: a fresh Firefox is not a failure, it has nothing to list
+  local why="$1"; shift
+  run_tool "$@" || die "$why: must succeed, failed with: $(cat "$scratch/stderr")"
+  [[ ! -s "$scratch/stdout" && ! -s "$scratch/stderr" ]] || die "$why: must print nothing: $(cat "$scratch/stdout" "$scratch/stderr")"
+}
 # rows <query> [--limit N]: the output as "kind title score" lines
 rows() { ok_run places "$@"; jq -r '[.kind, .title, .score] | join(" | ")' "$scratch/stdout"; }
 expect_rows() { # expect_rows <why> <expected, newline separated> <places args...>
@@ -200,7 +205,7 @@ wait "$LOCK_PID"
 fails "--limit 0" "not a positive integer" places example --limit 0
 fails "--limit lizard" "not a positive integer" places example --limit lizard
 rm "$main/places.sqlite"
-fails "missing places.sqlite" "places.sqlite not found" places example
+succeeds_empty "Firefox has not created places.sqlite yet" places example
 printf 'not a database, long enough to be read as a page header and fail the check........' > "$main/places.sqlite"
 fails "corrupt places.sqlite" "places.sqlite query failed" places example
 
@@ -221,7 +226,7 @@ fixture engines "$main/search.json.mozlz4" gone ddg
 fails "default engine absent from the engine list" "default engine gone is not among its engines" engine-name
 
 rm "$main/search.json.mozlz4"
-fails "missing search.json.mozlz4" "search.json.mozlz4" engine-name
+succeeds_empty "Firefox has not created search.json.mozlz4 yet" engine-name
 
 printf 'plain json, not mozlz4' > "$main/search.json.mozlz4"
 fails "wrong magic" "is not a mozLz4 file" engine-name
@@ -243,13 +248,15 @@ fails "bytes that are no JSON" "could not decode" engine-name
 reset_profile
 rm -r "$main"
 fails "profile directory gone" "profile directory does not exist" engine-name
+fails "profile directory gone for places" "profile directory does not exist" places example
 
 rm "$ff_root/profiles.ini"
-fails "no profiles.ini" "no profiles.ini under $ff_root" engine-name
-fails "no profiles.ini for places" "no profiles.ini under $ff_root" places example
+succeeds_empty "no profiles.ini, Firefox never started: engine-name" engine-name
+succeeds_empty "no profiles.ini, Firefox never started: places" places example
 
 printf '[General]\nVersion=2\n' > "$ff_root/profiles.ini"
-fails "profiles.ini without a default" "no default Firefox profile" engine-name
+succeeds_empty "profiles.ini without a default: engine-name" engine-name
+succeeds_empty "profiles.ini without a default: places" places example
 
 printf '[Install1]\nDefault=a\n\n[Install2]\nDefault=b\n' > "$ff_root/profiles.ini"
 fails "two install sections" "cannot tell the default profile" engine-name

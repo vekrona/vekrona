@@ -53,9 +53,10 @@ def frecency_scorer(conn):
 
 
 def open_places(profile):
+    """The connection to the profile's places.sqlite, or None when Firefox has not created it yet."""
     path = os.path.join(profile, "places.sqlite")
     if not os.path.isfile(path):
-        die(f"{path} not found (Firefox has not recorded any history yet)")
+        return None
     # immutable=1 reads the file without locking it, which works while Firefox holds its exclusive lock.
     # It does not read places.sqlite-wal, so the newest pages show up only after Firefox checkpoints.
     conn = sqlite3.connect(f"file:{urllib.parse.quote(path)}?immutable=1", uri=True)
@@ -70,8 +71,12 @@ def matching_rows(conn, sql, haystack, terms, limit):
 
 
 def cmd_places(args):
+    """No profile or no places.sqlite yet is a fresh Firefox: no rows and success, not a failure."""
     terms = args.query.casefold().split()
-    conn = open_places(vekrona_firefox.require_default_profile())
+    profile = vekrona_firefox.default_profile()
+    conn = None if profile is None else open_places(profile)
+    if conn is None:
+        return
     try:
         score = frecency_scorer(conn)
         for kind, sql, haystack in (("bookmark", BOOKMARKS_SQL, BOOKMARK_HAYSTACK),
@@ -83,7 +88,10 @@ def cmd_places(args):
 
 
 def default_engine_name(profile):
+    """The display name, or None when Firefox has not written its search settings yet."""
     path = os.path.join(profile, "search.json.mozlz4")
+    if not os.path.isfile(path):
+        return None
     store = vekrona_firefox.read_mozlz4_json(path)
     meta = store.get("metaData", {})
     # An empty defaultEngineId means the user never chose one: Firefox then uses the app default.
@@ -99,7 +107,11 @@ def default_engine_name(profile):
 
 
 def cmd_engine_name(_args):
-    print(default_engine_name(vekrona_firefox.require_default_profile()))
+    """Prints nothing and succeeds on a fresh Firefox, which has no profile or search settings yet."""
+    profile = vekrona_firefox.default_profile()
+    name = None if profile is None else default_engine_name(profile)
+    if name is not None:
+        print(name)
 
 
 def cmd_profile_root(_args):

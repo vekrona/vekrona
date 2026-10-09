@@ -65,15 +65,16 @@ def find_webapp_profiles(root, parser):
     return [d for d in dirs if d]
 
 
-def require_default_profile():
-    """The main profile directory; FirefoxError when Firefox has none or it is gone from disk."""
+def default_profile():
+    """The main profile directory, or None when Firefox has no profile yet (no profiles.ini, or no default in
+    it: Firefox writes both on its first start). FirefoxError when profiles.ini is ambiguous or unreadable, or
+    names a directory that is gone."""
     profiles = read_profiles_ini()
     if profiles is None:
-        raise FirefoxError(f"no profiles.ini under {firefox_profile_root()} (start Firefox once)")
+        return None
     profile = find_default_profile(*profiles)
     if profile is None:
-        raise FirefoxError(f"no default Firefox profile in {os.path.join(profiles[0], 'profiles.ini')} "
-                           "(start Firefox once)")
+        return None
     if not os.path.isdir(profile):
         raise FirefoxError(f"Firefox profile directory does not exist: {profile}")
     return profile
