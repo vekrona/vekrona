@@ -44,7 +44,7 @@ expected and harmless (snapper snapshots are cheap CoW, and `NUMBER_LIMIT=10`
 prunes old ones), not a bug to work around.
 
 Stay one Fedora release behind: this machine runs F44 until F46 reaches GA.
-Staying a release behind gives the NVIDIA driver, Sway/wlroots, and DMS/Qt
+Staying a release behind gives the NVIDIA driver, Sway/wlroots, and Quickshell/Qt
 time to catch up before this machine takes the upgrade.
 
 Updates flow through multiple channels:
@@ -56,7 +56,7 @@ Updates flow through multiple channels:
 The versionlocked set, applied by the stage that installs each package and
 recorded in `/etc/dnf/versionlock.toml`:
 
-- Stage `30-packages` locks `sway`, the wlroots package providing the libwlroots soname the installed `sway` links against, `dms`, `quickshell`, `qt6-qtbase`, `qt6-qtdeclarative`, `qt6-qtwayland`, `xremap-wlroots`, the whole compositor and shell stack, so a routine `dnf upgrade` cannot pull one of them out from under versions that were actually tested together.
+- Stage `30-packages` locks `sway`, the wlroots package providing the libwlroots soname the installed `sway` links against, `quickshell`, `qt6-qtbase`, `qt6-qtdeclarative`, `qt6-qtwayland`, `xremap-wlroots`, the whole compositor and shell stack, so a routine `dnf upgrade` cannot pull one of them out from under versions that were actually tested together.
 - Stage `10-nvidia` locks `akmod-nvidia` and every installed `xorg-x11-drv-nvidia*` package, so a routine upgrade cannot install a newer proprietary driver against an untested kernel.
 
 `vekrona-update`'s `dnf upgrade` respects both locks automatically (dnf never

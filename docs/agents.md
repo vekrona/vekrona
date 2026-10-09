@@ -169,18 +169,12 @@ Hyper+a         open the coding agent (vekrona-agent --pick)
 Hyper+Shift+a   pick a recorded error and open the agent on it (vekrona-error pick)
 ```
 
-The DankBar plugin `config/DankMaterialShell/plugins/vekronaAgent/` shows the
+The shell's Agent widget (`config/vekrona-shell/Agent.qml`) shows the
 same two actions as a bar button: left click runs `vekrona-agent --pick`,
 right click runs `vekrona-error pick`. A small badge on the icon shows the
 unread recorded-error count
 (`${XDG_STATE_HOME:-~/.local/state}/vekrona/errors/unread`, watched
-event-driven via Quickshell's `FileView`) and hides when it is zero. Stage
-`50-user` symlinks the plugin directory in with the rest of
-`config/DankMaterialShell/plugins/`, enables it in `plugin_settings.json`,
-and inserts `vekronaAgent` into a bar's widget list (before
-`notificationButton`) if it is not already present, the same idempotent
-pattern used for `vekronaSwayWorkspaces`; `settings.seed.json` already ships
-it in place for a fresh install.
+event-driven via Quickshell's `FileView`) and hides when it is zero.
 
 `bin/vekrona-agent` runs every harness by its absolute managed path
 (`managed_binary` in `lib/common.sh`), never by `PATH` lookup: `claude` is the

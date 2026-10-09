@@ -15,7 +15,7 @@ which follows the journal and turns four kinds of entry into a recorded error:
 - a kernel OOM kill, or a `systemd-oomd` kill
 - any other journal entry logged at priority `err` or above
 
-The last kind also covers DMS QML `console.error` lines: quickshell logs them as
+The last kind also covers vekrona-shell QML `console.error` lines: quickshell logs them as
 `ERROR qml:` at journal priority 6 (ANSI colors stripped before matching), so the
 watcher records them although they are not `err` priority. An `err` entry whose
 `MESSAGE` is empty is titled `<identifier>: empty error message`. Shell tests
@@ -45,18 +45,15 @@ repeat within 10 minutes of the last one doesn't re-toast, *unless* the record
 had been `ack`ed (or launched) since the last occurrence, in which case it
 re-toasts regardless of the window — an acked error recurring is exactly what
 acking is supposed to surface again. `~/.local/state/vekrona/errors/unread`
-holds the count of errors still in `new` status, kept for the DMS bar button
-(added by another stream) to read. The newest 500 records, by `last_seen`, are
+holds the count of errors still in `new` status, kept for the shell's agent button
+to read. The newest 500 records, by `last_seen`, are
 kept; older ones are pruned.
 
-A toast (via DMS's notification daemon) has two actions, "Fix with agent" and
-"Mute" (clicking the toast body does the same as "Fix with agent": stage
-`50-user` enforces DMS's own `notificationPopupBodyInvokesAction` setting to
-`true` in `settings.json`, since DMS defaults it to `false` and otherwise only
-dismisses the popup on a body click rather than running its first action;
-`70-verify` asserts it stays `true`. This is a DMS-wide setting, not specific
-to vekrona's own toasts: a body click on *any* application's notification
-popup runs that notification's first action the same way, once this is set):
+A toast (via vekrona-shell's notification daemon) has two actions, "Fix with agent" and
+"Mute" (clicking the toast body does the same as "Fix with agent": the shell
+runs the notification's `default` action on a body click, or its first action
+when it has none, for *any* application's notification, and `tests/e2e/notifications.sh`
+covers it):
 the former launches `vekrona-agent --pick --error <id>` as a monitored child (its failure
 or non-zero exit is itself toasted, not swallowed), the coding agent launcher
 built by another stream, which calls `vekrona-error prompt <id>` to get its

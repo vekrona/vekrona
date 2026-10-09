@@ -39,14 +39,12 @@ Sway uses each monitor's preferred mode with VRR off. Put your own `output` line
 Theme: `vekrona-theme dark|light|next|list` switches the Vekrona Design System
 between its two modes and remembers the mode in `~/.local/state/vekrona/theme`
 so `next` cycles correctly. The wallpaper is a solid color, the mode's `bg`
-token, set through the DMS per-mode wallpaper and a Sway `output * bg` line.
+token, set by a Sway `output * bg` line.
 
 vekrona leaves terminal colors alone. Ghostty uses its own defaults, or
 whatever your Ghostty config sets. vekrona ships no Ghostty config and writes
 nothing under `~/.config/ghostty`, because that directory is often a symlink
-into a dotfiles repo. Stage `50-user` sets the DMS setting
-`matugenTemplateGhostty` to `false`, so DMS does not write its
-`themes/dankcolors` file there either. The one thing stage `50-user` removes
+into a dotfiles repo. The one thing stage `50-user` removes
 there is the config link older installs made into the vekrona checkout, and
 only while it points there. Copy and paste in Ghostty are Ghostty's own
 Ctrl+Shift+C and Ctrl+Shift+V, because the Super layer skips terminals (see
@@ -71,32 +69,13 @@ The design lives in `config/tokens.json`, copied verbatim from the Vekrona
 Design System; never edit it by hand, re-import the design by copying the file.
 `bin/vekrona-render-theme` reads it with the mode and `config/design.json` and
 generates `~/.local/state/vekrona/active-theme.json`, GTK 3/4 css, gsettings,
-qt6ct, the Sway drop-in, Firefox userChrome and rofi from it. DMS and vekrona's
-own Quickshell apps read the generated `active-theme.json` (lock screen, bar
-plugins) or `tokens.json` itself (app switcher), so the generated file is
-output, never input. `customThemeFile` in the DMS
-settings seed points at it from the first session onward and DMS reloads it on
-every write. `vekrona-theme` writes it through the renderer, then waits for DMS
-to confirm the new colors (via `inotifywait` on `~/.config/gtk-4.0/dank-colors.css`,
-which DMS generates as a side effect, so it needs `inotify-tools`) and exits
-non-zero with a clear message, restoring the previous files, if the theme did
-not take within the wait. It never retries or restarts the shell itself.
-
-The DMS colors for the very first session are not guaranteed: DMS has an
-internal startup race between checking whether `matugen` is available and
-loading the custom theme file, and when it loses that race it does not retry,
-so GTK application colors can stay at GTK defaults until the first
-`vekrona-theme` call. No event exists to reliably wait on for that race from
-outside DMS, so this is not automated.
-
-The same startup race is why `runDmsMatugenTemplates` and
-`matugenTemplateGtk` must stay on. Without them DMS never regenerates the GTK
-color files after it wins the race, and `vekrona-theme` waits on one of those
-files. The seed leaves both keys out, so DMS's default of `true` applies.
-Stages `50-user` and `70-verify` assert that neither is `false`, which
-catches anyone turning them off by hand. `matugenTemplateGhostty` goes the
-other way. Stage `50-user` sets it to `false` on fresh and existing installs,
-and stage `70-verify` checks it.
+qt6ct, the Sway drop-in, Firefox userChrome and rofi from it. vekrona-shell and
+vekrona's other Quickshell apps read the generated `active-theme.json` (shell,
+lock screen) or `tokens.json` itself (app switcher), so the generated file is
+output, never input. The shell reloads it on every write, so `vekrona-theme`
+only has to run the renderer: it records the mode, renders, and restores the
+previous files and exits non-zero if the renderer fails. It never retries or
+restarts the shell itself.
 
 ```
 vekrona-theme dark
@@ -109,8 +88,7 @@ Each `vekrona-theme` call also runs `bin/vekrona-render-theme`, which writes
 `~/.config/gtk-3.0/gtk.css` and `~/.config/gtk-4.0/gtk.css`, selects
 `adw-gtk3` (dark mode: `adw-gtk3-dark`) with `prefer-dark` or `prefer-light`,
 and sets the GTK font keys from the tokens, so GTK apps (file choosers,
-swappy, Firefox dialogs) follow the mode even when DMS's own GTK color
-generation lost its startup race. It refuses to overwrite a `gtk.css` it did
+swappy, Firefox dialogs) follow the mode. It refuses to overwrite a `gtk.css` it did
 not generate. GTK apps that are already running keep their old colors until
 restarted. Firefox and Qt applications need a restart to pick up the new
 theme; Qt apps additionally need one re-login for the `QT_QPA_PLATFORMTHEME=qt6ct`
@@ -120,11 +98,10 @@ and filled selection, which the design does not allow elsewhere.
 The design has radius 0, no shadows, and a 2px accent underline as the only
 selection highlight. `config/design.json` holds the few toolkit knobs that are
 not design tokens: `radius`, `widgetPadding`, `trayIconSpacing`,
-`barInnerPadding` and `dmsFontScale`. Gaps and padding come from the spacing
+and `barInnerPadding`. Gaps and padding come from the spacing
 tokens (`space-2` is 8, `space-3` is 12). To change the look, change
 `config/design.json` or re-import `config/tokens.json`, then run
-`./install.sh 50-user` to apply. This re-applies DMS settings, so GUI tweaks to
-those keys via DMS settings will revert.
+`./install.sh 50-user` to apply.
 
 Caffeine (a fixed wall-clock duration is the point, not something to work
 around): `vekrona-caffeine` starts a transient systemd user unit
@@ -231,24 +208,13 @@ scb -- %command%
 MangoHud toggle in-game: Shift_R+F12 (`config/mangohud/MangoHud.conf`,
 `toggle_hud=Shift_R+F12`).
 
-## The vekronaSwayWorkspaces DankBar plugin
+## The Desktops widget
 
-Stock DMS pads its workspace switcher to only 3 slots and otherwise shows
-whatever Sway currently reports, which deletes an empty workspace as soon as
-you focus away from it. `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/`
-is a DMS DankBar widget plugin that instead always shows workspaces 1-5, even
-empty, plus any workspace 6-10 that currently exists. Click a pill to switch
-(`workspace number N` over the Sway IPC socket via `Quickshell.I3`), scroll
-over the widget to step through the shown workspaces. Focused, occupied
-(has a window), and urgent workspaces are colored using the same `Theme`
-tokens (`Theme.primary`/`Theme.secondary`/`Theme.error`) as the stock widget.
-
-Stage `50-user` symlinks the plugin directory into
-`~/.config/DankMaterialShell/plugins/`, enables it in
-`~/.config/DankMaterialShell/plugin_settings.json`, and replaces
-`workspaceSwitcher` with `vekronaSwayWorkspaces` in place in any
-`barConfigs[].{left,center,right}Widgets` list that still names the stock
-widget, without touching any other bar customization; `settings.seed.json`
-already ships `vekronaSwayWorkspaces` in place of the stock widget for a
-fresh install. `70-verify` checks the plugin is linked, enabled, and placed
-in a bar widget list.
+The shell's Desktops widget (`config/vekrona-shell/Desktops.qml`) always shows
+desktops 1-5, even empty, plus any desktop 6-10 that currently exists, because
+Sway deletes an empty workspace as soon as you focus away from it. Click a
+desktop to switch (`workspace number N` over the Sway IPC socket via
+`Quickshell.I3`), scroll over the widget to step through the shown desktops.
+Focused, occupied (has a window) and urgent desktops use the `accentInk`,
+`ink` and `dangerInk` tokens; the focused one also gets the 2 px accent
+underline.

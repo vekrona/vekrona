@@ -19,12 +19,12 @@ Repo layout, tests, the VM smoke test, the ISO build and CI.
 | `config/agents/skills/vekrona-diagnose/` | the Claude Code skill an agent uses to investigate a vekrona error; stage `50-user` symlinks it into `~/.claude/skills/`, `~/.codex/skills/`, and `~/.agents/skills/` |
 | `fonts/` | vendored AtkynsonMono Nerd Font, Atkinson Hyperlegible Mono, JetBrainsMono Nerd Font and Material Symbols Rounded (OFL, one folder each with its licence; versions in `fonts/SOURCES`), symlinked into `~/.local/share/fonts/vekrona` |
 | `config/fontconfig/conf.d/50-vekrona-fonts.conf` | fontconfig aliases: `sans-serif`/`system-ui` prefer Atkinson Hyperlegible Next then Inter (Atkinson has no Cyrillic, Inter covers it), `monospace` prefers AtkynsonMono Nerd Font, Atkinson Hyperlegible Mono, then JetBrainsMono Nerd Font; symlinked into `~/.config/fontconfig/conf.d/` |
-| `config/DankMaterialShell/plugins/vekronaSwayWorkspaces/` | DMS DankBar plugin: always shows Sway workspaces 1-5 plus any existing 6-10, replacing the stock workspace switcher (see [The vekronaSwayWorkspaces DankBar plugin](daily-use.md#the-vekronaswayworkspaces-dankbar-plugin)); stage `50-user` symlinks the whole `plugins/` directory into `~/.config/DankMaterialShell/plugins/` |
-| `config/DankMaterialShell/plugins/vekronaAgent/` | DMS DankBar plugin: agent-button icon with an unread-error badge, left click opens the default coding agent, right click opens the recorded-error picker (see [Agent button](agents.md#agent-button)) |
+| `config/vekrona-shell/` | the vekrona-shell Quickshell config, run as `qs -c vekrona-shell` by `vekrona-shell.service`: bar (Desktops, window title, Tray, Weather, Perf, Sound, Network, Battery, Agent, Notifications, Calendar, Clock), notification daemon and centre, polkit agent, launcher, clipboard history, OSD and power menu; `Vekrona/` inside it links to `config/quickshell-shared/Vekrona/`, the design components shared with the lock screen. Stage `50-user` symlinks it into `~/.config/quickshell/` |
+| `config/systemd-user/vekrona-idle.service` | swayidle: `vekrona-lock` after 300 s idle, monitors off after 600 s, suspend after 1800 s, `vekrona-lock` before sleep and on logind's lock event |
 | `bin/vekrona-agent` | opens a configured coding agent harness (Claude Code, Codex, opencode, pi, or Cursor Agent) in a terminal, with default permission prompts and API-key env vars stripped; see [Agent button](agents.md#agent-button) |
 | `bin/vekrona-xkb-env` | prints `XKB_DEFAULT_*` for Sway from `/etc/X11/xorg.conf.d/00-keyboard.conf` (`VEKRONA_XKB_CONF` overrides the path in tests); sourced by `config/sway/environment`, and read by `vekrona-keybindings` for its layout row; tested by `tests/stages/test-xkb-env.sh` |
 | `bin/vekrona-gpu-env` | prints `export WLR_DRM_DEVICES=/dev/dri/cardN` only when the NVIDIA driver is loaded and every connected output is on the NVIDIA card, nothing otherwise (`VEKRONA_SYSFS_ROOT` prefixes `/sys` and `/proc` in tests); sourced by `config/sway/environment` at every login, never fails it; tested by `tests/stages/test-gpu-env.sh`; see [PLAN.md](PLAN.md) decision #6 |
-| `bin/vekrona-render-theme [all\|dms\|gtk\|qt\|firefox\|sway\|rofi]` | renders `config/tokens.json`, the theme mode and `config/design.json` to the generated `active-theme.json` (dms) and the GTK, Qt, Firefox, Sway, and rofi configs; default `all` (= dms, gtk, qt, firefox, sway); rofi prints to stdout and writes nothing; writes managed files with a marker first line, refuses to overwrite unmanaged files; run by `vekrona-theme` and stage `50-user` |
+| `bin/vekrona-render-theme [all\|shell\|gtk\|qt\|firefox\|sway\|rofi]` | renders `config/tokens.json`, the theme mode and `config/design.json` to the generated `active-theme.json` (shell) and the GTK, Qt, Firefox, Sway, and rofi configs; default `all` (= shell, gtk, qt, firefox, sway); rofi prints to stdout and writes nothing; writes managed files with a marker first line, refuses to overwrite unmanaged files; run by `vekrona-theme` and stage `50-user` |
 | `vm/` | checks that run inside a vekrona guest (session, agents, error pipeline, agent launch, rollback, login manager), driven by `vekrona-dev checks` and `iso/qemu-test.sh` |
 | `iso/` | installable-ISO tooling: `fetch-netinst.sh` (verified Fedora netinstall download), `build.sh` (mkksiso release/test ISO builder), `qemu-test.sh` (install-and-boot test of a test ISO), `lib-vm.sh` + `dev-vm.sh` (the QEMU VM lifetime library and its REPL CLI), `dev-installer.sh` (installer window with a freshly packed `updates.img`), `firstboot/`, `kickstart/` |
 | `iso/anaconda/` | the two Anaconda add-ons (`updates/`: `vekrona_account`, `vekrona_signin`, `90-vekrona.conf`), `pack-updates.sh` (builds `updates.img`), `bundle.list` (pinned RPMs layered into it) and `tests/` (add-on unit tests) |
@@ -131,19 +131,19 @@ that marker says this test run started them — a session it merely attached
 to is left running. `vm/session-check.sh` calls `session_ensure_up`
 (`WLR_BACKENDS=headless` Sway under `systemd-run --user` when nothing is
 live yet; wait for the IPC socket, confirm `sway-session.target` is active,
-start `dms.service`, call `systemctl --user status vekrona-lock`, validate the xremap
+start `vekrona-shell.service`, call `qs -c vekrona-shell ipc show`, validate the xremap
 config with `xremap-wlroots --validate-config`) and leaves the session
 running either way; `vm/errors-check.sh` and `vm/agent-launch-check.sh` call
 `session_attach_existing` to use that same session instead of starting
 their own; and `vm/session-teardown.sh`, run once after all three (wired
 into `vekrona-dev checks`), applies the ownership rule above, so nothing
-(`dms.service`, `vekrona-errors.service`, …) is ever left running against a
+(`vekrona-shell.service`, `vekrona-errors.service`, …) is ever left running against a
 dead compositor, and nothing this test run did not start is ever torn down
 out from under someone else.
 
 ## ISO and CI
 
-`iso/` builds an installable Fedora 44 ISO (Sway/DMS baked in via a
+`iso/` builds an installable Fedora 44 ISO (Sway and vekrona-shell baked in via a
 first-boot install) on top of the official Fedora Everything netinstall, and
 `.github/workflows/iso.yml` builds and tests it on every push, pull request,
 and tag:

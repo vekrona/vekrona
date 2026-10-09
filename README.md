@@ -1,6 +1,6 @@
 # vekrona
 
-My Fedora desktop as a shell script: Sway and DankMaterialShell on Fedora 44,
+My Fedora desktop as a shell script: Sway and a Quickshell shell on Fedora 44,
 with Btrfs snapshots, a Mac-style keyboard and Steam.
 Website: [vekrona.com](https://vekrona.com/)
 
@@ -18,9 +18,9 @@ I want a desktop I can rebuild from scratch and update without fear.
   `70-verify`, checks the result.
 - **Safe to update.** Snapper takes a snapshot before and after every dnf
   transaction. `sudo vekrona-rollback <N>` makes snapshot N the root again.
-  Sway, DMS, Quickshell, Qt and the NVIDIA driver are version-locked, so a
+  Sway, Quickshell, Qt and the NVIDIA driver are version-locked, so a
   routine `dnf upgrade` leaves them alone.
-- **Looks good.** Sway tiles, DankMaterialShell draws the bar, launcher and
+- **Looks good.** Sway tiles, vekrona-shell draws the bar, notifications, launcher and
   panels. One design system (Vekrona Design System) in a dark and a light mode
   switches the shell, GTK and Qt apps, Firefox, Sway and the wallpaper
   together. The terminal keeps its own colors.
@@ -43,7 +43,7 @@ vekrona is a recipe. It installs and configures software other people build:
 | | |
 |---|---|
 | Base | [Fedora Linux](https://fedoraproject.org/), [RPM Fusion](https://rpmfusion.org/) for codecs, Steam and the NVIDIA driver |
-| Desktop | [Sway](https://swaywm.org/) on [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots), [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) on [Quickshell](https://quickshell.org/), [matugen](https://github.com/InioX/matugen), [rofi](https://github.com/davatorium/rofi) |
+| Desktop | [Sway](https://swaywm.org/) on [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots), vekrona-shell on [Quickshell](https://quickshell.org/), [swayidle](https://github.com/swaywm/swayidle), [wlsunset](https://sr.ht/~kennylevinsen/wlsunset/), [rofi](https://github.com/davatorium/rofi) |
 | Terminal and keyboard | [Ghostty](https://ghostty.org/), [xremap](https://github.com/xremap/xremap) |
 | Login and filesystem | [greetd](https://sr.ht/~kennylevinsen/greetd/) with [tuigreet](https://github.com/tuigreet/tuigreet), [Btrfs](https://btrfs.readthedocs.io/en/latest/), [snapper](https://github.com/openSUSE/snapper), [pam-u2f](https://github.com/Yubico/pam-u2f) and [fprintd](https://fprint.freedesktop.org/) for security keys and fingerprints |
 | Gaming | [Steam](https://store.steampowered.com/), [ScopeBuddy](https://github.com/OpenGamingCollective/ScopeBuddy), [gamescope](https://github.com/ValveSoftware/gamescope), [MangoHud](https://github.com/flightlessmango/MangoHud), [GameMode](https://github.com/FeralInteractive/gamemode) |

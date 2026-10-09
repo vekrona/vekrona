@@ -39,10 +39,10 @@ Pull more evidence with whichever of these fits the error's `source`:
 vekrona's `config/` is the source of truth for most dotfiles: `stages/50-user.sh`
 symlinks them into `$HOME` with `ensure_symlink`, so a hand-edit of, say,
 `~/.config/sway/config` doesn't stick — edit `config/sway/config` in this repo
-instead. But not everything under `$HOME` is a symlink: `~/.config/DankMaterialShell/settings.json`
-and `~/.config/sway/config.d/vekrona-panel-scale.conf`, for two, are files stage
-`50-user` *generates* (from a seed, or from the panel's EDID), not links
-back into the repo. Check with `ls -la` (or a `readlink`) before assuming which
+instead. But not everything under `$HOME` is a symlink: `~/.config/sway/config.d/vekrona-panel-scale.conf`
+and `~/.local/state/vekrona/active-theme.json`, for two, are files stage
+`50-user` *generates* (from the panel's EDID, or from the design tokens), not
+links back into the repo. Check with `ls -la` (or a `readlink`) before assuming which
 kind you're looking at. Either way, fix the stage or the seed in this repo, then
 re-run it to see the fix take effect:
 
@@ -57,7 +57,7 @@ earliest stage that can catch a problem (compile/lint/validate before runtime).
 If the same fix would need repeating in more than one place, look for (or add) a
 chokepoint in `lib/common.sh` instead of duplicating it.
 
-A crash or failure that traces back to Sway, Quickshell, DMS, or the NVIDIA
+A crash or failure that traces back to Sway, Quickshell, or the NVIDIA
 driver rather than to anything in this repo is not yours to fix; note it in
 `TODO.md` (with what you found, not just that it happened) instead of patching
 around it here.

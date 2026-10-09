@@ -39,8 +39,8 @@ Sway defines `$hyper` as `Mod4+Ctrl+Mod1` and binds the rest on it:
 |---|---|
 | Hyper+Return | launch ghostty |
 | Hyper+v | `qs -c vekrona-shell ipc call clipboard toggle` |
-| Hyper+n | `dms ipc call notifications toggle` |
-| Hyper+Escape | `dms ipc call lock lock` |
+| Hyper+n | `qs -c vekrona-shell ipc call notifications toggle` |
+| Hyper+Escape | `vekrona-lock` |
 | Hyper+BackSpace | `qs -c vekrona-shell ipc call powermenu toggle` |
 | Hyper+slash | show the keybindings help panel (`vekrona-keybindings`) |
 | Hyper+a | open the coding agent (`vekrona-agent --pick`) |
@@ -58,6 +58,11 @@ Sway defines `$hyper` as `Mod4+Ctrl+Mod1` and binds the rest on it:
 | Hyper+Shift+t | `vekrona-theme next` |
 | XF86AudioRaiseVolume/LowerVolume/Mute, XF86MonBrightness* | `qs -c vekrona-shell ipc call audio ...` / `qs -c vekrona-shell ipc call brightness ...` |
 | XF86AudioPlay/Pause/Next/Prev | `qs -c vekrona-shell ipc call mpris playPause` / `pause` / `next` / `previous` |
+
+`qs -c vekrona-shell ipc show` lists every IPC target of the shell. Besides the
+bound ones, `notifications close` and `notifications clearAll` (dismiss every
+notification, which the e2e scenarios use) exist; the notification toasts and
+centre always sit below the bar.
 
 Moving a window to a workspace is Hyper+digit without Shift, because
 Cmd+Shift+3/4/5 are the screenshot keys.
