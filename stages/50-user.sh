@@ -190,16 +190,17 @@ ensure_flatpak_override_dropped md.obsidian.Obsidian --nosocket=wayland --socket
 ensure_flatpak_override org.signal.Signal --env=SIGNAL_PASSWORD_STORE=gnome-libsecret --env=XDG_SESSION_TYPE=x11
 
 shopt -s nullglob
+firefox_root="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"
 for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
   app="$(basename "$appdir")"
   profile="vekrona-$app"
-  profiledir="$(firefox_profile_root)/$profile"
-  if grep -q "Name=$profile$" "$(firefox_profile_root)/profiles.ini" 2>/dev/null; then
+  profiledir="$firefox_root/$profile"
+  if grep -q "Name=$profile$" "$firefox_root/profiles.ini" 2>/dev/null; then
     log "firefox profile exists: $profile"
   else
     log "creating firefox profile: $profile"
     firefox --headless -CreateProfile "$profile $profiledir"
-    grep -q "Name=$profile$" "$(firefox_profile_root)/profiles.ini" || die "firefox profile not created: $profile"
+    grep -q "Name=$profile$" "$firefox_root/profiles.ini" || die "firefox profile not created: $profile"
   fi
   ensure_symlink "$appdir/user.js" "$profiledir/user.js"
   ensure_symlink "$appdir/app.desktop" "$HOME/.local/share/applications/$profile.desktop"

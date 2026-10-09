@@ -353,8 +353,9 @@ vekrona_link_dirs() {
 
 # Every vekrona-* Firefox webapp profile directory that exists, one per line.
 vekrona_webapp_profile_dirs() {
-  local d
-  for d in "$(firefox_profile_root)"/vekrona-*; do
+  local root d
+  root="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"
+  for d in "$root"/vekrona-*; do
     [[ -d "$d" ]] && printf '%s\n' "$d"
   done
   return 0

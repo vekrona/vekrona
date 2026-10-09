@@ -15,10 +15,14 @@ source "$REPO/tests/lib.sh"
 VEKRONA_ROOT="$HOME/wrk/vekrona"
 OLD_CHECKOUT="${VEKRONA_LEGACY_ROOTS[0]}"
 OLD_CLONE="${VEKRONA_LEGACY_ROOTS[1]}"
-mkdir -p "$VEKRONA_ROOT/config" "$OLD_CHECKOUT/config" "$OLD_CLONE/config"
+mkdir -p "$VEKRONA_ROOT/config" "$VEKRONA_ROOT/bin" "$VEKRONA_ROOT/lib" "$OLD_CHECKOUT/config" "$OLD_CLONE/config"
 echo new > "$VEKRONA_ROOT/config/a"
 echo new > "$VEKRONA_ROOT/config/b"
 git -C "$VEKRONA_ROOT" init -q
+
+# Set up the fake bin/vekrona-firefox and lib files for firefox_profile_root
+cp "$REPO/bin/vekrona-firefox" "$VEKRONA_ROOT/bin/"
+cp "$REPO/lib/vekrona_firefox.py" "$REPO/lib/vekrona_cli.py" "$VEKRONA_ROOT/lib/"
 
 # A directory symlinked from outside $HOME's tree is managed elsewhere and left alone.
 mkdir -p "$scratch/dotfiles/ghostty" "$HOME/.config"

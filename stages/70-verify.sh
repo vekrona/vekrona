@@ -421,7 +421,7 @@ if ran 50-user; then
     check assert "signal flatpak keeps its key in gnome-keyring" contains SIGNAL_PASSWORD_STORE=gnome-libsecret "$override"
   fi
 
-  firefox_profiles_dir="$(firefox_profile_root)"
+  firefox_profiles_dir="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"
   firefox_profiles_ini="$firefox_profiles_dir/profiles.ini"
   for webapp_dir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
     webapp="$(basename "$webapp_dir")"
@@ -441,7 +441,9 @@ if ran 50-user; then
   done
   firefox_default_profile="$(awk -F= '/^\[Install/ {in_install=1; next} /^\[/ {in_install=0} in_install && $1 == "Default" {print $2; exit}' "$firefox_profiles_ini" 2>/dev/null || true)"
   if [[ -n "$firefox_default_profile" ]]; then
-    firefox_default_profile="$(firefox_profile_root)/$firefox_default_profile"
+    local firefox_root_dir
+    firefox_root_dir="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"
+    firefox_default_profile="$firefox_root_dir/$firefox_default_profile"
     check assert_file_contains "$firefox_default_profile/user.js" "^// vekrona-render-theme: "
     check assert_file_contains "$firefox_default_profile/chrome/userChrome.css" "^/\\* vekrona-render-theme: "
   fi
