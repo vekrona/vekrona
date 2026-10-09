@@ -654,6 +654,19 @@ wait_for_running_akmods() {
   esac
 }
 
+# newest_akmods_failure_log <cache dir> <module> <kernel version>: the most recently written build log of a failed
+# <module> build for that kernel. Each akmod version leaves its own log, so the newest one is the build that just failed.
+# Prints nothing and returns 1 when there is none.
+newest_akmods_failure_log() {
+  local candidate newest=""
+  for candidate in "$1/$2"/*-for-"$3".failed.log; do
+    [[ -e "$candidate" ]] || continue
+    if [[ -z "$newest" || "$candidate" -nt "$newest" ]]; then newest="$candidate"; fi
+  done
+  [[ -n "$newest" ]] || return 1
+  printf '%s' "$newest"
+}
+
 build_akmods_for_target_kernel() {
   local target_kver
   target_kver="$(uname -r)"

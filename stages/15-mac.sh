@@ -70,14 +70,9 @@ ensure_akmod_wl() {
     || die "akmod-wl $(installed_akmod_wl_version) cannot build on kernel $target_kver (kernel 7.2+ needs RPM Fusion akmod-wl >= $AKMOD_WL_MIN_FOR_KERNEL_7_2; older builds fail on the removed strncpy API) and the enabled repos offer nothing newer"
 }
 
-akmods_failure_log_for_wl() {
-  local logs=("$AKMODS_CACHE_DIR"/wl/*-for-"$target_kver".failed.log)
-  [[ -e "${logs[0]}" ]] && printf '%s' "${logs[0]}"
-}
-
 die_wl_build_failed() {
   local failed_log="" where="$AKMODS_LOG"
-  if failed_log="$(akmods_failure_log_for_wl)"; then
+  if failed_log="$(newest_akmods_failure_log "$AKMODS_CACHE_DIR" wl "$target_kver")"; then
     where="$failed_log (all akmods activity: $AKMODS_LOG)"
     warn "last 60 lines of $failed_log"
     root tail -n 60 "$failed_log" >&2
