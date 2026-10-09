@@ -1,6 +1,6 @@
 from harness import SandboxTestCase, journal_entry
 
-QML_ERROR = "\x1b[31m ERROR\x1b[97m qml\x1b[0m: VekronaSwayWorkspaces: barConfig.widgetPadding is missing"
+QML_ERROR = "\x1b[31m ERROR\x1b[97m qml\x1b[0m: Weather.qml:42: TypeError: Cannot read property 'weather_code' of null"
 
 
 class JournalMessagesTest(SandboxTestCase):
@@ -14,8 +14,8 @@ class JournalMessagesTest(SandboxTestCase):
     def test_a_qml_error_that_the_vekrona_shell_logs_at_info_priority_is_recorded_without_colour_codes(self):
         self.sandbox.watch([journal_entry(SYSLOG_IDENTIFIER="vekrona-shell", PRIORITY="6", MESSAGE=QML_ERROR)])
         record = self.recorded()
-        self.assertEqual(record["title"], "vekrona-shell: VekronaSwayWorkspaces: barConfig.widgetPadding is missing")
-        self.assertEqual(record["summary"], "VekronaSwayWorkspaces: barConfig.widgetPadding is missing")
+        self.assertEqual(record["title"], "vekrona-shell: Weather.qml:42: TypeError: Cannot read property 'weather_code' of null")
+        self.assertEqual(record["summary"], "Weather.qml:42: TypeError: Cannot read property 'weather_code' of null")
 
     def test_a_qml_error_arriving_as_a_byte_array_is_recorded(self):
         self.sandbox.watch([journal_entry(SYSLOG_IDENTIFIER="vekrona-shell", PRIORITY="6",

@@ -131,7 +131,7 @@ class SessionBus:
 
 
 class Sandbox:
-    def __init__(self, bus_address):
+    def __init__(self, bus_address, capabilities):
         self.root = tempfile.mkdtemp(prefix="vekrona-error-test-")
         self.bin = os.path.join(self.root, "bin")
         self.lib = os.path.join(self.root, "lib")
@@ -168,7 +168,7 @@ class Sandbox:
             "PYTHONDONTWRITEBYTECODE": "1",
         }
         self.notification_server = subprocess.Popen(
-            [sys.executable, "-B", "-W", "ignore::DeprecationWarning", os.path.join(HERE, "fake_notifications.py"), self.notifications],
+            [sys.executable, "-B", "-W", "ignore::DeprecationWarning", os.path.join(HERE, "fake_notifications.py"), self.notifications, capabilities],
             env=self.env, stdout=subprocess.PIPE, text=True)
         if self.notification_server.stdout.readline().strip() != "ready":
             raise RuntimeError("the fake notification server did not start")
@@ -242,6 +242,7 @@ class Sandbox:
 
 class SandboxTestCase(unittest.TestCase):
     bus = None
+    DAEMON_CAPABILITIES = "actions,body"
 
     @classmethod
     def setUpClass(cls):
@@ -249,5 +250,5 @@ class SandboxTestCase(unittest.TestCase):
         cls.addClassCleanup(cls.bus.close)
 
     def setUp(self):
-        self.sandbox = Sandbox(self.bus.address)
+        self.sandbox = Sandbox(self.bus.address, self.DAEMON_CAPABILITIES)
         self.addCleanup(self.sandbox.close)

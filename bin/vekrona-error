@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import tomllib
+import xml.sax.saxutils
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -954,8 +955,22 @@ def cmd_watch(args):
             self.notif_map.clear()
             self._persist_notif_map()
 
+        def _daemon_renders_markup(self):
+            try:
+                result = self.bus.call_sync(
+                    "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                    "org.freedesktop.Notifications", "GetCapabilities", None,
+                    GLib.VariantType("(as)"), Gio.DBusCallFlags.NONE, 5000, None,
+                )
+                return "body-markup" in result.unpack()[0]
+            except Exception as exc:
+                warn(f"cannot ask the notification daemon whether it renders markup, escaping the body: {exc}")
+                return True
+
         def _notify(self, title, body, actions, hints):
             try:
+                if self._daemon_renders_markup():
+                    body = xml.sax.saxutils.escape(body)
                 variant = GLib.Variant(
                     "(susssasa{sv}i)",
                     ("vekrona", 0, "", title, body, actions, hints, -1),
