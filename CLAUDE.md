@@ -30,4 +30,4 @@ as a `tests/e2e/` scenario that fails before the fix and passes after it.
 
 ## Upgrading Fedora to a new major release
 
-`stages/10-nvidia.sh`, `stages/70-verify.sh` and `stages/90b-remove.sh` hardcode the CUDA repo release (`fedora44` current, `fedora43` stale) on purpose: vekrona stays on a release NVIDIA already publishes. When moving to the next Fedora release, first check that NVIDIA publishes `cuda-fedora<N>`, then bump both names in all three files (current → N, stale → N-1).
+`stages/10-nvidia.sh`, `stages/70-verify.sh` and `stages/90b-remove.sh` hardcode the CUDA repo release (`fedora44` current, `fedora43` stale) on purpose: vekrona stays on a release NVIDIA already publishes. When moving to the next Fedora release, first check that NVIDIA publishes `cuda-fedora<N>`, then replace `fedora44` with `fedora<N>` and `fedora43` with `fedora<N-1>` wherever they appear (`CUDA_REPO_ID`, `CUDA_REPOFILE_URL` and `OLD_CUDA_REPOFILE` in stage 10, the two repo checks in 70, the stale repo file in 90b).
