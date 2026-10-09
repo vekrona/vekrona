@@ -23,9 +23,6 @@ REPO = vekrona_cli.repo_root(__file__)
 
 MARKER_TEXT = ("vekrona-render-theme: generated from the active vekrona theme, do not edit "
                "(run vekrona-theme or vekrona-render-theme)")
-# Existing installs carry the marker of the removed vekrona-gtk-theme; accepted so they migrate.
-LEGACY_MARKER = ("/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit "
-                 "(run vekrona-theme or vekrona-gtk-theme) */")
 COMMENT_STYLES = {"css": ("/* ", " */"), "hash": ("# ", ""), "slash": ("// ", "")}
 
 
@@ -91,7 +88,7 @@ def check_writable(path, style):
     if not os.path.lexists(path) or is_repo_symlink(path):
         return
     first_line = (read_text(path) or "").split("\n", 1)[0]
-    if first_line not in (marker(style), LEGACY_MARKER):
+    if first_line != marker(style):
         die(f"{path} exists and is not managed by vekrona (no marker header); move it away first")
 
 
