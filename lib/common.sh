@@ -459,13 +459,19 @@ ensure_user_unit_stopped() {
   done
 }
 
+user_in_group() {
+  local user="$1" group="$2" groups
+  groups="$(id -nG "$user")" || die "id -nG $user failed"
+  [[ " $groups " == *" $group "* ]]
+}
+
 ensure_user_in_group() {
   local group="$1"
   getent group "$group" >/dev/null || die "group missing: $group"
-  if id -nG "$VEKRONA_USER" | tr ' ' '\n' | grep -qx "$group"; then log "$VEKRONA_USER in $group"; return 0; fi
+  if user_in_group "$VEKRONA_USER" "$group"; then log "$VEKRONA_USER in $group"; return 0; fi
   log "adding $VEKRONA_USER to $group (re-login required)"
   root usermod -aG "$group" "$VEKRONA_USER"
-  getent group "$group" | grep -q "\b$VEKRONA_USER\b" || die "user not added to $group"
+  user_in_group "$VEKRONA_USER" "$group" || die "user not added to $group"
 }
 
 vekrona_sysfs() { printf '%s' "${VEKRONA_SYSFS_ROOT:-}/sys"; }
@@ -1118,16 +1124,22 @@ flatpak_installed() {
   grep -qx -- "$1" <<<"$apps"
 }
 
+flatpak_remotes_system() {
+  flatpak remotes --system --show-disabled --columns=name,options || die "flatpak remotes failed"
+}
+
 flatpak_remote_system_enabled() {
-  local name="$1" line
-  line="$(flatpak remotes --system --show-disabled --columns=name,options 2>/dev/null | awk -F'\t' -v n="$name" '$1==n')"
+  local name="$1" remotes line
+  remotes="$(flatpak_remotes_system)"
+  line="$(awk -F'\t' -v n="$name" '$1==n' <<<"$remotes")"
   [[ -n "$line" ]] || return 1
   [[ "$line" != *disabled* ]]
 }
 
 flatpak_remote_system_exists() {
-  local name="$1"
-  flatpak remotes --system --show-disabled --columns=name 2>/dev/null | grep -qx "$name"
+  local name="$1" remotes
+  remotes="$(flatpak_remotes_system)"
+  awk -F'\t' -v n="$name" '$1==n { found=1 } END { exit !found }' <<<"$remotes"
 }
 
 ensure_flatpak_remote_system() {
