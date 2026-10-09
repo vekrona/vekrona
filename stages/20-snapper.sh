@@ -39,7 +39,7 @@ ensure_root_file "$ROOT/etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.action
 
 assert_file_contains /etc/dnf/libdnf5-plugins/actions.conf 'enabled[[:space:]]*=[[:space:]]*1'
 
-ensure_system_unit enabled snapper-cleanup.timer
+ensure_system_unit --now enabled snapper-cleanup.timer
 
 assert "/.snapshots exists" test -d /.snapshots
 

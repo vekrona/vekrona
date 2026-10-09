@@ -98,18 +98,20 @@ def check_writable(path, style):
 def write_atomic(path, content):
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix=os.path.basename(path) + ".")
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix="." + os.path.basename(path) + ".")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(content)
         os.chmod(tmp, 0o644)
         os.replace(tmp, path)
-    except OSError as e:
+    except BaseException as e:
         try:
             os.unlink(tmp)
         except FileNotFoundError:
             pass
-        die(f"could not write {path}: {e}")
+        if isinstance(e, OSError):
+            die(f"could not write {path}: {e}")
+        raise
 
 
 def write_managed(files):

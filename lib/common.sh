@@ -201,6 +201,23 @@ file_grep_q() {
   return "$status"
 }
 
+# snapper_rows_after <number>: the snapper CSV rows on stdin whose snapshot number (first field) is above <number>.
+snapper_rows_after() {
+  [[ "$1" =~ ^[0-9]+$ ]] || die "snapper_rows_after: not a snapshot number: $1"
+  awk -F, -v n="$1" '$1 + 0 > n + 0' || die "snapper_rows_after: awk failed on the snapshot list"
+}
+
+# write_file_atomic <path> <content>: replaces <path> in one rename, so a process watching or reading it never sees a
+# truncated or half-written file. The parent directory must exist.
+write_file_atomic() {
+  local path="$1" content="$2" tmp
+  tmp="$(dirname "$path")/.$(basename "$path").tmp.$$"
+  if ! { printf '%s' "$content" > "$tmp" && mv -fT "$tmp" "$path"; }; then
+    rm -f "$tmp"
+    die "could not write $path"
+  fi
+}
+
 ensure_line() {
   local file="$1" line="$2"
   if [[ -f "$file" ]] && file_grep_q -xF -- "$line" "$file"; then log "line present in $file: $line"; return 0; fi
@@ -656,6 +673,19 @@ wait_for_running_akmods() {
     124) die "timed out after $AKMODS_WAIT_SECONDS s waiting for a running akmods build" ;;
     *) die "waiting for a running akmods build failed with status $status" ;;
   esac
+}
+
+# newest_akmods_failure_log <cache dir> <module> <kernel version>: the most recently written build log of a failed
+# <module> build for that kernel. Each akmod version leaves its own log, so the newest one is the build that just failed.
+# Prints nothing and returns 1 when there is none.
+newest_akmods_failure_log() {
+  local candidate newest=""
+  for candidate in "$1/$2"/*-for-"$3".failed.log; do
+    [[ -e "$candidate" ]] || continue
+    if [[ -z "$newest" || "$candidate" -nt "$newest" ]]; then newest="$candidate"; fi
+  done
+  [[ -n "$newest" ]] || return 1
+  printf '%s' "$newest"
 }
 
 build_akmods_for_target_kernel() {
