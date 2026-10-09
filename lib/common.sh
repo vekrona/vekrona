@@ -1021,7 +1021,7 @@ VEKRONA_COPRS=(blakegardner/xremap scottames/ghostty avengemedia/danklinux rosse
 copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 
 # shellcheck disable=SC2034
-VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio)
+VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio md.obsidian.Obsidian)
 
 # shellcheck disable=SC2034
 VEKRONA_X11_FLATPAKS=(md.obsidian.Obsidian org.signal.Signal)
