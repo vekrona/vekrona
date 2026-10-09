@@ -154,7 +154,7 @@ LauncherModule {
             ]
         }));
         rows.push(setting("mute", muted ? "Unmute" : "Mute", muted ? "volume_up" : "volume_off", {
-            subtitle: muted ? "Now muted" : "Now playing",
+            subtitle: muted ? "Sound is off" : "Sound is on",
             keywords: ["audio", "sound", "volume", "mute", "silence", "speakers"],
             aliases: ["mute", "volume"],
             actions: [
@@ -273,12 +273,7 @@ LauncherModule {
 
     function loadAgents(reqId: int): void {
         const argv = ["vekrona-agent", "list"];
-        Shell.Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0)
-                resultsReady(reqId, [errorRow("list the agent tools", Shell.Exec.failure(argv, code, stderr))]);
-            else
-                resultsReady(reqId, agentRows(stdout));
-        });
+        answerFrom(reqId, argv, (code, stdout, stderr) => code !== 0 ? [errorRow("list the agent tools", Shell.Exec.failure(argv, code, stderr))] : agentRows(stdout));
     }
 
     // Toasts why a toggle was refused and returns false then, so the launcher stays open to show it.

@@ -22,22 +22,33 @@ PanelWindow {
     property var modeModule: null
     // Pushed sub-views, innermost last: {title, viewId, module, savedQuery}.
     property var viewStack: []
-    // {action} of the selected row while it waits for the confirming second Enter, else null.
+    // {action, confirm} of the selected row while it waits for the confirming second Enter, else null.
     property var armed: null
     property bool actionsOpen: false
+    // The row the Ctrl+K panel was opened on, whose actions it lists; null while the panel is closed.
+    property var actionsEntry: null
+    // Which Enter (0 primary, 1 Ctrl+Enter) came while no row was selectable and a module still had to answer, else -1.
+    property int pendingActivation: -1
     property string toastText: ""
     // The list entries: {type: "header" | "empty", title} or {type: "row", module, result, synthetic}.
     property var rows: []
     property int selected: -1
     property int requestId: 0
-    // The modules asked for the current request, and the results that came back, by moduleId.
+    // By moduleId: the modules asked for the current request, those that have not answered it yet, and their
+    // latest results. A module that has not answered keeps the results of the request before until it does.
     property var queried: ({})
+    property var awaiting: ({})
     property var collected: ({})
+    // What kind of request `collected` answers (the mode and the sub-view), so results are never kept across kinds.
+    property string collectedContext: ""
 
     readonly property string activeSlash: modeModule === null ? "" : modeModule.slash
     readonly property var moduleList: modules.all
-    readonly property var selectedEntry: selected >= 0 && selected < rows.length ? rows[selected] : null
+    // The selected result row, or null while nothing is selected (headers and the "No matches" line cannot be).
+    readonly property var selectedEntry: selected >= 0 && selected < rows.length && rows[selected].type === "row" ? rows[selected] : null
+    readonly property string selectedId: selectedEntry === null ? "" : selectedEntry.result.id
     readonly property var selectedActions: selectedEntry === null ? [] : selectedEntry.result.actions ?? []
+    readonly property var panelActions: actionsEntry === null ? [] : actionsEntry.result.actions ?? []
     readonly property string breadcrumb: viewStack.length === 0 ? "" : [viewStack[0].module.title].concat(viewStack.map(frame => frame.title)).join(" › ")
     readonly property real listContentHeight: rows.reduce((sum, entry) => sum + LauncherMetrics.heightOf(entry), 0)
     // The search field's middle sits on the screen's middle; the list takes the room below it.
@@ -58,7 +69,7 @@ PanelWindow {
         viewStack = [];
         armed = null;
         actionsOpen = false;
-        toastText = "";
+        dismissToast();
         shown = true;
         if (slash === "" || !enterMode(slash))
             applyQuery("");
@@ -68,13 +79,20 @@ PanelWindow {
         shown = false;
     }
 
-    // An empty text clears the toast.
     function showToast(text: string): void {
         toastText = text;
-        if (text === "")
-            toastTimer.stop();
-        else
-            toastTimer.restart();
+        toastTimer.restart();
+    }
+
+    function dismissToast(): void {
+        toastText = "";
+        toastTimer.stop();
+    }
+
+    // Takes the toast back, unless it has been replaced by another text since.
+    function clearToast(text: string): void {
+        if (toastText === text)
+            dismissToast();
     }
 
     function moduleOf(resultId: string): var {
@@ -86,7 +104,7 @@ PanelWindow {
     function applyQuery(value: string): void {
         if (search.text === value) {
             armed = null;
-            refresh();
+            refresh(false);
         } else {
             search.text = value;
         }
@@ -123,7 +141,7 @@ PanelWindow {
     function exitMode(): void {
         modeModule = null;
         armed = null;
-        refresh();
+        refresh(false);
     }
 
     // Enters the sub-view `push` ({title, viewId}) of the module, on top of whatever is open.
@@ -159,7 +177,7 @@ PanelWindow {
                 return;
             }
         }
-        refresh();
+        refresh(false);
     }
 
     // The modules whose slash keyword starts with what follows the "/" being typed.
@@ -170,9 +188,10 @@ PanelWindow {
         return moduleList.filter(module => module.slash !== "" && module.slash.startsWith(typed));
     }
 
-    function isRecentCandidate(id: string): bool {
-        const module = moduleOf(id);
-        return module !== null && module.global;
+    // The global modules that own a frecent result.
+    function recentOwners(): var {
+        const owners = Object.keys(frecency.entries).map(id => moduleOf(id));
+        return moduleList.filter(module => module.global && owners.includes(module));
     }
 
     // The modules a new request asks.
@@ -183,10 +202,8 @@ PanelWindow {
             return [modeModule];
         if (modeSuggestions().length > 0)
             return [];
-        if (search.text.trim() === "") {
-            const owners = Ranker.recentIds(frecency.entries, Date.now(), recentLimit, isRecentCandidate).map(id => moduleOf(id));
-            return moduleList.filter(module => owners.includes(module));
-        }
+        if (search.text.trim() === "")
+            return recentOwners();
         return moduleList.filter(module => module.global);
     }
 
@@ -220,25 +237,81 @@ PanelWindow {
         showToast(module.title + " failed: " + error);
     }
 
-    function refresh(): void {
-        const reqId = ++requestId;
-        queried = {};
-        collected = {};
-        for (const module of targets()) {
-            queried[module.moduleId] = true;
-            const results = ask(module, reqId);
-            if (results !== null)
-                collected[module.moduleId] = results;
-        }
-        rebuild(false);
+    function contextKey(): string {
+        const frame = viewStack.length > 0 ? viewStack[viewStack.length - 1] : null;
+        return (modeModule === null ? "" : modeModule.moduleId) + "|" + (frame === null ? "" : frame.module.moduleId + ":" + frame.viewId);
     }
 
-    // An asynchronous module delivered; results for an older request are dropped.
+    // Asks the modules again. A new query (not keepSelection) selects the first row and forgets a waiting Enter.
+    function refresh(keepSelection: bool): void {
+        const reqId = ++requestId;
+        const context = contextKey();
+        const previous = context === collectedContext ? collected : {};
+        queried = {};
+        awaiting = {};
+        collected = {};
+        collectedContext = context;
+        if (!keepSelection)
+            pendingActivation = -1;
+        for (const module of targets()) {
+            const id = module.moduleId;
+            queried[id] = true;
+            const results = ask(module, reqId);
+            if (results !== null) {
+                collected[id] = results;
+            } else {
+                awaiting[id] = true;
+                if (previous[id] !== undefined)
+                    collected[id] = previous[id];
+            }
+        }
+        rebuild(keepSelection);
+    }
+
+    function isAwaited(module: var, reqId: int): bool {
+        return reqId === requestId && queried[module.moduleId] === true;
+    }
+
+    // A module delivered its results; those for an older request are dropped.
     function deliver(module: var, reqId: int, results: var): void {
-        if (reqId !== requestId || !queried[module.moduleId])
+        if (!isAwaited(module, reqId))
             return;
+        if (Array.isArray(results))
+            store(module, results);
+        else
+            deliverFailure(module, reqId, new Error("expected an array of results, got " + typeof results));
+    }
+
+    // A module could not answer: the failure is reported and the request counts as answered, with no results.
+    function deliverFailure(module: var, reqId: int, error: var): void {
+        if (!isAwaited(module, reqId))
+            return;
+        reportModuleFailure(module, error);
+        store(module, []);
+    }
+
+    function store(module: var, results: var): void {
         collected[module.moduleId] = results;
+        delete awaiting[module.moduleId];
         rebuild(true);
+        runPendingActivation();
+    }
+
+    // Runs the Enter that came before any row could take it, once a delivery made a row selectable.
+    function runPendingActivation(): void {
+        if (pendingActivation < 0)
+            return;
+        if (selectedEntry !== null) {
+            const which = pendingActivation;
+            pendingActivation = -1;
+            activateSelected(which);
+        } else if (!isWaiting()) {
+            pendingActivation = -1;
+        }
+    }
+
+    function isWaiting(): bool {
+        return Object.keys(awaiting).length > 0;
     }
 
     function rowEntry(module: var, result: var): var {
@@ -285,14 +358,15 @@ PanelWindow {
         return out;
     }
 
+    // The most frecent of the results the modules list for an empty query.
     function recentRows(): var {
         const found = {};
         for (const module of moduleList) {
             for (const result of collected[module.moduleId] ?? [])
                 found[result.id] = rowEntry(module, result);
         }
-        const ids = Ranker.recentIds(frecency.entries, Date.now(), recentLimit, isRecentCandidate);
-        const rowsFound = ids.filter(id => found[id] !== undefined).map(id => found[id]);
+        const ids = Ranker.recentIds(frecency.entries, Date.now(), recentLimit, id => found[id] !== undefined);
+        const rowsFound = ids.map(id => found[id]);
         return rowsFound.length === 0 ? [] : [{ type: "header", title: "Recent" }].concat(rowsFound);
     }
 
@@ -330,7 +404,7 @@ PanelWindow {
         const suggestions = modeSuggestions();
         if (suggestions.length > 0)
             return suggestionRows(suggestions);
-        const waiting = Object.keys(queried).some(id => collected[id] === undefined);
+        const waiting = isWaiting();
         if (viewStack.length > 0)
             return singleRows(viewStack[viewStack.length - 1].module, text, waiting);
         if (modeModule !== null)
@@ -338,19 +412,42 @@ PanelWindow {
         return text === "" ? recentRows() : rootRows(text, waiting);
     }
 
-    function firstSelectable(): int {
-        return rows.findIndex(entry => entry.type === "row");
+    // The index of the row nearest to `index`, or -1 when `entries` has none.
+    function nearestRow(entries: var, index: int): int {
+        if (entries.length === 0)
+            return -1;
+        const start = Math.max(0, Math.min(index, entries.length - 1));
+        for (let distance = 0; distance < entries.length; distance++) {
+            for (const candidate of [start - distance, start + distance]) {
+                if (candidate >= 0 && candidate < entries.length && entries[candidate].type === "row")
+                    return candidate;
+            }
+        }
+        return -1;
     }
 
-    // Replaces the list. With keepSelection the selected result stays selected if it is still there.
+    // Replaces the list. With keepSelection the selected result stays selected if it is still there, else
+    // the row nearest to where it was is; without, the first row is.
     function rebuild(keepSelection: bool): void {
-        const keptId = keepSelection && selectedEntry !== null ? selectedEntry.result.id : null;
-        rows = buildRows();
-        const kept = keptId === null ? -1 : rows.findIndex(entry => entry.type === "row" && entry.result.id === keptId);
-        selected = kept >= 0 ? kept : firstSelectable();
-        if (kept < 0)
-            armed = null;
+        const next = buildRows();
+        let index = -1;
+        if (keepSelection && selectedId !== "")
+            index = next.findIndex(entry => entry.type === "row" && entry.result.id === selectedId);
+        if (index < 0)
+            index = nearestRow(next, keepSelection ? selected : 0);
+        showList(next, index);
         Qt.callLater(revealSelected);
+    }
+
+    // The one place that sets the list and the selection: choosing another result disarms and closes the panel.
+    function showList(nextRows: var, nextSelected: int): void {
+        const nextId = nextSelected >= 0 ? nextRows[nextSelected].result.id : "";
+        if (nextId !== selectedId) {
+            armed = null;
+            actionsOpen = false;
+        }
+        rows = nextRows;
+        selected = nextSelected;
     }
 
     function revealSelected(): void {
@@ -364,8 +461,7 @@ PanelWindow {
     function selectIndex(index: int): void {
         if (index === selected)
             return;
-        armed = null;
-        selected = index;
+        showList(rows, index);
         revealSelected();
     }
 
@@ -386,8 +482,11 @@ PanelWindow {
     // Enter (which = 0, the primary action) or Ctrl+Enter (which = 1). While a row is armed, either runs the armed action.
     function activateSelected(which: int): void {
         const entry = selectedEntry;
-        if (entry === null)
+        if (entry === null) {
+            if (isWaiting())
+                pendingActivation = which;
             return;
+        }
         if (armed !== null) {
             const action = armed.action;
             armed = null;
@@ -398,14 +497,29 @@ PanelWindow {
             requestAction(entry, selectedActions[which]);
     }
 
-    // Runs the action, unless it needs a confirming second Enter first.
+    // Runs the action, unless it is destructive: that only arms the row, and the next Enter runs it.
     function requestAction(entry: var, action: var): void {
-        if (action.confirm === undefined) {
+        if (action.destructive !== true) {
             perform(entry, action);
             return;
         }
         actionsOpen = false;
-        armed = { action: action };
+        armed = {
+            action: action,
+            confirm: action.confirm ?? "Press Enter again to " + action.label.toLowerCase()
+        };
+    }
+
+    // The action picked in the Ctrl+K panel, for the row the panel was opened on.
+    function chooseAction(action: var): void {
+        const entry = actionsEntry;
+        actionsOpen = false;
+        if (entry === null) {
+            console.error("launcher: the actions panel chose '" + action.id + "' with no row open");
+            showToast("Couldn’t run " + action.label + ": its row is gone");
+            return;
+        }
+        requestAction(entry, action);
     }
 
     function perform(entry: var, action: var): void {
@@ -450,9 +564,10 @@ PanelWindow {
     }
 
     function openActions(): void {
-        if (selectedActions.length === 0)
+        if (selectedEntry === null || selectedActions.length === 0)
             return;
         armed = null;
+        actionsEntry = selectedEntry;
         actionsOpen = true;
     }
 
@@ -464,6 +579,7 @@ PanelWindow {
     }
 
     function handleKey(event): void {
+        pendingActivation = -1;
         const ctrl = (event.modifiers & Qt.ControlModifier) !== 0;
         switch (event.key) {
         case Qt.Key_Escape:
@@ -551,13 +667,18 @@ PanelWindow {
             requestId++;
             armed = null;
             actionsOpen = false;
+            pendingActivation = -1;
+            collected = {};
+            collectedContext = "";
         }
     }
     onActionsOpenChanged: {
-        if (actionsOpen)
+        if (actionsOpen) {
             Qt.callLater(actionsPanel.start);
-        else
+        } else {
+            actionsEntry = null;
             search.forceActiveFocus();
+        }
     }
 
     IpcHandler {
@@ -601,6 +722,10 @@ PanelWindow {
         function toast(text: string): void {
             root.showToast(text);
         }
+
+        function clearToast(text: string): void {
+            root.clearToast(text);
+        }
     }
 
     Frecency {
@@ -624,9 +749,13 @@ PanelWindow {
                 root.deliver(modelData, reqId, results);
             }
 
+            function onFailed(reqId: int, error: var): void {
+                root.deliverFailure(modelData, reqId, error);
+            }
+
             function onChanged(): void {
                 if (root.shown)
-                    root.refresh();
+                    root.refresh(true);
             }
         }
     }
@@ -634,7 +763,7 @@ PanelWindow {
     Timer {
         id: toastTimer
         interval: root.toastMs
-        onTriggered: root.toastText = ""
+        onTriggered: root.dismissToast()
     }
 
     Rectangle {
@@ -778,7 +907,7 @@ PanelWindow {
                         width: ListView.view.width
                         entry: modelData
                         current: index === root.selected
-                        armedText: root.armed !== null && index === root.selected ? root.armed.action.confirm : ""
+                        armedText: root.armed !== null && index === root.selected ? root.armed.confirm : ""
                         onMoved: root.selectIndex(index)
                         onClicked: {
                             root.selectIndex(index);
@@ -813,11 +942,8 @@ PanelWindow {
             anchors.rightMargin: VekronaTheme.space2
             anchors.bottom: parent.bottom
             anchors.bottomMargin: LauncherMetrics.footerHeight + VekronaTheme.borderHair + VekronaTheme.space1
-            actions: root.selectedActions
-            onChosen: action => {
-                root.actionsOpen = false;
-                root.requestAction(root.selectedEntry, action);
-            }
+            actions: root.panelActions
+            onChosen: action => root.chooseAction(action)
             onDismissed: root.actionsOpen = false
         }
     }

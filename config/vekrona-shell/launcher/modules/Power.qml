@@ -61,10 +61,8 @@ LauncherModule {
             label: item.title,
             exec: item.command
         };
-        if (item.armVerb !== "") {
+        if (item.armVerb !== "")
             action.destructive = true;
-            action.confirm = "Press Enter again to " + item.armVerb;
-        }
         return {
             id: "power:" + item.id,
             title: item.title,
@@ -95,6 +93,8 @@ LauncherModule {
             property var module: root
             property int current: 0
             property int armed: -1
+            // The toast shown for the armed command, which disarming takes back (and no other toast).
+            property string armedToast: ""
             property int hovered: -1
             readonly property int labelled: armed >= 0 ? armed : hovered >= 0 ? hovered : activeFocus ? current : -1
 
@@ -106,7 +106,8 @@ LauncherModule {
                 const item = module.commands[index];
                 if (item.armVerb !== "" && armed !== index) {
                     armed = index;
-                    launcher.toast(pressAgain(item));
+                    armedToast = pressAgain(item);
+                    launcher.toast(armedToast);
                     return;
                 }
                 armed = -1;
@@ -131,10 +132,12 @@ LauncherModule {
                 event.accepted = false;
             }
             onCurrentChanged: armed = -1
-            // Disarming (any way) takes the "Press again" toast back.
+            // Disarming (any way) takes the "Press again" toast back, unless another toast replaced it.
             onArmedChanged: {
-                if (armed < 0)
-                    launcher.toast("");
+                if (armed < 0) {
+                    launcher.clearToast(armedToast);
+                    armedToast = "";
+                }
             }
             onActiveFocusChanged: {
                 if (!activeFocus)

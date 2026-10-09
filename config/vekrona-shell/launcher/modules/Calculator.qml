@@ -32,26 +32,8 @@ LauncherModule {
         const strict = inMode;
         const options = strict ? ["-t"] : ["-t", "-s", "unknowns off"];
         const argv = ["env", "LC_ALL=C.UTF-8", "qalc"].concat(options, ["--", text]);
-        current = Shell.Exec.run(argv, (code, stdout, stderr) => finish(reqId, strict, text, argv, code, stdout, stderr));
+        current = answerFrom(reqId, argv, (code, stdout, stderr) => outcome(strict, text, argv, code, stdout, stderr));
         return null;
-    }
-
-    function failureRow(message: string): var {
-        return {
-            id: "calc:error",
-            title: "Can’t evaluate",
-            subtitle: message,
-            glyph: "calculate",
-            kind: "Calculator",
-            score: 1,
-            actions: [
-                {
-                    id: "copy-message",
-                    label: "Copy message",
-                    copy: message
-                }
-            ]
-        };
     }
 
     function answerRow(question: string, answer: string): var {
@@ -81,25 +63,20 @@ LauncherModule {
 
     // qalc prints "error: ..." and "warning: ..." lines on stdout, before the result. Outside /calc
     // (not strict), a failure or an answer that only repeats the question shows no row.
-    function finish(reqId: int, strict: bool, question: string, argv: list<string>, exitCode: int, stdout: string, stderr: string): void {
+    function outcome(strict: bool, question: string, argv: list<string>, exitCode: int, stdout: string, stderr: string): var {
         if (exitCode !== 0) {
             const message = Shell.Exec.failure(argv, exitCode, stderr);
-            resultsReady(reqId, strict ? [failureRow(message)] : []);
-            return;
+            return strict ? [errorRow("evaluate", message)] : [];
         }
         const lines = stdout.split("\n").map(line => line.trim()).filter(line => line !== "");
         const problems = lines.filter(line => line.startsWith("error: ")).map(line => line.slice("error: ".length));
         const answers = lines.filter(line => !line.startsWith("error: ") && !line.startsWith("warning: "));
-        if (problems.length > 0 || answers.length === 0) {
-            resultsReady(reqId, strict ? [failureRow(problems.length > 0 ? problems.join("; ") : "qalc printed no result")] : []);
-            return;
-        }
+        if (problems.length > 0 || answers.length === 0)
+            return strict ? [errorRow("evaluate", problems.length > 0 ? problems.join("; ") : "qalc printed no result")] : [];
         const answer = answers.join(", ");
-        if (!strict && squash(answer) === squash(question)) {
-            resultsReady(reqId, []);
-            return;
-        }
-        resultsReady(reqId, [answerRow(question, answer)]);
+        if (!strict && squash(answer) === squash(question))
+            return [];
+        return [answerRow(question, answer)];
     }
 
     function query(text: string, reqId: int): var {

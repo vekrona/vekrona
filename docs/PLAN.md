@@ -179,7 +179,7 @@ vekrona/
     vekrona-caffeine      # systemd-run --user transient unit wrapping systemd-inhibit --what=sleep; 30m/1h/2h/off/status, no-arg toggles
     vekrona-theme         # dark|light|next|list: back up, write the mode, render, roll back on failure
     vekrona-render-theme  # tokens.json + theme mode + design.json -> active-theme.json, gtk.css, gsettings (theme, color-scheme, fonts), qt6ct, firefox userChrome, sway drop-in, rofi -theme-str; called by vekrona-theme and stage 50
-    vekrona-firefox       # places <term> [--limit N] (bookmarks and history of the default profile as JSON lines) and engine-name; backs the launcher's Web module
+    vekrona-firefox       # places <term> [--limit N] (bookmarks and history of the default profile as JSON lines) and engine-name (both print nothing and succeed while Firefox has no profile yet); backs the launcher's Web module
     vekrona-webapp        # MOZ_APP_REMOTINGNAME=vekrona-<app> firefox --name vekrona-<app> -P vekrona-<app> --new-window <url>
     vekrona-screenshot    # grim+slurp, clipboard, notify with swappy Edit action
     vekrona-record        # wf-recorder

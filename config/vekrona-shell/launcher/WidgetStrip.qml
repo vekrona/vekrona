@@ -14,28 +14,32 @@ FocusScope {
 
     signal leave
 
-    function widgetAt(position: int): Item {
-        return repeater.itemAt(position).content;
-    }
-
-    function focusedPosition(): int {
+    // The widgets that loaded, in order: the keyboard stops. One that failed to load is no stop.
+    function stops(): var {
+        const loaded = [];
         for (let position = 0; position < repeater.count; position++) {
-            if (widgetAt(position).activeFocus)
-                return position;
+            const content = repeater.itemAt(position).content;
+            if (content !== null)
+                loaded.push(content);
         }
-        return -1;
+        return loaded;
     }
 
     function enter(fromEnd: bool): void {
-        widgetAt(fromEnd ? repeater.count - 1 : 0).forceActiveFocus();
+        const loaded = stops();
+        if (loaded.length === 0)
+            leave();
+        else
+            loaded[fromEnd ? loaded.length - 1 : 0].forceActiveFocus();
     }
 
     function step(delta: int): void {
-        const next = focusedPosition() + delta;
-        if (next < 0 || next >= repeater.count)
+        const loaded = stops();
+        const next = loaded.findIndex(widget => widget.activeFocus) + delta;
+        if (next < 0 || next >= loaded.length)
             leave();
         else
-            widgetAt(next).forceActiveFocus();
+            loaded[next].forceActiveFocus();
     }
 
     visible: populated

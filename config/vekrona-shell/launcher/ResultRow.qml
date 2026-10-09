@@ -87,7 +87,7 @@ Item {
             }
 
             Label {
-                Layout.maximumWidth: parent.width * 0.65
+                Layout.maximumWidth: LauncherMetrics.rowTitleMaxWidth
                 style: VekronaTheme.type.body
                 elide: Text.ElideRight
                 text: root.result === null ? "" : root.armed ? root.armedText : root.oneLine(root.result.title)

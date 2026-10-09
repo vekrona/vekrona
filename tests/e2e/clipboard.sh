@@ -13,7 +13,10 @@ nothing_matches() { vekrona-dev see text 'No matches'; }
 copy() { vekrona-dev sh bash -c 'printf %s "$1" | base64 -d | wl-copy >/dev/null 2>&1' _ "$(printf %s "$1" | base64 -w0)"; }
 stored() { vekrona-dev sh bash -c 'cliphist list | grep -qF "$1"' _ "$1"; }
 pasted() { [[ "$(vekrona-dev sh bash -c 'wl-paste --no-newline | base64 -w0')" == "$(printf %s "$EXPECTED" | base64 -w0)" ]]; }
-export -f nothing_matches stored pasted
+doomed_listed() { vekrona-dev see text 'vekrona-doomed'; }
+delete_armed() { vekrona-dev see text 'Press Enter again to delete'; }
+doomed_gone() { ! stored vekrona-doomed; }
+export -f nothing_matches stored pasted doomed_listed delete_armed doomed_gone
 
 export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"
 
@@ -57,3 +60,17 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
 EXPECTED="$TRICKY_ENTRY"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- pasted
 log "ok: an entry with quotes, newlines and shell syntax comes back byte for byte"
+
+copy vekrona-doomed
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- stored vekrona-doomed
+vekrona-dev key "$OPEN_CHORD"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_shown
+vekrona-dev type doomed
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- doomed_listed
+vekrona-dev key ctrl-ret
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- delete_armed
+stored vekrona-doomed || die "the first Ctrl+Enter on Delete must only arm it, but the entry is gone"
+vekrona-dev key ret
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- doomed_gone
+panel_shown || die "deleting an entry must keep the clipboard history open"
+log "ok: Delete needs a second Enter and then removes the entry"

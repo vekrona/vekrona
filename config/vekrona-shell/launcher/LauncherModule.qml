@@ -1,4 +1,5 @@
 import QtQuick
+import ".." as Shell
 
 // The base of every launcher module (modules/*.qml). The host (Launcher.qml) sets `launcher` and
 // calls opened, query, fallbacks and view.
@@ -9,10 +10,11 @@ import QtQuick
 //
 // An action is {id, label, key?, destructive?, confirm?} plus exactly one of exec: [argv], copy: string,
 // url: string, push: {title, viewId}, setQuery: string, run: function() (the launcher closes unless it
-// returns false). With `confirm` the first activation only arms the row.
+// returns false). A `destructive` action always needs a confirming second activation: the first one only
+// arms the row and shows `confirm`, which defaults to "Press Enter again to <label in lower case>".
 Item {
     // The host API: close(), setQuery(text), enterMode(slash), pushView(moduleId, {title, viewId}),
-    // toast(text) (an empty text clears the toast).
+    // toast(text), clearToast(text) (takes the toast back, only while it still shows `text`).
     property var launcher
     property string moduleId
     property string title
@@ -29,8 +31,11 @@ Item {
     // Set by the host: true while this module's mode (/keyword) is the active one, e.g. to evaluate strictly.
     property bool inMode: false
 
-    // Asynchronous delivery of the results for `reqId`.
+    // Asynchronous delivery of the results for `reqId`: an array. It replaces what the module answered
+    // for that request before, so a module may answer at once and deliver a fuller list later.
     signal resultsReady(int reqId, var results)
+    // The request `reqId` cannot be answered: the host reports `error` and counts the request as answered.
+    signal failed(int reqId, var error)
     // The static results changed; the host queries again.
     signal changed
 
@@ -55,6 +60,21 @@ Item {
                 }
             ]
         };
+    }
+
+    // Runs argv, then answers the request `reqId` with toResults(code, stdout, stderr), an array. A toResults
+    // that throws fails the request. Returns the Exec.run handle, whose kill() cancels the run.
+    function answerFrom(reqId: int, argv: list<string>, toResults): var {
+        return Shell.Exec.run(argv, (code, stdout, stderr) => {
+            let results;
+            try {
+                results = toResults(code, stdout, stderr);
+            } catch (e) {
+                failed(reqId, e);
+                return;
+            }
+            resultsReady(reqId, results);
+        });
     }
 
     // An array, or null when the results arrive later through resultsReady (the host drops stale reqIds).

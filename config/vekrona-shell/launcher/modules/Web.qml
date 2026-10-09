@@ -31,6 +31,8 @@ LauncherModule {
         })
     // Resolved once by the helper from the profile's search.json.mozlz4.
     property string engineName: ""
+    // The handle of the running places lookup, if any.
+    property var current: null
 
     function searchRow(term: string): var {
         return {
@@ -96,8 +98,17 @@ LauncherModule {
         }
     }
 
-    // In /search the search row comes first; in the root search it is only a fallback.
+    function cancel(): void {
+        if (current)
+            current.kill();
+        current = null;
+    }
+
+    // In /search the search row comes first and is answered at once, so Enter never waits for the places;
+    // in the root search it is only a fallback. The places follow through a second delivery that
+    // repeats the head.
     function query(text: string, reqId: int): var {
+        cancel();
         const term = text.trim();
         if (term === "")
             return [];
@@ -105,8 +116,8 @@ LauncherModule {
         if (term.length < minPlacesChars)
             return head;
         const argv = ["vekrona-firefox", "places", term, "--limit", String(placesPerKind)];
-        Shell.Exec.run(argv, (code, stdout, stderr) => root.resultsReady(reqId, head.concat(root.placesRows(argv, code, stdout, stderr))));
-        return null;
+        current = answerFrom(reqId, argv, (code, stdout, stderr) => head.concat(placesRows(argv, code, stdout, stderr)));
+        return head.length > 0 ? head : null;
     }
 
     function fallbacks(text: string): var {

@@ -111,7 +111,7 @@ Item {
         Rectangle {
             visible: root.armedLabel === "" && root.hasActions
             Layout.preferredWidth: VekronaTheme.borderHair
-            Layout.preferredHeight: 0.6 * LauncherMetrics.footerHeight
+            Layout.preferredHeight: LauncherMetrics.footerRuleHeight
             color: VekronaTheme.c.line
         }
 

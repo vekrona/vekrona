@@ -93,8 +93,8 @@ toggles) is one Tab away.
 | Backspace on an empty query | leave the mode (or the sub-view) |
 | Escape | disarm a confirmation, then leave the sub-view, the mode, clear the query, close |
 
-A destructive command (log out, restart, shut down, also from the Power
-widget) asks you to press Enter twice to confirm; Escape cancels. What you
+A destructive action (log out, restart, shut down, also from the Power
+widget; deleting a clipboard entry) asks you to press Enter twice to confirm; Escape cancels. What you
 open often moves up: results are ranked with a frecency score kept in
 `$XDG_STATE_HOME/vekrona/launcher-frecency.json` that halves every seven
 days, and the empty launcher lists the six most recent.

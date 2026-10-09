@@ -10,6 +10,10 @@ QtObject {
     readonly property real cardHeight: 2 * rowHeight
     readonly property real headerHeight: VekronaTheme.space6 + VekronaTheme.space1
     readonly property real footerHeight: VekronaTheme.sizeTarget
+    // The rule between the footer's hints.
+    readonly property real footerRuleHeight: 3 * footerHeight / 5
+    // The most a result's title takes of its row; the subtitle gets the rest.
+    readonly property real rowTitleMaxWidth: 13 * VekronaTheme.sizeTarget
     readonly property real actionsWidth: 35 * VekronaTheme.sizeTarget / 4
     readonly property real actionHeight: VekronaTheme.sizeTarget
     readonly property int maxRows: 8

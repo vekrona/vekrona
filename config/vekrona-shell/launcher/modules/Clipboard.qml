@@ -53,12 +53,7 @@ LauncherModule {
 
     function query(text: string, reqId: int): var {
         const argv = ["cliphist", "list"];
-        Shell.Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0)
-                root.resultsReady(reqId, [root.errorRow("read the clipboard history", Shell.Exec.failure(argv, code, stderr))]);
-            else
-                root.resultsReady(reqId, root.rows(stdout, text));
-        });
+        answerFrom(reqId, argv, (code, stdout, stderr) => code !== 0 ? [errorRow("read the clipboard history", Shell.Exec.failure(argv, code, stderr))] : rows(stdout, text));
         return null;
     }
 

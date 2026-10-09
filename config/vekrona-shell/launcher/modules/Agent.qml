@@ -8,7 +8,9 @@ LauncherModule {
 
     readonly property string unreadPath: StandardPaths.writableLocation(StandardPaths.GenericStateLocation) + "/vekrona/errors/unread"
     readonly property var listLine: /^(\d{8}T\d{6}-[0-9a-f]{8})\s+(\S+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(.*)$/
+    // "" when none is set, or when reading it failed (toolFailed): those are different states.
     property string defaultTool: ""
+    property bool toolFailed: false
     property var latestError: null
     property bool toolInFlight: false
     property bool errorsInFlight: false
@@ -20,12 +22,14 @@ LauncherModule {
         const argv = ["vekrona-agent", "get"];
         Shell.Exec.run(argv, (code, stdout, stderr) => {
             toolInFlight = false;
-            if (code !== 0)
+            const unreadable = code !== 0;
+            if (unreadable)
                 Shell.Exec.failure(argv, code, stderr);
-            const next = code === 0 ? stdout.trim() : "";
-            if (next === defaultTool)
+            const next = unreadable ? "" : stdout.trim();
+            if (next === defaultTool && unreadable === toolFailed)
                 return;
             defaultTool = next;
+            toolFailed = unreadable;
             changed();
         });
     }
@@ -85,7 +89,7 @@ LauncherModule {
         return {
             id: "agent:ask",
             title: "Ask agent “" + text + "”",
-            subtitle: defaultTool !== "" ? defaultTool : "no default agent, you will choose one",
+            subtitle: toolFailed ? "Couldn’t read the default agent" : defaultTool !== "" ? defaultTool : "no default agent, you will choose one",
             glyph: "smart_toy",
             kind: "Command",
             score: 1,
