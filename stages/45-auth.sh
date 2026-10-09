@@ -12,7 +12,7 @@ PROFILE_ID="custom/$PROFILE_NAME"
 PROFILE_DIR="/etc/authselect/custom/$PROFILE_NAME"
 PROFILE_FEATURES=(with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f)
 
-ensure_pkg pam-u2f pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam cryptsetup perl-interpreter
+ensure_pkg pam-u2f yubikey-manager pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam cryptsetup perl-interpreter
 require_cmd authselect cryptsetup dracut lsinitrd jq findfs perl
 
 render_profile() {

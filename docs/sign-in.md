@@ -64,6 +64,12 @@ never reaches the key as a PIN. pam_u2f has no timeout option; when a wait
 for the touch ends without one, `vekrona-lock` starts a new one while the key
 stays plugged in.
 
+A YubiKey with its OTP interface enabled is also a USB keyboard: a touch
+while no security-key request is pending types a one-time password and Enter,
+which the lock screen submits as a wrong password. Vekrona expects OTP off:
+run `ykman config usb --disable OTP` once and replug the key; stage 70 fails
+while a Yubico device still has a keyboard interface.
+
 **Password:** always works, regardless of key/fingerprint enrollment.
 
 If you enroll neither on the VEKRONA SIGN-IN screen, the machine works
