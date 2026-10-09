@@ -164,7 +164,7 @@ vekrona/
     dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions
     yum.repos.d/claude-code.repo   # Anthropic's signed dnf repo, gpgcheck=1, gpgkey=file://
     yum.repos.d/mise.repo          # mise's signed dnf repo, gpgcheck=1, gpgkey=file://
-    pki/rpm-gpg/RPM-GPG-KEY-{claude-code,mise,1password}   # vendored repo signing keys, pinned by VEKRONA_REPO_KEY_FINGERPRINTS
+    pki/rpm-gpg/RPM-GPG-KEY-{claude-code,mise,1password,protonvpn-fedora-44}   # vendored repo signing keys, pinned by VEKRONA_REPO_KEY_FINGERPRINTS
     claude-code/managed-settings.json   # forceLoginMethod claudeai, auto-update off
     codex/requirements.toml        # allowed_login_methods = ["chatgpt"]
     codex/managed_config.toml      # check_for_update_on_startup = false

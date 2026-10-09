@@ -48,7 +48,7 @@ apply the cooldown it prints `minimum_release_age is set for ...`;
 than it claims.
 
 All repo files are GPG-signed (`gpgcheck=1`), and no key is fetched from the
-network. The signing keys of the five pinned repos are vendored in
+network. The signing keys of the six pinned repos are vendored in
 `etc/pki/rpm-gpg/RPM-GPG-KEY-<repo>`:
 
 | Pin (`VEKRONA_REPO_KEY_FINGERPRINTS`) | Repo | Installed by |
@@ -56,6 +56,7 @@ network. The signing keys of the five pinned repos are vendored in
 | `claude-code`, `mise` | Claude Code, mise | `55-agents` |
 | `1password` | 1Password | `00-repos` |
 | `rpmfusion-free-fedora-44`, `rpmfusion-nonfree-fedora-44` | RPM Fusion free and nonfree | `00-repos` |
+| `protonvpn-fedora-44` | Proton VPN | `00-repos` |
 
 Each repo file points at its copy with `gpgkey=file:///etc/pki/rpm-gpg/...`,
 and `VEKRONA_REPO_KEY_FINGERPRINTS` in `lib/common.sh` pins the one
@@ -93,6 +94,16 @@ every install and upgrade (with `gpgkey=` pointing at its HTTPS URL and
 `repo_gpgcheck` commented out). `ensure_1password_repo_file` puts the
 repo's file back right after stage `30-packages` installs the package and
 right after the `dnf upgrade` in `vekrona-update`.
+
+Proton signs each Fedora release's repo with its own key, so
+`protonvpn_key_repo` names the pin after `rpm -E %fedora` (as
+`rpmfusion_key_repo` does) and the vendored repo file reads
+`gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-protonvpn-fedora-$releasever`. The
+repo's `repomd.xml` is signed by that same key, so the repo file sets
+`repo_gpgcheck=1`. The `protonvpn-stable-release` RPM is not installed: it
+would fetch the key over HTTPS without a pin. The key expires on 2028-03-11;
+replace it, with its pin, before then. `70-verify` warns when a pinned
+`*-fedora-<N>` key is not for the running Fedora release.
 
 When a vendor rotates its signing key, the stage dies naming the expected and
 the found fingerprints. Verify the new fingerprint with the vendor out of

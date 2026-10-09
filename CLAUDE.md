@@ -11,6 +11,9 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
   encryption, keys stay local).
 - Native, not FOSS: Obsidian (closed source, but it has no web version and works
   on local vault files).
+- Native, official vendor packages: Proton VPN (Proton's signed dnf repo,
+  `etc/yum.repos.d/protonvpn-stable.repo`; GTK app and CLI, tray through
+  vekrona-shell's SNI tray).
 - Daemon plus webapp: Syncthing (Fedora RPM user service for file access; its
   GUI at `127.0.0.1:8384` is a webapp).
 - Webapp: Telegram and Discord (proprietary and tracking, so a browser
