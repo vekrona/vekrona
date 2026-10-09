@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Installs updates as root, under the update lock. Started by the vekrona-update-{now,reboot,poweroff} units and by
+# vekrona-update-night.
+#   --online                 dnf, Flatpak and mise run now
+#   --offline [--poweroff]   Flatpak and mise run now; dnf's transaction is stored and runs in the next boot's
+#                            system-update.target, after which the machine reboots (or powers off with --poweroff)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/update.sh"
+
+usage() {
+  echo "usage: vekrona-update-apply --online | --offline [--poweroff]" >&2
+  exit 2
+}
+
+mode="" poweroff=""
+case "${1:-}" in
+  --online) [[ $# -eq 1 ]] || usage; mode=online ;;
+  --offline)
+    mode=offline
+    case "${2:-}" in
+      "") ;;
+      --poweroff) [[ $# -eq 2 ]] || usage; poweroff=--poweroff ;;
+      *) usage ;;
+    esac
+    ;;
+  *) usage ;;
+esac
+
+require_root
+update_lock
+
+pre_number=""
+post_number=""
+post_attempted=0
+
+create_post_snapshot() {
+  post_attempted=1
+  post_number="$(snapper -c root create -p -c number -d "vekrona-update post" --pre-number "$pre_number")" || return 1
+  [[ -n "$post_number" ]]
+}
+
+on_exit() {
+  local status=$?
+  if [[ -n "$pre_number" && $post_attempted -eq 0 ]]; then
+    create_post_snapshot \
+      || warn "failed to create post-update snapshot; pre-update snapshot $pre_number has no matching post snapshot"
+  fi
+  [[ -n "$post_number" ]] && log "post-update snapshot: $post_number"
+  [[ -n "$pre_number" ]] && log "roll back with: vekrona-rollback $pre_number"
+  exit "$status"
+}
+trap on_exit EXIT
+
+update_flatpak_and_mise() {
+  log "=== flatpak update ==="
+  flatpak update --system -y --noninteractive
+
+  log "=== mise system: checking for upgrades (minimum_release_age may hold some back) ==="
+  mise_system_strict upgrade --dry-run
+
+  log "=== mise system: upgrading ==="
+  mise_system_strict upgrade
+
+  log "=== mise system: pruning superseded tool versions ==="
+  mise_system prune --tools --yes
+
+  log "=== mise system: reshim ==="
+  mise_system reshim
+}
+
+update_online() {
+  log "=== dnf upgrade ==="
+  dnf5 upgrade --refresh -y
+  update_postflight
+  update_flatpak_and_mise
+}
+
+# Sets stored=1 when dnf has a transaction waiting for the offline boot.
+update_offline() {
+  local status=0
+  update_flatpak_and_mise
+
+  log "=== dnf upgrade: storing the offline transaction ==="
+  dnf5 check-upgrade --refresh >/dev/null || status=$?
+  case "$status" in
+    0) log "dnf has nothing to install, so there is nothing to reboot for" ;;
+    100)
+      dnf5 upgrade --offline -y
+      stored=1
+      ;;
+    *) die "dnf5 check-upgrade failed with exit status $status" ;;
+  esac
+}
+
+stored=0
+"$VEKRONA_PROTON" stage
+
+pre_number="$(snapper -c root create -p -c number -d "vekrona-update pre")"
+[[ -n "$pre_number" ]] || die "failed to create pre-update snapshot"
+log "pre-update snapshot: $pre_number"
+
+"update_$mode"
+
+create_post_snapshot || die "failed to create post-update snapshot; pre-update snapshot $pre_number has no matching post snapshot"
+
+if [[ $stored -eq 1 ]]; then
+  date -Iseconds >"$VEKRONA_OFFLINE_MARKER"
+  log "=== rebooting into the offline update${poweroff:+, then powering off} ==="
+  dnf5 offline reboot -y ${poweroff:+"$poweroff"} || { rm -f "$VEKRONA_OFFLINE_MARKER"; die "dnf5 offline reboot failed"; }
+else
+  update_check
+  log "done: system updated"
+fi

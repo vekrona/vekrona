@@ -1,0 +1,7 @@
+[Unit]
+Description=Skip tonight's update
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStart=/usr/local/lib/vekrona/libexec/vekrona-update-skip

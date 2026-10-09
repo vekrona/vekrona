@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# "Not tonight": records today's date so the check does not arm the night timer again today, and disarms it now.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/update.sh"
+
+require_root
+update_lock
+[[ -f "$VEKRONA_UPDATES_JSON" ]] || die "$VEKRONA_UPDATES_JSON does not exist: nothing to skip"
+date +%F >"$VEKRONA_UPDATE_SKIP_FILE"
+jq -c '.groups' "$VEKRONA_UPDATES_JSON" | update_publish "$(jq -r '.checked' "$VEKRONA_UPDATES_JSON")"

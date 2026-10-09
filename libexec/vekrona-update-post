@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# First boot after an offline update (vekrona-update-post.service, only while the offline-pending marker exists):
+# repairs what the dnf transaction undid, rewrites updates.json and tells the user how the update went.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/update.sh"
+
+require_root
+[[ -e "$VEKRONA_OFFLINE_MARKER" ]] || die "no offline update is pending: $VEKRONA_OFFLINE_MARKER does not exist"
+trap 'rm -f "$VEKRONA_OFFLINE_MARKER"' EXIT
+update_lock
+
+# dnf clears its stored transaction when it ran to the end; a transaction that is still stored did not.
+offline_status="$(dnf5 offline status 2>&1)"
+update_postflight
+update_check
+
+if [[ "$offline_status" == *"No offline transaction is stored."* ]]; then
+  log "the offline update finished"
+  notify_user -u normal "System updated" "The updates were installed." \
+    || log "nobody is logged in to read it"
+else
+  die "the offline update did not finish: $offline_status $(dnf5 offline log --number=-1 2>&1 | tail -n 20)"
+fi

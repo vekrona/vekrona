@@ -1,0 +1,15 @@
+// Anyone at the machine's own session who is in wheel may start the update units, and nothing else, without a password.
+polkit.addRule(function(action, subject) {
+  var units = [
+    "vekrona-update-now.service",
+    "vekrona-update-reboot.service",
+    "vekrona-update-poweroff.service",
+    "vekrona-update-skip.service"
+  ];
+  if (action.id == "org.freedesktop.systemd1.manage-units" &&
+      units.indexOf(action.lookup("unit")) >= 0 &&
+      action.lookup("verb") == "start" &&
+      subject.active && subject.local && subject.isInGroup("wheel")) {
+    return polkit.Result.YES;
+  }
+});

@@ -1,0 +1,8 @@
+[Unit]
+Description=Wake at midnight to install updates
+
+[Timer]
+OnCalendar=*-*-* 00:00
+WakeSystem=true
+AccuracySec=1s
+Persistent=false

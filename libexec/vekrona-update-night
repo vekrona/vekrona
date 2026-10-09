@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Midnight run of vekrona-update-night.service, which wakes the machine from suspend. Checks again, then either lets
+# the machine sleep, asks the user at the keyboard, or installs the updates offline and reboots.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/update.sh"
+
+require_root
+ask_timeout="${VEKRONA_UPDATE_ASK_TIMEOUT:-600}"
+[[ "$ask_timeout" =~ ^[0-9]+$ ]] || die "VEKRONA_UPDATE_ASK_TIMEOUT is not a number of seconds: $ask_timeout"
+
+"$VEKRONA_UPDATE_CHECK"
+pending="$(jq -r '.pending' "$VEKRONA_UPDATES_JSON")"
+awake="$(wayland_sessions awake)"
+
+if [[ "$pending" != true ]]; then
+  if [[ -z "$awake" ]]; then
+    log "nothing to install and nobody at the machine: suspending"
+    systemctl suspend
+  else
+    log "nothing to install, and somebody is at the machine: leaving it on"
+  fi
+  exit 0
+fi
+
+if [[ -n "$awake" ]]; then
+  read -r uid name <<<"${awake%%$'\n'*}"
+  answer="$(ask_user "$uid" "$name" --timeout "$ask_timeout" --title "Install updates and restart now?" \
+    --body "$(update_summary)" --action "install=Install and reboot" --action "skip=Skip tonight")"
+  case "$answer" in
+    install) log "$name chose to install" ;;
+    skip | timeout | closed)
+      log "not installing tonight: $name answered '$answer'"
+      exit 0
+      ;;
+    *) die "vekrona-update-ask printed an unexpected answer: '$answer'" ;;
+  esac
+fi
+
+blockers="$(shutdown_blockers)"
+[[ -z "$blockers" ]] || die "updates not installed, a block inhibitor holds the shutdown: $blockers"
+
+exec "$VEKRONA_UPDATE_APPLY" --offline

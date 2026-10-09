@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Looks for updates in dnf, the Proton repo, Flatpak and mise, and rewrites /var/lib/vekrona/updates.json. Runs as root
+# from vekrona-update-check.service, under the update lock.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/update.sh"
+
+require_root
+update_lock
+update_check

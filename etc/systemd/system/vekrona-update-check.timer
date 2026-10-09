@@ -1,0 +1,10 @@
+[Unit]
+Description=Look for updates every morning
+
+[Timer]
+OnCalendar=*-*-* 09:00
+OnBootSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
