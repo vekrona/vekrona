@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROG="$(basename "$0")"
 HORIZON=31d
-CALENDAR_ROOT="$HOME/.local/share/vekrona/calendars"
+CALENDAR_ROOT="$HOME/.local/share/vekrona-calendars"
 VDIRSYNCER_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/vdirsyncer/config"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona"
 
@@ -41,12 +41,16 @@ render() {
   mv "$temp" "$STATE_DIR/calendar.json"
 }
 
+redact_urls() {
+  sed -E 's#(https?://)[^/@[:space:]"]*@#\1#g; s#(https?://[^/[:space:]"]+)[^[:space:]"]*#\1/<redacted>#g'
+}
+
 sync() {
   local status=0 output
   if [[ -f "$VDIRSYNCER_CONFIG" ]]; then
     output="$(mktemp)"
     { vdirsyncer metasync && vdirsyncer sync; } >"$output" 2>&1 || status=$?
-    cat "$output" >&2
+    redact_urls <"$output" >&2
     if ((status != 0)) && grep -q 'vdirsyncer discover' "$output"; then
       printf '%s: run `vdirsyncer discover` once by hand, then start vekrona-calendar.service again\n' "$PROG" >&2
     fi

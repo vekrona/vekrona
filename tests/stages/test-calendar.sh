@@ -9,7 +9,7 @@ trap 'rm -rf "$scratch"' EXIT
 export HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/home/.config" XDG_STATE_HOME="$scratch/state"
 mkdir -p "$XDG_CONFIG_HOME/khal"
 cp "$ROOT/config/khal/config" "$XDG_CONFIG_HOME/khal/config"
-calendars="$HOME/.local/share/vekrona/calendars"
+calendars="$HOME/.local/share/vekrona-calendars"
 output="$XDG_STATE_HOME/vekrona/calendar.json"
 today="$(date +%Y-%m-%d)"
 tomorrow="$(date -d tomorrow +%Y-%m-%d)"
@@ -75,3 +75,11 @@ fi
 grep -q 'run `vdirsyncer discover` once by hand' "$scratch/sync.err" || die "a pair that needs discovery must tell the user to run vdirsyncer discover"
 [[ -f "$output" ]] || die "a failing sync must still render the calendar"
 log "ok: a failing sync still renders and fails the unit"
+
+secret_url='https://calendar.example.com/ical/user%40example.com/private-s3cr3t/basic.ics?token=s3cr3t'
+printf '#!/usr/bin/env bash\necho "Error: pair x: storage y: %s: 500 Server Error" >&2\nexit 1\n' "$secret_url" >"$fake_bin/vdirsyncer"
+PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err" || true
+grep -q 's3cr3t' "$scratch/sync.err" && die "a vdirsyncer error must not print a private calendar URL: $(cat "$scratch/sync.err")"
+grep -q 'https://calendar.example.com' "$scratch/sync.err" || die "the redacted URL must keep its host: $(cat "$scratch/sync.err")"
+grep -q '500 Server Error' "$scratch/sync.err" || die "redacting a URL must keep the rest of the error: $(cat "$scratch/sync.err")"
+log "ok: a URL in a sync error is cut to its host"

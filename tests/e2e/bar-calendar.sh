@@ -6,7 +6,7 @@ source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
 EVENT_TITLE="Vekrona review"
-GUEST_CALENDAR_DIR='$HOME/.local/share/vekrona/calendars/e2e'
+GUEST_CALENDAR_DIR='$HOME/.local/share/vekrona-calendars/e2e'
 
 POSITION_FILE="$(mktemp)"
 event_position() { vekrona-dev see find "Vekrona" >"$POSITION_FILE"; }

@@ -1,11 +1,11 @@
 [calendars]
 
 [[vekrona]]
-path = ~/.local/share/vekrona/calendars/*
+path = ~/.local/share/vekrona-calendars/*
 type = discover
 
 [[vekrona_collections]]
-path = ~/.local/share/vekrona/calendars/*/*
+path = ~/.local/share/vekrona-calendars/*/*
 type = discover
 
 [locale]

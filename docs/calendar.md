@@ -3,12 +3,12 @@
 The bar's Calendar widget shows your next event today and opens a month grid with an agenda for the next 31 days.
 It reads `~/.local/state/vekrona/calendar.json`, which `vekrona-calendar` writes every 15 minutes
 (`vekrona-calendar.timer`). Vekrona syncs calendars with [vdirsyncer](https://vdirsyncer.pimutils.org/) into
-`~/.local/share/vekrona/calendars/<provider>/` and reads them with [khal](https://khal.readthedocs.io/).
+`~/.local/share/vekrona-calendars/<provider>/` and reads them with [khal](https://khal.readthedocs.io/).
 All providers are read-only: Vekrona shows events, it does not create or change them.
 
 ## Set up
 
-1. Copy the example: `mkdir -p ~/.config/vdirsyncer && cp ~/.local/share/vekrona/config/vdirsyncer/config.example ~/.config/vdirsyncer/config`.
+1. Copy the example (the install links it from the checkout it ran from): `cp ~/.config/vdirsyncer/config.example ~/.config/vdirsyncer/config`.
 2. Keep the pairs and storages of the providers you use and delete the others. Replace every `PLACEHOLDER`.
    The file holds secrets (URLs and passwords), so it stays yours and Vekrona never overwrites it.
 3. Run `vdirsyncer discover` once by hand. The unit never runs it, because it can prompt and hang.

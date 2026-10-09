@@ -18,7 +18,7 @@ read_only = true
 
 [storage proton_local]
 type = "filesystem"
-path = "~/.local/share/vekrona/calendars/proton/"
+path = "~/.local/share/vekrona-calendars/proton/"
 fileext = ".ics"
 
 # Google Calendar: Settings -> your calendar -> "Secret address in iCal format" (read-only; anyone with the URL can read the calendar).
@@ -35,7 +35,7 @@ read_only = true
 
 [storage google_local]
 type = "filesystem"
-path = "~/.local/share/vekrona/calendars/google/"
+path = "~/.local/share/vekrona-calendars/google/"
 fileext = ".ics"
 
 # iCloud: appleid.apple.com -> Sign-In and Security -> App-Specific Passwords.
@@ -54,7 +54,7 @@ password = "APP_SPECIFIC_PASSWORD"
 
 [storage icloud_local]
 type = "filesystem"
-path = "~/.local/share/vekrona/calendars/icloud/"
+path = "~/.local/share/vekrona-calendars/icloud/"
 fileext = ".ics"
 
 # Nextcloud: Settings -> Security -> Devices & sessions -> create an app password.
@@ -73,7 +73,7 @@ password = "APP_PASSWORD"
 
 [storage nextcloud_local]
 type = "filesystem"
-path = "~/.local/share/vekrona/calendars/nextcloud/"
+path = "~/.local/share/vekrona-calendars/nextcloud/"
 fileext = ".ics"
 
 # Microsoft: Outlook on the web -> Settings -> Calendar -> Shared calendars -> Publish a calendar -> ICS link (read-only).
@@ -90,5 +90,5 @@ read_only = true
 
 [storage microsoft_local]
 type = "filesystem"
-path = "~/.local/share/vekrona/calendars/microsoft/"
+path = "~/.local/share/vekrona-calendars/microsoft/"
 fileext = ".ics"
