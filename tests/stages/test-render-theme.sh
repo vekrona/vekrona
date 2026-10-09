@@ -85,11 +85,11 @@ INI
 reset_home() { rm -rf "$HOME" "$scratch/gsettings.log" "$scratch/swaymsg.log"; mkdir -p "$HOME"; write_profiles_ini; }
 
 check_mode() { # check_mode <dark|light>: every target renders that mode's tokens
-  local m="$1" bg s1 s2 s3 ink muted dis line strong accent on_accent accent_ink focus danger on_danger danger_ink
+  local m="$1" bg s1 s2 s3 ink muted dis line strong accent on_accent accent_ink focus focus_inner selected danger on_danger danger_ink
   bg=$(tok "$m" bg); s1=$(tok "$m" surface-1); s2=$(tok "$m" surface-2); s3=$(tok "$m" surface-3)
   ink=$(tok "$m" ink); muted=$(tok "$m" ink-muted); dis=$(tok "$m" ink-disabled)
   line=$(tok "$m" line); strong=$(tok "$m" line-strong); accent=$(tok "$m" accent); on_accent=$(tok "$m" on-accent)
-  accent_ink=$(tok "$m" accent-ink); focus=$(tok "$m" focus)
+  accent_ink=$(tok "$m" accent-ink); focus=$(tok "$m" focus); focus_inner=$(tok "$m" focus-inner); selected=$(tok "$m" selected)
   danger=$(tok "$m" danger); on_danger=$(tok "$m" on-danger); danger_ink=$(tok "$m" danger-ink)
   reset_home
   set_mode "$m"
@@ -101,9 +101,13 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
     [[ "$(jq -r ".$each | keys | join(\",\")" "$active_json")" == tokens ]] || die "$m: $each carries more than its tokens"
     [[ "$(jq -r ".$each.tokens.dangerInk" "$active_json")" == "$(tok "$each" danger-ink)" ]] || die "$m: $each.tokens.dangerInk is not danger-ink"
     [[ "$(jq -r ".$each.tokens.surface1" "$active_json")" == "$(tok "$each" surface-1)" ]] || die "$m: $each.tokens.surface1 is not surface-1"
+    [[ "$(jq -r ".$each.tokens.focusInner" "$active_json")" == "$(tok "$each" focus-inner)" ]] || die "$m: $each.tokens.focusInner is not focus-inner"
+    [[ "$(jq -r ".$each.tokens.selected" "$active_json")" == "$(tok "$each" selected)" ]] || die "$m: $each.tokens.selected is not selected"
   done
-  [[ "$(jq -c '.metrics.spacing.space2, .metrics.border.indicator, .metrics.border.focusOffset, .metrics.size.bar, .metrics.opacity.scrim' "$active_json" | tr '\n' ' ')" == "8 2 2 36 0.6 " ]] \
+  [[ "$(jq -c '.metrics.spacing.space2, .metrics.size.bar, .metrics.opacity.scrim' "$active_json" | tr '\n' ' ')" == "8 36 0.6 " ]] \
     || die "$m: metrics do not follow tokens.json"
+  [[ "$(jq -c '.metrics.border' "$active_json")" == '{"hair":1,"control":1,"focus":1}' ]] \
+    || die "$m: border metrics carry more than hair, control and focus (the underline and the focus offset are gone)"
   [[ "$(jq -r '.metrics.font.sans | join(",")' "$active_json")" == "Atkinson Hyperlegible Next,Atkinson Hyperlegible,Inter" ]] || die "$m: sans list keeps generics or is reordered"
   [[ "$(jq -c '.metrics.type.label' "$active_json")" == '{"size":13,"line":18,"weight":600,"tracking":0.02}' ]] || die "$m: label type style wrong"
 
@@ -123,16 +127,27 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
     expect_line "$css" "@define-color warning_bg_color $(tok "$m" warning);"
     expect_line "$css" "@define-color success_fg_color $(tok "$m" on-success);"
     expect_line "$css" "@define-color vk_focus $focus;"
+    expect_line "$css" "@define-color vk_focus_inner $focus_inner;"
+    expect_line "$css" "@define-color vk_selected $selected;"
     expect_line "$css" "@define-color vk_line $line;"
     expect_line "$css" "@define-color vk_line_strong $strong;"
     expect_text "$css" "border-radius: 0px;"
     expect_text "$css" "box-shadow: none;"
     expect_text "$css" "background-image: none;"
-    expect_text "$css" "outline: 1px solid @vk_focus;"
-    expect_text "$css" "outline-offset: 2px;"
+    expect_text "$css" "outline: none;"
+    expect_text "$css" "border-color: @vk_focus;"
+    expect_text "$css" "box-shadow: inset 0 0 0 1px @vk_focus_inner;"
+    expect_text "$css" "box-shadow: inset 0 0 0 1px @vk_focus, inset 0 0 0 2px @vk_focus_inner;"
     refute_text "$css" "*:focus-visible, "
-    expect_text "$css" "border-bottom: 2px solid transparent;"
-    expect_text "$css" "border-bottom-color: @accent_bg_color;"
+    refute_text "$css" "outline-offset"
+    refute_text "$css" "outline: 1px"
+    refute_text "$css" "border-bottom: 2px"
+    refute_text "$css" "border-bottom-color: @accent_bg_color;"
+    refute_text "$css" "inset 0 -2px"
+    expect_block "$css" "row:selected"
+    expect_block "$css" "  background-color: @vk_selected;
+  color: @window_fg_color;
+}"
     expect_text "$css" "border-bottom: 1px solid @vk_line;"
     expect_line "$css" "@define-color vk_surface_3 $s3;"
     expect_line "$css" "@define-color vk_disabled $dis;"
@@ -175,7 +190,7 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
     [[ "$roles" -eq 21 ]] || die "$m: ${kind}_colors has $roles roles, not 21"
   done
   # roles: WindowText Button Light Midlight Dark Mid Text BrightText ButtonText Base Window Shadow Highlight HighlightedText Link LinkVisited AlternateBase NoRole ToolTipBase ToolTipText PlaceholderText
-  expect_line "$qt_colors" "active_colors=$ink, $s2, $s3, $s2, $line, $strong, $ink, $ink, $ink, $s2, $s1, $bg, $accent, $on_accent, $accent_ink, $muted, $s1, $s1, $s2, $ink, $muted"
+  expect_line "$qt_colors" "active_colors=$ink, $s2, $s3, $s2, $line, $strong, $ink, $ink, $ink, $s2, $s1, $bg, $selected, $ink, $accent_ink, $muted, $s1, $s1, $s2, $ink, $muted"
   expect_line "$qt_colors" "disabled_colors=$dis, $s2, $s3, $s2, $line, $strong, $dis, $dis, $dis, $s2, $s1, $bg, $s3, $dis, $accent_ink, $muted, $s1, $s1, $s2, $dis, $dis"
 
   expect_line "$sway_conf" 'font pango:Atkinson Hyperlegible Next 11.25'
@@ -196,9 +211,12 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
     expect_text "$chrome" "--toolbar-bgcolor: $s1 !important;"
     expect_text "$chrome" "--toolbar-field-background-color: $s2 !important;"
     expect_text "$chrome" "--focus-outline-color: $focus !important;"
-    expect_text "$chrome" "border-bottom: 2px solid $accent !important;"
-    expect_text "$chrome" "outline: 1px solid $focus !important;"
-    expect_text "$chrome" "outline-offset: 2px !important;"
+    expect_text "$chrome" "--tab-selected-bgcolor: $selected !important;"
+    expect_text "$chrome" "background: $selected !important;"
+    expect_text "$chrome" "border-color: $focus !important;"
+    expect_text "$chrome" "box-shadow: inset 0 0 0 1px $focus !important, inset 0 0 0 2px $focus_inner !important;"
+    refute_text "$chrome" "outline-offset"
+    refute_text "$chrome" "border-bottom: 2px"
     expect_text "$chrome" "border-radius: 0px !important;"
     expect_text "$chrome" "box-shadow: none !important;"
   done
@@ -212,15 +230,16 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
   expect_line "$scratch/stdout" "    border-color: $strong;"
   expect_line "$scratch/stdout" "    urgent-foreground: $danger_ink;"
   expect_line "$scratch/stdout" "    active-foreground: $accent_ink;"
-  expect_line "$scratch/stdout" "    selected-normal-background: transparent;"
+  for state in normal active urgent; do
+    expect_line "$scratch/stdout" "    selected-$state-background: $selected;"
+  done
   for state in normal active urgent; do
     expect_line "$scratch/stdout" "    alternate-$state-background: $bg;"
   done
   expect_text "$scratch/stdout" "handle-width: 1px;"
   expect_text "$scratch/stdout" "handle-color: $strong;"
   expect_text "$scratch/stdout" "background-color: transparent;"
-  expect_text "$scratch/stdout" "border: 0 0 2px;"
-  expect_text "$scratch/stdout" "border-color: $accent;"
+  refute_text "$scratch/stdout" "border: 0 0 2px;"
   expect_text "$scratch/stdout" "border-radius: 0px;"
 }
 
@@ -418,7 +437,9 @@ def ratio(a, b):
 grounds = ("bg", "surface-1", "surface-2", "surface-3")
 pairs = [(fg, g, 7) for fg in ("ink", "ink-muted") for g in grounds]
 pairs += [(f"on-{x}", x, 7) for x in ("accent", "danger", "warning", "success", "info")]
-pairs += [(fg, "bg", 3) for fg in ("line-strong", "focus", "accent")]
+pairs += [(fg, "bg", 3) for fg in ("line-strong", "accent")]
+pairs += [("focus", g, 7) for g in grounds]
+pairs += [(fg, "selected", 7) for fg in ("ink", "ink-muted", "danger-ink", "accent-ink")]
 failures = []
 for mode in ("dark", "light"):
     for fg, bg, floor in pairs:
@@ -428,7 +449,7 @@ for mode in ("dark", "light"):
 if failures:
     sys.exit("\n".join(failures))
 PY
-log "ok: text pairs reach 7:1 and line-strong, focus and accent reach 3:1 in both modes"
+log "ok: text pairs, focus and text on selected reach 7:1; line-strong and accent reach 3:1 in both modes"
 
 # ---- fontconfig drift guard
 python3 - "$ROOT/config/tokens.json" "$ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" <<'PY' || die "fontconfig family lists differ from the token families (see above)"

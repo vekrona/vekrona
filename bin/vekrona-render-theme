@@ -204,6 +204,8 @@ GTK_COLORS = TokenTemplate("""@define-color accent_color ${accent-ink};
 @define-color dialog_fg_color ${ink};
 @define-color shade_color transparent;
 @define-color vk_focus ${focus};
+@define-color vk_focus_inner ${focus-inner};
+@define-color vk_selected ${selected};
 @define-color vk_line ${line};
 @define-color vk_line_strong ${line-strong};
 @define-color vk_surface_3 ${surface-3};
@@ -259,9 +261,13 @@ switch:checked slider {
 }
 """
 
-# Flat, square and quiet: the selection signal is a 2px accent underline, never a fill. Rows and tabs
-# reserve the underline's space with a transparent border so selecting one does not shift the layout.
+# Flat, square and quiet. Focus never leaves the control: a bordered control turns its 1px border to focus
+# and draws a 1px focus-inner line just inside it; a borderless one draws both lines inset on its own bounds.
+# Selection is the selected fill under ink text, never an accent fill. theme_selected_* is where adw-gtk3
+# reads its (accent-based) selection colors, e.g. text selection.
 GTK3_SHAPE = string.Template("""
+@define-color theme_selected_bg_color @vk_selected;
+@define-color theme_selected_fg_color @window_fg_color;
 * {
   border-radius: ${r}px;
   box-shadow: none;
@@ -275,8 +281,13 @@ button.flat, headerbar button:not(.suggested-action):not(.destructive-action), s
   border-color: transparent;
 }
 *:focus {
-  outline: 1px solid @vk_focus;
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: inset 0 0 0 1px @vk_focus, inset 0 0 0 2px @vk_focus_inner;
+}
+button:focus, button.flat:focus, headerbar button:not(.suggested-action):not(.destructive-action):focus,
+entry:focus, spinbutton:focus, combobox button:focus, notebook > header > tabs > tab:focus {
+  border-color: @vk_focus;
+  box-shadow: inset 0 0 0 1px @vk_focus_inner;
 }
 headerbar, .titlebar {
   border-bottom: 1px solid @vk_line;
@@ -286,19 +297,11 @@ separator {
   min-width: 1px;
   min-height: 1px;
 }
-row, notebook > header > tabs > tab, stacksidebar row, button.flat:checked {
-  border-bottom: 2px solid transparent;
-}
 row:selected, row:selected:focus, stacksidebar row:selected, notebook > header > tabs > tab:checked,
-button.flat:checked, iconview:selected, iconview:selected:focus {
-  background-color: transparent;
+button.flat:checked, iconview:selected, iconview:selected:focus, treeview.view:selected,
+treeview.view:selected:focus {
+  background-color: @vk_selected;
   color: @window_fg_color;
-  border-bottom-color: @accent_bg_color;
-}
-treeview.view:selected, treeview.view:selected:focus {
-  background-color: transparent;
-  color: @view_fg_color;
-  box-shadow: inset 0 -2px @accent_bg_color;
 }
 menu, .menu, .popup, popover.background, tooltip.background {
   background-color: @popover_bg_color;
@@ -318,9 +321,18 @@ button, entry, spinbutton, dropdown > button, .card, scale trough {
 button.flat, headerbar button:not(.suggested-action):not(.destructive-action), scale trough {
   border-color: transparent;
 }
-*:focus:focus-visible, entry:focus-within, spinbutton:focus-within {
-  outline: 1px solid @vk_focus;
-  outline-offset: 2px;
+*:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px @vk_focus, inset 0 0 0 2px @vk_focus_inner;
+}
+button:focus-visible, button.flat:focus-visible, dropdown > button:focus-visible, .card:focus-visible,
+headerbar button:not(.suggested-action):not(.destructive-action):focus-visible,
+entry:focus-within, spinbutton:focus-within {
+  border-color: @vk_focus;
+  box-shadow: inset 0 0 0 1px @vk_focus_inner;
+}
+entry text:focus-visible, spinbutton text:focus-visible {
+  box-shadow: none;
 }
 headerbar, toolbarview > .top-bar {
   border-bottom: 1px solid @vk_line;
@@ -330,15 +342,10 @@ separator {
   min-width: 1px;
   min-height: 1px;
 }
-row, .navigation-sidebar > row, listview > row, columnview > listview > row, gridview > child, tab,
-button.flat:checked {
-  border-bottom: 2px solid transparent;
-}
 row:selected, .navigation-sidebar > row:selected, listview > row:selected, columnview > listview > row:selected,
 gridview > child:selected, tab:selected, button.flat:checked {
-  background-color: transparent;
+  background-color: @vk_selected;
   color: @window_fg_color;
-  border-bottom-color: @accent_bg_color;
 }
 popover > contents, tooltip.background {
   background-color: @popover_bg_color;
@@ -395,7 +402,7 @@ QT_ROLES = (
     ("WindowText", "ink"), ("Button", "surface-2"), ("Light", "surface-3"), ("Midlight", "surface-2"),
     ("Dark", "line"), ("Mid", "line-strong"), ("Text", "ink"), ("BrightText", "ink"),
     ("ButtonText", "ink"), ("Base", "surface-2"), ("Window", "surface-1"), ("Shadow", "bg"),
-    ("Highlight", "accent"), ("HighlightedText", "on-accent"), ("Link", "accent-ink"),
+    ("Highlight", "selected"), ("HighlightedText", "ink"), ("Link", "accent-ink"),
     ("LinkVisited", "ink-muted"), ("AlternateBase", "surface-1"), ("NoRole", "surface-1"),
     ("ToolTipBase", "surface-2"), ("ToolTipText", "ink"), ("PlaceholderText", "ink-muted"),
 )
@@ -507,7 +514,7 @@ USER_CHROME = TokenTemplate("""
   --toolbar-field-color: ${ink} !important;
   --toolbar-field-border-color: ${line-strong} !important;
   --urlbar-box-bgcolor: ${surface-2} !important;
-  --tab-selected-bgcolor: transparent !important;
+  --tab-selected-bgcolor: ${selected} !important;
   --arrowpanel-background: ${surface-2} !important;
   --arrowpanel-color: ${ink} !important;
   --arrowpanel-border-color: ${line} !important;
@@ -542,8 +549,7 @@ USER_CHROME = TokenTemplate("""
   background: ${surface-2} !important;
 }
 .tabbrowser-tab[selected] > .tab-stack > .tab-background {
-  background: transparent !important;
-  border-bottom: 2px solid ${accent} !important;
+  background: ${selected} !important;
 }
 toolbarbutton:hover, .footer-button:hover {
   background-color: ${surface-2} !important;
@@ -556,20 +562,22 @@ toolbarbutton:is(:active, [open], [checked]), .footer-button:active {
   border: 1px solid ${line-strong} !important;
 }
 #urlbar:is([focused], [open]) > :is(#urlbar-background, .urlbar-background) {
-  outline: 1px solid ${focus} !important;
-  outline-offset: 2px !important;
+  border-color: ${focus} !important;
+  box-shadow: inset 0 0 0 1px ${focus-inner} !important;
 }
 :focus-visible {
-  outline: 1px solid ${focus} !important;
-  outline-offset: 2px !important;
+  outline: none !important;
+  box-shadow: inset 0 0 0 1px ${focus} !important, inset 0 0 0 2px ${focus-inner} !important;
+}
+#urlbar-input:focus-visible {
+  box-shadow: none !important;
 }
 .urlbarView {
   background-color: ${surface-2} !important;
 }
 .urlbarView-row[selected] {
-  background: transparent !important;
+  background: ${selected} !important;
   color: ${ink} !important;
-  border-bottom: 2px solid ${accent} !important;
 }
 menupopup, panel {
   --panel-background: ${surface-2};
@@ -683,19 +691,19 @@ def render_rofi(theme, mode, design):
     normal-foreground: {c['ink']};
     alternate-normal-background: {c['bg']};
     alternate-normal-foreground: {c['ink']};
-    selected-normal-background: transparent;
+    selected-normal-background: {c['selected']};
     selected-normal-foreground: {c['ink']};
     active-background: {c['bg']};
     active-foreground: {c['accent-ink']};
     alternate-active-background: {c['bg']};
     alternate-active-foreground: {c['accent-ink']};
-    selected-active-background: transparent;
+    selected-active-background: {c['selected']};
     selected-active-foreground: {c['accent-ink']};
     urgent-background: {c['bg']};
     urgent-foreground: {c['danger-ink']};
     alternate-urgent-background: {c['bg']};
     alternate-urgent-foreground: {c['danger-ink']};
-    selected-urgent-background: transparent;
+    selected-urgent-background: {c['selected']};
     selected-urgent-foreground: {c['danger-ink']};
 }}
 window {{
@@ -707,10 +715,6 @@ window {{
 element {{
     border-radius: {r}px;
     padding: {space['space1']}px {space['space3']}px;
-}}
-element selected.normal, element selected.active, element selected.urgent {{
-    border: 0 0 2px;
-    border-color: {c['accent']};
 }}
 inputbar {{
     padding: {space['space3']}px;

@@ -10,13 +10,13 @@ MODES = ("dark", "light")
 
 COLOR_NAMES = (
     "bg", "surface-1", "surface-2", "surface-3", "ink", "ink-muted", "ink-disabled", "line", "line-strong",
-    "accent", "on-accent", "accent-ink", "focus", "danger", "on-danger", "danger-ink",
+    "accent", "on-accent", "accent-ink", "focus", "focus-inner", "selected", "danger", "on-danger", "danger-ink",
     "warning", "on-warning", "success", "on-success", "info", "on-info", "scrim",
 )
 # Metric group -> (prefix stripped from the token name, required token names). The result is camelCased.
 METRIC_GROUPS = {
     "spacing": ("", ("space-1", "space-2", "space-3", "space-4", "space-6", "space-8")),
-    "border": ("border-", ("border-hair", "border-control", "border-focus", "border-indicator")),
+    "border": ("border-", ("border-hair", "border-control", "border-focus")),
     "size": ("size-", ("size-target", "size-bar", "size-icon-s", "size-icon-m", "size-icon-l", "size-icon-xl")),
     "opacity": ("opacity-", ("opacity-scrim",)),
 }
@@ -24,8 +24,7 @@ TYPE_STYLES = ("display", "headline", "title", "body", "body-strong", "label", "
 FAMILIES = ("sans", "mono", "icons")
 GENERIC_FAMILIES = ("system-ui", "sans-serif", "ui-monospace", "monospace")
 
-# Design rules the tokens state only in prose ("offset 2px", "120 ms ... 200 ms").
-FOCUS_OFFSET_PX = 2
+# Design rules the tokens state only in prose ("120 ms ... 200 ms").
 MOTION_MS = {"fast": 120, "popover": 200}
 
 HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$")
@@ -144,7 +143,6 @@ def _build(raw):
         index = _named(raw[group]["tokens"], f"{group}.tokens", names)
         parse = (lambda n, v: float(v)) if group == "opacity" else _px
         metrics[group] = {camel(name.removeprefix(prefix)): parse(name, index[name].get("value")) for name in names}
-    metrics["border"]["focusOffset"] = FOCUS_OFFSET_PX
     metrics["motion"] = dict(MOTION_MS)
 
     families = {name: _families(raw["type"]["families"], name) for name in FAMILIES}
