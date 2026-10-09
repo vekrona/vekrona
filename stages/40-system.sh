@@ -5,6 +5,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
 ensure_root_tree "$VEKRONA_ROOT/lib" "$VEKRONA_SYSTEM_DIR/lib"
+ensure_root_tree "$VEKRONA_ROOT/libexec" "$VEKRONA_SYSTEM_DIR/libexec"
+for script in "${VEKRONA_SYSTEM_BIN[@]}"; do
+  ensure_root_file "$VEKRONA_ROOT/bin/$script" "$VEKRONA_SYSTEM_DIR/bin/$script" 0755
+done
+# lib/common.sh finds this repo file relative to its own checkout, which for the root-owned copy is VEKRONA_SYSTEM_DIR.
+ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" "$VEKRONA_SYSTEM_DIR/etc/yum.repos.d/1password.repo"
+root_restorecon "$VEKRONA_SYSTEM_DIR"
+
+for unit in "$VEKRONA_ROOT"/etc/systemd/system/vekrona-update-*; do
+  ensure_system_unit_file "$unit"
+done
+ensure_root_file "$VEKRONA_ROOT/etc/polkit-1/rules.d/50-vekrona-update.rules" /etc/polkit-1/rules.d/50-vekrona-update.rules
+ensure_system_unit --now enabled vekrona-update-check.timer
+ensure_system_unit enabled vekrona-update-post.service
+
 ensure_root_file "$VEKRONA_ROOT/etc/greetd/config.toml" /etc/greetd/config.toml
 ensure_root_file "$VEKRONA_ROOT/etc/geoclue/conf.d/90-vekrona.conf" /etc/geoclue/conf.d/90-vekrona.conf
 

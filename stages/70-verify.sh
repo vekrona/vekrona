@@ -284,6 +284,18 @@ fi
 
 if ran 40-system; then
   check assert "$VEKRONA_SYSTEM_DIR/lib matches the checkout's lib/" root_tree_matches "$VEKRONA_ROOT/lib" "$VEKRONA_SYSTEM_DIR/lib"
+  check assert "$VEKRONA_SYSTEM_DIR/libexec matches the checkout's libexec/" root_tree_matches "$VEKRONA_ROOT/libexec" "$VEKRONA_SYSTEM_DIR/libexec"
+  for script in "${VEKRONA_SYSTEM_BIN[@]}"; do
+    check assert "$VEKRONA_SYSTEM_DIR/bin/$script matches the checkout's bin/$script" root_files_equal "$VEKRONA_ROOT/bin/$script" "$VEKRONA_SYSTEM_DIR/bin/$script"
+  done
+  check assert "$VEKRONA_SYSTEM_DIR/etc/yum.repos.d/1password.repo matches the repo file" root_files_equal "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" "$VEKRONA_SYSTEM_DIR/etc/yum.repos.d/1password.repo"
+  for unit_file in "$VEKRONA_ROOT"/etc/systemd/system/vekrona-update-*; do
+    check assert "/etc/systemd/system/${unit_file##*/} matches the checkout" root_files_equal "$unit_file" "/etc/systemd/system/${unit_file##*/}"
+  done
+  check assert "update polkit rule matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/polkit-1/rules.d/50-vekrona-update.rules" /etc/polkit-1/rules.d/50-vekrona-update.rules
+  check assert "vekrona-update-check.timer enabled" unit_enabled vekrona-update-check.timer
+  check assert "vekrona-update-check.timer active" unit_active vekrona-update-check.timer
+  check assert "vekrona-update-post.service enabled" unit_enabled vekrona-update-post.service
   check assert_file_contains /etc/greetd/config.toml 'user = "greetd"'
   check assert "greetd creates /var/cache/tuigreet on start" file_exists /etc/systemd/system/greetd.service.d/vekrona-tuigreet-cache.conf
   check assert "no tmpfiles.d entry for greetd's cache dir (dracut copies it into an initramfs without the user)" file_absent /etc/tmpfiles.d/vekrona-tuigreet.conf
