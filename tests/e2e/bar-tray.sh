@@ -35,18 +35,57 @@ set_output() {
 # The bar lays out again after the output changes: wait until two screenshots agree.
 bar_settled() { vekrona-dev see diff "$(vekrona-dev shot)" | awk -v max="$SETTLED_MAX_DIFF" '{ exit !($1 <= max) }'; }
 
-check_icon() {
-  local name="$1" kind="$2" shape="$3" scale="$4" bar_px="$5" icon_px="$6"
-  vekrona-dev spawn "$GUEST_LOG" -- python3 "$GUEST_SNI" "$kind"
+scale_sizes() {
+  bar_px="$(scaled_px "$BAR_HEIGHT_LOGICAL_PX" "$1")"
+  icon_px="$(scaled_px "$ICON_S_LOGICAL_PX" "$1")"
+}
+settle_output() {
+  vekrona-dev move 600 500
+  export -f bar_settled
+  export SETTLED_MAX_DIFF
+  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bar_settled
+}
+start_icon() {
+  vekrona-dev spawn "$GUEST_LOG" -- python3 "$GUEST_SNI" "$1"
   registered() { vekrona-dev run grep -q registered "$GUEST_LOG"; }
-  tray_ink_ok() { python3 "$INK_TRAY" "$without_icon" "$(vekrona-dev shot)" "$bar_px" "$icon_px" "$INK" "$BAR" "$shape" >/dev/null 2>&1; }
-  export -f registered tray_ink_ok
-  export GUEST_LOG INK_TRAY without_icon bar_px icon_px INK BAR shape
+  export -f registered
+  export GUEST_LOG
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- registered
+}
+# Measures the icon on screen against a screenshot of the same bar without it.
+measure_icon() {
+  local name="$1" shape="$2" scale="$3" without_icon="$4" bar_px icon_px
+  scale_sizes "$scale"
+  tray_ink_ok() { python3 "$INK_TRAY" "$without_icon" "$(vekrona-dev shot)" "$bar_px" "$icon_px" "$INK" "$BAR" "$shape" >/dev/null 2>&1; }
+  export -f tray_ink_ok
+  export INK_TRAY without_icon bar_px icon_px INK BAR shape
   if ! vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- tray_ink_ok; then
     log "the $name tray icon did not settle within ${STEP_TIMEOUT_SEC}s at scale $scale; measuring the final state"
   fi
   python3 "$INK_TRAY" "$without_icon" "$(vekrona-dev shot)" "$bar_px" "$icon_px" "$INK" "$BAR" "$shape" || die "the $name tray icon is drawn wrongly at scale $scale, see the measurement above"
+}
+check_icon() {
+  local name="$1" kind="$2" shape="$3" scale="$4" without_icon="$5"
+  start_icon "$kind"
+  measure_icon "$name" "$shape" "$scale" "$without_icon"
+  stop_fake_icons
+}
+# An icon already on the bar must redraw when the output scale changes under it.
+check_scale_change() {
+  local from="$1" to="$2" without_from without_to
+  set_output "$from"
+  settle_output
+  without_from="$(vekrona-dev shot)"
+  set_output "$to"
+  settle_output
+  without_to="$(vekrona-dev shot)"
+  set_output "$from"
+  settle_output
+  start_icon "$GUEST_DIR/tailscale.png"
+  measure_icon "Tailscale" dots "$from" "$without_from"
+  set_output "$to"
+  settle_output
+  measure_icon "Tailscale" dots "$to" "$without_to"
   stop_fake_icons
 }
 
@@ -65,19 +104,19 @@ done
 
 for scale in "${SCALES[@]}"; do
   set_output "$scale"
-  vekrona-dev move 600 500
-  export -f bar_settled
-  export SETTLED_MAX_DIFF
-  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bar_settled
-  bar_px="$(scaled_px "$BAR_HEIGHT_LOGICAL_PX" "$scale")"
-  icon_px="$(scaled_px "$ICON_S_LOGICAL_PX" "$scale")"
+  settle_output
   without_icon="$(vekrona-dev shot)"
-  check_icon "opaque" opaque dots "$scale" "$bar_px" "$icon_px"
+  check_icon "opaque" opaque dots "$scale" "$without_icon"
   log "ok: at scale $scale an opaque tray icon shows its dots as ink on the bar, not a solid ink square"
-  check_icon "alpha" alpha disc "$scale" "$bar_px" "$icon_px"
+  check_icon "alpha" alpha disc "$scale" "$without_icon"
   log "ok: at scale $scale a tray icon with transparency keeps its shape as an ink silhouette"
-  check_icon "1Password" "$GUEST_DIR/1password.png" disc "$scale" "$bar_px" "$icon_px"
+  check_icon "1Password" "$GUEST_DIR/1password.png" disc "$scale" "$without_icon"
   log "ok: at scale $scale the real 1Password tray icon is a whole ink disc"
-  check_icon "Tailscale" "$GUEST_DIR/tailscale.png" dots "$scale" "$bar_px" "$icon_px"
+  check_icon "Tailscale" "$GUEST_DIR/tailscale.png" dots "$scale" "$without_icon"
   log "ok: at scale $scale the real Tailscale tray icon is ink dots on the bar"
 done
+
+check_scale_change "${SCALES[0]}" "${SCALES[1]}"
+log "ok: a tray icon on the bar is redrawn whole when the output scale goes from ${SCALES[0]} to ${SCALES[1]}"
+check_scale_change "${SCALES[1]}" "${SCALES[0]}"
+log "ok: a tray icon on the bar is redrawn whole when the output scale goes from ${SCALES[1]} to ${SCALES[0]}"
