@@ -9,6 +9,10 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
 
 - Native: Blender, OBS (GPU and capture), Signal (strong end-to-end
   encryption, keys stay local).
+- Native, not FOSS: Obsidian (closed source, but it has no web version and works
+  on local vault files).
+- Daemon plus webapp: Syncthing (Fedora RPM user service for file access; its
+  GUI at `127.0.0.1:8384` is a webapp).
 - Webapp: Telegram and Discord (proprietary and tracking, so a browser
   sandbox contains them), Spotify, SoundCloud, YouTube, WhatsApp.
 

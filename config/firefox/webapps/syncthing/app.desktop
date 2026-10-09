@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Syncthing
+Exec=vekrona-webapp syncthing
+StartupWMClass=vekrona-syncthing
+Icon=vekrona-syncthing
+Type=Application
+Categories=Network;FileTransfer;

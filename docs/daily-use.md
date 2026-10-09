@@ -10,8 +10,9 @@ Vekrona installs a curated set of applications via the following channels:
 - **herdr**: COPR `rossetnocpes/herdr` (single-package COPR, upstream Rust builds for f43–rawhide)
 - **Zed**: Flathub Flatpak `dev.zed.Zed` (system-wide install, requires hardware Vulkan driver; Fedora-built RPMs freeze on F44 due to GCC 16/LLVM ABI bug rhbz#2464281, unresolved; updates via `flatpak update`)
 - **Spotify**: Firefox webapp with Widevine (replaces the `com.spotify.Client` Flatpak; downloads the Widevine CDM on first launch)
-- **Signal, OBS Studio**: Flathub Flatpaks (system-wide install, `VEKRONA_FLATPAKS`)
-- **Telegram, Discord, SoundCloud, YouTube, WhatsApp**: Firefox webapps
+- **Signal, OBS Studio, Obsidian**: Flathub Flatpaks (system-wide install, `VEKRONA_FLATPAKS`; Obsidian is closed source but has no web version and works on local vault files)
+- **Syncthing**: Fedora repository (the `syncthing` RPM runs as your user service `syncthing.service`; its web GUI at `http://127.0.0.1:8384/` is the Firefox webapp below)
+- **Telegram, Discord, SoundCloud, YouTube, WhatsApp, Syncthing GUI**: Firefox webapps
 - **Steam**: RPM Fusion (already installed; stage 60 sets Steam Play preset to `proton_experimental` for all titles)
 - **Nix**: Fedora 44's own `nix` and `nix-daemon` RPMs (flakes enabled by default; `/nix` lives on its own btrfs subvolume `nix` separate from root, so rollbacks never include the Nix store)
 - **devbox**: installed via `nix profile install nixpkgs#devbox` for the desktop user
@@ -28,6 +29,7 @@ vekrona-webapp spotify
 vekrona-webapp soundcloud
 vekrona-webapp telegram
 vekrona-webapp discord
+vekrona-webapp syncthing
 ```
 
 ## Daily operations
@@ -141,6 +143,7 @@ vekrona-webapp spotify
 vekrona-webapp soundcloud
 vekrona-webapp telegram
 vekrona-webapp discord
+vekrona-webapp syncthing
 ```
 
 Snapshots:

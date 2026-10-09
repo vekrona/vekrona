@@ -66,7 +66,9 @@ fi
 
 ensure_user_unit_stopped dms.service
 systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer
+ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer syncthing.service
+# The syncthing webapp talks to this daemon, so it must not wait for the next login.
+systemctl --user start syncthing.service || die "syncthing.service failed to start"
 # Enabling only wires the unit into the next login; a live session needs the overlay now.
 if [[ -n "$(sway_socket)" ]]; then
   log "restarting vekrona-app-switch.service for the running sway session"

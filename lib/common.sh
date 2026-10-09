@@ -1021,7 +1021,7 @@ VEKRONA_COPRS=(blakegardner/xremap scottames/ghostty avengemedia/danklinux rosse
 copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 
 # shellcheck disable=SC2034
-VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio)
+VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio md.obsidian.Obsidian)
 
 # shellcheck disable=SC2034
 VEKRONA_X11_FLATPAKS=(md.obsidian.Obsidian org.signal.Signal)
@@ -1039,7 +1039,7 @@ VEKRONA_DESKTOP_PKGS=(
   jq kanshi khal
   libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
   python3 python3-gobject python3-pyyaml python3-vdf qt6ct quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
-  sway-systemd swayidle tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
+  sway-systemd swayidle syncthing tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
 )
 

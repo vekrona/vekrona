@@ -357,6 +357,7 @@ if ran 50-user; then
   check assert "vekrona-keybindings --list has workspace 10 bindings" bash -c "vekrona-keybindings --list | grep -qF 'workspace 1…10'"
   check assert "vekrona-keybindings --list has the help binding" bash -c "vekrona-keybindings --list | grep -qF 'Show keybindings help'"
   check assert "xremap.service enabled" user_unit_enabled xremap
+  check assert "syncthing.service enabled" user_unit_enabled syncthing
   check assert "vekrona-app-switch.service enabled" user_unit_enabled vekrona-app-switch.service
   check assert "vekrona-shell Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-shell")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-shell")"
   check assert "vekrona-shell reaches the shared Vekrona module" file_exists "$HOME/.config/quickshell/vekrona-shell/Vekrona/qmldir"
