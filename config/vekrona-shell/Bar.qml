@@ -48,6 +48,20 @@ PanelWindow {
         height: parent.height
         spacing: 0
 
+        Tray {}
+
+        Perf {}
+
+        Sound {
+            bar: root
+        }
+
+        Network {
+            bar: root
+        }
+
+        Battery {}
+
         Agent {}
 
         Clock {}

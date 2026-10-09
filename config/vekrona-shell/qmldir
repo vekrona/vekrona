@@ -4,3 +4,8 @@ Desktops 1.0 Desktops.qml
 WindowTitle 1.0 WindowTitle.qml
 Clock 1.0 Clock.qml
 Agent 1.0 Agent.qml
+Tray 1.0 Tray.qml
+Perf 1.0 Perf.qml
+Sound 1.0 Sound.qml
+Network 1.0 Network.qml
+Battery 1.0 Battery.qml

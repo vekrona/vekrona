@@ -7,6 +7,7 @@ Item {
     property string icon
     property string value
     property bool emphasized: false
+    property bool filled: false
     property string ariaName
     property real overhang: 0
     default property alias extra: iconBox.data
@@ -44,6 +45,7 @@ Item {
 
             Pictogram {
                 name: root.icon
+                filled: root.filled
             }
         }
 

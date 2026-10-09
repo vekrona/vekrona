@@ -16,7 +16,7 @@ BarPill {
 
     icon: "smart_toy"
     ariaName: "Open coding agent"
-    overhang: badge.visible ? badge.width - VekronaTheme.space1 : 0
+    overhang: badge.overhang
     onClicked: Exec.detached(["vekrona-agent", "--pick"])
     onRightClicked: Exec.detached(["vekrona-error", "pick"])
 
