@@ -9,9 +9,9 @@ BarPill {
 
     required property var bar
     readonly property string weatherPath: StandardPaths.writableLocation(StandardPaths.GenericStateLocation) + "/vekrona/weather.json"
-    property var data: null
-    readonly property var current: data?.current ?? null
-    readonly property var today: data?.daily?.[0] ?? null
+    property var report: null
+    readonly property var current: report?.current ?? null
+    readonly property var today: report?.daily?.[0] ?? null
 
     function glyph(code: int, isDay: bool): string {
         if (code === 0)
@@ -40,7 +40,7 @@ BarPill {
         return Qt.locale().dayName(new Date(year, month - 1, day).getDay(), Locale.ShortFormat);
     }
 
-    visible: data !== null
+    visible: report !== null
     icon: current ? glyph(current.weather_code, current.is_day) : "cloud_off"
     value: current ? degrees(current.temperature) : ""
     ariaName: "Weather"
@@ -49,9 +49,9 @@ BarPill {
     FileView {
         path: root.weatherPath
         watchChanges: true
-        onLoaded: root.data = JSON.parse(text())
+        onLoaded: root.report = JSON.parse(text())
         onLoadFailed: error => {
-            root.data = null;
+            root.report = null;
             if (error !== FileViewError.FileNotFound)
                 console.error("cannot read " + root.weatherPath + ": " + error);
         }
@@ -66,7 +66,7 @@ BarPill {
 
         Label {
             style: VekronaTheme.type.title
-            text: root.data?.location?.name ?? ""
+            text: root.report?.location?.name ?? ""
         }
 
         Label {
@@ -76,7 +76,7 @@ BarPill {
         }
 
         Repeater {
-            model: root.data?.daily ?? []
+            model: root.report?.daily ?? []
 
             RowLayout {
                 required property var modelData
@@ -101,12 +101,12 @@ BarPill {
         }
 
         Label {
-            visible: (root.data?.error ?? null) !== null
+            visible: (root.report?.error ?? null) !== null
             Layout.maximumWidth: VekronaTheme.sizeTarget * 8
             wrapMode: Text.Wrap
             color: VekronaTheme.c.dangerInk
             style: VekronaTheme.type.body
-            text: root.data?.error ?? ""
+            text: root.report?.error ?? ""
         }
 
         Label {
