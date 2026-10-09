@@ -35,6 +35,25 @@ vekrona-webapp syncthing
 
 ## Daily operations
 
+### Updates
+
+The system checks for updates every morning at 9:00 (and five minutes after boot). When something is pending, a
+toast says "Hey dude(-ssa), updates are ready" and lists what changes, one line per group (System packages, Agents,
+Flatpak, Proton). A group with more than five updates shows its count and the first five.
+
+- **Install now** updates in the background and does not restart anything. The toast stays on screen, or in the
+  notification center, until midnight.
+- **Not tonight** skips the midnight update for today.
+- Ignore the toast and the computer installs the updates at midnight: it wakes itself, asks you first if you are
+  at it, and reboots into the update.
+
+You see each set of updates once. If the check runs before you log in, the toast appears when the session starts.
+
+The launcher's Power view (`/power`, or the power buttons) gains two items while updates are pending, placed
+before Restart and Shut down: **Update and restart** and **Update and shut down**. Like Restart, each needs a second
+press to run. They install the updates in an offline update and then restart or power off the computer. When
+nothing is pending the items are not there.
+
 ### Display settings
 
 Sway uses each monitor's preferred mode with VRR off. Put your own `output` lines (mode, scale, position) in a file in `~/.config/sway/config.d/`, which the repo does not track and `config/sway/config` includes last. Find the identifier with `swaymsg -t get_outputs`, for example `output "<make> <model> <serial>" mode 3840x2160@120Hz scale 1.5`.
