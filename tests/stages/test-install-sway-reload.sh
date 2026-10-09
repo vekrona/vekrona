@@ -28,6 +28,12 @@ run_install || die "install without sway failed: $(cat "$scratch/stderr")"
 [[ "$(swaymsg_calls)" -eq 0 ]] || die "swaymsg called with no sway session"
 log "ok: no sway session, no reload"
 
+echo 1 > "$scratch/swaymsg.status"
+SWAYSOCK=/dead/sway.sock run_install || die "install with a dead SWAYSOCK and no sway failed: $(cat "$scratch/stderr")"
+grep -qw reload "$scratch/swaymsg.log" && die "reload attempted on a dead SWAYSOCK: $(cat "$scratch/swaymsg.log")"
+rm "$scratch/swaymsg.status"
+log "ok: a SWAYSOCK left by a dead sway is not a running session"
+
 bind_socket() { python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$XDG_RUNTIME_DIR/sway-ipc.1000.$1.sock"; }
 true & dead_pid=$!
 wait "$dead_pid"

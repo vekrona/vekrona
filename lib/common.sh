@@ -40,10 +40,11 @@ sudo_refresh() {
 
 # Prints the IPC socket of the user's sway session, or nothing when none runs. A terminal inside sway has SWAYSOCK;
 # a TTY or SSH login does not, so look for the session's socket where sway creates it (sway-ipc.UID.PID.sock).
-# A crashed sway leaves its socket behind, so only sockets whose sway PID is alive count.
+# A crashed sway leaves its socket behind, so only sockets whose sway PID is alive count; for the same reason a
+# SWAYSOCK inherited by a tmux that outlived its sway is used only if sway answers on it.
 sway_socket() {
   local socket pid live=()
-  if [[ -n "${SWAYSOCK:-}" ]]; then
+  if [[ -n "${SWAYSOCK:-}" ]] && swaymsg -s "$SWAYSOCK" -t get_version >/dev/null 2>&1; then
     printf '%s\n' "$SWAYSOCK"
     return 0
   fi
