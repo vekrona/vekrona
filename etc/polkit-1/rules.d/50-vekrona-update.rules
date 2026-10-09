@@ -1,4 +1,6 @@
-// Anyone at the machine's own session who is in wheel may start the update units, and nothing else, without a password.
+// An administrator at the machine's own session may start the update units, and nothing else, without a password.
+// The toast buttons and the launcher run `systemctl start` from systemd user services, which belong to no login
+// session, so polkit sees neither a local nor an active subject; their system unit, user@UID.service, stands for them.
 polkit.addRule(function(action, subject) {
   var units = [
     "vekrona-update-now.service",
@@ -6,10 +8,12 @@ polkit.addRule(function(action, subject) {
     "vekrona-update-poweroff.service",
     "vekrona-update-skip.service"
   ];
+  var atTheMachine = subject.active && subject.local;
+  var inUserManager = /^user@[0-9]+\.service$/.test(subject.system_unit);
   if (action.id == "org.freedesktop.systemd1.manage-units" &&
       units.indexOf(action.lookup("unit")) >= 0 &&
       action.lookup("verb") == "start" &&
-      subject.active && subject.local && subject.isInGroup("wheel")) {
+      (atTheMachine || inUserManager) && subject.isInGroup("wheel")) {
     return polkit.Result.YES;
   }
 });

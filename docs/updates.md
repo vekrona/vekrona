@@ -31,8 +31,9 @@ next boot                       vekrona-update-post.service: report the result, 
 - **The notification** is the user side (`bin/vekrona-update-notify`, started by a path unit on `updates.json` and at
   login, once per distinct content). [Install now] starts `vekrona-update-now.service`; [Not tonight] starts
   `vekrona-update-skip.service`, which writes today's date to `update-skip`, disarms the night timer and marks
-  `night_armed: false`. Ignoring the toast changes nothing: midnight installs. An active local `wheel` user may start
-  exactly the `now`, `reboot`, `poweroff` and `skip` units without a password
+  `night_armed: false`. Ignoring the toast changes nothing: midnight installs. A `wheel` user at the machine's own
+  session, or one of its systemd user services (the toast and the launcher run `systemctl start` from those, outside
+  any login session), may start exactly the `now`, `reboot`, `poweroff` and `skip` units without a password
   (`etc/polkit-1/rules.d/50-vekrona-update.rules`), and nothing else.
 - **Midnight** (`libexec/vekrona-update-night`) has `WakeSystem=true`, so a sleeping machine wakes for it. It checks
   again first. A user at the keyboard is a logind session with `Type=wayland`, `Active=yes`, `LockedHint=no` and
