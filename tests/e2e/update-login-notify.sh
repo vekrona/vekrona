@@ -12,6 +12,7 @@ export -f shown
 cleanup() {
   updates_restore
   updates_forget
+  close_notification_centre
   clear_notifications
 }
 
@@ -27,6 +28,8 @@ updates_forget
 
 vekrona-dev session
 vekrona-dev move 100 500
+# The toast may be gone by the time the session is unlocked and looked at; the centre still holds it.
+open_notification_centre
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'updates are ready'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Not tonight'
 log "ok: updates found before the login are announced when the session starts"
