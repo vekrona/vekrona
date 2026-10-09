@@ -1,3 +1,4 @@
+import signal
 import unittest
 
 from update_harness import UpdateAskTestCase
@@ -44,6 +45,22 @@ class AnswerTest(UpdateAskTestCase):
             daemon, "--timeout", "0.2", *ASK[2:])
         self.assertEqual(daemon.expect("close")["id"], notification["id"])
         self.assertEqual(self.finish(process), (0, "timeout\n", ""))
+
+    def assert_stopped_by(self, stop_signal):
+        daemon = self.start_daemon()
+        process, notification = self.ask_notification(daemon)
+        process.send_signal(stop_signal)
+        self.assertEqual(daemon.expect("close")["id"], notification["id"])
+        self.assertEqual(self.finish(process), (0, "closed\n", ""))
+
+    def test_sigterm_closes_the_notification_and_answers_closed(self):
+        self.assert_stopped_by(signal.SIGTERM)
+
+    def test_sigint_closes_the_notification_and_answers_closed(self):
+        self.assert_stopped_by(signal.SIGINT)
+
+    def test_sighup_closes_the_notification_and_answers_closed(self):
+        self.assert_stopped_by(signal.SIGHUP)
 
 
 class IgnoredSignalTest(UpdateAskTestCase):
@@ -108,6 +125,17 @@ class FailureTest(UpdateAskTestCase):
         daemon.command("fail-close")
         process = self.start_ask("--timeout", "0.2", *ASK[2:])
         daemon.expect("notify")
+        status, stdout, stderr = self.finish(process)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(stdout, "")
+        self.assertIn("failed to close the notification", stderr)
+
+    def test_a_failure_to_close_the_notification_when_stopped_is_an_error_with_no_answer(self):
+        daemon = self.start_daemon()
+        daemon.command("fail-close")
+        process = self.start_ask(*ASK)
+        daemon.expect("notify")
+        process.send_signal(signal.SIGTERM)
         status, stdout, stderr = self.finish(process)
         self.assertNotEqual(status, 0)
         self.assertEqual(stdout, "")

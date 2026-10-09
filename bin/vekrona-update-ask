@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Ask a question with a desktop notification and print the answer on one line: the key of the clicked
 action, `timeout` (the notification is closed here, because vekrona-shell keeps notifications until someone
-dismisses them), or `closed` (dismissed, or the notification daemon went away)."""
+dismisses them), or `closed` (dismissed, the notification daemon went away, or this process was told to stop and
+took the notification down with it).
+
+The first --action is what a click on the toast body runs (vekrona-shell falls back to the first action when the
+notification has no `default` one, and every action also shows as a button). So the first --action must be the
+harmless answer, such as "not tonight": a stray click on the toast must never start anything."""
 import argparse
 import os
 import re
+import signal
 import sys
 import xml.sax.saxutils
 
@@ -16,7 +22,8 @@ import gi
 
 gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
-from gi.repository import Gio, GLib
+gi.require_version("GLibUnix", "2.0")
+from gi.repository import Gio, GLib, GLibUnix
 
 PROG = "vekrona-update-ask"
 
@@ -56,7 +63,8 @@ def parse_args(argv):
     parser.add_argument("--title", required=True)
     parser.add_argument("--body", required=True)
     parser.add_argument("--action", type=parse_action, action="append", required=True, metavar="KEY=LABEL",
-                        dest="actions")
+                        dest="actions", help="a button; repeatable; the FIRST one is also what a click on the "
+                        "toast body answers, so it must be the harmless one")
     args = parser.parse_args(argv)
     keys = [key for key, _ in args.actions]
     if len(set(keys)) != len(keys):
@@ -149,14 +157,21 @@ class Question:
         if self.from_daemon(old_owner):
             self.finish("closed")
 
-    def on_timeout(self):
+    def close_and_finish(self, answer, reason):
         try:
             call_daemon(self.bus, "CloseNotification", GLib.Variant("(u)", (self.notification_id,)), None)
         except GLib.Error as exc:
-            self.fail(f"failed to close the notification after the timeout: {exc}")
+            self.fail(f"failed to close the notification {reason}: {exc}")
         else:
-            self.finish("timeout")
+            self.finish(answer)
+
+    def on_timeout(self):
+        self.close_and_finish("timeout", "after the timeout")
         return False
+
+    def on_stop_signal(self):
+        self.close_and_finish("closed", "when told to stop")
+        return GLib.SOURCE_REMOVE
 
 
 def ask(args):
@@ -164,6 +179,9 @@ def ask(args):
     loop = GLib.MainLoop()
     question = Question(bus, loop, {key for key, _ in args.actions})
     question.subscribe()
+    # Before the send: a stop that arrives while Notify is in flight waits for the loop and then finds the id.
+    for stop_signal in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, stop_signal, question.on_stop_signal)
     question.send(args.title, args.body, args.actions)
     GLib.timeout_add(int(args.timeout * 1000), question.on_timeout)
     loop.run()
