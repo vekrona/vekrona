@@ -65,21 +65,6 @@ fi
 "$VEKRONA_ROOT/bin/vekrona-render-theme"
 
 ensure_user_unit_stopped dms.service
-systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer syncthing.service
-# The syncthing webapp talks to this daemon, so it must not wait for the next login.
-systemctl --user start syncthing.service || die "syncthing.service failed to start"
-# Enabling only wires the unit into the next login; a live session needs the overlay now.
-if [[ -n "$(sway_socket)" ]]; then
-  log "restarting vekrona-app-switch.service for the running sway session"
-  systemctl --user restart vekrona-app-switch.service || die "vekrona-app-switch.service failed to start"
-  log "restarting vekrona-idle.service for the running sway session"
-  systemctl --user restart vekrona-idle.service || die "vekrona-idle.service failed to start"
-  log "restarting vekrona-cliphist.service for the running sway session"
-  systemctl --user restart vekrona-cliphist.service || die "vekrona-cliphist.service failed to start"
-  log "restarting vekrona-shell.service for the running sway session"
-  systemctl --user restart vekrona-shell.service || die "vekrona-shell.service failed to start"
-fi
 
 for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
   ensure_symlink "$VEKRONA_ROOT/config/agents/skills/vekrona-diagnose" "$skills_dir/vekrona-diagnose"
@@ -100,8 +85,6 @@ for retired in "$HOME/.config/systemd/user/sway-session.target.wants/dms.service
     log "absent: $retired"
   fi
 done
-
-prune_dead_quickshell_instances "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell"
 
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
@@ -220,21 +203,32 @@ done < <(vekrona_webapp_profile_dirs)
 
 ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
 
-ensure_default_browser
-
-if [[ -n "$(sway_socket)" ]]; then
-  log "starting the weather and calendar timers for the running sway session"
-  systemctl --user start vekrona-weather.timer vekrona-calendar.timer || die "the weather and calendar timers failed to start"
-fi
-
 # bin/vekrona-lock starts it as `qs -c vekrona-lock`, which looks under ~/.config/quickshell.
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-lock" "$HOME/.config/quickshell/vekrona-lock"
+
+ensure_default_browser
 
 ensure_symlink "$VEKRONA_ROOT/config/scopebuddy/scb.conf" "$HOME/.config/scopebuddy/scb.conf"
 ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/MangoHud/MangoHud.conf"
 
 mapfile -t link_dirs < <(vekrona_link_dirs)
 prune_vekrona_links "${link_dirs[@]}"
+
+# Everything these units read when they start is linked or generated above this line; add new files before it.
+prune_dead_quickshell_instances "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell"
+systemctl --user daemon-reload
+ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer syncthing.service
+# The syncthing webapp talks to this daemon, so it must not wait for the next login.
+systemctl --user start syncthing.service || die "syncthing.service failed to start"
+# Enabling only wires a unit into the next login; a live session needs it running now, on the files linked above.
+if [[ -n "$(sway_socket)" ]]; then
+  for unit in xremap tailscale-systray vekrona-app-switch vekrona-idle vekrona-cliphist vekrona-shell vekrona-errors; do
+    log "restarting $unit.service for the running sway session"
+    systemctl --user restart "$unit.service" || die "$unit.service failed to start"
+  done
+  log "starting the weather and calendar timers for the running sway session"
+  systemctl --user start vekrona-weather.timer vekrona-calendar.timer || die "the weather and calendar timers failed to start"
+fi
 
 require_cmd nix
 if nix profile list --json | jq -e '.elements | has("devbox")' >/dev/null; then
