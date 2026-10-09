@@ -38,6 +38,7 @@ ensure_repo_enabled rpmfusion-free rpmfusion-nonfree rpmfusion-free-updates rpmf
 ensure_repo_enabled fedora-cisco-openh264
 
 ensure_copr "${VEKRONA_COPRS[@]}"
+ensure_copr_absent avengemedia/dms
 
 ensure_repo_key 1password
 ensure_1password_repo_file

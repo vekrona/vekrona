@@ -4,9 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/display-scale.sh"
-source "$ROOT/lib/dms-settings.sh"
-
-VEKRONA_RESET_DMS_SETTINGS="${VEKRONA_RESET_DMS_SETTINGS:-0}"
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/sway" "$HOME/.config/sway"
 mkdir -p "$HOME/.config/sway/config.d" # where personal settings (monitor outputs) go; config/sway/config includes it last
@@ -34,7 +31,6 @@ ensure_symlink "$VEKRONA_ROOT/config/xremap/config.yml" "$HOME/.config/xremap/co
 ensure_symlink "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" "$HOME/.config/autostart/nvidia-settings-user.desktop"
 
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/xremap.service" "$HOME/.config/systemd/user/xremap.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/dms.service.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-app-switch" "$HOME/.config/quickshell/vekrona-app-switch"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-app-switch.service" "$HOME/.config/systemd/user/vekrona-app-switch.service"
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-shell" "$HOME/.config/quickshell/vekrona-shell"
@@ -51,7 +47,7 @@ ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$H
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors.service" "$HOME/.config/systemd/user/vekrona-errors.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors-failed.service" "$HOME/.config/systemd/user/vekrona-errors-failed.service"
 
-# The theme mode and the rendered theme come before any unit restart: the app switcher and DMS read active-theme.json on start.
+# The theme mode and the rendered theme come before any unit restart: the app switcher and the shell read active-theme.json on start.
 theme_state_dir="$(vekrona_state_dir)"
 theme_state_file="$(vekrona_active_theme_file)"
 theme_name_file="$(vekrona_theme_name_file)"
@@ -85,130 +81,19 @@ for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/sk
   ensure_symlink "$VEKRONA_ROOT/config/agents/skills/vekrona-diagnose" "$skills_dir/vekrona-diagnose"
 done
 
-systemctl --user add-wants sway-session.target dms.service
-assert "dms.service wanted by sway-session.target" test -e "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
-
-dms_graphical_want="$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
-[[ -e "$dms_graphical_want" || -L "$dms_graphical_want" ]] && rm -f "$dms_graphical_want"
-assert "dms.service not wanted by graphical-session.target" bash -c "[[ ! -e '$dms_graphical_want' && ! -L '$dms_graphical_want' ]]"
-
-seed_dms_json() {
-  local seed="$1" dest="$2" respect_reset="${3:-1}" dest_dir
-  dest_dir="$(dirname "$dest")"
-  [[ -f "$seed" ]] || die "seed missing: $seed"
-  if [[ -f "$dest" ]] && { [[ "$respect_reset" == "0" ]] || [[ "$VEKRONA_RESET_DMS_SETTINGS" != "1" ]]; }; then
-    log "already present: $dest"
-    return 0
+for retired in "$HOME/.config/systemd/user/sway-session.target.wants/dms.service" \
+  "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service" \
+  "$HOME/.config/systemd/user/dms.service.d" \
+  "$HOME/.config/DankMaterialShell" "$HOME/.local/state/DankMaterialShell" "$HOME/.cache/DankMaterialShell" \
+  "$HOME/.config/gtk-3.0/dank-colors.css" "$HOME/.config/gtk-4.0/dank-colors.css"; do
+  if [[ -e "$retired" || -L "$retired" ]]; then
+    log "removing: $retired (left by DankMaterialShell, which vekrona-shell replaced)"
+    rm -rf "$retired"
+    [[ ! -e "$retired" && ! -L "$retired" ]] || die "failed to remove $retired"
+  else
+    log "absent: $retired"
   fi
-  log "seeding: $dest"
-  ensure_dir "$dest_dir"
-  local tmp
-  tmp="$(mktemp "$dest_dir/.$(basename "$dest").XXXXXX")"
-  python3 - "$seed" "$HOME" > "$tmp" <<'PYEOF'
-import json
-import sys
-
-seed_path, home = sys.argv[1], sys.argv[2]
-
-def substitute(value):
-    if isinstance(value, str):
-        return value.replace("__HOME__", home)
-    if isinstance(value, dict):
-        return {k: substitute(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [substitute(v) for v in value]
-    return value
-
-with open(seed_path) as f:
-    data = json.load(f)
-
-json.dump(substitute(data), sys.stdout, indent=2)
-sys.stdout.write("\n")
-PYEOF
-  mv "$tmp" "$dest"
-}
-
-ensure_dms_setting_default() {
-  local key="$1" value="$2"
-  jq -e --arg k "$key" 'has($k)' "$dms_settings" >/dev/null && { log "DMS setting already set: $key"; return 0; }
-  log "setting DMS default: $key = $value"
-  local tmp
-  tmp="$(mktemp "$dms_settings_dir/.settings.json.XXXXXX")"
-  if ! jq --arg k "$key" --arg v "$value" '.[$k] = $v' "$dms_settings" > "$tmp"; then
-    rm -f "$tmp"
-    die "jq failed to set DMS default: $key"
-  fi
-  mv "$tmp" "$dms_settings"
-  [[ "$(jq -r --arg k "$key" '.[$k]' "$dms_settings")" == "$value" ]] || die "DMS default not applied: $key"
-}
-
-# Set <key> = <json_value> in the JSON file <file> (DMS settings.json or session.json) unless it already is.
-ensure_json_key_enforced() {
-  local file="$1" key="$2" json_value="$3" tmp
-  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$file" >/dev/null 2>&1 && {
-    log "DMS setting already enforced: $key = $json_value"
-    return 0
-  }
-  log "enforcing DMS setting: $key = $json_value"
-  tmp="$(mktemp "$(dirname "$file")/.$(basename "$file").XXXXXX")"
-  if ! jq --arg k "$key" --argjson v "$json_value" '.[$k] = $v' "$file" > "$tmp"; then
-    rm -f "$tmp"
-    die "jq failed to enforce DMS setting: $key"
-  fi
-  mv "$tmp" "$file"
-  jq -e --arg k "$key" --argjson v "$json_value" '.[$k] == $v' "$file" >/dev/null || die "DMS setting not enforced: $key"
-}
-
-ensure_dms_setting_enforced() { ensure_json_key_enforced "$dms_settings" "$1" "$2"; }
-ensure_dms_session_enforced() { ensure_json_key_enforced "$dms_session" "$1" "$2"; }
-
-dms_settings_dir="$HOME/.config/DankMaterialShell"
-dms_settings="$dms_settings_dir/settings.json"
-dms_session_dir="$HOME/.local/state/DankMaterialShell"
-dms_session="$dms_session_dir/session.json"
-
-seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/settings.seed.json" "$dms_settings"
-seed_dms_json "$VEKRONA_ROOT/config/DankMaterialShell/session.seed.json" "$dms_session" 0
-
-ensure_dms_setting_default fontFamily "Atkinson Hyperlegible Next"
-ensure_dms_setting_default monoFontFamily "AtkynsonMono Nerd Font"
-ensure_dms_setting_enforced notificationPopupBodyInvokesAction true
-ensure_dms_setting_enforced customPowerActionLock '"vekrona-lock"'
-ensure_dms_setting_enforced currentThemeName '"custom"'
-ensure_dms_setting_enforced customThemeFile "$(jq -n --arg f "$theme_state_file" '$f')"
-ensure_dms_setting_enforced cornerRadius "$(vekrona_design_get radius)"
-ensure_dms_setting_enforced fontScale "$(vekrona_design_get dmsFontScale)"
-ensure_dms_setting_enforced animationSpeed 4 # SettingsData.AnimationSpeed.Custom
-ensure_dms_setting_enforced customAnimationDuration "$(jq -er '.metrics.motion.fast' "$theme_state_file")"
-ensure_dms_setting_enforced enableRippleEffects false
-ensure_dms_setting_enforced m3ElevationEnabled false # the master switch of every popout, modal and bar shadow
-ensure_dms_setting_enforced notificationPopupShadowEnabled false
-ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get trayIconSpacing)"
-ensure_dms_bar_setting_enforced enabled false
-
-# The wallpaper is the solid bg of the mode; DMS reads a leading # as a color and swaps it with the mode.
-theme_mode="$(cat "$theme_name_file")"
-ensure_dms_session_enforced perModeWallpaper true
-ensure_dms_session_enforced wallpaperPathDark "\"$(vekrona_token_get color bg dark)\""
-ensure_dms_session_enforced wallpaperPathLight "\"$(vekrona_token_get color bg light)\""
-ensure_dms_session_enforced wallpaperPath "\"$(vekrona_token_get color bg "$theme_mode")\""
-
-dms_changelog_seen="$(dirname "$dms_settings")/.changelog-$(dms_changelog_version)"
-if [[ -e "$dms_changelog_seen" ]]; then
-  log "already present: $dms_changelog_seen"
-else
-  log "marking DMS changelog as seen: $dms_changelog_seen"
-  touch "$dms_changelog_seen"
-fi
-
-ensure_dms_setting_enforced matugenTemplateGhostty false
-assert "DMS matugen templates: GTK on, Ghostty off" python3 -c "
-import json
-d = json.load(open('$dms_settings'))
-assert d.get('runDmsMatugenTemplates', True) is True
-assert d.get('matugenTemplateGtk', True) is True
-assert d.get('matugenTemplateGhostty', True) is False
-"
+done
 
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
@@ -302,12 +187,6 @@ ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/Mang
 
 mapfile -t link_dirs < <(vekrona_link_dirs)
 prune_vekrona_links "${link_dirs[@]}"
-# Pruning leaves the directories of the removed plugins and themes behind.
-for retired_dir in "$HOME/.config/DankMaterialShell/plugins"/* \
-  "$HOME/.config/DankMaterialShell/plugins" \
-  "$HOME/.config/DankMaterialShell/vekrona-themes/wallpapers" "$HOME/.config/DankMaterialShell/vekrona-themes"; do
-  remove_dir_if_empty "$retired_dir"
-done
 
 require_cmd nix
 if nix profile list --json | jq -e '.elements | has("devbox")' >/dev/null; then

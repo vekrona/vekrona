@@ -5,8 +5,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-# shellcheck disable=SC2016 # $HOME expands in the guest
-GUEST_SETTINGS='$HOME/.config/DankMaterialShell/settings.json'
 
 # OCR cannot read the badge's dark text on its danger fill, so the badge is found by its fill: half of an icon-s square.
 DANGER_HEX="$(vekrona_token_get color danger dark)"
@@ -32,16 +30,11 @@ export -f clock_shown danger_pixels badge_hidden badge_shown workspace_two_focus
 
 vekrona-dev session
 clear_notifications
-vekrona-dev run bash -c "test -s $GUEST_SETTINGS" || die "DMS settings $GUEST_SETTINGS are missing: install did not seed them"
 
 shell_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-shell.service; }
 export -f shell_active
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shell_active
 log "ok: the vekrona shell runs"
-
-enabled="$(vekrona-dev sh bash -c "jq -c '[.barConfigs[] | select(.enabled != false) | .name]' $GUEST_SETTINGS")"
-[[ "$enabled" == '[]' ]] || die "every DMS bar must be disabled so the shell's bar is the only one, but these are enabled: $enabled"
-log "ok: the DMS bar is off"
 
 vekrona-dev move 100 400
 CLOCK_BEFORE="$(vekrona-dev run date +%M)"
@@ -49,6 +42,10 @@ export CLOCK_BEFORE CLOCK_HOURS
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- clock_shown
 log "ok: the bar shows the current time"
 
+# The watcher rewrites the unread count whenever it records an error, e.g. the failed units it replays after a session restart.
+restart_error_watcher() { vekrona-dev sh systemctl --user start vekrona-errors.service; }
+trap restart_error_watcher EXIT
+vekrona-dev sh systemctl --user stop vekrona-errors.service
 vekrona-dev sh bash -c 'mkdir -p ~/.local/state/vekrona/errors && echo 0 > ~/.local/state/vekrona/errors/unread'
 export ROOT DANGER_HEX BAR_HEIGHT_PX BADGE_MIN_PIXELS
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- badge_hidden

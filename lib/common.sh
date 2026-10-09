@@ -100,6 +100,23 @@ ensure_pkg_from_repo() {
   done
 }
 
+# Removes installed packages through a --assumeno transaction first, which dies when it would take a desktop package along.
+ensure_pkg_absent() {
+  local installed=() pkg out protected rc=0
+  for pkg in "$@"; do pkg_installed "$pkg" && installed+=("$pkg"); done
+  if [[ ${#installed[@]} -eq 0 ]]; then log "packages absent: $*"; return 0; fi
+  protected="$(vekrona_desktop_pkgs | paste -sd,)"
+  out="$(root dnf remove --assumeno --setopt=protected_packages="$protected" "${installed[@]}" 2>&1)" || rc=$?
+  printf '%s\n' "$out"
+  [[ "$out" != *"protected packages"* ]] || die "dnf remove ${installed[*]} would remove protected packages"
+  [[ $rc -eq 1 && "$out" == *"Operation aborted"* ]] || die "dnf remove ${installed[*]} --assumeno failed unexpectedly (exit $rc)"
+  log "removing: ${installed[*]}"
+  root dnf remove -y --setopt=protected_packages="$protected" "${installed[@]}"
+  for pkg in "${installed[@]}"; do
+    ! pkg_installed "$pkg" || die "package still installed: $pkg"
+  done
+}
+
 ensure_pkg_swapped() {
   local from="$1" to="$2"
   if pkg_installed "$to" && ! pkg_installed "$from"; then log "already swapped: $from -> $to"; return 0; fi
@@ -299,13 +316,12 @@ prune_vekrona_links() {
 # Every directory stage 50 links into, one per line (70-verify scans the same set). ~/.config/ghostty is
 # listed only so prune_vekrona_links retires the config link earlier installs made there (vekrona no longer
 # ships a Ghostty config); a dotfiles-managed or regular ~/.config/ghostty/config is never touched.
-# Likewise DankMaterialShell/vekrona-themes: it stays listed so prune retires the links earlier installs made there.
 vekrona_link_dirs() {
   local d
   printf '%s\n' \
     "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/ghostty" "$HOME/.config/autostart" \
     "$HOME/.config/systemd/user" "$HOME/.config/fontconfig/conf.d" \
-    "$HOME/.config/quickshell" "$HOME/.config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/vekrona-themes" \
+    "$HOME/.config/quickshell" \
     "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/bin" \
     "$HOME/.config/scopebuddy" "$HOME/.config/MangoHud" \
     "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"
@@ -319,15 +335,6 @@ vekrona_webapp_profile_dirs() {
     [[ -d "$d" ]] && printf '%s\n' "$d"
   done
   return 0
-}
-
-# rmdir <dir> when it is an empty real directory; a missing, non-empty or symlinked one is left alone, any other failure dies.
-remove_dir_if_empty() {
-  local dir="$1"
-  [[ -d "$dir" && ! -L "$dir" ]] || return 0
-  [[ -z "$(ls -A "$dir")" ]] || return 0
-  log "removing empty directory: $dir"
-  rmdir "$dir" || die "failed to remove empty directory $dir"
 }
 
 ensure_dir() {
@@ -799,6 +806,16 @@ versionlock_installed() {
   done
 }
 
+versionlock_absent() {
+  local p
+  for p in "$@"; do
+    versionlock_has "$p" || { log "not locked: $p"; continue; }
+    log "unlocking: $p"
+    root dnf versionlock delete "$p"
+    ! versionlock_has "$p" || die "lock still recorded in $VERSIONLOCK_FILE: $p"
+  done
+}
+
 # Exact whole-token lookup in a file in kernel command line format.
 cmdline_file_has() {
   local file="$1" arg="$2" words w
@@ -957,12 +974,6 @@ wlroots_package_name() {
   printf '%s' "$p"
 }
 
-dms_changelog_version() {
-  local qml=/usr/share/quickshell/dms/Services/ChangelogService.qml v
-  v="$(grep -oP 'currentVersion:\s*"\K[^"]+' "$qml")" || die "cannot read DMS changelog version from $qml"
-  printf '%s' "$v"
-}
-
 read_pkg_list() {
   local -n out_arr="$1"
   shift
@@ -975,7 +986,7 @@ read_pkg_list() {
 }
 
 # shellcheck disable=SC2034
-VEKRONA_COPRS=(blakegardner/xremap scottames/ghostty avengemedia/dms avengemedia/danklinux rossetnocpes/herdr)
+VEKRONA_COPRS=(blakegardner/xremap scottames/ghostty avengemedia/danklinux rossetnocpes/herdr)
 
 copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 
@@ -993,14 +1004,17 @@ declare -A VEKRONA_PINNED_PKGS=(
 
 VEKRONA_DESKTOP_PKGS=(
   adw-gtk3-theme 1password 1password-cli NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl btop cliphist
-  danksearch dconf dgop dms ffmpeg firefox flatpak gamemode gamescope ghostty
+  dconf ffmpeg firefox flatpak gamemode gamescope ghostty
   geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver
   jq kanshi khal
-  libnotify mangohud matugen mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
+  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
   python3 python3-gobject python3-pyyaml python3-vdf qt6ct quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd swayidle tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
 )
+
+# shellcheck disable=SC2034
+VEKRONA_RETIRED_PKGS=(dms dms-cli dgop danksearch matugen)
 
 vekrona_desktop_pkgs() {
   local wlroots_pkg
@@ -1008,7 +1022,7 @@ vekrona_desktop_pkgs() {
   printf '%s\n' "${VEKRONA_DESKTOP_PKGS[@]}" "$wlroots_pkg"
 }
 
-VEKRONA_VERSIONLOCK_PKGS=(sway dms quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots)
+VEKRONA_VERSIONLOCK_PKGS=(sway quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots)
 
 vekrona_versionlock_pkgs() {
   local wlroots_pkg

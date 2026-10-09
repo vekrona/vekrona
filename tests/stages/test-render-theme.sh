@@ -95,13 +95,10 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
   set_mode "$m"
   ok_run all
 
-  # dms: both modes in one file, the current one named
+  # shell: both modes in one file, the current one named
   [[ "$(jq -r .mode "$active_json")" == "$m" ]] || die "$m: active-theme.json mode is not $m"
   for each in dark light; do
-    [[ "$(jq -r ".$each.primary" "$active_json")" == "$(tok "$each" accent)" ]] || die "$m: $each.primary is not accent"
-    [[ "$(jq -r ".$each.surfaceContainerHigh" "$active_json")" == "$(tok "$each" surface-2)" ]] || die "$m: $each.surfaceContainerHigh is not surface-2"
-    [[ "$(jq -r ".$each.outline" "$active_json")" == "$(tok "$each" line-strong)" ]] || die "$m: $each.outline is not line-strong"
-    [[ "$(jq -r ".$each.error" "$active_json")" == "$(tok "$each" danger)" ]] || die "$m: $each.error is not danger"
+    [[ "$(jq -r ".$each | keys | join(\",\")" "$active_json")" == tokens ]] || die "$m: $each carries more than its tokens"
     [[ "$(jq -r ".$each.tokens.dangerInk" "$active_json")" == "$(tok "$each" danger-ink)" ]] || die "$m: $each.tokens.dangerInk is not danger-ink"
     [[ "$(jq -r ".$each.tokens.surface1" "$active_json")" == "$(tok "$each" surface-1)" ]] || die "$m: $each.tokens.surface1 is not surface-1"
   done
@@ -228,7 +225,7 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
 }
 
 check_mode dark
-log "ok: dark mode renders dms, gtk, gsettings, qt, sway, firefox and rofi from the tokens"
+log "ok: dark mode renders shell, gtk, gsettings, qt, sway, firefox and rofi from the tokens"
 check_mode light
 log "ok: light mode renders every target from the light tokens"
 
@@ -263,13 +260,13 @@ log "ok: a mode switch is picked up"
 
 # ---- targets
 reset_home; set_mode dark
-ok_run dms
-[[ -f "$active_json" && ! -e "$gtk4" && ! -e "$sway_conf" ]] || die "dms target must write only active-theme.json"
+ok_run shell
+[[ -f "$active_json" && ! -e "$gtk4" && ! -e "$sway_conf" ]] || die "shell target must write only active-theme.json"
 status=0
 run_tool lizard || status=$?
 [[ "$status" -eq 2 ]] || die "an unknown target must exit 2, got $status"
 grep -q 'usage:' "$scratch/stderr" || die "unknown target did not print usage"
-log "ok: dms is a target of its own; an unknown target prints usage and exits 2"
+log "ok: shell is a target of its own; an unknown target prints usage and exits 2"
 
 # ---- rofi writes nothing
 rm -rf "$HOME" "$XDG_STATE_HOME/vekrona/active-theme.json"; mkdir -p "$HOME"
@@ -394,8 +391,6 @@ for bad in '"0"' '-1' '0.5' 'true' 'null'; do
   jq ".radius = $bad" "$ROOT/config/design.json" > "$repo/config/design.json"
   fails "design radius $bad" "radius" gtk
 done
-jq '.dmsFontScale = 0' "$ROOT/config/design.json" > "$repo/config/design.json"
-fails "design dmsFontScale 0" "dmsFontScale" gtk
 jq 'del(.barInnerPadding)' "$ROOT/config/design.json" > "$repo/config/design.json"
 fails "a design.json missing a key" "keys must be exactly" gtk
 jq '. + {gap: 8}' "$ROOT/config/design.json" > "$repo/config/design.json"

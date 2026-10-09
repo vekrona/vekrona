@@ -30,7 +30,7 @@ guest_gtk_window_bg() { vekrona-dev sh bash -c "sed -n 's/^@define-color window_
 guest_color_scheme() { vekrona-dev sh gsettings get org.gnome.desktop.interface color-scheme; }
 guest_sway_focused_border() { vekrona-dev sh bash -c "sed -n 's/^client.focused \(#[0-9a-fA-F]*\) .*/\1/p' $GUEST_SWAY_DROP_IN"; }
 
-# $2 is a regex of the gsettings values that mean this mode: DMS's portal service writes 'default' for light, which libadwaita reads as light.
+# $2 is a regex of the gsettings values that mean this mode.
 assert_mode() {
   local mode="$1" scheme="$2" got
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- desktop_is "$(color bg "$mode")" \
@@ -60,7 +60,7 @@ log "ok: the bar is $BAR_PX px tall"
 assert_mode dark prefer-dark
 
 vekrona-dev sh vekrona-theme light
-assert_mode light 'default|prefer-light'
+assert_mode light prefer-light
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bar_is_tall "$(color bg light)" \
   || die "light: the bar must still be $BAR_PX px tall"
 

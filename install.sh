@@ -32,14 +32,13 @@ mapfile -t DEFAULT_STAGES < <(applicable_default_stages)
 
 usage() {
   cat <<EOF
-usage: $0 [--skip STAGE]... [--reset-dms-settings] [--list] [STAGE...]
+usage: $0 [--skip STAGE]... [--list] [STAGE...]
 
 Stages run in this order by default (those applicable to this hardware): ${DEFAULT_STAGES[*]}
 Cleanup stages must be named explicitly: 90a-switch-dm 90b-remove
 A STAGE may be given by its number (10), its name (nvidia) or the full name (10-nvidia).
 --skip STAGE      omit a stage (also removes it from the set 70-verify checks)
 --list            print the resolved stages, one per line, and exit
---reset-dms-settings  overwrite ~/.config/DankMaterialShell/settings.json from the seed
 EOF
   exit "${1:-0}"
 }
@@ -55,11 +54,9 @@ resolve_stage() {
 skip=()
 list_only=0
 selected=()
-export VEKRONA_RESET_DMS_SETTINGS=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip) [[ $# -ge 2 ]] || usage 1; skip+=("$(resolve_stage "$2")"); shift 2 ;;
-    --reset-dms-settings) VEKRONA_RESET_DMS_SETTINGS=1; shift ;;
     --list) list_only=1; shift ;;
     -h|--help) usage ;;
     -*) usage 1 ;;

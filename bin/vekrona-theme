@@ -7,21 +7,10 @@ source "$ROOT/lib/common.sh"
 STATE_DIR="$(vekrona_state_dir)"
 STATE_FILE="$(vekrona_theme_name_file)"
 ACTIVE_THEME_FILE="$(vekrona_active_theme_file)"
-GTK_COLORS_FILE="$HOME/.config/gtk-4.0/dank-colors.css"
-WAIT_SECONDS="${VEKRONA_THEME_WAIT_SECONDS:-10}"
-
-INOTIFY_PID=""
 
 usage() {
   printf 'usage: %s dark|light|next|list\n' "$(basename "$0")" >&2
   exit 1
-}
-
-require_inotifywait() {
-  command -v inotifywait >/dev/null 2>&1 || {
-    echo "vekrona-theme: inotifywait not found (install inotify-tools)" >&2
-    exit 1
-  }
 }
 
 MODES=(dark light)
@@ -30,82 +19,11 @@ current_theme() {
   [[ -f "$STATE_FILE" ]] && cat "$STATE_FILE"
 }
 
-dms_settings_set() {
-  local key="$1" value="$2" output rc=0
-  output="$(dms ipc call settings set "$key" "$value" 2>&1)" || rc=$?
-  if [[ "$rc" -ne 0 || "$output" == *INVALID* || "$output" == *FAILURE* || "$output" == *ERROR* ]]; then
-    echo "vekrona-theme: dms ipc call settings set $key $value failed: $output (the recorded theme is unchanged)" >&2
-    exit 1
-  fi
-}
-
-# DMS renders window_bg_color from the custom theme's <mode>.surface
-# (matugen/templates/gtk-colors.css), so that is the value to wait for.
-current_window_bg() {
-  [[ -f "$GTK_COLORS_FILE" ]] || return 0
-  sed -n 's/^@define-color window_bg_color \(#[0-9A-Fa-f]*\);$/\1/p' "$GTK_COLORS_FILE"
-}
-
-window_bg_is() {
-  [[ "${1,,}" == "${2,,}" ]]
-}
-
-stop_gtk_colors_watch() {
-  if [[ -n "$INOTIFY_PID" ]]; then
-    pkill -TERM -P "$INOTIFY_PID" 2>/dev/null || true
-    kill "$INOTIFY_PID" 2>/dev/null || true
-    wait "$INOTIFY_PID" 2>/dev/null || true
-    INOTIFY_PID=""
-  fi
-  INOTIFY_FD=""
-}
-
-start_gtk_colors_watch() {
-  local watch_dir line
-  watch_dir="$(dirname "$GTK_COLORS_FILE")"
-  mkdir -p "$watch_dir"
-
-  coproc INOTIFY_CP { inotifywait -m -e close_write,moved_to,create "$watch_dir" 2>&1; }
-  INOTIFY_PID="$INOTIFY_CP_PID"
-  INOTIFY_FD="${INOTIFY_CP[0]}"
-  disown "$INOTIFY_PID"
-  trap cleanup EXIT
-
-  while IFS= read -r -t "$WAIT_SECONDS" -u "$INOTIFY_FD" line 2>/dev/null; do
-    [[ "$line" == "Watches established." ]] && return 0
-    echo "vekrona-theme: $line" >&2
-  done
-  if kill -0 "$INOTIFY_PID" 2>/dev/null; then
-    echo "vekrona-theme: inotifywait did not report readiness in time" >&2
-  else
-    echo "vekrona-theme: inotifywait exited before reporting readiness" >&2
-  fi
-  return 1
-}
-
-wait_for_window_bg() {
-  local expected="$1"
-  window_bg_is "$(current_window_bg)" "$expected" && return 0
-  local deadline now remaining line
-  deadline=$(( $(date +%s) + WAIT_SECONDS ))
-  while :; do
-    now="$(date +%s)"
-    remaining=$(( deadline - now ))
-    (( remaining > 0 )) || return 1
-    IFS= read -r -t "$remaining" -u "$INOTIFY_FD" line 2>/dev/null || return 1
-    window_bg_is "$(current_window_bg)" "$expected" && return 0
-  done
-}
-
-dms_answers() {
-  dms ipc call theme getMode >/dev/null 2>&1
-}
-
 ROLLBACK_ON_EXIT=0
 MODE_BACKUP=""
 ACTIVE_THEME_BACKUP=""
 
-# Replace <dest> by a copy of <source> with one rename, so DMS, which watches the file, never reads it half written.
+# Replace <dest> by a copy of <source> with one rename, so the shell, which watches the file, never reads it half written.
 replace_file_from() {
   local source="$1" dest="$2" tmp
   tmp="$(mktemp "$(dirname "$dest")/.$(basename "$dest").restore.XXXXXX")"
@@ -113,10 +31,10 @@ replace_file_from() {
   mv "$tmp" "$dest"
 }
 
-# Put the files back, then re-render and re-flip DMS so GTK, Qt, Firefox, Sway and DMS agree with the
-# recorded mode again. With no usable recorded mode (none yet, or a legacy value stage 50 would migrate) the
-# mode goes back to dark, stage 50's default, so the files and the desktop still agree. A failing re-render
-# is reported: the desktop would be left half-themed.
+# Put the files back, then re-render so GTK, Qt, Firefox, Sway and the shell agree with the recorded mode again.
+# With no usable recorded mode (none yet, or a legacy value stage 50 would migrate) the mode goes back to dark,
+# stage 50's default, so the files and the desktop still agree. A failing re-render is reported: the desktop
+# would be left half-themed.
 rollback() {
   local previous=dark recorded
   if [[ -n "$MODE_BACKUP" ]]; then
@@ -131,11 +49,9 @@ rollback() {
     rm -f "$ACTIVE_THEME_FILE"
   fi
   "$ROOT/bin/vekrona-render-theme" || echo "vekrona-theme: re-rendering '$previous' after the failure failed; run 'vekrona-theme $previous'" >&2
-  dms ipc call theme "$previous" >/dev/null || echo "vekrona-theme: could not flip DMS back to '$previous'; run 'vekrona-theme $previous'" >&2
 }
 
 cleanup() {
-  stop_gtk_colors_watch
   [[ "$ROLLBACK_ON_EXIT" == "1" ]] && rollback
   [[ -n "$MODE_BACKUP" ]] && rm -f "$MODE_BACKUP"
   [[ -n "$ACTIVE_THEME_BACKUP" ]] && rm -f "$ACTIVE_THEME_BACKUP"
@@ -153,14 +69,8 @@ backup_file() {
 apply_theme() {
   local mode="$1"
 
-  dms_answers || {
-    echo "vekrona-theme: DMS is not responding to IPC (the recorded theme is unchanged)" >&2
-    exit 1
-  }
-
-  start_gtk_colors_watch || exit 1
-
   mkdir -p "$STATE_DIR"
+  trap cleanup EXIT
   MODE_BACKUP="$(backup_file "$STATE_FILE")"
   ACTIVE_THEME_BACKUP="$(backup_file "$ACTIVE_THEME_FILE")"
   ROLLBACK_ON_EXIT=1
@@ -168,21 +78,6 @@ apply_theme() {
 
   "$ROOT/bin/vekrona-render-theme"
 
-  local expected_bg
-  expected_bg="$(jq -r --arg m "$mode" '.[$m].surface' "$ACTIVE_THEME_FILE")"
-  [[ "$expected_bg" =~ ^#[0-9A-Fa-f]{6}$ ]] || {
-    echo "vekrona-theme: $ACTIVE_THEME_FILE has no .$mode.surface hex color" >&2
-    exit 1
-  }
-
-  dms ipc call theme "$mode" >/dev/null
-  dms_settings_set customThemeFile "$ACTIVE_THEME_FILE"
-  dms_settings_set currentThemeName custom
-
-  if ! wait_for_window_bg "$expected_bg"; then
-    echo "vekrona-theme: theme '$mode' did not take in DMS (GTK window_bg_color is '$(current_window_bg)', expected '$expected_bg'). The recorded theme is unchanged." >&2
-    exit 1
-  fi
   ROLLBACK_ON_EXIT=0
   echo "theme: $mode"
 }
@@ -195,14 +90,12 @@ case "$cmd" in
     printf '%s\n' "${MODES[@]}"
     ;;
   next)
-    require_inotifywait
     case "$(current_theme || true)" in
       dark) apply_theme light ;;
       *) apply_theme dark ;;
     esac
     ;;
   dark | light)
-    require_inotifywait
     apply_theme "$cmd"
     ;;
   *)

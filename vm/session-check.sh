@@ -10,9 +10,9 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/session-lib.sh"
 
 session_ensure_up || fail "could not bring up or attach to a sway session"
 
-systemctl --user start dms.service || fail "dms.service did not become active"
+systemctl --user start vekrona-shell.service || fail "vekrona-shell.service did not become active"
 
-session_wait_until 30 dms ipc call lock status || fail "dms ipc call lock status failed"
+session_wait_until 30 qs -c vekrona-shell ipc show || fail "qs -c vekrona-shell ipc show failed"
 
 xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml" || fail "xremap config failed to validate"
 

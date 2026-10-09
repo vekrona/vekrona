@@ -82,6 +82,8 @@ present_iff() {
   if "$applicable"; then "$@"; else not "$@"; fi
 }
 
+sway_runs() { [[ -n "$(sway_socket)" ]]; }
+
 verify_greetd_active() {
   check assert "greetd enabled" greetd_enabled
   check assert "display-manager.service points to greetd" dm_is_greetd
@@ -213,6 +215,9 @@ if ran 30-packages; then
   check assert "greetd user exists" bash -c "getent passwd greetd >/dev/null"
 
   check assert "package installed: tuned-ppd" pkg_installed tuned-ppd
+  check assert "rpm -q dms fails (retired)" bash -c "! rpm -q dms"
+  check assert "command -v dms fails" bash -c "! command -v dms"
+  check assert "dnf versionlock list has no dms" bash -c "! dnf versionlock list 2>&1 | grep -qw dms"
   check assert "tuned.service enabled" unit_enabled tuned
   check assert "tuned-ppd.service enabled" unit_enabled tuned-ppd
   warn_check "power profiles D-Bus name answers: net.hadess.PowerProfiles" \
@@ -348,8 +353,6 @@ if ran 50-user; then
   check assert "sway keybindings all described" vekrona-keybindings --check
   check assert "vekrona-keybindings --list has workspace 10 bindings" bash -c "vekrona-keybindings --list | grep -qF 'workspace 1…10'"
   check assert "vekrona-keybindings --list has the help binding" bash -c "vekrona-keybindings --list | grep -qF 'Show keybindings help'"
-  check assert "dms.service wanted by sway-session.target" file_exists "$HOME/.config/systemd/user/sway-session.target.wants/dms.service"
-  check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
   check assert "vekrona-app-switch.service enabled" user_unit_enabled vekrona-app-switch.service
   check assert "vekrona-shell Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-shell")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-shell")"
@@ -358,6 +361,8 @@ if ran 50-user; then
   check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
   check assert "vekrona-cliphist.service enabled" user_unit_enabled vekrona-cliphist.service
   check assert "vekrona-idle.service enabled" user_unit_enabled vekrona-idle.service
+  check assert "vekrona-shell.service active while sway runs" present_iff sway_runs systemctl --user is-active --quiet vekrona-shell.service
+  check assert "~/.config/DankMaterialShell is absent" file_absent "$HOME/.config/DankMaterialShell"
   check assert "vekrona-night.service linked" file_exists "$HOME/.config/systemd/user/vekrona-night.service"
   check assert "vekrona-weather.timer enabled" user_unit_enabled vekrona-weather.timer
   check assert "vekrona-calendar.timer enabled" user_unit_enabled vekrona-calendar.timer
@@ -385,59 +390,8 @@ if ran 50-user; then
   check assert "gsettings font-name: Atkinson Hyperlegible Next 11.25" gsettings_eq org.gnome.desktop.interface font-name "Atkinson Hyperlegible Next 11.25"
   check assert "gsettings document-font-name: Atkinson Hyperlegible Next 11.25" gsettings_eq org.gnome.desktop.interface document-font-name "Atkinson Hyperlegible Next 11.25"
   check assert "gsettings monospace-font-name: AtkynsonMono Nerd Font 10.5" gsettings_eq org.gnome.desktop.interface monospace-font-name "AtkynsonMono Nerd Font 10.5"
-  check assert "DankMaterialShell settings.json present" file_exists "$HOME/.config/DankMaterialShell/settings.json"
-  check assert "DMS changelog for the installed version marked seen" file_exists "$HOME/.config/DankMaterialShell/.changelog-$(dms_changelog_version)"
-  check assert "DMS settings: lockBeforeSuspend=true, acLockTimeout=300" python3 -c "
-import json
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-assert d.get('lockBeforeSuspend') is True, d.get('lockBeforeSuspend')
-assert d.get('acLockTimeout') == 300, d.get('acLockTimeout')
-"
-  check assert "DMS settings: customPowerActionLock=vekrona-lock (DMS hands the lock to vekrona-lock)" python3 -c "
-import json
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-assert d.get('customPowerActionLock') == 'vekrona-lock', d.get('customPowerActionLock')
-"
   check assert "vekrona-lock resolves on PATH" bash -c "command -v vekrona-lock >/dev/null"
   check assert "vekrona-lock Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-lock")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-lock")"
-  check assert "DMS settings: fontFamily=Atkinson Hyperlegible Next" python3 -c "
-import json
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-assert d.get('fontFamily') == 'Atkinson Hyperlegible Next', d.get('fontFamily')
-"
-  check assert "DMS settings: notificationPopupBodyInvokesAction=true" python3 -c "
-import json
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-assert d.get('notificationPopupBodyInvokesAction') is True, d.get('notificationPopupBodyInvokesAction')
-"
-  check assert "DMS shape: cornerRadius, fontScale, animations, ripples and shadows match config/design.json and tokens.json, and no bar is enabled" python3 -c "
-import json
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-radius, font_scale = $(vekrona_design_get radius), $(vekrona_design_get dmsFontScale)
-tray_icon_spacing = $(vekrona_design_get trayIconSpacing)
-motion_fast = json.load(open('$(vekrona_active_theme_file)'))['metrics']['motion']['fast']
-assert d.get('cornerRadius') == radius, d.get('cornerRadius')
-assert d.get('fontScale') == font_scale, d.get('fontScale')
-assert d.get('animationSpeed') == 4, d.get('animationSpeed')  # SettingsData.AnimationSpeed.Custom
-assert d.get('customAnimationDuration') == motion_fast, d.get('customAnimationDuration')
-assert d.get('enableRippleEffects') is False, d.get('enableRippleEffects')
-assert d.get('m3ElevationEnabled') is False, d.get('m3ElevationEnabled')
-assert d.get('notificationPopupShadowEnabled') is False, d.get('notificationPopupShadowEnabled')
-assert d.get('trayIconSpacing', 0) == tray_icon_spacing, d.get('trayIconSpacing')  # DMS drops a key equal to its default (0) when it rewrites the file
-bars = d.get('barConfigs', [])
-assert bars, 'no barConfigs'
-for bar in bars:
-    assert bar.get('enabled') is False, (bar.get('id'), 'enabled')
-"
-  check assert "DMS session: per-mode wallpaper is the solid bg of each mode, and the current one matches the theme mode" python3 -c "
-import json
-d = json.load(open('$HOME/.local/state/DankMaterialShell/session.json'))
-bg = {'dark': '$(vekrona_token_get color bg dark)', 'light': '$(vekrona_token_get color bg light)'}
-assert d.get('perModeWallpaper') is True, d.get('perModeWallpaper')
-assert d.get('wallpaperPathDark') == bg['dark'], d.get('wallpaperPathDark')
-assert d.get('wallpaperPathLight') == bg['light'], d.get('wallpaperPathLight')
-assert d.get('wallpaperPath') == bg['$(cat "$(vekrona_theme_name_file)")'], d.get('wallpaperPath')
-"
   check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
 
   for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
@@ -491,17 +445,8 @@ assert isinstance(d.get('metrics'), dict), 'metrics'
   check assert "vekrona-lock resolves import \"Vekrona\" through ~/.config/quickshell" file_exists "$HOME/.config/quickshell/vekrona-lock/Vekrona/qmldir"
   check assert "vekrona-app-switch reads tokens.json through ~/.config/quickshell" test -r "$HOME/.config/quickshell/vekrona-app-switch/tokens.json"
 
-  check assert "DMS matugen templates: GTK on, Ghostty off (nothing is written under ~/.config/ghostty)" python3 -c "
-import json
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-assert d.get('runDmsMatugenTemplates', True) is True
-assert d.get('matugenTemplateGtk', True) is True
-assert d.get('matugenTemplateGhostty', True) is False
-"
-
   check assert "no stale vekrona-gpu.conf from an earlier install (the GPU is chosen at login by vekrona-gpu-env)" file_absent "$HOME/.config/environment.d/vekrona-gpu.conf"
   check assert "vekrona-gpu-env runs" vekrona-gpu-env
-  check assert "dms.service declared Environment has no QSG_RHI_BACKEND (Vulkan deadlocks the lock screen)" not_contains 'QSG_RHI_BACKEND' "$(systemctl --user show dms -p Environment 2>/dev/null || true)"
   check assert "systemd --user manager environment has no QSG_RHI_BACKEND (Vulkan deadlocks the lock screen)" not_contains 'QSG_RHI_BACKEND' "$(systemctl --user show-environment 2>/dev/null || true)"
 
   user_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"

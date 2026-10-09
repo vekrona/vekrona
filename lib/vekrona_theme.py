@@ -1,6 +1,6 @@
 """Loads, flattens and validates config/tokens.json (the Vekrona Design System export).
 
-The single place that knows the token names, the token -> DMS key table and the unit conversions.
+The single place that knows the token names and the unit conversions.
 Every failure raises ThemeError naming the offending token.
 """
 import json
@@ -27,23 +27,6 @@ GENERIC_FAMILIES = ("system-ui", "sans-serif", "ui-monospace", "monospace")
 # Design rules the tokens state only in prose ("offset 2px", "120 ms ... 200 ms").
 FOCUS_OFFSET_PX = 2
 MOTION_MS = {"fast": 120, "popover": 200}
-
-# DMS theme key -> token name, for every mode. Secondary and tertiary collapse onto accent.
-DMS_KEYS = {
-    "primary": "accent", "secondary": "accent", "tertiary": "accent",
-    "primaryText": "on-accent", "secondaryText": "on-accent", "tertiaryText": "on-accent",
-    "primaryContainer": "surface-3", "secondaryContainer": "surface-3",
-    "tertiaryContainer": "surface-3", "errorContainer": "surface-3",
-    "background": "bg", "surfaceContainerLowest": "bg",
-    "backgroundText": "ink", "surfaceText": "ink",
-    "surface": "surface-1", "surfaceContainer": "surface-1", "surfaceContainerLow": "surface-1",
-    "surfaceContainerHigh": "surface-2",
-    "surfaceVariant": "surface-3", "surfaceContainerHighest": "surface-3",
-    "surfaceVariantText": "ink-muted",
-    "outline": "line-strong", "outlineVariant": "line",
-    "error": "danger", "errorText": "on-danger",
-    "warning": "warning", "success": "success", "info": "info", "scrim": "scrim",
-}
 
 HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$")
 PX = re.compile(r"^(\d+)px$")
@@ -123,16 +106,11 @@ class Theme:
     def type_px(self, style):
         return self.metrics["type"][camel(style)]["size"]
 
-    def dms_colors(self, mode):
-        colors = self.colors[mode]
-        return {key: colors[token] for key, token in DMS_KEYS.items()}
-
     def active_theme(self, mode):
         """The generated active-theme.json document: both modes plus the metrics."""
         doc = {"name": "Vekrona", "mode": mode, "metrics": self.metrics}
         for each in MODES:
-            doc[each] = {**self.dms_colors(each),
-                         "tokens": {camel(name): value for name, value in self.colors[each].items()}}
+            doc[each] = {"tokens": {camel(name): value for name, value in self.colors[each].items()}}
         return doc
 
 

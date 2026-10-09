@@ -14,10 +14,10 @@ import vekrona_cli
 import vekrona_theme
 
 PROG = "vekrona-render-theme"
-TARGETS = ("dms", "gtk", "qt", "firefox", "sway")
+TARGETS = ("shell", "gtk", "qt", "firefox", "sway")
 ALL_TARGETS = TARGETS + ("rofi",)
 DESIGN_INT_KEYS = ("radius", "widgetPadding", "trayIconSpacing", "barInnerPadding")
-DESIGN_KEYS = DESIGN_INT_KEYS + ("dmsFontScale",)
+DESIGN_KEYS = DESIGN_INT_KEYS
 
 die = vekrona_cli.make_die(PROG, __file__)
 REPO = vekrona_cli.repo_root(__file__)
@@ -68,9 +68,6 @@ def load_design():
         value = data[key]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             die(f"{design_file}: {key} is not a non-negative integer: {value!r}")
-    scale = data["dmsFontScale"]
-    if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale <= 0:
-        die(f"{design_file}: dmsFontScale is not a positive number: {scale!r}")
     return data
 
 
@@ -151,9 +148,9 @@ def run_or_die(argv, what, env=None):
         die(f"{what} failed (exit {result.returncode}): {result.stderr.strip()}")
 
 
-# ---------------------------------------------------------------- dms
+# ---------------------------------------------------------------- shell
 
-def apply_dms(theme, mode):
+def apply_shell(theme, mode):
     path = os.path.join(vekrona_cli.vekrona_state_dir(), "active-theme.json")
     content = json.dumps(theme.active_theme(mode), indent=2) + "\n"
     if read_text(path) == content:
@@ -741,8 +738,8 @@ def main():
     parser = argparse.ArgumentParser(
         prog=PROG,
         description="Render the vekrona design tokens (config/tokens.json, config/design.json) in the mode "
-                    "of the 'theme' state file into the DMS theme file, GTK, Qt, Firefox and Sway config. "
-                    "'all' is dms, gtk, qt, firefox, sway; 'rofi' prints a theme string to stdout and "
+                    "of the 'theme' state file into the shell theme file, GTK, Qt, Firefox and Sway config. "
+                    "'all' is shell, gtk, qt, firefox, sway; 'rofi' prints a theme string to stdout and "
                     "writes nothing. Running apps keep old looks until restarted.")
     parser.add_argument("target", nargs="?", default="all", choices=("all",) + ALL_TARGETS)
     target = parser.parse_args().target
@@ -754,8 +751,8 @@ def main():
         print(render_rofi(theme, mode, design))
         return
     for name in TARGETS if target == "all" else (target,):
-        if name == "dms":
-            apply_dms(theme, mode)
+        if name == "shell":
+            apply_shell(theme, mode)
         elif name == "gtk":
             apply_gtk(theme, mode, design)
         elif name == "qt":
