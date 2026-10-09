@@ -409,6 +409,7 @@ if ran 50-user; then
   check assert "gsettings monospace-font-name: AtkynsonMono Nerd Font 10.5" gsettings_eq org.gnome.desktop.interface monospace-font-name "AtkynsonMono Nerd Font 10.5"
   check assert "vekrona-lock resolves on PATH" bash -c "command -v vekrona-lock >/dev/null"
   check assert "vekrona-lock Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-lock")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-lock")"
+  check assert "vekrona-lock.service linked" eq "$(readlink -f "$HOME/.config/systemd/user/vekrona-lock.service")" "$(readlink -f "$VEKRONA_ROOT/config/systemd-user/vekrona-lock.service")"
   check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
   check assert "qalc resolves (the launcher's /calc)" bash -c "command -v qalc >/dev/null"
 

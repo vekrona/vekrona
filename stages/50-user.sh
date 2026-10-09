@@ -42,6 +42,7 @@ ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-weather.service" "$HOM
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-weather.timer" "$HOME/.config/systemd/user/vekrona-weather.timer"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-calendar.service" "$HOME/.config/systemd/user/vekrona-calendar.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-calendar.timer" "$HOME/.config/systemd/user/vekrona-calendar.timer"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-lock.service" "$HOME/.config/systemd/user/vekrona-lock.service"
 ensure_symlink "$VEKRONA_ROOT/config/khal/config" "$HOME/.config/khal/config"
 ensure_symlink "$VEKRONA_ROOT/config/vdirsyncer/config.example" "$HOME/.config/vdirsyncer/config.example"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$HOME/.config/systemd/user/tailscale-systray.service"
@@ -203,7 +204,7 @@ done < <(vekrona_webapp_profile_dirs)
 
 ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
 
-# bin/vekrona-lock starts it as `qs -c vekrona-lock`, which looks under ~/.config/quickshell.
+# vekrona-lock.service starts it as `qs -c vekrona-lock`, which looks under ~/.config/quickshell.
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-lock" "$HOME/.config/quickshell/vekrona-lock"
 
 ensure_default_browser
