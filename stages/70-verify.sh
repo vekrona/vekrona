@@ -441,7 +441,6 @@ if ran 50-user; then
   done
   firefox_default_profile="$(awk -F= '/^\[Install/ {in_install=1; next} /^\[/ {in_install=0} in_install && $1 == "Default" {print $2; exit}' "$firefox_profiles_ini" 2>/dev/null || true)"
   if [[ -n "$firefox_default_profile" ]]; then
-    local firefox_root_dir
     firefox_root_dir="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"
     firefox_default_profile="$firefox_root_dir/$firefox_default_profile"
     check assert_file_contains "$firefox_default_profile/user.js" "^// vekrona-render-theme: "
