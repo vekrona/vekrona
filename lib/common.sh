@@ -87,16 +87,19 @@ ensure_pkg() {
   for p in "${missing[@]}"; do pkg_installed "$p" || die "package did not install: $p"; done
 }
 
+# Prints the repo an installed package came from; nothing when it is not installed (dnf exits 0 then).
+installed_from_repo() { dnf repoquery --installed --qf '%{from_repo}\n' "$1"; }
+
 ensure_pkg_from_repo() {
   local repo="$1"; shift
   local p
   for p in "$@"; do
     local from
-    from="$(dnf repoquery --installed --qf '%{from_repo}\n' "$p" 2>/dev/null || true)"
+    from="$(installed_from_repo "$p")" || die "dnf repoquery failed for $p"
     if [[ "$from" == "$repo" ]]; then log "$p already from $repo"; continue; fi
     log "installing $p from $repo"
     root dnf install -y --from-repo="$repo" "$p"
-    from="$(dnf repoquery --installed --qf '%{from_repo}\n' "$p" 2>/dev/null)"
+    from="$(installed_from_repo "$p")" || die "dnf repoquery failed for $p"
     [[ "$from" == "$repo" ]] || die "$p installed from $from, expected $repo"
   done
 }
@@ -402,17 +405,38 @@ ensure_system_unit() {
     fi
     if [[ -n "$now" ]]; then
       case "$state" in
-        enabled)  [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]] || root systemctl start "$u" ;;
-        disabled) [[ "$(systemctl is-active "$u" 2>/dev/null || true)" != active ]] || root systemctl stop "$u" ;;
+        enabled)  unit_is_active "$u" || root systemctl start "$u" ;;
+        disabled) ! unit_is_active "$u" || root systemctl stop "$u" ;;
       esac
     fi
     log "unit $u: $state"
   done
 }
 
+# unit_state <var> is-active|is-enabled <unit> [systemctl flags]  Stores the state word systemctl prints. Both verbs
+# print the state even when they exit non-zero (is-active: 3 inactive, 4 not found; is-enabled: 1 disabled, masked or
+# linked, 4 not found; static, alias and indirect exit 0). Any other status, or output that is not one state word (an
+# unreachable bus, for one), means systemctl itself failed. The caller's shell must run this, not a $(...) subshell,
+# for the die to stop the install.
+unit_state() {
+  local var="$1" verb="$2" out rc=0
+  shift 2
+  out="$(systemctl "$verb" "$@")" || rc=$?
+  case "$verb:$rc" in
+    is-active:0 | is-active:3 | is-active:4 | is-enabled:0 | is-enabled:1 | is-enabled:4) ;;
+    *) die "systemctl $verb $* failed with status $rc (its stderr is above)" ;;
+  esac
+  [[ -n "$out" && "$out" != *[[:space:]]* ]] || die "systemctl $verb $* printed no single unit state word (stdout: '$out'; its stderr is above)"
+  printf -v "$var" %s "$out"
+}
+
+# unit_is_active|unit_is_enabled <unit> [systemctl flags, e.g. --user]
+unit_is_active() { local state; unit_state state is-active "$@"; [[ "$state" == active ]]; }
+unit_is_enabled() { local state; unit_state state is-enabled "$@"; [[ "$state" == enabled ]]; }
+
 unit_matches_state() {
   local current
-  current="$(systemctl is-enabled "$1" 2>/dev/null || true)"
+  unit_state current is-enabled "$1"
   case "$2" in
     enabled)  [[ "$current" == enabled ]] ;;
     disabled) [[ "$current" == disabled || "$current" == masked || "$current" == static ]] ;;
@@ -434,9 +458,9 @@ ensure_utc_rtc() {
 ensure_system_unit_active() {
   local u
   for u in "$@"; do
-    if [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]]; then log "unit active: $u"; continue; fi
+    if unit_is_active "$u"; then log "unit active: $u"; continue; fi
     root systemctl start "$u"
-    [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]] || die "unit not active: $u"
+    unit_is_active "$u" || die "unit not active: $u"
   done
 }
 
@@ -464,10 +488,10 @@ prune_dead_quickshell_instances() {
 ensure_user_unit_enabled() {
   local u
   for u in "$@"; do
-    if [[ "$(systemctl --user is-enabled "$u" 2>/dev/null || true)" == "enabled" ]]; then log "user unit enabled: $u"; continue; fi
+    if unit_is_enabled "$u" --user; then log "user unit enabled: $u"; continue; fi
     systemctl --user daemon-reload
     systemctl --user enable "$u"
-    [[ "$(systemctl --user is-enabled "$u" 2>/dev/null || true)" == "enabled" ]] || die "user unit not enabled: $u"
+    unit_is_enabled "$u" --user || die "user unit not enabled: $u"
   done
 }
 
@@ -1044,7 +1068,7 @@ ensure_kernel_arg() {
 
 session_is_sway() { [[ "${XDG_CURRENT_DESKTOP:-}" == "sway" ]]; }
 
-session_started_by_gdm() { [[ "$(systemctl is-active gdm 2>/dev/null || true)" == "active" ]]; }
+session_started_by_gdm() { unit_is_active gdm; }
 
 dm_unit_target() {
   local f=/etc/systemd/system/display-manager.service
@@ -1055,7 +1079,7 @@ dm_is_greetd() { [[ "$(dm_unit_target 2>/dev/null || true)" == greetd.service ]]
 
 default_target_is_graphical() { [[ "$(systemctl get-default)" == graphical.target ]]; }
 
-greetd_enabled() { [[ "$(systemctl is-enabled greetd 2>/dev/null || true)" == enabled ]]; }
+greetd_enabled() { unit_is_enabled greetd; }
 
 enable_greetd_login_manager() {
   if greetd_enabled; then

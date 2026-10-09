@@ -10,6 +10,7 @@ mkdir "$work/bin" "$work/units"
 
 # systemctl stub over one file per unit: $work/units/<unit>.enabled holds the is-enabled answer, <unit>.active exists
 # while the unit runs. enable/disable change the answer unless STUCK is set; --now also starts/stops. Every call is logged.
+# PROBE_FAIL="<status> <stderr text>" makes is-enabled and is-active fail like an unreachable bus: that status, no state on stdout.
 cat > "$work/bin/systemctl" <<'FAKE'
 #!/usr/bin/env bash
 echo "systemctl $*" >> "$STUB_LOG"
@@ -17,8 +18,14 @@ verb="$1"; shift
 [[ "${1-}" == --now ]] && { now=1; shift; } || now=
 unit="$1"
 f="$UNITS/$unit"
+if [[ -n "${PROBE_FAIL-}" && "$verb" == is-* ]]; then
+  echo "${PROBE_FAIL#* }" >&2
+  exit "${PROBE_FAIL%% *}"
+fi
 case "$verb" in
-  is-enabled) cat "$f.enabled" 2>/dev/null || echo not-found; [[ "$(cat "$f.enabled" 2>/dev/null)" == enabled ]] ;;
+  is-enabled)
+    [[ -e "$f.enabled" ]] || { echo not-found; exit 4; }
+    cat "$f.enabled"; [[ "$(cat "$f.enabled")" == enabled ]] || exit 1 ;;
   is-active)  if [[ -e "$f.active" ]]; then echo active; else echo inactive; exit 3; fi ;;
   enable)  [[ -n "${STUCK-}" ]] || echo enabled > "$f.enabled"; [[ -z "$now" ]] || touch "$f.active" ;;
   disable) [[ -n "${STUCK-}" ]] || echo disabled > "$f.enabled"; [[ -z "$now" ]] || rm -f "$f.active" ;;
@@ -77,3 +84,23 @@ if (STUCK=1 ensure_system_unit disabled g) 2>"$work/err"; then die "a disable th
 grep -q 'unit g not disabled' "$work/err" || die "a failed disable did not say so: $(cat "$work/err")"
 if (ensure_system_unit sideways g) 2>"$work/err"; then die "an unknown state was accepted"; fi
 log "ok: a state that does not stick and an unknown state are errors"
+
+rm -f "$UNITS/h.enabled"; : > "$STUB_LOG"
+(ensure_system_unit enabled h) 2>/dev/null
+[[ "$(<"$UNITS/h.enabled")" == enabled ]] || die "a unit systemctl reports as not-found (status 4) was not enabled"
+log "ok: a not-found unit reads as not enabled, not as a probe failure"
+
+unit i enabled
+if (ensure_system_unit_active i) 2>/dev/null; then :; fi
+[[ -e "$UNITS/i.active" ]] || die "an inactive unit (status 3) was not started"
+log "ok: an inactive unit (status 3) reads as not active"
+
+for failure in "5 unexpected failure" "1 Failed to connect to bus: No such file or directory"; do
+  unit j enabled
+  if (PROBE_FAIL="$failure" ensure_system_unit enabled j) 2>"$work/err"; then die "a failing is-enabled probe ($failure) was accepted"; fi
+  grep -q "systemctl is-enabled j" "$work/err" && grep -q "${failure#* }" "$work/err" || die "a failing probe ($failure) did not report itself: $(cat "$work/err")"
+  [[ "$(mutating_calls)" -eq 0 ]] || die "a failing probe ($failure) was followed by a change"
+  if (PROBE_FAIL="$failure" ensure_system_unit_active j) 2>/dev/null; then die "a failing is-active probe ($failure) was accepted"; fi
+  [[ "$(mutating_calls)" -eq 0 ]] || die "a failing is-active probe ($failure) was followed by a change"
+done
+log "ok: an unexpected exit status or a missing state word from systemctl dies instead of reading as 'no'"
