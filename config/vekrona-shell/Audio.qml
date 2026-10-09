@@ -34,7 +34,8 @@ Singleton {
         Exec.run(argv, (code, stdout, stderr) => {
             if (code === 0)
                 return;
-            if (player.canRaise)
+            // The player may have quit while the helper ran; then there is nothing to raise.
+            if (player?.canRaise)
                 player.raise();
             else
                 Exec.failure(argv, code, stderr);
