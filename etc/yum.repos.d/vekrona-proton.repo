@@ -1,0 +1,10 @@
+# Local repo that bin/vekrona-proton fills with Proton's desktop RPMs. Proton signs none of them, so there is no key
+# to check; each RPM is accepted instead because it came over TLS from proton.me and matches the SHA512 that the
+# feed on the same origin publishes (docs/updates.md, "Proton apps"). gpgcheck=0 is safe only because the directory is
+# root-owned and nothing but `vekrona-proton stage` writes to it, and includepkgs keeps the repo to these three names.
+[vekrona-proton]
+name=Vekrona Proton apps (local)
+baseurl=file:///var/lib/vekrona/proton-repo
+enabled=1
+gpgcheck=0
+includepkgs=proton-mail,proton-pass,proton-authenticator

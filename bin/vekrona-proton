@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Proton's desktop apps (Mail with Calendar, Pass, Authenticator) are unsigned vendor RPMs published through JSON feeds.
+# `stage` verifies them against the feed's sha512 and keeps them in a local dnf repo, so plain dnf installs and upgrades
+# them. `check` shows what is installed against what the feeds offer. See docs/updates.md.
+set -euo pipefail
+shopt -s nullglob
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/proton.sh"
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: vekrona-proton check    print installed and latest version of each Proton app (any user, read-only)
+       vekrona-proton stage    download newer RPMs into the local repo and refresh its metadata (root)
+USAGE
+  exit 2
+}
+
+scratch=""
+cleanup() {
+  [[ -z "$scratch" ]] || rm -rf "$scratch"
+  rm -f "$VEKRONA_PROTON_REPO_DIR"/*.rpm.part
+}
+
+cmd_check() {
+  local name picked version installed
+  scratch="$(mktemp -d)"
+  trap cleanup EXIT
+  printf '%-22s %-12s %s\n' PACKAGE INSTALLED LATEST
+  for name in $(proton_package_names); do
+    picked="$(proton_latest "$name" "$scratch")"
+    version="${picked%% *}"
+    installed="$(proton_installed_version "$name")"
+    printf '%-22s %-12s %s\n' "$name" "$installed" "$version"
+  done
+}
+
+# Leaves only the newest RPM of one package in the repo; the files are named <name>-<version>.rpm.
+prune_older_rpms() {
+  local name="$1" rpms=() newest older
+  rpms=("$VEKRONA_PROTON_REPO_DIR/$name"-[0-9]*.rpm)
+  ((${#rpms[@]} > 1)) || return 0
+  newest="$(printf '%s\n' "${rpms[@]##*/}" | sort -V | tail -n 1)"
+  for older in "${rpms[@]}"; do
+    [[ "${older##*/}" != "$newest" ]] || continue
+    log "removing superseded: $older"
+    rm -f "$older"
+  done
+}
+
+stage_one() {
+  local name="$1" picked version url sum installed file part actual
+  picked="$(proton_latest "$name" "$scratch")"
+  read -r version url sum <<<"$picked"
+  installed="$(proton_installed_version "$name")"
+  file="$name-$version.rpm"
+  if [[ -f "$VEKRONA_PROTON_REPO_DIR/$file" ]]; then
+    log "already staged: $file"
+  elif proton_version_newer "$version" "$installed"; then
+    part="$VEKRONA_PROTON_REPO_DIR/$file.part"
+    fetch_verified "$url" sha512 "$sum" "$part"
+    actual="$(rpm -qp --qf '%{NAME} %{VERSION}' "$part")"
+    [[ "$actual" == "$name $version" ]] || die "$url holds '$actual', expected '$name $version'"
+    mv "$part" "$VEKRONA_PROTON_REPO_DIR/$file"
+    log "staged: $file (installed: $installed)"
+  else
+    log "nothing newer than installed: $name $installed"
+  fi
+  prune_older_rpms "$name"
+}
+
+cmd_stage() {
+  local name
+  [[ $EUID -eq 0 ]] || die "vekrona-proton stage must run as root (sudo vekrona-proton stage)"
+  require_cmd createrepo_c
+  scratch="$(mktemp -d)"
+  trap cleanup EXIT
+  install -d -m 0755 "$VEKRONA_PROTON_REPO_DIR"
+  for name in $(proton_package_names); do
+    stage_one "$name"
+  done
+  # Cheap when nothing changed, and it heals metadata left behind by a run that died after staging an rpm.
+  createrepo_c --update --quiet "$VEKRONA_PROTON_REPO_DIR"
+}
+
+case "${1:-}" in
+  check) cmd_check ;;
+  stage) cmd_stage ;;
+  *) usage ;;
+esac
