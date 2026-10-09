@@ -262,13 +262,35 @@ ensure_symlink() {
   log "linked: $dst -> $src"
 }
 
+# Vekrona is always installed from a git checkout (docs/install.md clones it; the ISO payload is a clone), and the
+# checkout's .gitignore is what separates the files it ships from build junk such as bin/__pycache__.
+require_git_checkout() {
+  git -C "$VEKRONA_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    || die "$VEKRONA_ROOT is not a git checkout (or git is missing): vekrona links only the files git tracks or does not ignore"
+}
+
+# Succeeds when git ignores the path inside $VEKRONA_ROOT. Tracked files are never ignored.
+is_ignored_in_checkout() {
+  local rc=0
+  git -C "$VEKRONA_ROOT" check-ignore -q -- "$1" || rc=$?
+  case $rc in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) die "git check-ignore failed (exit $rc) for $1 in $VEKRONA_ROOT" ;;
+  esac
+}
+
+# Links every regular file under srcdir that git tracks or that is untracked but not ignored.
 ensure_symlink_tree() {
   local srcdir="$1" dstdir="$2"
   [[ -d "$srcdir" ]] || die "directory missing: $srcdir"
-  local f
-  while IFS= read -r -d '' f; do
-    ensure_symlink "$f" "$dstdir/${f#"$srcdir"/}"
-  done < <(find "$srcdir" -type f -print0)
+  require_git_checkout
+  local rel
+  while IFS= read -r -d '' rel; do
+    # --cached still lists tracked files deleted from the working tree, and tracked symlinks.
+    [[ -f "$srcdir/$rel" && ! -L "$srcdir/$rel" ]] || continue
+    ensure_symlink "$srcdir/$rel" "$dstdir/$rel"
+  done < <(git -C "$srcdir" ls-files -z --cached --others --exclude-standard --deduplicate)
 }
 
 # True when the link target lies in a legacy root other than the tree in use.
@@ -281,10 +303,11 @@ is_legacy_link_target() {
 }
 
 # Prints every symlink under the given dirs whose raw target is under this checkout or a legacy root; with
-# --dangling, only those whose target no longer exists. A dir that is itself a symlink is someone else's.
+# --stale, only those that should not exist: the target is gone, git ignores it in this checkout (an earlier
+# install linked build junk), or it lies in a legacy root. A dir that is itself a symlink is someone else's.
 vekrona_links() {
-  local dangling=0 d link target
-  [[ "${1:-}" == --dangling ]] && { dangling=1; shift; }
+  local stale=0 d link target
+  [[ "${1:-}" == --stale ]] && { stale=1; shift; }
   for d in "$@"; do
     [[ -d "$d" && ! -L "$d" ]] || continue
     while IFS= read -r -d '' link; do
@@ -293,24 +316,24 @@ vekrona_links() {
         "$VEKRONA_ROOT"/*) ;;
         *) is_legacy_link_target "$target" || continue ;;
       esac
-      if [[ $dangling -eq 1 && -e "$link" ]]; then
-        is_legacy_link_target "$target" || continue
+      if [[ $stale -eq 1 && -e "$link" ]]; then
+        is_legacy_link_target "$target" || is_ignored_in_checkout "$target" || continue
       fi
       printf '%s\n' "$link"
     done < <(find "$d" -type l -print0)
   done
 }
 
-# Removes links into a vekrona checkout whose file is gone from it (renamed or deleted upstream), and
-# links still into the legacy root. ensure_symlink has already repointed every legacy link whose file
+# Removes links into a vekrona checkout whose file is gone from it (renamed or deleted upstream) or is now
+# git-ignored, and links still into the legacy root. ensure_symlink has already repointed every legacy link whose file
 # exists in this checkout, so this only catches leftovers.
 prune_vekrona_links() {
   local link
   while IFS= read -r link; do
-    log "removing dangling link: $link -> $(readlink "$link")"
+    log "removing stale link: $link -> $(readlink "$link")"
     rm -f "$link"
     [[ ! -L "$link" ]] || die "failed to remove $link"
-  done < <(vekrona_links --dangling "$@")
+  done < <(vekrona_links --stale "$@")
 }
 
 # Every directory stage 50 links into, one per line (70-verify scans the same set). ~/.config/ghostty is

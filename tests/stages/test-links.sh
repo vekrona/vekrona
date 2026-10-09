@@ -18,6 +18,7 @@ OLD_CLONE="${VEKRONA_LEGACY_ROOTS[1]}"
 mkdir -p "$VEKRONA_ROOT/config" "$OLD_CHECKOUT/config" "$OLD_CLONE/config"
 echo new > "$VEKRONA_ROOT/config/a"
 echo new > "$VEKRONA_ROOT/config/b"
+git -C "$VEKRONA_ROOT" init -q
 
 # A directory symlinked from outside $HOME's tree is managed elsewhere and left alone.
 mkdir -p "$scratch/dotfiles/ghostty" "$HOME/.config"
@@ -69,6 +70,33 @@ for kept in new-alive foreign-dangling lookalike-dangling; do
   [[ -L "$d/$kept" ]] || die "link wrongly pruned: $kept"
 done
 log "ok: prune_vekrona_links removes only stale links into a vekrona root"
+
+# Tree linking: git-ignored build junk is never linked, untracked files that are not ignored are, and a link an
+# earlier run made to a file that is now ignored is pruned.
+mkdir -p "$VEKRONA_ROOT/bin/__pycache__" "$HOME/.local/bin/__pycache__"
+printf '__pycache__/\n' > "$VEKRONA_ROOT/.gitignore"
+echo tool > "$VEKRONA_ROOT/bin/tool"
+echo junk > "$VEKRONA_ROOT/bin/__pycache__/tool.pyc"
+echo junk > "$VEKRONA_ROOT/bin/__pycache__/other.pyc"
+ln -s "$VEKRONA_ROOT/bin/__pycache__/tool.pyc" "$HOME/.local/bin/__pycache__/tool.pyc"
+ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin" 2>/dev/null
+[[ "$(readlink "$HOME/.local/bin/tool")" == "$VEKRONA_ROOT/bin/tool" ]] || die "an untracked, non-ignored file was not linked"
+[[ ! -e "$HOME/.local/bin/__pycache__/other.pyc" ]] || die "a git-ignored file was linked"
+prune_vekrona_links "$HOME/.local/bin" 2>/dev/null
+[[ ! -L "$HOME/.local/bin/__pycache__/tool.pyc" ]] || die "a stale link to a now-ignored file was not pruned"
+[[ -L "$HOME/.local/bin/tool" ]] || die "a link to a non-ignored file was pruned"
+log "ok: ignored files are not linked, their stale links are pruned, untracked files are linked"
+
+# Outside a git checkout nothing is guessed: linking stops with an explanation.
+(
+  VEKRONA_ROOT="$scratch/not-a-checkout"
+  mkdir -p "$VEKRONA_ROOT/bin"
+  echo x > "$VEKRONA_ROOT/bin/tool"
+  if out="$(ensure_symlink_tree "$VEKRONA_ROOT/bin" "$scratch/dst" 2>&1)"; then exit 1; fi
+  [[ "$out" == *"not a git checkout"* ]]
+) || die "ensure_symlink_tree did not refuse a non-git root"
+[[ ! -e "$scratch/dst" ]] || die "ensure_symlink_tree linked from a non-git root"
+log "ok: a non-git root is refused"
 
 # Running from a dev checkout retargets every link into the old clone, and the verify scan sees none left.
 mkdir -p "$HOME/.config/sway" "$VEKRONA_ROOT/config/sway"
