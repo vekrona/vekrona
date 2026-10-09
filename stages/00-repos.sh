@@ -43,3 +43,7 @@ ensure_copr_absent avengemedia/dms
 ensure_repo_key 1password
 ensure_1password_repo_file
 ensure_repo_enabled 1password
+
+ensure_repo_key "$(protonvpn_key_repo)"
+ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/protonvpn-stable.repo" /etc/yum.repos.d/protonvpn-stable.repo
+ensure_repo_enabled protonvpn-fedora-stable

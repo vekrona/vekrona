@@ -108,6 +108,15 @@ if ran 00-repos; then
   check assert "repo enabled: 1password" repo_enabled 1password
   check assert_repo_key_trusted 1password
   check assert "/etc/yum.repos.d/1password.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" /etc/yum.repos.d/1password.repo
+  check assert "repo enabled: protonvpn-fedora-stable" repo_enabled protonvpn-fedora-stable
+  check assert_repo_key_trusted "$(protonvpn_key_repo)"
+  check assert "/etc/yum.repos.d/protonvpn-stable.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/protonvpn-stable.repo" /etc/yum.repos.d/protonvpn-stable.repo
+  # A pin kept for a Fedora release the system has left would silently stop covering the repo files, which read $releasever.
+  fedora_release="$(rpm -E %fedora)"
+  for pin in "${!VEKRONA_REPO_KEY_FINGERPRINTS[@]}"; do
+    [[ "$pin" =~ -fedora-([0-9]+)$ ]] || continue
+    warn_check "pinned per-release key $pin is for the running Fedora $fedora_release" eq "${BASH_REMATCH[1]}" "$fedora_release"
+  done
   for c in "${VEKRONA_COPRS[@]}"; do
     check assert "copr enabled: $c" copr_enabled "$c"
   done
@@ -221,6 +230,9 @@ if ran 30-packages; then
     warn_check "versionlock entry matches fc$os_version_id: $entry" eq "$fcver" "$os_version_id"
   done < <(versionlock_evrs)
   check assert "greetd user exists" bash -c "getent passwd greetd >/dev/null"
+  # The proton-vpn-daemon RPM enables and starts its split-tunneling service itself.
+  check assert "me.proton.vpn.split_tunneling.service enabled" unit_enabled me.proton.vpn.split_tunneling
+  check assert "me.proton.vpn.split_tunneling.service active" unit_active me.proton.vpn.split_tunneling
 
   check assert "package installed: tuned-ppd" pkg_installed tuned-ppd
   check assert "rpm -q dms finds nothing (retired)" pkg_absent dms
