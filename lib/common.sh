@@ -1063,7 +1063,7 @@ VEKRONA_DESKTOP_PKGS=(
   libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
   python3 python3-gobject python3-pyyaml python3-vdf qt6ct quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd swayidle syncthing tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
-  wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
+  wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots
 )
 
 # shellcheck disable=SC2034
@@ -1144,13 +1144,25 @@ vekrona_state_dir() { printf '%s' "${XDG_STATE_HOME:-$HOME/.local/state}/vekrona
 vekrona_theme_name_file() { printf '%s' "$(vekrona_state_dir)/theme"; }
 vekrona_active_theme_file() { printf '%s' "$(vekrona_state_dir)/active-theme.json"; }
 
-firefox_profile_root() {
-  if [[ -d "$HOME/.mozilla/firefox" ]]; then
-    printf '%s' "$HOME/.mozilla/firefox"
-  else
-    printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/firefox"
-  fi
+# What `xdg-open` (links in apps, the launcher's web results) hands web pages to: Firefox. xdg-settings would do
+# the same through xdg-mime, but it first has to detect the desktop environment, which Sway is not one of.
+VEKRONA_BROWSER_DESKTOP=org.mozilla.firefox.desktop
+VEKRONA_BROWSER_MIMES=(x-scheme-handler/http x-scheme-handler/https text/html)
+
+ensure_default_browser() {
+  local mime current
+  for mime in "${VEKRONA_BROWSER_MIMES[@]}"; do
+    current="$(xdg-mime query default "$mime")" || die "xdg-mime query failed: $mime"
+    [[ "$current" == "$VEKRONA_BROWSER_DESKTOP" ]] && { log "default handler already set: $mime"; continue; }
+    log "setting default handler: $mime = $VEKRONA_BROWSER_DESKTOP"
+    xdg-mime default "$VEKRONA_BROWSER_DESKTOP" "$mime" || die "xdg-mime default failed: $mime"
+    current="$(xdg-mime query default "$mime")"
+    [[ "$current" == "$VEKRONA_BROWSER_DESKTOP" ]] || die "default handler not applied: $mime (is $current)"
+  done
 }
+
+# The directory holding profiles.ini; one implementation (lib/vekrona_firefox.py) serves the renderer and the stages.
+firefox_profile_root() { "$VEKRONA_ROOT/bin/vekrona-firefox" profile-root; }
 
 whitespace_normalized() { local -a f; read -r -a f <<<"$1"; printf '%s' "${f[*]}"; }
 

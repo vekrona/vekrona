@@ -219,6 +219,8 @@ done < <(vekrona_webapp_profile_dirs)
 
 ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
 
+ensure_default_browser
+
 if [[ -n "$(sway_socket)" ]]; then
   log "starting the weather and calendar timers for the running sway session"
   systemctl --user start vekrona-weather.timer vekrona-calendar.timer || die "the weather and calendar timers failed to start"

@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sqlite3
+import sys
+import urllib.parse
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import vekrona_firefox
+
+PROG = "vekrona-firefox"
+DEFAULT_LIMIT = 10
+WEB_URL = "(p.url LIKE 'http://%' OR p.url LIKE 'https://%')"
+
+BOOKMARK_HAYSTACK = "COALESCE(b.title, '') || ' ' || COALESCE(p.title, '') || ' ' || p.url"
+HISTORY_HAYSTACK = "COALESCE(p.title, '') || ' ' || p.url"
+
+FRECENCY_RANGE_SQL = f"""
+SELECT MIN(p.frecency), MAX(p.frecency) FROM moz_places p
+WHERE p.visit_count > 0 AND p.hidden = 0 AND {WEB_URL}"""
+
+BOOKMARKS_SQL = f"""
+SELECT COALESCE(NULLIF(b.title, ''), NULLIF(p.title, ''), p.url), p.url, p.frecency, MIN(b.id)
+FROM moz_bookmarks b JOIN moz_places p ON p.id = b.fk
+WHERE b.type = 1 AND {WEB_URL} AND {{matches}}
+GROUP BY p.id
+ORDER BY p.frecency DESC
+LIMIT ?"""
+
+HISTORY_SQL = f"""
+SELECT COALESCE(NULLIF(p.title, ''), p.url), p.url, p.frecency
+FROM moz_places p
+WHERE p.visit_count > 0 AND p.hidden = 0 AND {WEB_URL} AND {{matches}}
+  AND NOT EXISTS (SELECT 1 FROM moz_bookmarks b WHERE b.fk = p.id AND b.type = 1)
+ORDER BY p.frecency DESC
+LIMIT ?"""
+
+
+def die(msg):
+    print(f"{PROG}: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def frecency_scorer(conn):
+    """Frecency has no fixed scale (current Firefox puts nearly every visited page within a few hundred of the
+    same ~20000), so a page scores by where it sits between the least and the most frecent visited page."""
+    low, high = conn.execute(FRECENCY_RANGE_SQL).fetchone()
+    if low is None or high == low:
+        return lambda frecency: 1.0
+    return lambda frecency: round(min(max((frecency - low) / (high - low), 0.0), 1.0), 4)
+
+
+def open_places(profile):
+    path = os.path.join(profile, "places.sqlite")
+    if not os.path.isfile(path):
+        die(f"{path} not found (Firefox has not recorded any history yet)")
+    # immutable=1 reads the file without locking it, which works while Firefox holds its exclusive lock.
+    # It does not read places.sqlite-wal, so the newest pages show up only after Firefox checkpoints.
+    conn = sqlite3.connect(f"file:{urllib.parse.quote(path)}?immutable=1", uri=True)
+    conn.create_function("fold", 1, lambda text: (text or "").casefold(), deterministic=True)
+    return conn
+
+
+def matching_rows(conn, sql, haystack, terms, limit):
+    # Every term must occur, in any order, in the haystack: the titles and the URL.
+    matches = " AND ".join(f"instr(fold({haystack}), ?) > 0" for _ in terms) or "1"
+    return conn.execute(sql.format(matches=matches), [*terms, limit]).fetchall()
+
+
+def cmd_places(args):
+    terms = args.query.casefold().split()
+    conn = open_places(vekrona_firefox.require_default_profile())
+    try:
+        score = frecency_scorer(conn)
+        for kind, sql, haystack in (("bookmark", BOOKMARKS_SQL, BOOKMARK_HAYSTACK),
+                                    ("history", HISTORY_SQL, HISTORY_HAYSTACK)):
+            for title, url, frecency, *_ in matching_rows(conn, sql, haystack, terms, args.limit):
+                print(json.dumps({"kind": kind, "title": title, "url": url, "score": score(frecency)}))
+    finally:
+        conn.close()
+
+
+def default_engine_name(profile):
+    path = os.path.join(profile, "search.json.mozlz4")
+    store = vekrona_firefox.read_mozlz4_json(path)
+    meta = store.get("metaData", {})
+    # An empty defaultEngineId means the user never chose one: Firefox then uses the app default.
+    engine_id = meta.get("defaultEngineId") or meta.get("appDefaultEngineId")
+    if not engine_id:
+        die(f"{path} names no default engine (metaData.defaultEngineId and metaData.appDefaultEngineId are empty)")
+    for engine in store.get("engines", []):
+        if engine.get("id") == engine_id:
+            if not engine.get("_name"):
+                die(f"{path}: the default engine {engine_id} has no _name")
+            return engine["_name"]
+    die(f"{path}: the default engine {engine_id} is not among its engines")
+
+
+def cmd_engine_name(_args):
+    print(default_engine_name(vekrona_firefox.require_default_profile()))
+
+
+def cmd_profile_root(_args):
+    print(vekrona_firefox.firefox_profile_root())
+
+
+def positive_int(text):
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a positive integer")
+    return value
+
+
+def main():
+    parser = argparse.ArgumentParser(prog=PROG, description="Read the main Firefox profile: bookmarks, history, "
+                                     "the default search engine. Searching with it is `firefox --search TERMS`.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    places = commands.add_parser("places", help="JSON lines {kind, title, url, score} of bookmarks, then history, "
+                                 "matching every word of QUERY")
+    places.add_argument("query")
+    places.add_argument("--limit", type=positive_int, default=DEFAULT_LIMIT, help="rows per kind")
+    places.set_defaults(run=cmd_places)
+    commands.add_parser("engine-name", help="display name of the default search engine").set_defaults(
+        run=cmd_engine_name)
+    commands.add_parser("profile-root", help="directory holding profiles.ini").set_defaults(run=cmd_profile_root)
+    args = parser.parse_args()
+    try:
+        args.run(args)
+    except vekrona_firefox.FirefoxError as e:
+        die(str(e))
+    except sqlite3.Error as e:
+        die(f"places.sqlite query failed: {e}")
+
+
+if __name__ == "__main__":
+    main()

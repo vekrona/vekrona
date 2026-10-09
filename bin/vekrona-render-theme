@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import configparser
 import json
 import os
 import string
@@ -11,6 +10,7 @@ import tempfile
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
 import vekrona_cli
+import vekrona_firefox
 import vekrona_theme
 
 PROG = "vekrona-render-theme"
@@ -444,57 +444,6 @@ fixed="{theme.mono()},{vekrona_theme.fmt_pt(vekrona_theme.px_to_pt(theme.type_px
 
 # ---------------------------------------------------------------- firefox
 
-def firefox_profile_root():
-    legacy = home_path(".mozilla", "firefox")
-    if os.path.isdir(legacy):
-        return legacy
-    return os.path.join(vekrona_cli.xdg_config_home(), "mozilla", "firefox")
-
-
-def read_profiles_ini():
-    """Returns (root, parser), or None when Firefox has no profiles yet."""
-    root = firefox_profile_root()
-    ini = os.path.join(root, "profiles.ini")
-    if not os.path.isfile(ini):
-        return None
-    parser = configparser.ConfigParser(interpolation=None)
-    try:
-        parser.read(ini)
-    except (OSError, configparser.Error) as e:
-        die(f"could not read {ini}: {e}")
-    return root, parser
-
-
-def profile_dir(root, parser, section):
-    path = parser[section].get("Default" if section.startswith("Install") else "Path")
-    if not path:
-        return None
-    relative = parser[section].get("IsRelative", "1") == "1" or section.startswith("Install")
-    return os.path.join(root, path) if relative and not os.path.isabs(path) else path
-
-
-def find_default_profile(root, parser):
-    installs = [s for s in parser.sections() if s.startswith("Install") and parser[s].get("Default")]
-    if len(installs) > 1:
-        die(f"{os.path.join(root, 'profiles.ini')} has several [Install*] sections, "
-            f"cannot tell the default profile: {', '.join(installs)}")
-    if installs:
-        return profile_dir(root, parser, installs[0])
-    for section in parser.sections():
-        if not section.startswith("Profile") or parser[section].get("Default") != "1":
-            continue
-        if parser[section].get("Name", "").startswith("vekrona-"):
-            continue
-        return profile_dir(root, parser, section)
-    return None
-
-
-def find_webapp_profiles(root, parser):
-    dirs = [profile_dir(root, parser, s) for s in parser.sections()
-            if s.startswith("Profile") and parser[s].get("Name", "").startswith("vekrona-")]
-    return [d for d in dirs if d]
-
-
 def render_user_js(mode):
     scheme = 0 if mode == "dark" else 1
     return f"""user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
@@ -619,12 +568,15 @@ def render_user_chrome(theme, mode, design):
 
 
 def apply_firefox(theme, mode, design, explicit):
-    profiles = read_profiles_ini()
-    default = find_default_profile(*profiles) if profiles else None
-    webapps = find_webapp_profiles(*profiles) if profiles else []
+    try:
+        profiles = vekrona_firefox.read_profiles_ini()
+        default = vekrona_firefox.find_default_profile(*profiles) if profiles else None
+    except vekrona_firefox.FirefoxError as e:
+        die(str(e))
+    webapps = vekrona_firefox.find_webapp_profiles(*profiles) if profiles else []
     if default is None and not webapps:
         if explicit:
-            die(f"no Firefox profile to theme under {firefox_profile_root()} "
+            die(f"no Firefox profile to theme under {vekrona_firefox.firefox_profile_root()} "
                 "(start Firefox once, or install a vekrona webapp, then retry)")
         print(f"{PROG}: no Firefox profile yet, skipping the firefox target "
               "(run vekrona-render-theme firefox after Firefox has started once)", file=sys.stderr)

@@ -435,6 +435,9 @@ if ran 50-user; then
   check assert_file_contains "$HOME/.config/qt6ct/qt6ct.conf" "^# vekrona-render-theme: "
   check assert_file_contains "$HOME/.config/qt6ct/colors/vekrona.conf" "^# vekrona-render-theme: "
   check assert_file_contains "$HOME/.config/sway/config.d/90-vekrona-design.conf" "^# vekrona-render-theme: "
+  for browser_mime in "${VEKRONA_BROWSER_MIMES[@]}"; do
+    check assert "Firefox is the default handler of $browser_mime" eq "$(xdg-mime query default "$browser_mime")" "$VEKRONA_BROWSER_DESKTOP"
+  done
   firefox_default_profile="$(awk -F= '/^\[Install/ {in_install=1; next} /^\[/ {in_install=0} in_install && $1 == "Default" {print $2; exit}' "$firefox_profiles_ini" 2>/dev/null || true)"
   if [[ -n "$firefox_default_profile" ]]; then
     firefox_default_profile="$(firefox_profile_root)/$firefox_default_profile"

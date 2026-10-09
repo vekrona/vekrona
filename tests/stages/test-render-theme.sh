@@ -12,7 +12,7 @@ trap 'rm -rf "$scratch"' EXIT
 repo="$scratch/repo"
 mkdir -p "$repo/bin" "$repo/lib" "$repo/config"
 cp "$ROOT/bin/vekrona-render-theme" "$repo/bin/"
-cp "$ROOT/lib/vekrona_cli.py" "$ROOT/lib/vekrona_theme.py" "$repo/lib/"
+cp "$ROOT/lib/vekrona_cli.py" "$ROOT/lib/vekrona_firefox.py" "$ROOT/lib/vekrona_theme.py" "$repo/lib/"
 cp "$ROOT/config/tokens.json" "$ROOT/config/design.json" "$repo/config/"
 tool="$repo/bin/vekrona-render-theme"
 

@@ -102,13 +102,14 @@ Second Opus review (post-fix) found 6 regressions (VM inotify race, virt-install
 vekrona/
   install.sh            # stage runner: parses --skip/STAGE, sudo -v per stage, runs stages/NN-*.sh in order
   lib/vekrona_theme.py  # loads and validates config/tokens.json; used by vekrona-render-theme (decision #47)
+  lib/vekrona_firefox.py  # Firefox profile discovery (profiles.ini, default and webapp profiles) and mozLz4 reading; used by vekrona-render-theme and vekrona-firefox (places.sqlite bookmarks and history, default search engine name for the launcher's Web module); common.sh's firefox_profile_root asks bin/vekrona-firefox
   lib/common.sh         # Helpers: log warn die root sudo_refresh require_cmd pkg_installed ensure_pkg 
                         # ensure_pkg_from_repo mark_user_installed repo_enabled ensure_repo_enabled ensure_copr 
                         # ensure_copr_absent ensure_root_file ensure_line ensure_symlink ensure_symlink_tree 
                         # ensure_dir ensure_system_unit ensure_user_unit_enabled ensure_user_in_group 
                         # versionlock_has versionlock_evrs versionlock_installed kernel_cmdline_has grubby_has_arg 
                         # ensure_kernel_arg session_is_sway session_started_by_gdm assert assert_file_contains 
-                        # firefox_profile_root wlroots_package_name vekrona_desktop_pkgs (VEKRONA_DESKTOP_PKGS: the
+                        # firefox_profile_root ensure_default_browser wlroots_package_name vekrona_desktop_pkgs (VEKRONA_DESKTOP_PKGS: the
                         # single list of packages vekrona installs and relies on, shared by 90a/90b's dnf mark user,
                         # 90b's dnf protected_packages, and 70-verify's post-cleanup package check)
   stages/
