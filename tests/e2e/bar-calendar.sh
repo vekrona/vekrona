@@ -21,6 +21,7 @@ cleanup() {
 }
 
 vekrona-dev session
+clear_notifications
 vekrona-dev move 600 500
 trap cleanup EXIT
 

@@ -33,6 +33,7 @@ check_icon() {
 }
 
 vekrona-dev session
+clear_notifications
 vekrona-dev move 600 500
 trap stop_fake_icons EXIT
 # The fake icon must be the only one in the tray, or the measured box would depend on the order of the icons.

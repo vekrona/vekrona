@@ -6,3 +6,5 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 # `vekrona-error report` writes to the journal socket, which feeds the user's real error store. A missing path makes
 # any report from a test fail loudly instead.
 export VEKRONA_JOURNAL_SOCKET=/nonexistent/vekrona-test-journal-socket
+
+clear_notifications() { vekrona-dev sh dms ipc call notifications clearAll >/dev/null; }

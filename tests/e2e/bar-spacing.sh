@@ -29,6 +29,7 @@ export -f bar_spacing_ok
 export ROOT BAR_HEIGHT_PX GROUP_JOIN_PX MAX_GAP_PX MAX_GAP_SPREAD_PX ICON_S_PX GAPS
 
 vekrona-dev session
+clear_notifications
 vekrona-dev move 600 500
 # Widgets load at their own pace: wait for the spacing to settle.
 if ! vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bar_spacing_ok; then

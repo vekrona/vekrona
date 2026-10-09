@@ -14,6 +14,7 @@ export -f volume_shown
 export VOLUME_REGEX
 
 vekrona-dev session
+clear_notifications
 vekrona-dev move 600 500
 
 # The VM has no sound card: the test brings its own output.

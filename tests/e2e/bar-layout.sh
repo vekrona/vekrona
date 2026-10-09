@@ -31,6 +31,7 @@ workspace_two_focused() {
 export -f clock_shown danger_pixels badge_hidden badge_shown workspace_two_focused
 
 vekrona-dev session
+clear_notifications
 vekrona-dev run bash -c "test -s $GUEST_SETTINGS" || die "DMS settings $GUEST_SETTINGS are missing: install did not seed them"
 
 shell_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-shell.service; }
