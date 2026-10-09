@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
+ensure_root_tree "$VEKRONA_ROOT/lib" "$VEKRONA_SYSTEM_DIR/lib"
 ensure_root_file "$VEKRONA_ROOT/etc/greetd/config.toml" /etc/greetd/config.toml
 ensure_root_file "$VEKRONA_ROOT/etc/geoclue/conf.d/90-vekrona.conf" /etc/geoclue/conf.d/90-vekrona.conf
 

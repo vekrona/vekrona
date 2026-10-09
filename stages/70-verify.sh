@@ -255,6 +255,7 @@ if ran 30-packages; then
 fi
 
 if ran 40-system; then
+  check assert "$VEKRONA_SYSTEM_DIR/lib matches the checkout's lib/" root_tree_matches "$VEKRONA_ROOT/lib" "$VEKRONA_SYSTEM_DIR/lib"
   check assert_file_contains /etc/greetd/config.toml 'user = "greetd"'
   check assert "greetd creates /var/cache/tuigreet on start" file_exists /etc/systemd/system/greetd.service.d/vekrona-tuigreet-cache.conf
   check assert "no tmpfiles.d entry for greetd's cache dir (dracut copies it into an initramfs without the user)" file_absent /etc/tmpfiles.d/vekrona-tuigreet.conf

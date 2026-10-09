@@ -7,7 +7,10 @@ export VEKRONA_ROOT
 VEKRONA_USER="$(id -un)"
 # Where earlier installs lived (a plain checkout, then install.sh's own clone); links into them are legacy and
 # get repointed or pruned, unless that tree is the one running.
-VEKRONA_LEGACY_ROOTS=("$HOME/vekrona" "$HOME/.local/share/vekrona")
+# Systemd system units have no $HOME: each one sets Environment=HOME=/root, and this fails loudly when it does not.
+VEKRONA_LEGACY_ROOTS=("${HOME:?lib/common.sh needs HOME: a systemd system unit must set Environment=HOME=/root}/vekrona" "$HOME/.local/share/vekrona")
+# Root-owned copy of the checkout's scripts: a unit cannot run from the 0700 user_home_t home directory.
+VEKRONA_SYSTEM_DIR=/usr/local/lib/vekrona
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
@@ -180,13 +183,74 @@ ensure_copr_absent() {
   done
 }
 
+# DST is read through root: its directory may be unreadable to the invoking user (/etc/polkit-1/rules.d is 750 root:polkitd).
+root_file_current() {
+  local src="$1" dst="$2" mode="$3" want
+  root test -f "$dst" && root cmp -s "$src" "$dst" || return 1
+  printf -v want '%o' "$((8#$mode))"
+  [[ "$(root stat -c %a "$dst")" == "$want" ]]
+}
+
 ensure_root_file() {
   local src="$1" dst="$2" mode="${3:-0644}"
   [[ -f "$src" ]] || die "source missing: $src"
-  if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then log "up to date: $dst"; return 0; fi
+  if root_file_current "$src" "$dst" "$mode"; then log "up to date: $dst"; return 0; fi
   log "installing: $dst"
   root install -D -m "$mode" "$src" "$dst"
-  cmp -s "$src" "$dst" || die "content mismatch after install: $dst"
+  root_file_current "$src" "$dst" "$mode" || die "content or mode mismatch after install: $dst"
+}
+
+# True when DST holds exactly SRC's files (read as root); modes are not compared. __pycache__ is not part of a tree.
+root_tree_matches() { root diff -r -x __pycache__ "$1" "$2" >/dev/null; }
+
+# Mirrors directory SRC into the root-owned DST: directories 0755, files 0755 where SRC's is executable and 0644
+# otherwise, and whatever SRC lacks is removed. SRC may hold only regular files and directories, with no newline in a name.
+ensure_root_tree() {
+  local src="$1" dst="$2" changed=0 rel kind target mode out
+  local -A want_files=() want_dirs=()
+  [[ -d "$src" ]] || die "source directory missing: $src"
+  out="$(find "$src" -name __pycache__ -prune -o \( ! -type f ! -type d -o -name $'*\n*' \) -print)"
+  [[ -z "$out" ]] || die "$src holds entries ensure_root_tree cannot mirror: $out"
+
+  out="$(find "$src" -name __pycache__ -prune -o -type d -printf '%P\n')"
+  while IFS= read -r rel; do
+    [[ -z "$rel" ]] || want_dirs[$rel]=1
+    target="$dst${rel:+/$rel}"
+    if root test -d "$target" && [[ "$(root stat -c %a "$target")" == 755 ]]; then continue; fi
+    log "creating directory: $target"
+    root install -d -m 0755 "$target"
+    changed=1
+  done <<<"$out"
+
+  out="$(find "$src" -name __pycache__ -prune -o -type f -printf '%P\n')"
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    want_files[$rel]=1
+    if [[ -x "$src/$rel" ]]; then mode=0755; else mode=0644; fi
+    root_file_current "$src/$rel" "$dst/$rel" "$mode" && continue
+    ensure_root_file "$src/$rel" "$dst/$rel" "$mode"
+    changed=1
+  done <<<"$out"
+
+  out="$(root find "$dst" -mindepth 1 -depth -printf '%y %P\n')"
+  while IFS=' ' read -r kind rel; do
+    [[ -n "$kind" ]] || continue
+    if [[ "$kind" == d ]]; then
+      [[ -z "${want_dirs[$rel]-}" ]] || continue
+      log "removing directory: $dst/$rel"
+      root rmdir "$dst/$rel"
+    else
+      [[ -z "${want_files[$rel]-}" ]] || continue
+      log "removing: $dst/$rel"
+      root rm -f "$dst/$rel"
+    fi
+    changed=1
+  done <<<"$out"
+
+  # Every run: an earlier run may have died between copying and labeling.
+  if command -v restorecon >/dev/null; then root restorecon -R "$dst"; fi
+  root_tree_matches "$src" "$dst" || die "$dst differs from $src after mirroring"
+  if [[ $changed -eq 0 ]]; then log "up to date: $dst"; else log "mirrored: $src -> $dst"; fi
 }
 
 # grep -q on a file: 0 match, 1 no match; any other grep status (unreadable file, a directory) is an error, not "absent".
