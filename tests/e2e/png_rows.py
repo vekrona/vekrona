@@ -1,9 +1,11 @@
-"""Minimal PNG reader (8-bit RGB/RGBA, not interlaced) so e2e image checks need no imaging library."""
+"""Minimal PNG reader (8-bit RGB/RGBA, not interlaced) so e2e image checks need no imaging library.
+
+max_rows stops decoding after the first rows, which keeps checks of a screen edge fast on big screens."""
 import struct
 import zlib
 
 
-def read_png_rows(path):
+def read_png_rows(path, max_rows=None):
     with open(path, "rb") as f:
         data = f.read()
     assert data[:8] == b"\x89PNG\r\n\x1a\n", f"{path} is not a PNG"
@@ -21,7 +23,7 @@ def read_png_rows(path):
     raw = zlib.decompress(idat)
     stride = width * channels
     rows, prev = [], bytearray(stride)
-    for y in range(height):
+    for y in range(height if max_rows is None else min(height, max_rows)):
         base = y * (stride + 1)
         ftype, line = raw[base], bytearray(raw[base + 1:base + 1 + stride])
         for i in range(stride):
