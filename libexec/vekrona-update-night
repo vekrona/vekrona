@@ -28,7 +28,7 @@ fi
 if [[ -n "$awake" ]]; then
   read -r uid name <<<"${awake%%$'\n'*}"
   answer="$(ask_user "$uid" "$name" --timeout "$ask_timeout" --title "Install updates and restart now?" \
-    --body "$(update_summary)" --action "install=Install and reboot" --action "skip=Skip tonight")"
+    --body "$(update_summary)" --action "skip=Skip tonight" --action "install=Install and reboot")"
   case "$answer" in
     install) log "$name chose to install" ;;
     skip | timeout | closed)

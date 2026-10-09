@@ -97,7 +97,12 @@ class ToastTest(UpdateNotifyTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         asked = self.ask_args()
         self.assertEqual(asked["title"], "Hey dude(-ssa), updates are ready")
-        self.assertEqual(asked["actions"], ["install=Install now", "skip=Not tonight"])
+        self.assertEqual(sorted(asked["actions"]), ["install=Install now", "skip=Not tonight"])
+
+    def test_the_first_action_is_the_harmless_one_because_a_click_on_the_toast_body_runs_it(self):
+        self.write_updates(state([AGENTS]))
+        self.assertEqual(self.run_notify().returncode, 0)
+        self.assertEqual(self.ask_args()["actions"][0], "skip=Not tonight")
 
     def test_the_toast_stays_until_midnight_at_the_latest(self):
         self.write_updates(state([AGENTS]))

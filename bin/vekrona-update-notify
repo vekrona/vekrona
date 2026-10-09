@@ -106,7 +106,7 @@ def ask(body):
         die("vekrona-update-ask not found")
     result = subprocess.run(
         [tool, "--timeout", str(seconds_until_midnight()), "--title", TITLE, "--body", body,
-         "--action", "install=Install now", "--action", "skip=Not tonight"],
+         "--action", "skip=Not tonight", "--action", "install=Install now"],
         stdout=subprocess.PIPE, text=True)
     if result.returncode != 0:
         die(f"vekrona-update-ask exited with status {result.returncode}")

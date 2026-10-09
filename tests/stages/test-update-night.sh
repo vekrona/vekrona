@@ -71,8 +71,8 @@ log "ok: timeout, skip and a closed notification skip the night"
 scenario; touch "$work/pending"; add_session 1; echo install >"$work/answer"
 night
 ran '^apply --offline$' || die "the answer 'install' did not start the offline install"
-ran 'vekrona-update-ask --timeout 600 --title .* --body Agents 2, Flatpak 1 --action install=Install and reboot --action skip=Skip tonight' \
-  || die "the question lacks its default timeout, summary or buttons: $(grep runuser "$FAKE_LOG")"
+ran 'vekrona-update-ask --timeout 600 --title .* --body Agents 2, Flatpak 1 --action skip=Skip tonight --action install=Install and reboot' \
+  || die "the question lacks its default timeout, summary or buttons, or the harmless skip is not first (a click on the toast body runs the first): $(grep runuser "$FAKE_LOG")"
 log "ok: install installs offline; the question carries the summary and a 600 s default timeout"
 
 scenario; touch "$work/pending"; add_session 1; echo install >"$work/answer"
