@@ -5,13 +5,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-VOLUME_PERCENT=100
 # The Perf widget's CPU and RAM values never reach 100, so only the sound pill matches. OCR reads the slashed zero as O or drops the space before the percent sign.
-VOLUME_REGEX="1[0O][0O] ?%"
+FULL_VOLUME_REGEX="1[0O][0O] ?%"
+VOLUMES=(0.42 0.64)
+# A changed value moves the pill's centre by a few characters, but the neighbouring Perf pills sit further away.
+PILL_DRIFT_PX=40
 
-volume_shown() { vekrona-dev see text "$VOLUME_REGEX"; }
+volume_shown() {
+  local center x
+  center="$(vekrona-dev see find "$1")" || return 1
+  x="${center%% *}"
+  ((x > PILL_X - PILL_DRIFT_PX && x < PILL_X + PILL_DRIFT_PX))
+}
 export -f volume_shown
-export VOLUME_REGEX
+export PILL_DRIFT_PX
 
 vekrona-dev session
 clear_notifications
@@ -25,19 +32,27 @@ trap unload_sink EXIT
 vekrona-dev sh pactl set-default-sink "$SINK_NAME"
 
 vekrona-dev sh wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- volume_shown
-log "ok: the bar shows the sink volume of $VOLUME_PERCENT %"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- vekrona-dev see text "$FULL_VOLUME_REGEX"
+read -r PILL_X y <<<"$(vekrona-dev see find "$FULL_VOLUME_REGEX")"
+[[ -n "${PILL_X:-}" && -n "${y:-}" ]] || die "the bar must show the volume, but OCR found no '100 %' to locate the sound pill"
+export PILL_X
+log "ok: the bar shows the initial sink volume of 100 % at x=$PILL_X"
 
-read -r x y <<<"$(vekrona-dev see find "$VOLUME_REGEX")"
-[[ -n "${x:-}" && -n "${y:-}" ]] || die "the bar must show the volume, but OCR found no '$VOLUME_PERCENT %' to click"
-vekrona-dev click "$x" "$y"
+for volume in "${VOLUMES[@]}"; do
+  percent="$(awk -v v="$volume" 'BEGIN { printf "%d", v * 100 }')"
+  vekrona-dev sh wpctl set-volume @DEFAULT_AUDIO_SINK@ "$volume"
+  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- volume_shown "$percent ?%"
+  log "ok: the bar follows the sink volume to $percent %"
+done
+
+vekrona-dev click "$PILL_X" "$y"
 sink_listed() { vekrona-dev see text "$SINK_NAME"; }
 export -f sink_listed
 export SINK_NAME
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sink_listed
 log "ok: clicking the sound pill lists the output $SINK_NAME"
 
-vekrona-dev click "$x" "$y"
+vekrona-dev click "$PILL_X" "$y"
 sink_hidden() { ! sink_listed; }
 export -f sink_hidden
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sink_hidden
