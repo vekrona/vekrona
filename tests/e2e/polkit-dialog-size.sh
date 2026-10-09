@@ -5,24 +5,48 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-GUEST_PKEXEC_LOG=/tmp/vekrona-e2e-pkexec.log
-MIN_WIDTH=460
-MIN_HEIGHT=220
-auth_window() { echo '[.. | objects | select(.app_id? == "com.danklinux.dms" and .name? == "Authentication")]'; }
+GUEST_PASSWORD=vekrona
+GUEST_CANCELLED_LOG=/tmp/vekrona-e2e-pkexec-cancelled.log
+GUEST_GRANTED_LOG=/tmp/vekrona-e2e-pkexec-granted.log
 
-auth_rect() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -r '$(auth_window) | first | \"\\(.rect.width) \\(.rect.height)\"'"; }
-auth_open() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -e '$(auth_window) | length > 0' >/dev/null"; }
-auth_closed() { ! auth_open; }
-export -f auth_window auth_open auth_closed
+dialog_open() { vekrona-dev see text 'Authentication required'; }
+dialog_closed() { ! dialog_open; }
+failure_shown() { vekrona-dev see text 'fail|sorry|again|incorrect'; }
+log_has() { vekrona-dev run grep -q "$2" "$1"; }
+# The agent serves the user's Display session, which is the sway session or, when an ssh login came first, that ssh session; pkexec must run in the same one.
+run_pkexec() {
+  local display session_type
+  display="$(vekrona-dev run loginctl show-user vekrona -p Display --value)"
+  session_type="$(vekrona-dev run loginctl show-session "$display" -p Type --value)"
+  if [[ "$session_type" == wayland ]]; then
+    vekrona-dev sh swaymsg exec "'bash -c \"pkexec true && echo granted > $1 || echo refused > $1\"'" >/dev/null
+  else
+    vekrona-dev spawn "$1.out" -- bash -c "pkexec true && echo granted > $1 || echo refused > $1"
+  fi
+}
+export -f dialog_open dialog_closed failure_shown log_has
 
 vekrona-dev session
-vekrona-dev spawn "$GUEST_PKEXEC_LOG" -- bash -c 'pkexec true; echo "pkexec exited $?"'
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- auth_open
+clear_notifications
+vekrona-dev run rm -f "$GUEST_CANCELLED_LOG" "$GUEST_GRANTED_LOG"
 
-read -r width height <<<"$(auth_rect)"
-((width >= MIN_WIDTH && height >= MIN_HEIGHT)) || die "the polkit Authentication dialog must open at least ${MIN_WIDTH}x${MIN_HEIGHT}, but it is ${width}x${height}"
-log "ok: the polkit Authentication dialog opens at ${width}x${height}, large enough to use"
+run_pkexec "$GUEST_CANCELLED_LOG"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- dialog_open
+log "ok: a privileged command opens the Authentication required dialog"
 
 vekrona-dev key esc
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- auth_closed
-log "ok: Escape dismisses the polkit Authentication dialog"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- dialog_closed
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- log_has "$GUEST_CANCELLED_LOG" refused
+log "ok: Escape dismisses the dialog and the command is refused"
+
+run_pkexec "$GUEST_GRANTED_LOG"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- dialog_open
+vekrona-dev type --enter wrong-password
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- failure_shown
+dialog_open || die "a wrong password must keep the dialog open for another try"
+log "ok: a wrong password says so and keeps the dialog open"
+
+vekrona-dev type --enter "$GUEST_PASSWORD"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- dialog_closed
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- log_has "$GUEST_GRANTED_LOG" granted
+log "ok: the right password after a wrong one authorises the command"

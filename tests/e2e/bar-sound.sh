@@ -5,9 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-VOLUME_PERCENT=40
-# OCR reads the slashed zero as O or drops the space before the percent sign.
-VOLUME_REGEX="4[0O]? ?%"
+VOLUME_PERCENT=100
+# The Perf widget's CPU and RAM values never reach 100, so only the sound pill matches. OCR reads the slashed zero as O or drops the space before the percent sign.
+VOLUME_REGEX="1[0O][0O] ?%"
 
 volume_shown() { vekrona-dev see text "$VOLUME_REGEX"; }
 export -f volume_shown
@@ -24,7 +24,7 @@ unload_sink() { vekrona-dev sh pactl unload-module "$module"; }
 trap unload_sink EXIT
 vekrona-dev sh pactl set-default-sink "$SINK_NAME"
 
-vekrona-dev sh wpctl set-volume @DEFAULT_AUDIO_SINK@ "0.$VOLUME_PERCENT"
+vekrona-dev sh wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- volume_shown
 log "ok: the bar shows the sink volume of $VOLUME_PERCENT %"
 

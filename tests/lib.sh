@@ -7,7 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 # any report from a test fail loudly instead.
 export VEKRONA_JOURNAL_SOCKET=/nonexistent/vekrona-test-journal-socket
 
-clear_notifications() { vekrona-dev sh dms ipc call notifications clearAll >/dev/null; }
+clear_notifications() { vekrona-dev sh qs -c vekrona-shell ipc call notifications clearAll >/dev/null; }
 
 SCREEN_COLORS="$VEKRONA_ROOT/tests/e2e/screen_colors.py"
 export SCREEN_COLORS

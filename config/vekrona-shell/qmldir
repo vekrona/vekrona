@@ -18,3 +18,8 @@ LauncherButton 1.0 LauncherButton.qml
 Clipboard 1.0 Clipboard.qml
 PowerMenu 1.0 PowerMenu.qml
 Osd 1.0 Osd.qml
+Catcher 1.0 Catcher.qml
+NotificationCard 1.0 NotificationCard.qml
+singleton Notifications 1.0 Notifications.qml
+NotificationsButton 1.0 NotificationsButton.qml
+Polkit 1.0 Polkit.qml

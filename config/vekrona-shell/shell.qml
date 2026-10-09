@@ -11,6 +11,8 @@ ShellRoot {
 
     Osd {}
 
+    Polkit {}
+
     Variants {
         model: Quickshell.screens
 

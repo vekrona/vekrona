@@ -32,7 +32,7 @@ bindsym --no-repeat $hyper+Return exec $term
 #: Toggle clipboard history
 bindsym --no-repeat --to-code $hyper+v exec qs -c vekrona-shell ipc call clipboard toggle
 #: Toggle notification center
-bindsym --no-repeat --to-code $hyper+n exec dms ipc call notifications toggle
+bindsym --no-repeat --to-code $hyper+n exec qs -c vekrona-shell ipc call notifications toggle
 #: Lock screen
 bindsym --no-repeat $hyper+Escape exec dms ipc call lock lock
 #: Lock screen

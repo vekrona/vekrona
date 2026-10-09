@@ -6,14 +6,12 @@ MARKUP = '<img src="file:///etc/passwd"/> <a href="http://evil.example">click</a
 
 
 class NotificationBodyTest(SandboxTestCase):
-    def test_journal_text_is_shown_literally_not_as_markup(self):
+    def test_journal_text_is_sent_unescaped_because_the_daemon_renders_no_markup(self):
         self.sandbox.watch([{
             "VEKRONA_TITLE": "markup in the log", "VEKRONA_SUMMARY": MARKUP,
             "SYSLOG_IDENTIFIER": "vekrona", "PRIORITY": "3", "MESSAGE": "m"}])
         notification = self.sandbox.sent_notifications()[0]
-        self.assertNotIn("<", notification["body"])
-        self.assertIn("&lt;img", notification["body"])
-        self.assertIn("a &lt; b &amp; c", notification["body"])
+        self.assertIn(MARKUP, notification["body"])
 
     def test_the_title_stays_plain_text(self):
         self.sandbox.watch([{

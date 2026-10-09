@@ -8,9 +8,9 @@ STEP_TIMEOUT_SEC=90
 # The last row of the bar is its border-hair bottom line, which is not widget ink.
 BAR_HEIGHT_PX=$(($(vekrona_token_get size size-bar) - $(vekrona_token_get border border-hair)))
 # Two widgets sit two BarPill paddings (2 * space-2) apart, plus the padding of the 24-unit pictogram grid on both facing sides:
-# 2 of 24 units each, at size-icon-s px.
+# 4 of 24 units each (the bell is the narrowest glyph), at size-icon-s px.
 ICON_S_PX="$(vekrona_token_get size size-icon-s)"
-GLYPH_BEARING_PX=$(((ICON_S_PX * 2 + 23) / 24))
+GLYPH_BEARING_PX=$(((ICON_S_PX * 4 + 23) / 24))
 GROUP_JOIN_PX="$(vekrona_token_get spacing space-2)"
 MAX_GAP_PX=$((2 * GROUP_JOIN_PX + 2 * GLYPH_BEARING_PX))
 MAX_GAP_SPREAD_PX=6

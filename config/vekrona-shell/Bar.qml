@@ -73,6 +73,8 @@ PanelWindow {
 
         Agent {}
 
+        NotificationsButton {}
+
         Calendar {
             bar: root
         }
@@ -80,23 +82,9 @@ PanelWindow {
         Clock {}
     }
 
-    PanelWindow {
-        visible: root.openPopout !== null
-        screen: root.screen
-        anchors.top: true
-        anchors.left: true
-        anchors.right: true
-        anchors.bottom: true
-        margins.top: VekronaTheme.sizeBar
-        color: "transparent"
-        exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Top
-        WlrLayershell.namespace: "vekrona-popout-catcher"
-
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.AllButtons
-            onClicked: root.openPopout = null
-        }
+    Catcher {
+        targetScreen: root.screen
+        active: root.openPopout !== null
+        onDismissed: root.openPopout = null
     }
 }
