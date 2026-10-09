@@ -71,5 +71,6 @@ log "ok: a launched command that exits at once is not reported as an error"
 add_entry "$MISSING_ENTRY" "$MISSING_BINARY"
 launch "$MISSING_ENTRY"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- errors_after
-vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-shell | grep -qF "$MISSING_BINARY" || die "the logged error must name the missing binary $MISSING_BINARY"
+shell_log="$(vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-shell)"
+[[ "$shell_log" == *"$MISSING_BINARY"* ]] || die "the logged error must name the missing binary $MISSING_BINARY"
 log "ok: launching a missing binary logs an error naming it"
