@@ -36,9 +36,29 @@ LauncherModule {
             title: "Pair a Bluetooth device",
             viewId: "bluetooth"
         })
+    readonly property var keyboardView: ({
+            title: "Keyboard layouts",
+            viewId: "keyboard"
+        })
+    readonly property var wifiView: ({
+            title: "Wi-Fi networks",
+            viewId: "wifi"
+        })
+    readonly property var agentView: ({
+            title: "Agent tool",
+            viewId: "agent"
+        })
+    // Every subview by its viewId, for the host's `launcher settings <viewId>` IPC.
+    readonly property var views: ({
+            audio: audioView,
+            bluetooth: bluetoothView,
+            keyboard: keyboardView,
+            wifi: wifiView,
+            agent: agentView
+        })
     readonly property var settingRows: buildRows()
-    // What the Wi-Fi, Bluetooth and audio views show, to tell the host to re-query only when it changes.
-    readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Wireless.scanning, Shell.Wireless.unpairedDevices.map(device => [device.address, device.name, device.pairing]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? ""])
+    // What the Wi-Fi, Bluetooth, audio and keyboard views show, to tell the host to re-query only when it changes.
+    readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Wireless.scanning, Shell.Wireless.unpairedDevices.map(device => [device.address, device.name, device.pairing]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? "", Shell.Keyboard?.layouts.map(layout => [layout.id, layout.name]) ?? [], Shell.Keyboard?.activeIndex ?? -1])
 
     function setting(key: string, heading: string, icon: string, fields: var): var {
         return Object.assign({
@@ -124,10 +144,7 @@ LauncherModule {
                 {
                     id: "open",
                     label: "Show networks",
-                    push: {
-                        title: "Wi-Fi networks",
-                        viewId: "wifi"
-                    }
+                    push: root.wifiView
                 }
             ]
         }));
@@ -171,6 +188,19 @@ LauncherModule {
                 }
             ]
         }));
+        const keyboardLayoutNames = (Shell.Keyboard?.layouts ?? []).map(layout => layout.name);
+        rows.push(setting("keyboard-layouts", "Keyboard layouts", "keyboard", {
+            subtitle: keyboardLayoutNames.length > 0 ? keyboardLayoutNames.join(", ") : "No layouts",
+            keywords: ["keyboard", "layout", "language", "input", "xkb", "ukrainian", "switch"],
+            aliases: ["keyboard", "layout"],
+            actions: [
+                {
+                    id: "change",
+                    label: "Change layouts",
+                    push: root.keyboardView
+                }
+            ]
+        }));
         rows.push(setting("mute", muted ? "Unmute" : "Mute", muted ? "volume_up" : "volume_off", {
             subtitle: muted ? "Sound is off" : "Sound is on",
             keywords: ["audio", "sound", "volume", "mute", "silence", "speakers"],
@@ -190,10 +220,7 @@ LauncherModule {
                 {
                     id: "open",
                     label: "Choose tool",
-                    push: {
-                        title: "Agent tool",
-                        viewId: "agent"
-                    }
+                    push: root.agentView
                 }
             ]
         }));
@@ -299,6 +326,47 @@ LauncherModule {
                         }
                     ]
                 }));
+    }
+
+    function keyboardRows(): var {
+        const layouts = Shell.Keyboard?.layouts ?? [];
+        const activeIndex = Shell.Keyboard?.activeIndex ?? -1;
+        const currentNames = layouts.map(layout => layout.name).join(", ");
+        const commandIds = layouts.map(layout => layout.id).join(",");
+        const rows = [
+            {
+                id: "settings:keyboard:info",
+                title: "Layouts come from your system keymap. Now: " + (currentNames || "none"),
+                glyph: "info",
+                kind: "Keyboard info"
+            },
+            {
+                id: "settings:keyboard:command",
+                title: "To add or remove a layout, run: sudo localectl set-x11-keymap " + (commandIds || "us"),
+                glyph: "terminal",
+                kind: "Keyboard command",
+                actions: [
+                    {
+                        id: "copy",
+                        label: "Copy command",
+                        copy: "sudo localectl set-x11-keymap " + (commandIds || "us")
+                    }
+                ]
+            },
+            {
+                id: "settings:keyboard:signout",
+                title: "Then sign out and sign back in.",
+                glyph: "logout",
+                kind: "Keyboard signout"
+            },
+            {
+                id: "settings:keyboard:keybind",
+                title: "Next layout: Hyper+Space",
+                glyph: "keyboard",
+                kind: "Keyboard keybind"
+            }
+        ];
+        return rows;
     }
 
     // vekrona-agent list prints "<tool>  installed|not installed  default|-" per tool.
@@ -442,6 +510,8 @@ LauncherModule {
             return bluetoothRows();
         case "audio":
             return audioRows();
+        case "keyboard":
+            return keyboardRows();
         case "agent":
             loadAgents(reqId);
             return null;

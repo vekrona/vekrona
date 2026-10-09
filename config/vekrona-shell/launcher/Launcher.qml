@@ -706,6 +706,22 @@ PanelWindow {
             else
                 root.openMode(mode);
         }
+
+        // Opens the launcher in settings mode and pushes the settings subview with the given viewId.
+        function settings(viewId: string): void {
+            const settingsModule = root.moduleList.find(candidate => candidate.moduleId === "settings");
+            if (settingsModule === undefined) {
+                console.error("launcher: settings module not found");
+                return;
+            }
+            root.openMode("settings");
+            const push = settingsModule.views[viewId];
+            if (push === undefined) {
+                console.error("launcher: unknown settings view '" + viewId + "'");
+                return;
+            }
+            root.pushView(settingsModule, push);
+        }
     }
 
     QtObject {
