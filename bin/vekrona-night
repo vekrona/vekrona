@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+UNIT=vekrona-night.service
+
+usage() {
+  printf 'usage: %s toggle\n' "$(basename "$0")" >&2
+  exit 1
+}
+
+[[ $# -eq 1 && "$1" == toggle ]] || usage
+
+if systemctl --user is-active --quiet "$UNIT"; then
+  systemctl --user stop "$UNIT"
+else
+  systemctl --user start "$UNIT"
+fi

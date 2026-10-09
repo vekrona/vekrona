@@ -17,7 +17,7 @@ Cmd (plain `Mod4`):
 
 | Binding | Action |
 |---|---|
-| Cmd+Space | `dms ipc call spotlight toggle` (launcher) |
+| Cmd+Space | `qs -c vekrona-shell ipc call launcher toggle` (launcher) |
 | Cmd+1..9, Cmd+0 | switch to workspace 1 through 10 |
 | Cmd+arrow keys | focus left/down/up/right |
 | Cmd+Shift+arrow keys | move the focused container left/down/up/right |
@@ -38,11 +38,10 @@ Sway defines `$hyper` as `Mod4+Ctrl+Mod1` and binds the rest on it:
 | Binding | Action |
 |---|---|
 | Hyper+Return | launch ghostty |
-| Hyper+v | `dms ipc call clipboard toggle` |
+| Hyper+v | `qs -c vekrona-shell ipc call clipboard toggle` |
 | Hyper+n | `dms ipc call notifications toggle` |
-| Hyper+comma | `dms ipc call control-center toggle` |
 | Hyper+Escape | `dms ipc call lock lock` |
-| Hyper+BackSpace | `dms ipc call powermenu toggle` |
+| Hyper+BackSpace | `qs -c vekrona-shell ipc call powermenu toggle` |
 | Hyper+slash | show the keybindings help panel (`vekrona-keybindings`) |
 | Hyper+a | open the coding agent (`vekrona-agent --pick`) |
 | Hyper+Shift+a | pick a recorded error and open the agent on it (`vekrona-error pick`) |
@@ -55,10 +54,10 @@ Sway defines `$hyper` as `Mod4+Ctrl+Mod1` and binds the rest on it:
 | Hyper+Print | `vekrona-screenshot` |
 | Hyper+Shift+Print | `vekrona-record` |
 | Hyper+Shift+c | `vekrona-caffeine` |
-| Hyper+Shift+n | `dms ipc call night toggle` |
+| Hyper+Shift+n | `vekrona-night toggle` |
 | Hyper+Shift+t | `vekrona-theme next` |
-| XF86AudioRaiseVolume/LowerVolume/Mute, XF86MonBrightness* | `dms ipc call audio ...` / `dms ipc call brightness ...` |
-| XF86AudioPlay/Pause/Next/Prev | `dms ipc call mpris playPause` / `pause` / `next` / `previous` |
+| XF86AudioRaiseVolume/LowerVolume/Mute, XF86MonBrightness* | `qs -c vekrona-shell ipc call audio ...` / `qs -c vekrona-shell ipc call brightness ...` |
+| XF86AudioPlay/Pause/Next/Prev | `qs -c vekrona-shell ipc call mpris playPause` / `pause` / `next` / `previous` |
 
 Moving a window to a workspace is Hyper+digit without Shift, because
 Cmd+Shift+3/4/5 are the screenshot keys.

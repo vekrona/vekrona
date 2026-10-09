@@ -30,17 +30,15 @@ focus_follows_mouse yes
 #: Open terminal
 bindsym --no-repeat $hyper+Return exec $term
 #: Toggle clipboard history
-bindsym --no-repeat --to-code $hyper+v exec dms ipc call clipboard toggle
+bindsym --no-repeat --to-code $hyper+v exec qs -c vekrona-shell ipc call clipboard toggle
 #: Toggle notification center
 bindsym --no-repeat --to-code $hyper+n exec dms ipc call notifications toggle
-#: Toggle control center
-bindsym --no-repeat $hyper+comma exec dms ipc call control-center toggle
 #: Lock screen
 bindsym --no-repeat $hyper+Escape exec dms ipc call lock lock
 #: Lock screen
 bindsym --no-repeat --to-code Mod4+Ctrl+q exec dms ipc call lock lock
 #: Toggle power menu
-bindsym --no-repeat $hyper+BackSpace exec dms ipc call powermenu toggle
+bindsym --no-repeat $hyper+BackSpace exec qs -c vekrona-shell ipc call powermenu toggle
 #: Show keybindings help
 bindsym --no-repeat $hyper+slash exec vekrona-keybindings
 #: Open the coding agent
@@ -48,8 +46,8 @@ bindsym --no-repeat --to-code $hyper+a exec vekrona-agent --pick
 #: Pick a recorded error and open the agent on it
 bindsym --no-repeat --to-code $hyper+Shift+a exec vekrona-error pick
 
-#: Toggle spotlight launcher
-bindsym --no-repeat Mod4+Space exec dms ipc call spotlight toggle
+#: Toggle launcher
+bindsym --no-repeat Mod4+Space exec qs -c vekrona-shell ipc call launcher toggle
 
 #: Switch to workspace 1
 bindsym Mod4+1 workspace number 1
@@ -155,28 +153,28 @@ bindsym --no-repeat $hyper+Shift+Print exec vekrona-record
 #: Toggle caffeine (prevent sleep)
 bindsym --no-repeat --to-code $hyper+Shift+c exec vekrona-caffeine
 #: Toggle night light
-bindsym --no-repeat --to-code $hyper+Shift+n exec dms ipc call night toggle
+bindsym --no-repeat --to-code $hyper+Shift+n exec vekrona-night toggle
 #: Switch to the next theme
 bindsym --no-repeat --to-code $hyper+Shift+t exec vekrona-theme next
 
 #: Volume up
-bindsym XF86AudioRaiseVolume exec dms ipc call audio increment 5
+bindsym XF86AudioRaiseVolume exec qs -c vekrona-shell ipc call audio increment 5
 #: Volume down
-bindsym XF86AudioLowerVolume exec dms ipc call audio decrement 5
+bindsym XF86AudioLowerVolume exec qs -c vekrona-shell ipc call audio decrement 5
 #: Mute audio
-bindsym --no-repeat XF86AudioMute exec dms ipc call audio mute
+bindsym --no-repeat XF86AudioMute exec qs -c vekrona-shell ipc call audio mute
 #: Play or pause media
-bindsym --no-repeat XF86AudioPlay exec dms ipc call mpris playPause
+bindsym --no-repeat XF86AudioPlay exec qs -c vekrona-shell ipc call mpris playPause
 #: Pause media
-bindsym --no-repeat XF86AudioPause exec dms ipc call mpris pause
+bindsym --no-repeat XF86AudioPause exec qs -c vekrona-shell ipc call mpris pause
 #: Next track
-bindsym --no-repeat XF86AudioNext exec dms ipc call mpris next
+bindsym --no-repeat XF86AudioNext exec qs -c vekrona-shell ipc call mpris next
 #: Previous track
-bindsym --no-repeat XF86AudioPrev exec dms ipc call mpris previous
+bindsym --no-repeat XF86AudioPrev exec qs -c vekrona-shell ipc call mpris previous
 #: Brightness up
-bindsym XF86MonBrightnessUp exec dms ipc call brightness increment 5 ""
+bindsym XF86MonBrightnessUp exec qs -c vekrona-shell ipc call brightness increment 5
 #: Brightness down
-bindsym XF86MonBrightnessDown exec dms ipc call brightness decrement 5 ""
+bindsym XF86MonBrightnessDown exec qs -c vekrona-shell ipc call brightness decrement 5
 #: Keyboard backlight up
 bindsym XF86KbdBrightnessUp exec brightnessctl --device='smc::kbd_backlight' set 10%+
 #: Keyboard backlight down

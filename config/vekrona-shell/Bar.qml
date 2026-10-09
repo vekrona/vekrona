@@ -8,6 +8,7 @@ PanelWindow {
     id: root
 
     required property var modelData
+    required property var launcher
     property var openPopout: null
 
     function togglePopout(popout) {
@@ -33,6 +34,10 @@ PanelWindow {
         anchors.left: parent.left
         height: parent.height
         spacing: 0
+
+        LauncherButton {
+            launcher: root.launcher
+        }
 
         Desktops {}
 

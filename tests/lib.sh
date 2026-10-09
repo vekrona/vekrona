@@ -8,3 +8,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 export VEKRONA_JOURNAL_SOCKET=/nonexistent/vekrona-test-journal-socket
 
 clear_notifications() { vekrona-dev sh dms ipc call notifications clearAll >/dev/null; }
+
+SCREEN_COLORS="$VEKRONA_ROOT/tests/e2e/screen_colors.py"
+export SCREEN_COLORS
+panel_shown() { [[ "$(python3 "$SCREEN_COLORS" center "$(vekrona-dev shot)")" == "$PANEL_HEX" ]]; }
+panel_hidden() { ! panel_shown; }
+export -f panel_shown panel_hidden

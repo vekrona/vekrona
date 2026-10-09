@@ -1,0 +1,7 @@
+[Unit]
+Description=Vekrona night light
+PartOf=sway-session.target
+After=sway-session.target
+
+[Service]
+ExecStart=/usr/bin/wlsunset -t 4000 -T 4100 -l 0 -L 0

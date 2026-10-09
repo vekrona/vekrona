@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 bind_re='^[[:space:]]*bindsym[[:space:]]+((--[^[:space:]]+[[:space:]]+)*)[^[:space:]]+[[:space:]]+(.+)$'
-repeating_re='^(focus |move |resize |workspace number |split[vh]$|mode "default"$|exec qs -c vekrona-app-switch ipc call appswitch |exec dms ipc call (audio|brightness) (increment|decrement) |exec brightnessctl )'
+repeating_re='^(focus |move |resize |workspace number |split[vh]$|mode "default"$|exec qs -c vekrona-app-switch ipc call appswitch |exec qs -c vekrona-shell ipc call (audio|brightness) (increment|decrement) |exec brightnessctl )'
 
 checked=0
 offenders=()
