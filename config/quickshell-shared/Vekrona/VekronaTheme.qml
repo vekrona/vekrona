@@ -136,6 +136,7 @@ Singleton {
     readonly property int borderHair: doc.metrics.border.hair
     readonly property int borderControl: doc.metrics.border.control
     readonly property int borderFocus: doc.metrics.border.focus
+    readonly property int borderIndicator: doc.metrics.border.indicator
     readonly property int focusOffset: doc.metrics.border.focusOffset
 
     readonly property int sizeTarget: doc.metrics.size.target

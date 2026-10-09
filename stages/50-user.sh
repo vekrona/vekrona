@@ -37,6 +37,8 @@ ensure_symlink "$VEKRONA_ROOT/config/systemd-user/xremap.service" "$HOME/.config
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/dms.service.d/vekrona.conf" "$HOME/.config/systemd/user/dms.service.d/vekrona.conf"
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-app-switch" "$HOME/.config/quickshell/vekrona-app-switch"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-app-switch.service" "$HOME/.config/systemd/user/vekrona-app-switch.service"
+ensure_symlink "$VEKRONA_ROOT/config/vekrona-shell" "$HOME/.config/quickshell/vekrona-shell"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-shell.service" "$HOME/.config/systemd/user/vekrona-shell.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$HOME/.config/systemd/user/tailscale-systray.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors.service" "$HOME/.config/systemd/user/vekrona-errors.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors-failed.service" "$HOME/.config/systemd/user/vekrona-errors-failed.service"
@@ -58,11 +60,13 @@ fi
 "$VEKRONA_ROOT/bin/vekrona-render-theme"
 
 systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service vekrona-app-switch.service tailscale-systray.service vekrona-errors.service
+ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service
 # Enabling only wires the unit into the next login; a live session needs the overlay now.
 if [[ -n "$(sway_socket)" ]]; then
   log "restarting vekrona-app-switch.service for the running sway session"
   systemctl --user restart vekrona-app-switch.service || die "vekrona-app-switch.service failed to start"
+  log "restarting vekrona-shell.service for the running sway session"
+  systemctl --user restart vekrona-shell.service || die "vekrona-shell.service failed to start"
 fi
 
 for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
@@ -146,39 +150,6 @@ ensure_json_key_enforced() {
 ensure_dms_setting_enforced() { ensure_json_key_enforced "$dms_settings" "$1" "$2"; }
 ensure_dms_session_enforced() { ensure_json_key_enforced "$dms_session" "$1" "$2"; }
 
-ensure_dms_plugin_enabled() {
-  local plugin_id="$1"
-  local plugin_settings="$dms_settings_dir/plugin_settings.json"
-  if [[ -f "$plugin_settings" ]] && jq -e --arg id "$plugin_id" '.[$id].enabled == true' "$plugin_settings" >/dev/null 2>&1; then
-    log "DMS plugin already enabled: $plugin_id"
-    return 0
-  fi
-  log "enabling DMS plugin: $plugin_id"
-  local tmp
-  tmp="$(mktemp "$dms_settings_dir/.plugin_settings.json.XXXXXX")"
-  if [[ -f "$plugin_settings" ]]; then
-    jq --arg id "$plugin_id" '.[$id].enabled = true' "$plugin_settings" > "$tmp" || { rm -f "$tmp"; die "jq failed to enable DMS plugin: $plugin_id"; }
-  else
-    jq -n --arg id "$plugin_id" '{($id): {enabled: true}}' > "$tmp" || { rm -f "$tmp"; die "jq failed to create plugin_settings.json: $plugin_id"; }
-  fi
-  mv "$tmp" "$plugin_settings"
-  jq -e --arg id "$plugin_id" '.[$id].enabled == true' "$plugin_settings" >/dev/null || die "DMS plugin not enabled: $plugin_id"
-  dms_restart_needed=1
-}
-
-# Drop the plugin_settings.json entries of plugins vekrona no longer ships.
-ensure_dms_plugin_forgotten() {
-  local plugin_settings="$dms_settings_dir/plugin_settings.json" id tmp
-  [[ -f "$plugin_settings" ]] || return 0
-  for id in "$@"; do
-    jq -e --arg id "$id" 'has($id)' "$plugin_settings" >/dev/null || continue
-    log "forgetting removed DMS plugin: $id"
-    tmp="$(mktemp "$dms_settings_dir/.plugin_settings.json.XXXXXX")"
-    jq --arg id "$id" 'del(.[$id])' "$plugin_settings" > "$tmp" || { rm -f "$tmp"; die "jq failed to forget DMS plugin: $id"; }
-    mv "$tmp" "$plugin_settings"
-  done
-}
-
 dms_settings_dir="$HOME/.config/DankMaterialShell"
 dms_settings="$dms_settings_dir/settings.json"
 dms_session_dir="$HOME/.local/state/DankMaterialShell"
@@ -201,15 +172,7 @@ ensure_dms_setting_enforced enableRippleEffects false
 ensure_dms_setting_enforced m3ElevationEnabled false # the master switch of every popout, modal and bar shadow
 ensure_dms_setting_enforced notificationPopupShadowEnabled false
 ensure_dms_setting_enforced trayIconSpacing "$(vekrona_design_get trayIconSpacing)"
-ensure_dms_bar_setting_enforced noBackground false
-ensure_dms_bar_setting_enforced squareCorners true
-ensure_dms_bar_setting_enforced attachToScreenEdge true
-ensure_dms_bar_setting_enforced transparency 1
-ensure_dms_bar_setting_enforced widgetPadding "$(vekrona_design_get widgetPadding)"
-ensure_dms_bar_setting_enforced pillPadding "$(vekrona_token_get spacing space-3)"
-ensure_dms_bar_setting_enforced innerPadding "$(vekrona_design_get barInnerPadding)"
-ensure_dms_bar_setting_enforced spacing "$(vekrona_token_get spacing space-2)"
-ensure_dms_bar_setting_enforced fontScale "$(vekrona_design_get dmsFontScale)"
+ensure_dms_bar_setting_enforced enabled false
 
 # The wallpaper is the solid bg of the mode; DMS reads a leading # as a color and swaps it with the mode.
 theme_mode="$(cat "$theme_name_file")"
@@ -217,52 +180,6 @@ ensure_dms_session_enforced perModeWallpaper true
 ensure_dms_session_enforced wallpaperPathDark "\"$(vekrona_token_get color bg dark)\""
 ensure_dms_session_enforced wallpaperPathLight "\"$(vekrona_token_get color bg light)\""
 ensure_dms_session_enforced wallpaperPath "\"$(vekrona_token_get color bg "$theme_mode")\""
-
-# Assert <widget_id> sits in a bar widget list and, if <absent_id> is given, no bar still lists that widget id.
-assert_dms_bar_plugin_placed() {
-  local widget_id="$1" absent_id="${2:-}"
-  assert "DMS bar has $widget_id placed in a widget list${absent_id:+ and no $absent_id}" python3 -c "
-import json
-import sys
-widget_id, absent_id = sys.argv[1], sys.argv[2]
-d = json.load(open('$dms_settings'))
-names = [w.get('id') if isinstance(w, dict) else w
-         for bar in d.get('barConfigs', []) for k in ('leftWidgets', 'centerWidgets', 'rightWidgets') for w in (bar.get(k) or [])]
-if widget_id not in names:
-    sys.exit(f'{widget_id} is in no bar widget list; the lists hold {names}')
-if absent_id and absent_id in names:
-    sys.exit(f'{absent_id} is still in a bar widget list; the lists hold {names}')
-" "$widget_id" "$absent_id"
-}
-
-ensure_symlink_tree "$VEKRONA_ROOT/config/DankMaterialShell/plugins" "$HOME/.config/DankMaterialShell/plugins"
-dms_restart_needed=0
-ensure_dms_plugin_enabled vekronaSwayWorkspaces
-ensure_dms_bar_widget_replaced workspaceSwitcher vekronaSwayWorkspaces
-ensure_dms_plugin_enabled vekronaSeparator
-ensure_dms_bar_separator_after vekronaSwayWorkspaces vekronaSeparator separator
-ensure_dms_bar_control_center_split
-ensure_dms_bar_widget_option cpuUsage minimumWidth false
-ensure_dms_bar_widget_option memUsage minimumWidth false
-assert_dms_bar_plugin_placed vekronaSwayWorkspaces workspaceSwitcher
-assert_dms_bar_plugin_placed vekronaSeparator separator
-
-ensure_dms_plugin_enabled vekronaAgent
-ensure_dms_bar_widget_inserted_before vekronaAgent notificationButton
-assert_dms_bar_plugin_placed vekronaAgent
-
-# The clock and weather are the stock widgets (a click opens DankDash). Earlier installs ran them as plugins.
-ensure_dms_bar_widget_replaced vekronaClock clock
-ensure_dms_bar_widget_replaced vekronaWeather weather
-assert_dms_bar_plugin_placed clock vekronaClock
-assert_dms_bar_plugin_placed weather vekronaWeather
-ensure_dms_plugin_forgotten vekronaClock vekronaWeather
-
-# A running DMS does not pick up a plugin enabled after it started, so its bar widget stays blank.
-if [[ "$dms_restart_needed" == 1 ]] && systemctl --user is-active --quiet dms.service; then
-  log "restarting dms.service to load newly enabled plugins"
-  dms restart >/dev/null || warn "dms restart failed, log out and back in to load the new DMS plugins"
-fi
 
 dms_changelog_seen="$(dirname "$dms_settings")/.changelog-$(dms_changelog_version)"
 if [[ -e "$dms_changelog_seen" ]]; then
@@ -374,7 +291,8 @@ ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/Mang
 mapfile -t link_dirs < <(vekrona_link_dirs)
 prune_vekrona_links "${link_dirs[@]}"
 # Pruning leaves the directories of the removed plugins and themes behind.
-for retired_dir in "$HOME/.config/DankMaterialShell/plugins"/{vekronaClock,vekronaWeather,vekronaShared} \
+for retired_dir in "$HOME/.config/DankMaterialShell/plugins"/* \
+  "$HOME/.config/DankMaterialShell/plugins" \
   "$HOME/.config/DankMaterialShell/vekrona-themes/wallpapers" "$HOME/.config/DankMaterialShell/vekrona-themes"; do
   remove_dir_if_empty "$retired_dir"
 done

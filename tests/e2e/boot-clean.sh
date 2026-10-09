@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A fresh boot and login leave no failed user units, no new error records, and no dms pillPadding errors.
+# A fresh boot and login leave no failed user units, no new error records, and no QML errors from the vekrona shell.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -30,6 +30,9 @@ failed="$(vekrona-dev sh systemctl --user --failed --no-legend)"
 [[ -z "$failed" ]] || die "a fresh login must leave no failed user units, but these failed: $failed"
 log "ok: no failed user units"
 
+vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- vekrona-dev sh systemctl --user is-active --quiet vekrona-shell.service
+log "ok: the vekrona shell starts with the session"
+
 autostart_units="$(vekrona-dev sh systemctl --user list-units --all --no-legend 'app-nvidia*')"
 [[ -z "$autostart_units" ]] || die "the nvidia-settings autostart entry must stay hidden, but a unit was generated: $autostart_units"
 log "ok: nvidia-settings is not autostarted"
@@ -38,6 +41,6 @@ store_after="$(error_store)"
 [[ "$store_after" == "$store_before" ]] || die "a fresh boot and login must leave the error store unchanged, but it changed: $(diff <(echo "$store_before") <(echo "$store_after"))"
 log "ok: the error store did not change"
 
-dms_errors="$(vekrona-dev sh journalctl --user -b SYSLOG_IDENTIFIER=dms --no-pager | grep -F 'pillPadding is missing' || true)"
-[[ -z "$dms_errors" ]] || die "dms must log no pillPadding errors, but logged: $dms_errors"
-log "ok: dms logs no pillPadding errors"
+shell_errors="$(vekrona-dev sh journalctl --user -b SYSLOG_IDENTIFIER=vekrona-shell --no-pager | grep -E 'ReferenceError|TypeError|is not defined|ERROR' || true)"
+[[ -z "$shell_errors" ]] || die "vekrona-shell must log no QML errors, but logged: $shell_errors"
+log "ok: vekrona-shell logs no QML errors"

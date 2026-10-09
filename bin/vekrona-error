@@ -501,7 +501,7 @@ def classify(entry, unit_exits):
     except (TypeError, ValueError):
         priority = 6
 
-    qml_error = QML_ERROR_RE.fullmatch(ANSI_RE.sub("", message)) if syslog_id == "dms" else None
+    qml_error = QML_ERROR_RE.fullmatch(ANSI_RE.sub("", message)) if syslog_id in ("dms", "vekrona-shell") else None
     if qml_error:
         message, priority = qml_error.group(1), 3
 

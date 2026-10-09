@@ -5,17 +5,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=90
-BAR_HEIGHT_PX="$(vekrona_token_get size size-bar)"
-# Two glyphs sit one widget gap (space-2) apart, plus the padding of the 24-unit pictogram grid on both facing sides:
+# The last row of the bar is its border-hair bottom line, which is not widget ink.
+BAR_HEIGHT_PX=$(($(vekrona_token_get size size-bar) - $(vekrona_token_get border border-hair)))
+# Two widgets sit two BarPill paddings (2 * space-2) apart, plus the padding of the 24-unit pictogram grid on both facing sides:
 # 2 of 24 units each, at size-icon-s px.
 ICON_S_PX="$(vekrona_token_get size size-icon-s)"
 GLYPH_BEARING_PX=$(((ICON_S_PX * 2 + 23) / 24))
-MAX_GAP_PX=$(($(vekrona_token_get spacing space-2) + 2 * GLYPH_BEARING_PX))
+GROUP_JOIN_PX="$(vekrona_token_get spacing space-2)"
+MAX_GAP_PX=$((2 * GROUP_JOIN_PX + 2 * GLYPH_BEARING_PX))
 MAX_GAP_SPREAD_PX=6
-# A percent label is bar text (type token "label") scaled by the shell font scale; its glyphs are at most one em tall,
-# plus one pixel of antialiasing. Icons (size-icon-s and up) are taller, which is what tells them apart from labels.
-LABEL_PX="$(jq -er '[.type.groups[].styles[] | select(.name == "label") | .fontSize][0] | sub("px$"; "")' "$ROOT/config/tokens.json")"
-LABEL_MAX_HEIGHT_PX="$(awk -v px="$LABEL_PX" -v scale="$(vekrona_design_get dmsFontScale)" 'BEGIN { e = px * scale; c = int(e); if (c < e) c++; print c + 1 }')"
 GAPS="$ROOT/tests/e2e/bar-gaps.py"
 SEPARATOR="$ROOT/tests/e2e/bar-separator.py"
 SEPARATOR_MIN_HEIGHT_PX=$((BAR_HEIGHT_PX / 2))
@@ -25,10 +23,10 @@ SEPARATOR_TOKEN_CONTRAST="$(python3 "$ROOT/tests/e2e/screen_colors.py" contrast 
 SEPARATOR_MIN_CONTRAST=$((SEPARATOR_TOKEN_CONTRAST / 2))
 
 bar_spacing_ok() {
-  python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$LABEL_MAX_HEIGHT_PX" >/dev/null
+  python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$GROUP_JOIN_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$ICON_S_PX" >/dev/null
 }
 export -f bar_spacing_ok
-export ROOT BAR_HEIGHT_PX MAX_GAP_PX MAX_GAP_SPREAD_PX LABEL_MAX_HEIGHT_PX GAPS
+export ROOT BAR_HEIGHT_PX GROUP_JOIN_PX MAX_GAP_PX MAX_GAP_SPREAD_PX ICON_S_PX GAPS
 
 vekrona-dev session
 vekrona-dev move 600 500
@@ -37,8 +35,8 @@ if ! vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bar_spacing_ok; then
   log "the bar spacing did not settle within ${STEP_TIMEOUT_SEC}s; measuring the final state"
 fi
 
-python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$LABEL_MAX_HEIGHT_PX" || die "the right-side bar pictograms must be evenly spaced at most $MAX_GAP_PX px apart, see the measurement above"
-log "ok: every right-side bar pictogram is separated by a similar, tight gap"
+python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$GROUP_JOIN_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$ICON_S_PX" || die "the right-side bar widgets must be evenly spaced at most $MAX_GAP_PX px apart, see the measurement above"
+log "ok: every right-side bar widget is separated by a similar, tight gap"
 
 python3 "$SEPARATOR" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$SEPARATOR_MIN_HEIGHT_PX" "$SEPARATOR_MIN_CONTRAST" || die "the bar must show a visible separator line after the workspaces, see the measurement above"
 log "ok: the separator after the workspaces is clearly visible"

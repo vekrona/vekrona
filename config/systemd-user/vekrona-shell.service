@@ -1,0 +1,13 @@
+[Unit]
+Description=Vekrona shell (bar, notifications, launcher)
+PartOf=sway-session.target
+After=sway-session.target
+ConditionEnvironment=XDG_CURRENT_DESKTOP=sway
+
+[Service]
+ExecStart=/usr/bin/qs -c vekrona-shell
+SyslogIdentifier=vekrona-shell
+Restart=always
+
+[Install]
+WantedBy=sway-session.target

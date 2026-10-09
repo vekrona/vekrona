@@ -20,23 +20,6 @@ ShellRoot {
 
     readonly property string passwordPrompt: "Password"
     // The lock is always dark, in both themes (VekronaTheme.dark).
-    component Label: Text {
-        required property var style
-
-        font.family: VekronaTheme.fontSans
-        font.pixelSize: style.size
-        font.weight: style.weight
-        font.letterSpacing: style.tracking * style.size
-    }
-
-    component Glyph: Text {
-        required property string name
-        required property int px
-
-        text: VekronaTheme.icon(name)
-        font.family: VekronaTheme.fontIcon
-        font.pixelSize: px
-    }
 
     // ---- Unlock sequence: loginctl unlock-session, LockedHint=false, unlock, quit.
     property bool unlocking: false
@@ -393,11 +376,10 @@ ShellRoot {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: VekronaTheme.space2
 
-                        Glyph {
+                        Pictogram {
                             visible: root.statusIcon !== ""
                             anchors.verticalCenter: parent.verticalCenter
                             name: root.statusIcon
-                            px: VekronaTheme.iconS
                             color: root.statusIsError ? VekronaTheme.dark.dangerInk : VekronaTheme.dark.ink
                         }
 

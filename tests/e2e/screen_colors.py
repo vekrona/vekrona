@@ -6,6 +6,7 @@ usage:
   screen_colors.py bar-height SHOT.png BG_HEX      print the bar height: the contiguous run of pixels that are not
                                                    BG_HEX from the top edge, taken at the most common length over all columns
   screen_colors.py count SHOT.png HEX MIN_Y        print how many pixels at row MIN_Y or below equal HEX
+  screen_colors.py bar-count SHOT.png HEX BAR_HEIGHT  print how many pixels in the top BAR_HEIGHT rows equal HEX
   screen_colors.py contrast HEX HEX                print the largest per-channel difference between two colors
 """
 import sys
@@ -42,6 +43,11 @@ def count(path, color, min_y):
     return sum(1 for y in range(min_y, len(rows)) for x in range(width) if hex_of(rows, channels, x, y) == color)
 
 
+def bar_count(path, color, bar_height):
+    width, rows, channels = read_png_rows(path)
+    return sum(1 for y in range(bar_height) for x in range(width) if hex_of(rows, channels, x, y) == color)
+
+
 def contrast(a, b):
     return max(abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) for i in (1, 3, 5))
 
@@ -50,6 +56,7 @@ COMMANDS = {
     "center": (1, lambda a: center(a[0])),
     "bar-height": (2, lambda a: bar_height(a[0], a[1])),
     "count": (3, lambda a: count(a[0], a[1], int(a[2]))),
+    "bar-count": (3, lambda a: bar_count(a[0], a[1], int(a[2]))),
     "contrast": (2, lambda a: contrast(a[0], a[1])),
 }
 

@@ -352,6 +352,9 @@ if ran 50-user; then
   check assert "dms.service not wanted by graphical-session.target" file_absent "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service"
   check assert "xremap.service enabled" user_unit_enabled xremap
   check assert "vekrona-app-switch.service enabled" user_unit_enabled vekrona-app-switch.service
+  check assert "vekrona-shell Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-shell")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-shell")"
+  check assert "vekrona-shell reaches the shared Vekrona module" file_exists "$HOME/.config/quickshell/vekrona-shell/Vekrona/qmldir"
+  check assert "vekrona-shell.service enabled" user_unit_enabled vekrona-shell.service
   check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
   check assert "vekrona-errors.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors.service"
   check assert "vekrona-errors-failed.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors-failed.service"
@@ -400,12 +403,11 @@ import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 assert d.get('notificationPopupBodyInvokesAction') is True, d.get('notificationPopupBodyInvokesAction')
 "
-  check assert "DMS shape: cornerRadius, fontScale, animations, ripples, shadows and every bar's look match config/design.json and tokens.json, no widget outline" python3 -c "
+  check assert "DMS shape: cornerRadius, fontScale, animations, ripples and shadows match config/design.json and tokens.json, and no bar is enabled" python3 -c "
 import json
 d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
 radius, font_scale = $(vekrona_design_get radius), $(vekrona_design_get dmsFontScale)
-widget_padding, tray_icon_spacing = $(vekrona_design_get widgetPadding), $(vekrona_design_get trayIconSpacing)
-inner_padding, space2, space3 = $(vekrona_design_get barInnerPadding), $(vekrona_token_get spacing space-2), $(vekrona_token_get spacing space-3)
+tray_icon_spacing = $(vekrona_design_get trayIconSpacing)
 motion_fast = json.load(open('$(vekrona_active_theme_file)'))['metrics']['motion']['fast']
 assert d.get('cornerRadius') == radius, d.get('cornerRadius')
 assert d.get('fontScale') == font_scale, d.get('fontScale')
@@ -418,11 +420,7 @@ assert d.get('trayIconSpacing', 0) == tray_icon_spacing, d.get('trayIconSpacing'
 bars = d.get('barConfigs', [])
 assert bars, 'no barConfigs'
 for bar in bars:
-    want = {'noBackground': False, 'squareCorners': True, 'attachToScreenEdge': True, 'transparency': 1, 'widgetPadding': widget_padding, 'pillPadding': space3,
-            'innerPadding': inner_padding, 'spacing': space2, 'fontScale': font_scale}
-    for key, value in want.items():
-        assert bar.get(key) == value, (bar.get('id'), key, bar.get(key))
-    assert not bar.get('widgetOutlineEnabled'), (bar.get('id'), 'widgetOutlineEnabled')
+    assert bar.get('enabled') is False, (bar.get('id'), 'enabled')
 "
   check assert "DMS session: per-mode wallpaper is the solid bg of each mode, and the current one matches the theme mode" python3 -c "
 import json
@@ -432,37 +430,6 @@ assert d.get('perModeWallpaper') is True, d.get('perModeWallpaper')
 assert d.get('wallpaperPathDark') == bg['dark'], d.get('wallpaperPathDark')
 assert d.get('wallpaperPathLight') == bg['light'], d.get('wallpaperPathLight')
 assert d.get('wallpaperPath') == bg['$(cat "$(vekrona_theme_name_file)")'], d.get('wallpaperPath')
-"
-  check assert "vekrona DMS plugins hardcode no corner radius, alpha, opacity or text below 13px (the look comes from the tokens)" bash -c "! grep -nE 'radius: *[1-9]|opacity: *0\\.|withAlpha\\(|pixelSize: *([0-9]|1[0-2])([^0-9]|\$)' '$VEKRONA_ROOT'/config/DankMaterialShell/plugins/*/*.qml"
-
-  check assert "vekronaSwayWorkspaces plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/vekronaSwayWorkspaces/plugin.json"
-  check assert "vekronaSwayWorkspaces plugin enabled" bash -c "jq -e '.vekronaSwayWorkspaces.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
-  check assert "vekronaSwayWorkspaces plugin placed in a DankBar widget list" python3 -c "
-import json
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-bars = d.get('barConfigs', [])
-assert any('vekronaSwayWorkspaces' in (bar.get(k) or []) for bar in bars for k in ('leftWidgets', 'centerWidgets', 'rightWidgets'))
-"
-
-  for plugin_id in vekronaAgent; do
-    check assert "$plugin_id plugin linked" file_exists "$HOME/.config/DankMaterialShell/plugins/$plugin_id/plugin.json"
-    check assert "$plugin_id plugin enabled" bash -c "jq -e '.$plugin_id.enabled == true' '$HOME/.config/DankMaterialShell/plugin_settings.json' >/dev/null"
-    check assert "$plugin_id plugin placed in a DankBar widget list" python3 -c "
-import json
-import sys
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-names = [w.get('id') if isinstance(w, dict) else w
-         for bar in d.get('barConfigs', []) for k in ('leftWidgets', 'centerWidgets', 'rightWidgets') for w in (bar.get(k) or [])]
-assert sys.argv[1] in names, sys.argv[1]
-" "$plugin_id"
-  done
-  check assert "the stock clock and weather widgets sit in a DankBar widget list, the removed vekronaClock and vekronaWeather plugins in none" python3 -c "
-import json
-d = json.load(open('$HOME/.config/DankMaterialShell/settings.json'))
-names = [w.get('id') if isinstance(w, dict) else w
-         for bar in d.get('barConfigs', []) for k in ('leftWidgets', 'centerWidgets', 'rightWidgets') for w in (bar.get(k) or [])]
-assert 'clock' in names and 'weather' in names, names
-assert 'vekronaClock' not in names and 'vekronaWeather' not in names, names
 "
   check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
 
