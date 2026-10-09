@@ -38,7 +38,7 @@ session_wait_until() {
 session_resolve_swaysock() {
   local sock
   sock="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -regextype posix-extended \
-    -regex '.*/sway-ipc\.[0-9]+\.[0-9]+\.sock' 2>/dev/null | head -1)"
+    -regex '.*/sway-ipc\.[0-9]+\.[0-9]+\.sock' -print -quit 2>/dev/null)"
   [[ -n "$sock" && -S "$sock" ]] || return 1
   printf '%s' "$sock"
 }

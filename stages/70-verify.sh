@@ -45,7 +45,6 @@ file_exists() { [[ -e "$1" ]]; }
 fprintd_sees_reader() { fprintd-list "$VEKRONA_USER" >/dev/null 2>&1; }
 file_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 dir_exists() { [[ -d "$1" ]]; }
-group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
 gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
 not_repo_enabled() { ! repo_enabled "$1"; }
 copr_enabled() { repo_enabled "$(copr_id "$1")"; }
@@ -267,7 +266,7 @@ if ran 40-system; then
   check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
   check assert "no stale dGPU udev rule from an earlier install" file_absent /etc/udev/rules.d/70-vekrona-dgpu.rules
   warn_check "no dead /dev/dri/vekrona-dgpu node from the old udev rule (reboot pending)" file_absent /dev/dri/vekrona-dgpu
-  check assert "$VEKRONA_USER in input group" group_member "$VEKRONA_USER" input
+  check assert "$VEKRONA_USER in input group" user_in_group "$VEKRONA_USER" input
   check assert "/dev/uinput exists" file_exists /dev/uinput
 
   for u in tailscaled nix-daemon.service; do

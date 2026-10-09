@@ -90,7 +90,9 @@ done
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
 
-if [[ -d "$VEKRONA_ROOT/fonts" ]] && find "$VEKRONA_ROOT/fonts" -type f -print -quit | grep -q .; then
+font_sample=""
+if [[ -d "$VEKRONA_ROOT/fonts" ]]; then font_sample="$(find "$VEKRONA_ROOT/fonts" -type f -print -quit)"; fi
+if [[ -n "$font_sample" ]]; then
   ensure_symlink_tree "$VEKRONA_ROOT/fonts" "$HOME/.local/share/fonts/vekrona"
   fc-cache -f >/dev/null
   for family in "AtkynsonMono Nerd Font" "Atkinson Hyperlegible Mono" "JetBrainsMono Nerd Font" "Material Symbols Rounded"; do

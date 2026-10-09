@@ -18,9 +18,9 @@ mount_btrfs_top_level "$mnt"
 
 [[ -d "$mnt/root" ]] || { echo "top-level subvolume 'root' not found on $(root_btrfs_device)" >&2; exit 1; }
 
-findmnt -no SOURCE / | grep -q '\[/root\]' || { echo "/ is not mounted from the root subvolume" >&2; exit 1; }
+[[ "$(findmnt -no SOURCE /)" == *'[/root]'* ]] || { echo "/ is not mounted from the root subvolume" >&2; exit 1; }
 
-findmnt -no SOURCE /nix | grep -q '\[/nix\]' || { echo "/nix is not mounted from the nix subvolume" >&2; exit 1; }
+[[ "$(findmnt -no SOURCE /nix)" == *'[/nix]'* ]] || { echo "/nix is not mounted from the nix subvolume" >&2; exit 1; }
 
 marker="/.vekrona-rolled-back-from-$number"
 [[ -e "$marker" ]] || { echo "rollback marker not found: $marker" >&2; exit 1; }

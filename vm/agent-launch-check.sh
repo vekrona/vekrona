@@ -351,7 +351,8 @@ for v in "${SCRIPT_ENV_VARS[@]}"; do
     [[ "$entry" != "$v="* ]] || fail "$v leaked into the launched harness environment although it was set in the user manager"
   done
 done
-printf '%s\n' "${stub_env[@]}" | grep -qx -- "$KEPT_ENV_VAR=keep" || fail "unrelated variable $KEPT_ENV_VAR was stripped from the harness environment"
+stub_env_lines="$(printf '%s\n' "${stub_env[@]}")"
+grep -qx -- "$KEPT_ENV_VAR=keep" <<<"$stub_env_lines" || fail "unrelated variable $KEPT_ENV_VAR was stripped from the harness environment"
 
 vekrona-agent --error "$REAL_ERROR_ID" >/dev/null || fail "vekrona-agent --error $REAL_ERROR_ID failed to launch the agent"
 assert_error_status launched "after a successful vekrona-agent --error launch"
