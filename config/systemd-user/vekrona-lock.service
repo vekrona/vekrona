@@ -1,0 +1,12 @@
+[Unit]
+Description=Vekrona lock screen
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=all
+ExecStart=/usr/bin/qs -c vekrona-lock
+SyslogIdentifier=vekrona-lock
+Restart=on-failure
+RestartSec=250ms
+TimeoutStartSec=8s
