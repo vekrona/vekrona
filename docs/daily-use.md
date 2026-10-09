@@ -109,8 +109,9 @@ tokens (`space-2` is 8, `space-3` is 12). To change the look, change
 Caffeine (a fixed wall-clock duration is the point, not something to work
 around): `vekrona-caffeine` starts a transient systemd user unit
 (`systemd-run --user --unit=vekrona-caffeine`) that wraps `systemd-inhibit
---what=sleep` for the given duration, and sends a desktop notification on
-start and stop; also bound to Hyper+Shift+c.
+--what=sleep:idle` for the given duration (it blocks a manual suspend and
+logind's idle suspend alike), and sends a desktop notification on start and
+stop; also bound to Hyper+Shift+c.
 
 ```
 vekrona-caffeine 30m
