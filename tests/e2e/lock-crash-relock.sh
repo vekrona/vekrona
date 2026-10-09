@@ -23,7 +23,7 @@ crash_locker() {
 
 lock_screen() {
   vekrona-dev sh vekrona-lock
-  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- lock_active
+  lock_active || die "vekrona-lock returned before the locker confirmed the lock, so suspend would not wait for the screen to be locked"
 }
 
 unlock_with_password() {

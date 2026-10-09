@@ -40,10 +40,11 @@ sudo_refresh() {
 
 # Prints the IPC socket of the user's sway session, or nothing when none runs. A terminal inside sway has SWAYSOCK;
 # a TTY or SSH login does not, so look for the session's socket where sway creates it (sway-ipc.UID.PID.sock).
-# A crashed sway leaves its socket behind, so only sockets whose sway PID is alive count.
+# A crashed sway leaves its socket behind, so only sockets whose sway PID is alive count; for the same reason a
+# SWAYSOCK inherited by a tmux that outlived its sway is used only if sway answers on it.
 sway_socket() {
   local socket pid live=()
-  if [[ -n "${SWAYSOCK:-}" ]]; then
+  if [[ -n "${SWAYSOCK:-}" ]] && swaymsg -s "$SWAYSOCK" -t get_version >/dev/null 2>&1; then
     printf '%s\n' "$SWAYSOCK"
     return 0
   fi
@@ -618,6 +619,33 @@ assert_running_kernel_is_latest() {
 ensure_target_kernel_devel() {
   assert_running_kernel_is_latest
   ensure_pkg "kernel-devel-$(newest_installed_kver)"
+}
+
+# Dies listing the processes (PID and command) with their working directory, executable or an open file under $1.
+# lsof +D is the exact check: fuser -m would report every process on the whole filesystem $1 lives on.
+die_if_path_in_use() {
+  local dir="$1" status=0 raw users
+  require_cmd lsof
+  raw="$(root lsof -w -F pc +D "$dir")" || status=$?
+  ((status <= 1)) || die "lsof failed with status $status while checking whether $dir is in use"
+  users="$(awk '/^p/ { pid = substr($0, 2) } /^c/ { print pid, substr($0, 2) }' <<<"$raw" | sort -u)"
+  [[ -z "$users" ]] || die "$dir is in use by:"$'\n'"$users"
+}
+
+AKMODS_WAIT_SECONDS=900
+
+# An akmod-* RPM's posttrans starts a background akmods that takes its lock only after its init, so the lock alone
+# can be won before that build exists. akmods is a bash script, so its process name (comm) is "akmods".
+# pidwait exits 1 when no such process runs.
+wait_for_running_akmods() {
+  local status=0
+  require_cmd pidwait timeout
+  timeout "$AKMODS_WAIT_SECONDS" pidwait -x akmods || status=$?
+  case "$status" in
+    0 | 1) ;;
+    124) die "timed out after $AKMODS_WAIT_SECONDS s waiting for a running akmods build" ;;
+    *) die "waiting for a running akmods build failed with status $status" ;;
+  esac
 }
 
 build_akmods_for_target_kernel() {

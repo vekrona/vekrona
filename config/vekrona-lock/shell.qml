@@ -1,5 +1,6 @@
-// Lock screen, started by bin/vekrona-lock as a transient user unit: the
-// process lives for exactly one lock. It locks on start and quits after unlock.
+// Lock screen, started by bin/vekrona-lock as vekrona-lock.service (Type=notify):
+// the process lives for exactly one lock and says READY once the compositor
+// confirmed it. It locks on start and quits after unlock.
 //
 // Three PAM stacks run side by side and any success unlocks:
 //   password     always; the typed text answers its prompt
@@ -24,7 +25,7 @@ ShellRoot {
     // ---- Unlock sequence: loginctl unlock-session, LockedHint=false, unlock, quit.
     property bool unlocking: false
 
-    component LogindStep: Process {
+    component CommandStep: Process {
         signal finished
 
         onExited: exitCode => {
@@ -34,18 +35,23 @@ ShellRoot {
         }
     }
 
-    LogindStep {
+    CommandStep {
+        id: notifyReady
+        command: ["systemd-notify", "--ready"]
+    }
+
+    CommandStep {
         id: setHint
         command: ["busctl", "call", "org.freedesktop.login1", "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session", "SetLockedHint", "b", "true"]
     }
 
-    LogindStep {
+    CommandStep {
         id: unlockSession
         command: ["loginctl", "unlock-session"]
         onFinished: clearHint.running = true
     }
 
-    LogindStep {
+    CommandStep {
         id: clearHint
         command: ["busctl", "call", "org.freedesktop.login1", "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session", "SetLockedHint", "b", "false"]
         onFinished: {
@@ -271,8 +277,10 @@ ShellRoot {
             }
         }
         onSecureChanged: {
-            if (secure)
+            if (secure) {
                 setHint.running = true;
+                notifyReady.running = true;
+            }
         }
 
         WlSessionLockSurface {

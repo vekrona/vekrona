@@ -83,3 +83,16 @@ grep -q 's3cr3t' "$scratch/sync.err" && die "a vdirsyncer error must not print a
 grep -q 'https://calendar.example.com' "$scratch/sync.err" || die "the redacted URL must keep its host: $(cat "$scratch/sync.err")"
 grep -q '500 Server Error' "$scratch/sync.err" || die "redacting a URL must keep the rest of the error: $(cat "$scratch/sync.err")"
 log "ok: a URL in a sync error is cut to its host"
+
+cp "$ROOT/config/vdirsyncer/config.example" "$XDG_CONFIG_HOME/vdirsyncer/config"
+printf '#!/usr/bin/env bash\necho called >"%s"\necho "fake vdirsyncer must not run" >&2\nexit 1\n' "$scratch/vdirsyncer.called" >"$fake_bin/vdirsyncer"
+rm -f "$output"
+if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then
+  die "a config that still has placeholder storages must fail the sync"
+fi
+for storage in proton_remote google_remote microsoft_remote; do
+  grep -q "$storage" "$scratch/sync.err" || die "the error must name the placeholder storage $storage: $(cat "$scratch/sync.err")"
+done
+[[ ! -e "$scratch/vdirsyncer.called" ]] || die "vdirsyncer must not run while placeholder storages remain"
+assert_json '.configured == true' "a placeholder config must still render the calendar"
+log "ok: a config with placeholder storages fails before vdirsyncer runs and names them"

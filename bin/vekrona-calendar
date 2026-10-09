@@ -46,8 +46,16 @@ redact_urls() {
 }
 
 sync() {
-  local status=0 output
+  local status=0 output placeholders
   if [[ -f "$VDIRSYNCER_CONFIG" ]]; then
+    placeholders="$(awk '
+      /^[[:space:]]*\[/ { name = ""; if (match($0, /\[storage [^]]+\]/)) name = substr($0, RSTART + 9, RLENGTH - 10) }
+      name != "" && !/^[[:space:]]*#/ && /PLACEHOLDER/ && !seen[name]++ { printf "%s ", name }
+    ' "$VDIRSYNCER_CONFIG")"
+    if [[ -n "$placeholders" ]]; then
+      render
+      fail "fill in or delete the placeholder storages in $VDIRSYNCER_CONFIG: ${placeholders% } (see docs/calendar.md)"
+    fi
     output="$(mktemp)"
     { vdirsyncer metasync && vdirsyncer sync; } >"$output" 2>&1 || status=$?
     redact_urls <"$output" >&2

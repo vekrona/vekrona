@@ -17,6 +17,7 @@ All providers are read-only: Vekrona shows events, it does not create or change 
 
 Until `~/.config/vdirsyncer/config` exists, the popout says "No calendars yet. See docs/calendar.md."
 If a sync fails, the unit fails and `vekrona-error` records it; the widget keeps showing the last synced events.
+The unit refuses to sync while any `PLACEHOLDER` remains in the config, and the error names those storages (for example `proton_remote`); fill in or delete each one.
 
 ## Providers
 

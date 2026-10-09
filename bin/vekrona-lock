@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 # The single entry point for locking the screen. The sway bindings, the power
 # menu and swayidle (idle timeout, before-sleep and logind's lock event) run
-# it. One Quickshell process per lock, kept by a transient user unit: it exits
-# on unlock, and a crashed locker restarts and locks again. A locker that keeps crashing must never be given up on (the unit
-# would fail, be collected, and leave the compositor locked red with no locker),
-# so the restart rate limit is off.
+# it. One Quickshell process per lock, kept by vekrona-lock.service: it exits
+# on unlock, and a crashed locker restarts and locks again. The unit is
+# Type=notify and the locker says READY once the compositor confirmed the lock,
+# so this returns only when the screen is locked (swayidle's before-sleep waits
+# for that) and fails when it cannot be. Starting is idempotent: a concurrent
+# caller joins the start in progress, so no check precedes it.
 set -euo pipefail
 shopt -s inherit_errexit
 
 PROG="vekrona-lock"
-UNIT="vekrona-lock"
+UNIT="vekrona-lock.service"
 
-if systemctl --user is-active --quiet "$UNIT"; then
-  exit 0
-fi
-
-if ! err="$(systemd-run --user --unit="$UNIT" --collect -p Restart=on-failure -p RestartSec=250ms -p StartLimitIntervalSec=0 qs -c vekrona-lock 2>&1)"; then
+if ! err="$(systemctl --user start "$UNIT" 2>&1)"; then
   printf '%s: %s\n' "$PROG" "$err" >&2
   notify-send -u critical -a vekrona "$PROG" "Cannot start the lock screen: $err" || printf '%s: notify-send failed\n' "$PROG" >&2
   exit 1

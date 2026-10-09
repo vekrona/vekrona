@@ -84,10 +84,15 @@ present_iff() {
 }
 
 sway_runs() { [[ -n "$(sway_socket)" ]]; }
-user_unit_not_failed() { ! systemctl --user is-failed --quiet "$1"; }
 active_when_sway_runs() { ! sway_runs || systemctl --user is-active --quiet "$1"; }
+runs_when_sway_runs() { ! sway_runs || systemctl --user start "$1"; }
+user_unit_active_without_restarts() {
+  local props
+  props="$(systemctl --user show -p ActiveState,NRestarts "$1")"
+  grep -qx 'ActiveState=active' <<<"$props" && grep -qx 'NRestarts=0' <<<"$props"
+}
 
-verify_greetd_active() {
+verify_greetd_enabled() {
   check assert "greetd enabled" greetd_enabled
   check assert "display-manager.service points to greetd" dm_is_greetd
   check assert "default target is graphical.target" default_target_is_graphical
@@ -367,7 +372,7 @@ if ran 50-user; then
   check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
   check assert "vekrona-cliphist.service enabled" user_unit_enabled vekrona-cliphist.service
   check assert "vekrona-idle.service enabled" user_unit_enabled vekrona-idle.service
-  check assert "vekrona-shell.service active while sway runs" present_iff sway_runs systemctl --user is-active --quiet vekrona-shell.service
+  check assert "vekrona-shell.service active without automatic restarts while sway runs" present_iff sway_runs user_unit_active_without_restarts vekrona-shell.service
   check assert "~/.config/DankMaterialShell is absent" file_absent "$HOME/.config/DankMaterialShell"
   check assert "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell is absent" file_absent "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell"
   check assert "vekrona-night.service linked" file_exists "$HOME/.config/systemd/user/vekrona-night.service"
@@ -375,8 +380,8 @@ if ran 50-user; then
   check assert "vekrona-calendar.timer enabled" user_unit_enabled vekrona-calendar.timer
   check assert "vekrona-weather.timer active while sway runs" active_when_sway_runs vekrona-weather.timer
   check assert "vekrona-calendar.timer active while sway runs" active_when_sway_runs vekrona-calendar.timer
-  check assert "vekrona-weather.service has not failed" user_unit_not_failed vekrona-weather.service
-  check assert "vekrona-calendar.service has not failed" user_unit_not_failed vekrona-calendar.service
+  check assert "vekrona-weather.service runs successfully while sway runs" runs_when_sway_runs vekrona-weather.service
+  check assert "vekrona-calendar.service runs successfully while sway runs" runs_when_sway_runs vekrona-calendar.service
   check assert "khal config linked" eq "$(readlink -f "$HOME/.config/khal/config")" "$(readlink -f "$VEKRONA_ROOT/config/khal/config")"
   check assert "vdirsyncer example linked" eq "$(readlink -f "$HOME/.config/vdirsyncer/config.example")" "$(readlink -f "$VEKRONA_ROOT/config/vdirsyncer/config.example")"
   check assert_file_contains /etc/geoclue/conf.d/90-vekrona.conf "^allowed=true\$"
@@ -404,6 +409,7 @@ if ran 50-user; then
   check assert "gsettings monospace-font-name: AtkynsonMono Nerd Font 10.5" gsettings_eq org.gnome.desktop.interface monospace-font-name "AtkynsonMono Nerd Font 10.5"
   check assert "vekrona-lock resolves on PATH" bash -c "command -v vekrona-lock >/dev/null"
   check assert "vekrona-lock Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-lock")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-lock")"
+  check assert "vekrona-lock.service linked" eq "$(readlink -f "$HOME/.config/systemd/user/vekrona-lock.service")" "$(readlink -f "$VEKRONA_ROOT/config/systemd-user/vekrona-lock.service")"
   check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
   check assert "qalc resolves (the launcher's /calc)" bash -c "command -v qalc >/dev/null"
 
@@ -562,7 +568,7 @@ fi
 if ran 65-login-manager; then
   dm_target="$(dm_unit_target 2>/dev/null || true)"
   if dm_is_greetd; then
-    verify_greetd_active
+    verify_greetd_enabled
   elif [[ -n "$dm_target" ]]; then
     log "another display manager enabled ($dm_target); skipping greetd checks, 90a-switch-dm is the migration path"
   else
@@ -571,12 +577,14 @@ if ran 65-login-manager; then
 fi
 
 if ran 90a-switch-dm || ran 90b-remove; then
-  verify_greetd_active
+  verify_greetd_enabled
   warn_check "gdm not present or disabled" gdm_absent_or_disabled
   warn_check "secrets service reachable" busctl --user status org.freedesktop.secrets
-  for p in omedora hyprland keyd dunst; do
-    check assert "package absent: $p" pkg_absent "$p"
-  done
+  if ran 90b-remove; then
+    for p in omedora hyprland keyd dunst; do
+      check assert "package absent: $p" pkg_absent "$p"
+    done
+  fi
   declare -a desktop_pkgs
   read_pkg_list desktop_pkgs vekrona_desktop_pkgs
   for p in "${desktop_pkgs[@]}"; do
