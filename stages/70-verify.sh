@@ -409,6 +409,10 @@ if ran 50-user; then
     override="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
     check assert "flatpak x11 override set: $app_id" contains x11 "$override"
   done
+  if flatpak_installed md.obsidian.Obsidian; then
+    override="$(flatpak override --user --show md.obsidian.Obsidian 2>/dev/null || true)"
+    check assert "obsidian flatpak keeps its wayland socket" not_contains '!wayland' "$override"
+  fi
   if flatpak_installed org.signal.Signal; then
     override="$(flatpak override --user --show org.signal.Signal 2>/dev/null || true)"
     check assert "signal flatpak keeps its key in gnome-keyring" contains SIGNAL_PASSWORD_STORE=gnome-libsecret "$override"

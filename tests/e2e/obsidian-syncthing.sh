@@ -21,4 +21,4 @@ log "ok: the Syncthing webapp opens its own window"
 
 vekrona-dev sh swaymsg exec "flatpak run md.obsidian.Obsidian" >/dev/null
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- window_open md.obsidian.Obsidian
-log "ok: Obsidian opens a window under the X11 override"
+log "ok: Obsidian opens a window"

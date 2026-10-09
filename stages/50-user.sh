@@ -149,9 +149,41 @@ ensure_flatpak_override() {
   done
 }
 
+# Resets the app's user override when it holds nothing but the given socket flags (set by an earlier vekrona); dies rather than clobber overrides the user added.
+ensure_flatpak_override_dropped() {
+  local app_id="$1" flag shown stale=0 entry alt owned_re
+  local entries=()
+  shift
+  flatpak_installed "$app_id" || { log "flatpak not installed, skipping override cleanup: $app_id"; return 0; }
+  shown="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
+  for flag in "$@"; do
+    case "$flag" in
+      --socket=*) entry="${flag#--socket=}" ;;
+      --nosocket=*) entry="!${flag#--nosocket=}" ;;
+      *) die "ensure_flatpak_override_dropped: unsupported override flag: $flag" ;;
+    esac
+    entries+=("$entry")
+    if flatpak_override_has "$flag" "$shown"; then stale=1; fi
+  done
+  if ((stale == 0)); then
+    log "flatpak override already clean: $app_id"
+    return 0
+  fi
+  alt="$(IFS='|'; echo "${entries[*]}")"
+  owned_re="^\[Context\]"$'\n'"sockets=(($alt);)+$"
+  [[ "$(awk NF <<<"$shown")" =~ $owned_re ]] \
+    || die "$app_id has stale vekrona socket overrides ($*) next to overrides of your own; remove those socket entries from ~/.local/share/flatpak/overrides/$app_id yourself"
+  log "resetting stale flatpak override: $app_id"
+  flatpak override --user --reset "$app_id"
+  [[ -z "$(flatpak override --user --show "$app_id")" ]] || die "flatpak override not reset: $app_id"
+}
+
 for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
   ensure_flatpak_override "$app_id" --nosocket=wayland --socket=x11
 done
+
+# Obsidian runs native Wayland (XWayland windows blur at fractional output scale); earlier installs forced it onto X11.
+ensure_flatpak_override_dropped md.obsidian.Obsidian --nosocket=wayland --socket=x11
 
 # Electron on Sway does not recognise XDG_CURRENT_DESKTOP and falls back to a plaintext key store; greetd's PAM unlocks gnome-keyring at login.
 # Electron also picks its Wayland backend from XDG_SESSION_TYPE=wayland and exits when the sandbox has no Wayland socket, so name X11.
