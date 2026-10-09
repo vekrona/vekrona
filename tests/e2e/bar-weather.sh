@@ -5,9 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-# The fixture's current temperature is 37.4. The bar shows it rounded, and OCR reads the glyph before it as a letter or drops the unit.
-# A clock such as 03:37 and a CPU load of 37 % must not match.
-TEMPERATURE_REGEX='(^|[^0-9:])37($|[^0-9:])'
+# The fixture's current temperature is 37.4. The bar shows it rounded, and OCR reads the glyph before it as a letter or a digit
+# ("237°C") or drops the unit. A clock such as 03:37 and a volume or CPU load of 37 % must not match.
+TEMPERATURE_REGEX='37 ?°|^[^0-9:%]?37$'
 CLOCK_REGEX='^[0-9]{2}:[0-9]{2}$'
 GUEST_FIXTURE=/tmp/bar-weather-open-meteo.json
 GUEST_OVERRIDE='$HOME/.config/vekrona/weather.json'
