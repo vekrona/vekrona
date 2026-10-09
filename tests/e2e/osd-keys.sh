@@ -30,8 +30,14 @@ clear_notifications
 # The VM has no sound card: the test brings its own output.
 module="$(vekrona-dev sh pactl load-module module-null-sink "sink_name=$SINK_NAME" "sink_properties=device.description=$SINK_NAME")"
 unload_sink() { vekrona-dev sh pactl unload-module "$module"; }
-trap unload_sink EXIT
 vekrona-dev sh pactl set-default-sink "$SINK_NAME"
+
+# A focused window's accent border would count as OSD pixels: use an empty workspace.
+focused_workspace() { vekrona-dev sh swaymsg -t get_workspaces | jq -r '.[] | select(.focused) | .name'; }
+previous_workspace="$(focused_workspace)"
+restore() { vekrona-dev sh swaymsg workspace "$previous_workspace" >/dev/null; unload_sink; }
+trap restore EXIT
+vekrona-dev sh swaymsg workspace number 9 >/dev/null
 
 vekrona-dev sh wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.50
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- osd_hidden
