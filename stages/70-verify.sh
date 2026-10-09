@@ -243,9 +243,8 @@ if ran 30-packages; then
   done
   check assert "package absent: ffmpeg-free" pkg_absent ffmpeg-free
 
-  pkg_from_repo() { dnf repoquery --installed --qf '%{from_repo}\n' "$1" 2>/dev/null || true; }
   for p in "${!VEKRONA_PINNED_PKGS[@]}"; do
-    check assert "package installed from pinned repo: $p" eq "$(pkg_from_repo "$p")" "${VEKRONA_PINNED_PKGS[$p]}"
+    check assert "package installed from pinned repo: $p" eq "$(installed_from_repo "$p")" "${VEKRONA_PINNED_PKGS[$p]}"
   done
 
   for stale in "$HOME/.local/zed.app" "$HOME/.local/bin/zed" "$HOME/.local/share/applications/dev.zed.Zed.desktop"; do
