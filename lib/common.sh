@@ -394,6 +394,27 @@ ensure_system_unit_active() {
   done
 }
 
+# Quickshell never removes the runtime directory (logs, ipc socket) of an instance that has exited.
+prune_dead_quickshell_instances() {
+  local runtime="$1" pid_link instance_dir removed=0
+  [[ -d "$runtime/by-id" ]] || return 0
+  local -A live=()
+  for pid_link in "$runtime"/by-pid/*; do
+    [[ -L "$pid_link" ]] || continue
+    if kill -0 "${pid_link##*/}" 2>/dev/null; then
+      live["$(basename "$(readlink "$pid_link")")"]=1
+    else
+      rm -f "$pid_link"
+    fi
+  done
+  for instance_dir in "$runtime"/by-id/*; do
+    [[ -d "$instance_dir" && -z "${live[${instance_dir##*/}]:-}" ]] || continue
+    rm -rf "$instance_dir"
+    removed=$((removed + 1))
+  done
+  log "removed $removed dead Quickshell instance directories"
+}
+
 ensure_user_unit_enabled() {
   local u
   for u in "$@"; do

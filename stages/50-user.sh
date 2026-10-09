@@ -91,7 +91,7 @@ for retired in "$HOME/.config/systemd/user/sway-session.target.wants/dms.service
   "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell"; do
   if [[ -e "$retired" || -L "$retired" ]]; then
     log "removing: $retired (left by DankMaterialShell, which vekrona-shell replaced)"
-    chmod -R u+w "$retired" 2>/dev/null || true
+    if [[ -d "$retired" && ! -L "$retired" ]]; then chmod -R u+w "$retired"; fi
     rm -rf "$retired"
     [[ ! -e "$retired" && ! -L "$retired" ]] || die "failed to remove $retired"
   else
@@ -99,39 +99,7 @@ for retired in "$HOME/.config/systemd/user/sway-session.target.wants/dms.service
   fi
 done
 
-shopt -s nullglob
-removed_count=0
-if [[ -d "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell" ]]; then
-  for instance_dir in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell/by-id"/*/; do
-    [[ -d "$instance_dir" ]] || continue
-    instance_running=false
-    for pid_link in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell/by-pid"/*; do
-      [[ -L "$pid_link" ]] || continue
-      target="$(readlink "$pid_link")" || continue
-      if [[ "$target" == "$instance_dir" ]]; then
-        pid="${pid_link##*/}"
-        if kill -0 "$pid" 2>/dev/null; then
-          instance_running=true
-          break
-        fi
-      fi
-    done
-    if [[ "$instance_running" == false ]]; then
-      rm -rf "$instance_dir"
-      removed_count=$((removed_count + 1))
-    fi
-  done
-  for pid_link in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell/by-pid"/*; do
-    [[ -L "$pid_link" ]] || continue
-    target="$(readlink "$pid_link")" || continue
-    pid="${pid_link##*/}"
-    if [[ ! -d "$target" ]] || ! kill -0 "$pid" 2>/dev/null; then
-      rm -f "$pid_link"
-    fi
-  done
-  log "removed $removed_count dead Quickshell instance directories"
-fi
-shopt -u nullglob
+prune_dead_quickshell_instances "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell"
 
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
