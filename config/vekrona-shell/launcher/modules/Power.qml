@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import ".."
 import "../.." as Shell
 import "../../Vekrona"
@@ -6,8 +7,32 @@ import "../../Vekrona"
 LauncherModule {
     id: root
 
-    // armVerb is set for the commands that need a second press: "Press Enter again to <armVerb>".
-    readonly property var commands: [
+    // The update check's state file, written by root. It is missing until the first check has run.
+    property string updatesPath: "/var/lib/vekrona/updates.json"
+    property bool updatesPending: false
+
+    readonly property var updateCommands: [
+        {
+            id: "update-restart",
+            title: "Update and restart",
+            subtitle: "Install the pending updates, then restart the computer",
+            glyph: "system_update",
+            command: ["vekrona-update-start", "vekrona-update-reboot.service"],
+            aliases: ["update and reboot"],
+            armVerb: "update and restart"
+        },
+        {
+            id: "update-shutdown",
+            title: "Update and shut down",
+            subtitle: "Install the pending updates, then power off the computer",
+            glyph: "upgrade",
+            command: ["vekrona-update-start", "vekrona-update-poweroff.service"],
+            aliases: ["update and power off", "update and poweroff"],
+            armVerb: "update and shut down"
+        }
+    ]
+
+    readonly property var baseCommands: [
         {
             id: "lock",
             title: "Lock",
@@ -55,6 +80,28 @@ LauncherModule {
         }
     ]
 
+    // armVerb is set for the commands that need a second press: "Press Enter again to <armVerb>".
+    // The update commands sit right before Restart while updates are pending.
+    readonly property var commands: {
+        const all = baseCommands.slice();
+        if (updatesPending)
+            all.splice(all.findIndex(command => command.id === "restart"), 0, ...updateCommands);
+        return all;
+    }
+
+    function readUpdates(text: string): void {
+        try {
+            updatesPending = JSON.parse(text).pending === true;
+        } catch (e) {
+            updatesPending = false;
+            console.error("Power: cannot read the update state " + updatesPath + ":", e);
+        }
+    }
+
+    function opened() {
+        updates.reload();
+    }
+
     function row(item): var {
         const action = {
             id: item.id,
@@ -82,6 +129,21 @@ LauncherModule {
     title: "Power"
     glyph: "power_settings_new"
     slash: "power"
+
+    onCommandsChanged: changed()
+
+    FileView {
+        id: updates
+        path: root.updatesPath
+        watchChanges: true
+        onLoaded: root.readUpdates(text())
+        onLoadFailed: error => {
+            root.updatesPending = false;
+            if (error !== FileViewError.FileNotFound)
+                console.error("Power: cannot read " + root.updatesPath + ":", error);
+        }
+        onFileChanged: reload()
+    }
 
     // One keyboard stop: Left/Right move `current`, Enter/Space press it. A command with an
     // armVerb arms on the first press and runs on the second.
@@ -132,6 +194,14 @@ LauncherModule {
                 event.accepted = false;
             }
             onCurrentChanged: armed = -1
+            // Pending updates add or remove buttons, which moves every index after them.
+            Connections {
+                target: strip.module
+                function onCommandsChanged() {
+                    strip.armed = -1;
+                    strip.current = Math.min(strip.current, strip.module.commands.length - 1);
+                }
+            }
             // Disarming (any way) takes the "Press again" toast back, unless another toast replaced it.
             onArmedChanged: {
                 if (armed < 0) {
