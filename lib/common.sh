@@ -197,6 +197,12 @@ file_grep_q() {
   return "$status"
 }
 
+# snapper_rows_after <number>: the snapper CSV rows on stdin whose snapshot number (first field) is above <number>.
+snapper_rows_after() {
+  [[ "$1" =~ ^[0-9]+$ ]] || die "snapper_rows_after: not a snapshot number: $1"
+  awk -F, -v n="$1" '$1 + 0 > n + 0' || die "snapper_rows_after: awk failed on the snapshot list"
+}
+
 ensure_line() {
   local file="$1" line="$2"
   if [[ -f "$file" ]] && file_grep_q -xF -- "$line" "$file"; then log "line present in $file: $line"; return 0; fi

@@ -185,6 +185,7 @@ if ran 20-snapper; then
   root dnf remove -y hello
   snapshots_csv="$(snapper_csv)"
   n1="$(tail -1 <<<"$snapshots_csv" | cut -d, -f1)"
+  snapshots_csv="$(snapper_rows_after "$n0" <<<"$snapshots_csv")"
   check assert "at least 2 new snapshots from install/remove round-trip" ge "$((n1 - n0))" 2
   check assert "pre snapshot has cleanup=number" csv_row_matches '^[0-9]+,pre,number$'
   check assert "post snapshot has cleanup=number" csv_row_matches '^[0-9]+,post,number$'
