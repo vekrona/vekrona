@@ -12,7 +12,8 @@ export -f shown gone
 export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"
 
 vekrona-dev session
-vekrona-dev move 600 500
+# Away from the launcher: the pointer would sit over the armed row's text and break OCR.
+vekrona-dev move 100 700
 clear_notifications
 updates_stash
 
