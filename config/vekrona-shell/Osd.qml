@@ -53,8 +53,10 @@ PanelWindow {
     color: "transparent"
     anchors.bottom: true
     margins.bottom: 2 * VekronaTheme.sizeTarget
-    implicitWidth: panel.width
-    implicitHeight: panel.height
+    // The surface fits every mode and keeps that size: resizing a layer surface as it shows let Sway present a mismatched
+    // buffer, which tore the panel. Only the panel inside it changes with the mode; the rest is transparent and takes no input.
+    implicitWidth: Math.max(volumeRow.width, layoutsColumn.width) + 2 * VekronaTheme.space4
+    implicitHeight: Math.max(volumeRow.height, layoutsColumn.height) + 2 * VekronaTheme.space4
     exclusionMode: ExclusionMode.Ignore
     mask: Region {}
     WlrLayershell.layer: WlrLayer.Overlay
@@ -67,6 +69,8 @@ PanelWindow {
 
     Rectangle {
         id: panel
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
         width: content.width + 2 * VekronaTheme.space4
         height: content.height + 2 * VekronaTheme.space4
         color: VekronaTheme.c.surface1
