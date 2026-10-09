@@ -341,6 +341,8 @@ if ran 50-user; then
     if is_legacy_link_target "$(readlink "$l")"; then printf '%s ' "$l"; fi
   done)"
   check assert "every vekrona symlink points into $VEKRONA_ROOT (stale: ${stale_links:-none})" eq "$stale_links" ""
+  stale_bad_links="$(vekrona_links --stale "${link_dirs[@]}" | tr '\n' ' ')"
+  check assert "no vekrona symlink points to a missing or git-ignored file (stale: ${stale_bad_links:-none})" eq "$stale_bad_links" ""
   ghostty_links="$(vekrona_links "$HOME/.config/ghostty" | tr '\n' ' ')"
   check assert "no vekrona symlink left under ~/.config/ghostty (vekrona ships no Ghostty config; found: ${ghostty_links:-none})" eq "$ghostty_links" ""
   check assert "~/.config/autostart/nvidia-settings-user.desktop links to $VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" \
