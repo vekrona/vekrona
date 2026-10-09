@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import Quickshell.Services.Pipewire
 import "Vekrona"
 import "."
 
@@ -23,70 +22,29 @@ BarPill {
         open: root.bar.openPopout === popout
         onDismissed: root.bar.openPopout = null
 
-        RowLayout {
-            spacing: VekronaTheme.space2
+        ColumnLayout {
+            Layout.preferredWidth: 24 * VekronaTheme.space4
+            spacing: 0
 
-            BarPill {
-                icon: "volume_off"
-                filled: Audio.muted
-                ariaName: "Mute"
-                onClicked: Audio.toggleMute()
-            }
-
-            Slider {
-                value: Audio.volume
-                ariaName: "Volume"
-                onMoved: fraction => Audio.setVolume(fraction)
-            }
-
-            Label {
-                style: VekronaTheme.type.label
-                text: Audio.percent + " %"
-            }
-        }
-
-        Repeater {
-            model: Audio.sinks
-
-            BarPill {
-                required property PwNode modelData
-
+            MediaCard {
+                id: card
                 Layout.fillWidth: true
-                icon: "speaker"
-                value: modelData.description
-                emphasized: modelData === Audio.sink
-                ariaName: "Output " + modelData.description
-                onClicked: Audio.selectSink(modelData)
+                visible: Audio.player !== null
+                onRaised: root.bar.openPopout = null
             }
-        }
 
-        RowLayout {
-            visible: Audio.player !== null
-            spacing: VekronaTheme.space1
+            Rule {
+                visible: card.visible
+            }
 
-            Label {
+            VolumeControl {
                 Layout.fillWidth: true
-                style: VekronaTheme.type.body
-                elide: Text.ElideRight
-                text: [Audio.player?.trackTitle, Audio.player?.trackArtist].filter(s => s).join(" - ")
             }
 
-            BarPill {
-                icon: "skip_previous"
-                ariaName: "Previous track"
-                onClicked: Audio.player.previous()
-            }
+            Rule {}
 
-            BarPill {
-                icon: Audio.player?.isPlaying ? "pause" : "play_arrow"
-                ariaName: "Play or pause"
-                onClicked: Audio.player.togglePlaying()
-            }
-
-            BarPill {
-                icon: "skip_next"
-                ariaName: "Next track"
-                onClicked: Audio.player.next()
+            OutputList {
+                Layout.fillWidth: true
             }
         }
     }
