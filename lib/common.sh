@@ -705,6 +705,7 @@ declare -A VEKRONA_REPO_KEY_FINGERPRINTS=(
   [claude-code]="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
   [mise]="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
   [1password]="3FEF9748469ADBE15DA7CA80AC2D62742012EA22"
+  [protonvpn-fedora-44]="6929133BDE1CE1CFA9EDB286D84176F6844830D4"
   [rpmfusion-free-fedora-44]="E9A491A3DE247814E7E067EAE06F8ECDD651FF2E"
   [rpmfusion-nonfree-fedora-44]="79BDB88F9BBF73910FD4095B6A2AF96194843C65"
 )
@@ -712,6 +713,9 @@ declare -A VEKRONA_REPO_KEY_FINGERPRINTS=(
 repo_key_name() { printf 'RPM-GPG-KEY-%s' "$1"; }
 
 rpmfusion_key_repo() { printf 'rpmfusion-%s-fedora-%s' "$1" "$(rpm -E %fedora)"; }
+
+# Proton signs each Fedora release's repo with its own key.
+protonvpn_key_repo() { printf 'protonvpn-fedora-%s' "$(rpm -E %fedora)"; }
 
 rpmfusion_release_url() {
   local section="$1"
@@ -1090,7 +1094,7 @@ VEKRONA_DESKTOP_PKGS=(
   geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver
   jq kanshi khal
   libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
-  python3 python3-gobject python3-pyyaml python3-vdf qalculate qt6ct quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
+  proton-vpn-cli proton-vpn-gtk-app python3 python3-gobject python3-pyyaml python3-vdf qalculate qt6ct quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd swayidle syncthing tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots
 )
