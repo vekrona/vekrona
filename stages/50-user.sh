@@ -75,8 +75,6 @@ if [[ -n "$(sway_socket)" ]]; then
   systemctl --user restart vekrona-idle.service || die "vekrona-idle.service failed to start"
   log "restarting vekrona-cliphist.service for the running sway session"
   systemctl --user restart vekrona-cliphist.service || die "vekrona-cliphist.service failed to start"
-  log "starting the weather and calendar timers for the running sway session"
-  systemctl --user start vekrona-weather.timer vekrona-calendar.timer || die "the weather and calendar timers failed to start"
   log "restarting vekrona-shell.service for the running sway session"
   systemctl --user restart vekrona-shell.service || die "vekrona-shell.service failed to start"
 fi
@@ -89,15 +87,51 @@ for retired in "$HOME/.config/systemd/user/sway-session.target.wants/dms.service
   "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service" \
   "$HOME/.config/systemd/user/dms.service.d" \
   "$HOME/.config/DankMaterialShell" "$HOME/.local/state/DankMaterialShell" "$HOME/.cache/DankMaterialShell" \
-  "$HOME/.config/gtk-3.0/dank-colors.css" "$HOME/.config/gtk-4.0/dank-colors.css"; do
+  "$HOME/.config/gtk-3.0/dank-colors.css" "$HOME/.config/gtk-4.0/dank-colors.css" \
+  "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell"; do
   if [[ -e "$retired" || -L "$retired" ]]; then
     log "removing: $retired (left by DankMaterialShell, which vekrona-shell replaced)"
+    chmod -R u+w "$retired" 2>/dev/null || true
     rm -rf "$retired"
     [[ ! -e "$retired" && ! -L "$retired" ]] || die "failed to remove $retired"
   else
     log "absent: $retired"
   fi
 done
+
+shopt -s nullglob
+removed_count=0
+if [[ -d "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell" ]]; then
+  for instance_dir in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell/by-id"/*/; do
+    [[ -d "$instance_dir" ]] || continue
+    instance_running=false
+    for pid_link in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell/by-pid"/*; do
+      [[ -L "$pid_link" ]] || continue
+      target="$(readlink "$pid_link")" || continue
+      if [[ "$target" == "$instance_dir" ]]; then
+        pid="${pid_link##*/}"
+        if kill -0 "$pid" 2>/dev/null; then
+          instance_running=true
+          break
+        fi
+      fi
+    done
+    if [[ "$instance_running" == false ]]; then
+      rm -rf "$instance_dir"
+      removed_count=$((removed_count + 1))
+    fi
+  done
+  for pid_link in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell/by-pid"/*; do
+    [[ -L "$pid_link" ]] || continue
+    target="$(readlink "$pid_link")" || continue
+    pid="${pid_link##*/}"
+    if [[ ! -d "$target" ]] || ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$pid_link"
+    fi
+  done
+  log "removed $removed_count dead Quickshell instance directories"
+fi
+shopt -u nullglob
 
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
@@ -182,6 +216,11 @@ done < <(vekrona_webapp_profile_dirs)
 "$VEKRONA_ROOT/bin/vekrona-render-theme" firefox
 
 ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
+
+if [[ -n "$(sway_socket)" ]]; then
+  log "starting the weather and calendar timers for the running sway session"
+  systemctl --user start vekrona-weather.timer vekrona-calendar.timer || die "the weather and calendar timers failed to start"
+fi
 
 # bin/vekrona-lock starts it as `qs -c vekrona-lock`, which looks under ~/.config/quickshell.
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-lock" "$HOME/.config/quickshell/vekrona-lock"

@@ -365,6 +365,7 @@ if ran 50-user; then
   check assert "vekrona-idle.service enabled" user_unit_enabled vekrona-idle.service
   check assert "vekrona-shell.service active while sway runs" present_iff sway_runs systemctl --user is-active --quiet vekrona-shell.service
   check assert "~/.config/DankMaterialShell is absent" file_absent "$HOME/.config/DankMaterialShell"
+  check assert "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell is absent" file_absent "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell"
   check assert "vekrona-night.service linked" file_exists "$HOME/.config/systemd/user/vekrona-night.service"
   check assert "vekrona-weather.timer enabled" user_unit_enabled vekrona-weather.timer
   check assert "vekrona-calendar.timer enabled" user_unit_enabled vekrona-calendar.timer
