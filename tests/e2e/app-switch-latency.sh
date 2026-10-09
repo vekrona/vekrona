@@ -31,11 +31,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
+explain_missing_focus() {
+  warn "$1 never took focus; focused app: $(focused_app)"
+  warn "session locked: $(vekrona-dev sh busctl get-property org.freedesktop.login1 /org/freedesktop/login1/session/auto org.freedesktop.login1.Session LockedHint)"
+  warn "windows: $(vekrona-dev sh bash -c "swaymsg -t get_tree | jq -c '[recurse(.nodes[]?, .floating_nodes[]?) | select(.pid != null) | {app_id, focused}]'")"
+  warn "$1 log: $(vekrona-dev run cat "/tmp/vekrona-e2e-$1.log")"
+  exit 1
+}
+
 vekrona-dev session
 kill_guest -x foot
 for app in switch-first switch-second; do
   vekrona-dev spawn "/tmp/vekrona-e2e-$app.log" -- foot --app-id="$app" -o "colors.background=$APP_BACKGROUND"
-  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- focused_is "$app"
+  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- focused_is "$app" || explain_missing_focus "$app"
 done
 
 vekrona-dev spawn "$GUEST_PROBE_OUT" -- python3 -B "$GUEST_PROBE"
