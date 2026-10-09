@@ -40,6 +40,7 @@ ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-app-switch.service" "$
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-shell" "$HOME/.config/quickshell/vekrona-shell"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-shell.service" "$HOME/.config/systemd/user/vekrona-shell.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-cliphist.service" "$HOME/.config/systemd/user/vekrona-cliphist.service"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-idle.service" "$HOME/.config/systemd/user/vekrona-idle.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-night.service" "$HOME/.config/systemd/user/vekrona-night.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-weather.service" "$HOME/.config/systemd/user/vekrona-weather.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-weather.timer" "$HOME/.config/systemd/user/vekrona-weather.timer"
@@ -67,11 +68,13 @@ fi
 "$VEKRONA_ROOT/bin/vekrona-render-theme"
 
 systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-weather.timer vekrona-calendar.timer
+ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer
 # Enabling only wires the unit into the next login; a live session needs the overlay now.
 if [[ -n "$(sway_socket)" ]]; then
   log "restarting vekrona-app-switch.service for the running sway session"
   systemctl --user restart vekrona-app-switch.service || die "vekrona-app-switch.service failed to start"
+  log "restarting vekrona-idle.service for the running sway session"
+  systemctl --user restart vekrona-idle.service || die "vekrona-idle.service failed to start"
   log "restarting vekrona-cliphist.service for the running sway session"
   systemctl --user restart vekrona-cliphist.service || die "vekrona-cliphist.service failed to start"
   log "restarting vekrona-shell.service for the running sway session"

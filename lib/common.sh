@@ -998,7 +998,7 @@ VEKRONA_DESKTOP_PKGS=(
   jq kanshi khal
   libnotify mangohud matugen mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
   python3 python3-gobject python3-pyyaml python3-vdf qt6ct quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
-  sway-systemd tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
+  sway-systemd swayidle tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xremap-wlroots
 )
 

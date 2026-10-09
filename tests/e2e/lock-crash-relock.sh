@@ -22,7 +22,7 @@ crash_locker() {
 }
 
 lock_screen() {
-  vekrona-dev sh dms ipc call lock lock
+  vekrona-dev sh vekrona-lock
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- lock_active
 }
 

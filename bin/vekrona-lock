@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# The single entry point for locking the screen. DMS runs it on every lock
-# (customPowerActionLock). One Quickshell process per lock, kept by a
-# transient user unit: it exits on unlock, and a crashed locker restarts and
-# locks again. A locker that keeps crashing must never be given up on (the unit
+# The single entry point for locking the screen. The sway bindings, the power
+# menu and swayidle (idle timeout, before-sleep and logind's lock event) run
+# it. One Quickshell process per lock, kept by a transient user unit: it exits
+# on unlock, and a crashed locker restarts and locks again. A locker that keeps crashing must never be given up on (the unit
 # would fail, be collected, and leave the compositor locked red with no locker),
 # so the restart rate limit is off.
 set -euo pipefail

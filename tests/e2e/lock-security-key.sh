@@ -29,7 +29,7 @@ locked_hint() { vekrona-dev sh loginctl show-session auto -p LockedHint --value;
 export -f lock_text_shown lock_active lock_inactive key_watcher_running password_shown key_prompt_shown key_prompt_hidden
 
 lock_screen() {
-  vekrona-dev sh dms ipc call lock lock
+  vekrona-dev sh vekrona-lock
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- lock_active
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- password_shown
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- key_watcher_running

@@ -34,9 +34,9 @@ bindsym --no-repeat --to-code $hyper+v exec qs -c vekrona-shell ipc call clipboa
 #: Toggle notification center
 bindsym --no-repeat --to-code $hyper+n exec qs -c vekrona-shell ipc call notifications toggle
 #: Lock screen
-bindsym --no-repeat $hyper+Escape exec dms ipc call lock lock
+bindsym --no-repeat $hyper+Escape exec vekrona-lock
 #: Lock screen
-bindsym --no-repeat --to-code Mod4+Ctrl+q exec dms ipc call lock lock
+bindsym --no-repeat --to-code Mod4+Ctrl+q exec vekrona-lock
 #: Toggle power menu
 bindsym --no-repeat $hyper+BackSpace exec qs -c vekrona-shell ipc call powermenu toggle
 #: Show keybindings help

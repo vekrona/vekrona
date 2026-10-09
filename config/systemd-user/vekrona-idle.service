@@ -1,0 +1,11 @@
+[Unit]
+Description=Vekrona idle handling (lock, screen off, suspend)
+PartOf=sway-session.target
+After=sway-session.target
+
+[Service]
+ExecStart=/usr/bin/swayidle -w timeout 300 vekrona-lock timeout 600 'swaymsg "output * dpms off"' resume 'swaymsg "output * dpms on"' timeout 1800 'systemctl suspend' before-sleep vekrona-lock lock vekrona-lock
+Restart=on-failure
+
+[Install]
+WantedBy=sway-session.target

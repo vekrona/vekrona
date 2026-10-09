@@ -357,6 +357,7 @@ if ran 50-user; then
   check assert "vekrona-shell.service enabled" user_unit_enabled vekrona-shell.service
   check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
   check assert "vekrona-cliphist.service enabled" user_unit_enabled vekrona-cliphist.service
+  check assert "vekrona-idle.service enabled" user_unit_enabled vekrona-idle.service
   check assert "vekrona-night.service linked" file_exists "$HOME/.config/systemd/user/vekrona-night.service"
   check assert "vekrona-weather.timer enabled" user_unit_enabled vekrona-weather.timer
   check assert "vekrona-calendar.timer enabled" user_unit_enabled vekrona-calendar.timer
