@@ -353,14 +353,11 @@ ShellRoot {
                             }
                         }
 
-                        // Focus ring: offset so it lands on the surface, not on the control.
-                        Rectangle {
-                            visible: field.activeFocus
-                            anchors.fill: parent
-                            anchors.margins: -(VekronaTheme.focusOffset + VekronaTheme.borderFocus)
-                            color: "transparent"
-                            border.width: VekronaTheme.borderFocus
-                            border.color: VekronaTheme.dark.focus
+                        // The lock screen is always dark, whatever the desktop mode.
+                        FocusRing {
+                            shown: field.activeFocus
+                            outer: VekronaTheme.dark.focus
+                            inner: VekronaTheme.dark.focusInner
                         }
                     }
                 }

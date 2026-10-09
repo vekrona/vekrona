@@ -26,6 +26,8 @@ Singleton {
         readonly property color onAccent: tokens.onAccent
         readonly property color accentInk: tokens.accentInk
         readonly property color focus: tokens.focus
+        readonly property color focusInner: tokens.focusInner
+        readonly property color selected: tokens.selected
         readonly property color danger: tokens.danger
         readonly property color onDanger: tokens.onDanger
         readonly property color dangerInk: tokens.dangerInk
@@ -47,7 +49,7 @@ Singleton {
             bg: "black", surface1: "black", surface2: "black", surface3: "black",
             ink: "white", inkMuted: "white", inkDisabled: "white",
             line: "white", lineStrong: "white",
-            accent: "white", onAccent: "black", accentInk: "white", focus: "white",
+            accent: "white", onAccent: "black", accentInk: "white", focus: "white", focusInner: "white", selected: "black",
             danger: "white", onDanger: "black", dangerInk: "white",
             warning: "white", onWarning: "black", success: "white", onSuccess: "black",
             info: "white", onInfo: "black", scrim: "black"
@@ -57,7 +59,7 @@ Singleton {
             mode: "dark",
             metrics: {
                 spacing: { space1: 4, space2: 8, space3: 12, space4: 16, space6: 24, space8: 32 },
-                border: { hair: 1, control: 1, focus: 1, indicator: 2, focusOffset: 2 },
+                border: { hair: 1, control: 1, focus: 1 },
                 size: { target: 32, bar: 36, iconS: 18, iconM: 24, iconL: 48, iconXl: 72 },
                 opacity: { scrim: 0.6 },
                 motion: { fast: 120, popover: 200 },
@@ -136,8 +138,6 @@ Singleton {
     readonly property int borderHair: doc.metrics.border.hair
     readonly property int borderControl: doc.metrics.border.control
     readonly property int borderFocus: doc.metrics.border.focus
-    readonly property int borderIndicator: doc.metrics.border.indicator
-    readonly property int focusOffset: doc.metrics.border.focusOffset
 
     readonly property int sizeTarget: doc.metrics.size.target
     readonly property int sizeBar: doc.metrics.size.bar

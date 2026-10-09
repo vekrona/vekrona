@@ -70,9 +70,7 @@ Row {
     function labelColor(focused, occupied, urgent) {
         if (urgent)
             return VekronaTheme.c.dangerInk;
-        if (focused)
-            return VekronaTheme.c.accentInk;
-        return occupied ? VekronaTheme.c.ink : VekronaTheme.c.inkMuted;
+        return focused || occupied ? VekronaTheme.c.ink : VekronaTheme.c.inkMuted;
     }
 
     Process {
@@ -120,6 +118,10 @@ Row {
                 visible: mouse.containsMouse
             }
 
+            Selection {
+                shown: desktop.focused
+            }
+
             Label {
                 id: label
                 anchors.centerIn: parent
@@ -127,15 +129,6 @@ Row {
                 font.weight: desktop.focused ? Font.DemiBold : Font.Normal
                 text: desktop.modelData
                 color: root.labelColor(desktop.focused, root.occupiedNumbers.includes(desktop.modelData), desktop.workspace?.urgent ?? false)
-            }
-
-            Rectangle {
-                visible: desktop.focused
-                anchors.bottom: parent.bottom
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: label.implicitWidth
-                height: VekronaTheme.borderIndicator
-                color: VekronaTheme.c.accent
             }
 
             MouseArea {

@@ -33,12 +33,11 @@ ShellRoot {
             "line": "white",
             "ink": "white",
             "ink-muted": "white",
-            "accent": "white",
+            "selected": "black",
             "space-2": 8,
             "space-4": 16,
             "size-icon-xl": 72,
             "border-hair": 1,
-            "border-indicator": 2,
             "opacity-scrim": 0.6
         })
     readonly property var fallbackStyle: ({
@@ -151,7 +150,6 @@ ShellRoot {
     readonly property real space2: token("space-2")
     readonly property real space4: token("space-4")
     readonly property real iconXl: token("size-icon-xl")
-    readonly property real borderIndicator: token("border-indicator")
 
     function track(node) {
         const known = windows[node.id];
@@ -328,7 +326,13 @@ ShellRoot {
 
                         width: root.iconXl + 2 * root.space4
                         height: root.space2 + root.iconXl + root.space2
-                            + root.labelStyle.line + root.borderIndicator + root.space2
+                            + root.labelStyle.line + root.space2
+
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: tile.current
+                            color: root.token("selected")
+                        }
 
                         Image {
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -355,15 +359,6 @@ ShellRoot {
                             font.pixelSize: root.labelStyle.size
                             font.weight: root.labelStyle.weight
                             font.letterSpacing: root.labelStyle.tracking * root.labelStyle.size
-                        }
-
-                        Rectangle {
-                            visible: tile.current
-                            anchors.horizontalCenter: label.horizontalCenter
-                            y: label.y + label.height
-                            width: Math.min(label.contentWidth, label.width)
-                            height: root.borderIndicator
-                            color: root.token("accent")
                         }
 
                         MouseArea {

@@ -166,6 +166,10 @@ PanelWindow {
                         width: ListView.view.width
                         height: VekronaTheme.sizeTarget
 
+                        Selection {
+                            shown: row.ListView.isCurrentItem
+                        }
+
                         Row {
                             x: VekronaTheme.space2
                             width: parent.width - 2 * VekronaTheme.space2
@@ -194,15 +198,6 @@ PanelWindow {
                                 elide: Text.ElideRight
                                 text: row.modelData.label
                             }
-                        }
-
-                        Rectangle {
-                            visible: row.ListView.isCurrentItem
-                            x: VekronaTheme.space2
-                            y: parent.height - height
-                            width: parent.width - 2 * VekronaTheme.space2
-                            height: VekronaTheme.borderIndicator
-                            color: VekronaTheme.c.accent
                         }
 
                         MouseArea {

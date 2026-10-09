@@ -30,6 +30,10 @@ Item {
         color: mouse.pressed ? VekronaTheme.c.surface3 : mouse.containsMouse ? VekronaTheme.c.surface2 : "transparent"
     }
 
+    Selection {
+        shown: root.emphasized
+    }
+
     Row {
         id: content
         x: VekronaTheme.space2
@@ -55,15 +59,6 @@ Item {
             style: VekronaTheme.type.label
             text: root.value
         }
-    }
-
-    Rectangle {
-        visible: root.emphasized
-        x: content.x
-        y: parent.height - height
-        width: content.width
-        height: VekronaTheme.borderIndicator
-        color: VekronaTheme.c.accent
     }
 
     FocusRing {

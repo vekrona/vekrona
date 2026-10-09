@@ -135,21 +135,15 @@ BarPill {
                     Layout.preferredWidth: VekronaTheme.sizeTarget
                     Layout.preferredHeight: VekronaTheme.sizeTarget
 
+                    Selection {
+                        shown: root.isToday(parent.day)
+                    }
+
                     Label {
-                        id: dayLabel
                         anchors.centerIn: parent
                         visible: parent.day >= 1
                         style: root.isToday(parent.day) ? VekronaTheme.type.bodyStrong : VekronaTheme.type.body
                         text: parent.day
-                    }
-
-                    Rectangle {
-                        visible: root.isToday(parent.day)
-                        x: dayLabel.x
-                        y: dayLabel.y + dayLabel.height
-                        width: dayLabel.width
-                        height: VekronaTheme.borderIndicator
-                        color: VekronaTheme.c.accent
                     }
                 }
             }
