@@ -393,8 +393,8 @@ ensure_system_unit() {
 }
 
 # unit_state <var> is-active|is-enabled <unit> [systemctl flags]  Stores the state word systemctl prints. Both verbs
-# exit non-zero for every state but active/enabled (is-active: 3 inactive, 4 not found; is-enabled: 1 disabled/masked/
-# static, 4 not found) and still print the state. Any other status, or output that is not one state word (an
+# print the state even when they exit non-zero (is-active: 3 inactive, 4 not found; is-enabled: 1 disabled, masked or
+# linked, 4 not found; static, alias and indirect exit 0). Any other status, or output that is not one state word (an
 # unreachable bus, for one), means systemctl itself failed. The caller's shell must run this, not a $(...) subshell,
 # for the die to stop the install.
 unit_state() {
