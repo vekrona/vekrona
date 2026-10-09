@@ -1,0 +1,94 @@
+# Copy this file to ~/.config/vdirsyncer/config, keep only the providers you use, and fill in the placeholders.
+# The file holds secrets, so it is yours and Vekrona never overwrites it. docs/calendar.md has the details.
+
+[general]
+status_path = "~/.local/share/vdirsyncer/status/"
+
+# Proton Calendar: web app -> Settings -> Calendars -> Share via link -> "Full view" (read-only).
+
+[pair proton]
+a = "proton_remote"
+b = "proton_local"
+collections = null
+
+[storage proton_remote]
+type = "http"
+url = "https://calendar.proton.me/api/calendar/v1/url/PLACEHOLDER/calendar.ics?CacheKey=PLACEHOLDER&PassphraseKey=PLACEHOLDER"
+read_only = true
+
+[storage proton_local]
+type = "filesystem"
+path = "~/.local/share/vekrona/calendars/proton/"
+fileext = ".ics"
+
+# Google Calendar: Settings -> your calendar -> "Secret address in iCal format" (read-only; anyone with the URL can read the calendar).
+
+[pair google]
+a = "google_remote"
+b = "google_local"
+collections = null
+
+[storage google_remote]
+type = "http"
+url = "https://calendar.google.com/calendar/ical/PLACEHOLDER/private-PLACEHOLDER/basic.ics"
+read_only = true
+
+[storage google_local]
+type = "filesystem"
+path = "~/.local/share/vekrona/calendars/google/"
+fileext = ".ics"
+
+# iCloud: appleid.apple.com -> Sign-In and Security -> App-Specific Passwords.
+
+[pair icloud]
+a = "icloud_remote"
+b = "icloud_local"
+collections = ["from a"]
+conflict_resolution = "a wins"
+
+[storage icloud_remote]
+type = "caldav"
+url = "https://caldav.icloud.com/"
+username = "APPLE_ID_EMAIL"
+password = "APP_SPECIFIC_PASSWORD"
+
+[storage icloud_local]
+type = "filesystem"
+path = "~/.local/share/vekrona/calendars/icloud/"
+fileext = ".ics"
+
+# Nextcloud: Settings -> Security -> Devices & sessions -> create an app password.
+
+[pair nextcloud]
+a = "nextcloud_remote"
+b = "nextcloud_local"
+collections = ["from a"]
+conflict_resolution = "a wins"
+
+[storage nextcloud_remote]
+type = "caldav"
+url = "https://HOST/remote.php/dav"
+username = "USERNAME"
+password = "APP_PASSWORD"
+
+[storage nextcloud_local]
+type = "filesystem"
+path = "~/.local/share/vekrona/calendars/nextcloud/"
+fileext = ".ics"
+
+# Microsoft: Outlook on the web -> Settings -> Calendar -> Shared calendars -> Publish a calendar -> ICS link (read-only).
+
+[pair microsoft]
+a = "microsoft_remote"
+b = "microsoft_local"
+collections = null
+
+[storage microsoft_remote]
+type = "http"
+url = "https://outlook.office365.com/owa/calendar/PLACEHOLDER/PLACEHOLDER/calendar.ics"
+read_only = true
+
+[storage microsoft_local]
+type = "filesystem"
+path = "~/.local/share/vekrona/calendars/microsoft/"
+fileext = ".ics"

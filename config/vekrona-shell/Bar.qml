@@ -68,6 +68,10 @@ PanelWindow {
 
         Agent {}
 
+        Calendar {
+            bar: root
+        }
+
         Clock {}
     }
 

@@ -1,0 +1,7 @@
+[Unit]
+Description=Vekrona calendar sync for the bar
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/vekrona-calendar sync
+TimeoutStartSec=120

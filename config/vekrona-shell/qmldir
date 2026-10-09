@@ -11,3 +11,4 @@ Network 1.0 Network.qml
 Battery 1.0 Battery.qml
 TintedIcon 1.0 TintedIcon.qml
 Weather 1.0 Weather.qml
+Calendar 1.0 Calendar.qml

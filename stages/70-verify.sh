@@ -357,6 +357,8 @@ if ran 50-user; then
   check assert "vekrona-shell.service enabled" user_unit_enabled vekrona-shell.service
   check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
   check assert "vekrona-weather.timer enabled" user_unit_enabled vekrona-weather.timer
+  check assert "vekrona-calendar.timer enabled" user_unit_enabled vekrona-calendar.timer
+  check assert "khal config linked" eq "$(readlink -f "$HOME/.config/khal/config")" "$(readlink -f "$VEKRONA_ROOT/config/khal/config")"
   check assert_file_contains /etc/geoclue/conf.d/90-vekrona.conf "^allowed=true\$"
   check assert "vekrona-errors.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors.service"
   check assert "vekrona-errors-failed.service linked" file_exists "$HOME/.config/systemd/user/vekrona-errors-failed.service"

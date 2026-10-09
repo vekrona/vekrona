@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROG="$(basename "$0")"
+HORIZON=31d
+CALENDAR_ROOT="$HOME/.local/share/vekrona/calendars"
+VDIRSYNCER_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/vdirsyncer/config"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona"
+
+usage() {
+  printf 'usage: %s sync|render\n' "$PROG" >&2
+  exit 1
+}
+
+fail() {
+  printf '%s: %s\n' "$PROG" "$*" >&2
+  exit 1
+}
+
+events_json() {
+  if [[ -z "$(find "$CALENDAR_ROOT" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]]; then
+    echo '[]'
+    return
+  fi
+  khal list --json title --json start --json end --json all-day --json location --json calendar \
+    --day-format '' today "$HORIZON" |
+    jq -s 'add // [] | map(. + {allDay: (.["all-day"] == "True")} | del(.["all-day"])) | unique_by([.start, .end, .title, .calendar]) | sort_by(.start)'
+}
+
+render() {
+  mkdir -p "$CALENDAR_ROOT" "$STATE_DIR"
+  local configured=false events temp
+  [[ -f "$VDIRSYNCER_CONFIG" ]] && configured=true
+  events="$(events_json)"
+  temp="$(mktemp "$STATE_DIR/.calendar.XXXXXX")"
+  if ! jq -n --argjson configured "$configured" --argjson events "$events" \
+    '{configured: $configured, events: $events}' >"$temp"; then
+    rm -f "$temp"
+    fail "cannot write the calendar"
+  fi
+  mv "$temp" "$STATE_DIR/calendar.json"
+}
+
+sync() {
+  local status=0 output
+  if [[ -f "$VDIRSYNCER_CONFIG" ]]; then
+    output="$(mktemp)"
+    { vdirsyncer metasync && vdirsyncer sync; } >"$output" 2>&1 || status=$?
+    cat "$output" >&2
+    if ((status != 0)) && grep -q 'vdirsyncer discover' "$output"; then
+      printf '%s: run `vdirsyncer discover` once by hand, then start vekrona-calendar.service again\n' "$PROG" >&2
+    fi
+    rm -f "$output"
+  fi
+  render
+  exit "$status"
+}
+
+[[ $# -eq 1 ]] || usage
+case "$1" in
+  render) render ;;
+  sync) sync ;;
+  *) usage ;;
+esac
