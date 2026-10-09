@@ -12,8 +12,15 @@ Singleton {
         return terminal.concat(argv);
     }
 
+    readonly property var transientUnit: ["systemd-run", "--user", "--collect", "--quiet", "--property=ExitType=cgroup"]
+
     function detached(argv: list<string>): void {
-        capture(["systemd-run", "--user", "--collect", "--quiet", "--property=ExitType=cgroup", "--"].concat(argv), null);
+        capture(transientUnit.concat(["--"], argv), null);
+    }
+
+    // Like detached(), but waits for the unit to finish and calls onSuccess if it exited 0.
+    function detachedThen(argv: list<string>, onSuccess): void {
+        capture(transientUnit.concat(["--wait", "--"], argv), onSuccess);
     }
 
     function capture(argv: list<string>, onSuccess): void {

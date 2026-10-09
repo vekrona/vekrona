@@ -8,6 +8,7 @@ Singleton {
     id: root
 
     readonly property PwNode sink: Pipewire.defaultAudioSink
+    readonly property var sinks: Pipewire.nodes.values.filter(node => node.type === PwNodeType.AudioSink)
     readonly property real volume: sink?.audio?.volume ?? 0
     readonly property bool muted: sink?.audio?.muted ?? true
     readonly property int percent: Math.round(100 * volume)
@@ -20,6 +21,10 @@ Singleton {
             return;
         }
         sink.audio.volume = Math.max(0, Math.min(1, fraction));
+    }
+
+    function selectSink(node: PwNode): void {
+        Pipewire.preferredDefaultAudioSink = node;
     }
 
     function toggleMute(): void {

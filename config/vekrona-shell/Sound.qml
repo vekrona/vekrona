@@ -9,7 +9,6 @@ BarPill {
 
     required property var bar
     readonly property real wheelStep: 0.05
-    readonly property var sinks: Pipewire.nodes.values.filter(node => node.type === PwNodeType.AudioSink)
 
     icon: Audio.glyph
     value: Audio.percent + " %"
@@ -47,7 +46,7 @@ BarPill {
         }
 
         Repeater {
-            model: root.sinks
+            model: Audio.sinks
 
             BarPill {
                 required property PwNode modelData
@@ -57,7 +56,7 @@ BarPill {
                 value: modelData.description
                 emphasized: modelData === Audio.sink
                 ariaName: "Output " + modelData.description
-                onClicked: Pipewire.preferredDefaultAudioSink = modelData
+                onClicked: Audio.selectSink(modelData)
             }
         }
 

@@ -1,31 +1,18 @@
 import QtQuick
 import QtQuick.Layouts
-import Quickshell.Bluetooth
 import Quickshell.Networking
 import "Vekrona"
+import "."
 
 BarPill {
     id: root
 
     required property var bar
-    readonly property var devices: Networking.devices.values
-    readonly property var wifiNetworks: devices
-        .filter(device => device.type === DeviceType.Wifi)
-        .reduce((all, device) => all.concat(device.networks.values), [])
-        .sort((a, b) => b.signalStrength - a.signalStrength)
-    readonly property bool wired: devices.some(device => device.type === DeviceType.Wired && device.connected)
-    readonly property var connectedWifi: wifiNetworks.find(network => network.connected) ?? null
-    readonly property var adapter: Bluetooth.defaultAdapter
-    readonly property var pairedDevices: adapter ? adapter.devices.values.filter(device => device.paired) : []
     property var passwordFor: null
     property string failure: ""
 
-    function wifiGlyph(strength: real): string {
-        return strength >= 0.66 ? "wifi" : strength >= 0.33 ? "wifi_2_bar" : "wifi_1_bar";
-    }
-
     function connectionFailed(network, reason): void {
-        failure = network.name + ": " + ConnectionFailReason.toString(reason);
+        failure = Wireless.failureText(network, reason);
         console.error("Wi-Fi " + failure);
         if (network.security !== WifiSecurityType.Open) {
             passwordFor = network;
@@ -35,17 +22,15 @@ BarPill {
 
     function chooseNetwork(network): void {
         failure = "";
-        if (network.connected) {
-            network.disconnect();
-        } else if (network.known || network.security === WifiSecurityType.Open) {
-            network.connect();
-        } else {
+        if (Wireless.needsPassword(network)) {
             passwordFor = network;
             password.forceActiveFocus();
+        } else {
+            Wireless.toggleConnection(network);
         }
     }
 
-    icon: wired ? "lan" : connectedWifi ? wifiGlyph(connectedWifi.signalStrength) : "wifi_off"
+    icon: Wireless.wired ? "lan" : Wireless.connectedWifi ? Wireless.wifiGlyph(Wireless.connectedWifi.signalStrength) : "wifi_off"
     ariaName: "Network"
     onClicked: bar.togglePopout(popout)
 
@@ -60,13 +45,13 @@ BarPill {
         }
 
         Repeater {
-            model: root.wifiNetworks
+            model: Wireless.wifiNetworks
 
             BarPill {
                 required property var modelData
 
                 Layout.fillWidth: true
-                icon: root.wifiGlyph(modelData.signalStrength)
+                icon: Wireless.wifiGlyph(modelData.signalStrength)
                 value: modelData.name
                 emphasized: modelData.connected
                 ariaName: "Wi-Fi " + modelData.name
@@ -117,24 +102,24 @@ BarPill {
         }
 
         Rectangle {
-            visible: root.adapter !== null
+            visible: Wireless.adapter !== null
             Layout.fillWidth: true
             implicitHeight: VekronaTheme.borderHair
             color: VekronaTheme.c.line
         }
 
         BarPill {
-            visible: root.adapter !== null
+            visible: Wireless.adapter !== null
             Layout.fillWidth: true
-            icon: root.adapter?.enabled ? "bluetooth" : "bluetooth_disabled"
+            icon: Wireless.bluetoothEnabled ? "bluetooth" : "bluetooth_disabled"
             value: "Bluetooth"
-            emphasized: root.adapter?.enabled ?? false
+            emphasized: Wireless.bluetoothEnabled
             ariaName: "Bluetooth power"
-            onClicked: root.adapter.enabled = !root.adapter.enabled
+            onClicked: Wireless.toggleBluetooth()
         }
 
         Repeater {
-            model: root.pairedDevices
+            model: Wireless.pairedDevices
 
             BarPill {
                 required property var modelData
