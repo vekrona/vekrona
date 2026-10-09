@@ -43,6 +43,8 @@ ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-weather.timer" "$HOME/
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-calendar.service" "$HOME/.config/systemd/user/vekrona-calendar.service"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-calendar.timer" "$HOME/.config/systemd/user/vekrona-calendar.timer"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-lock.service" "$HOME/.config/systemd/user/vekrona-lock.service"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-update-notify.service" "$HOME/.config/systemd/user/vekrona-update-notify.service"
+ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-update-notify.path" "$HOME/.config/systemd/user/vekrona-update-notify.path"
 ensure_symlink "$VEKRONA_ROOT/config/khal/config" "$HOME/.config/khal/config"
 ensure_symlink "$VEKRONA_ROOT/config/vdirsyncer/config.example" "$HOME/.config/vdirsyncer/config.example"
 ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$HOME/.config/systemd/user/tailscale-systray.service"
@@ -218,7 +220,7 @@ prune_vekrona_links "${link_dirs[@]}"
 # Everything these units read when they start is linked or generated above this line; add new files before it.
 prune_dead_quickshell_instances "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell"
 systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer syncthing.service
+ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path vekrona-update-notify.service syncthing.service
 # The syncthing webapp talks to this daemon, so it must not wait for the next login.
 systemctl --user start syncthing.service || die "syncthing.service failed to start"
 # Enabling only wires a unit into the next login; a live session needs it running now, on the files linked above.
@@ -227,8 +229,8 @@ if [[ -n "$(sway_socket)" ]]; then
     log "restarting $unit.service for the running sway session"
     systemctl --user restart "$unit.service" || die "$unit.service failed to start"
   done
-  log "starting the weather and calendar timers for the running sway session"
-  systemctl --user start vekrona-weather.timer vekrona-calendar.timer || die "the weather and calendar timers failed to start"
+  log "starting the weather and calendar timers and the update watcher for the running sway session"
+  systemctl --user start vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path || die "the weather and calendar timers and the update watcher failed to start"
 fi
 
 require_cmd nix

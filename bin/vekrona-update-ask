@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""Ask a question with a desktop notification and print the answer on one line: the key of the clicked
+action, `timeout` (the notification is closed here, because vekrona-shell keeps notifications until someone
+dismisses them), or `closed` (dismissed, or the notification daemon went away)."""
+import argparse
+import os
+import re
+import sys
+import xml.sax.saxutils
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import vekrona_cli
+
+import gi
+
+gi.require_version("Gio", "2.0")
+gi.require_version("GLib", "2.0")
+from gi.repository import Gio, GLib
+
+PROG = "vekrona-update-ask"
+
+NOTIFICATIONS_NAME = "org.freedesktop.Notifications"
+NOTIFICATIONS_PATH = "/org/freedesktop/Notifications"
+BUS_CALL_TIMEOUT_MS = 5000
+URGENCY_NORMAL = 1
+
+KEY_RE = re.compile(r"[A-Za-z0-9_.-]+")
+ANSWERS_THAT_ARE_NOT_KEYS = ("timeout", "closed")
+
+die = vekrona_cli.make_die(PROG, __file__, report=False)
+
+
+def parse_action(text):
+    key, separator, label = text.partition("=")
+    if not separator or not label or not KEY_RE.fullmatch(key) or key in ANSWERS_THAT_ARE_NOT_KEYS:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not KEY=LABEL with a KEY of letters, digits, _ . - (not "
+            f"{' or '.join(ANSWERS_THAT_ARE_NOT_KEYS)})")
+    return key, label
+
+
+def positive_seconds(text):
+    try:
+        seconds = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number of seconds")
+    if not 0 < seconds < float("inf"):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a positive number of seconds")
+    return seconds
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog=PROG, description=__doc__)
+    parser.add_argument("--timeout", type=positive_seconds, required=True, metavar="SECONDS")
+    parser.add_argument("--title", required=True)
+    parser.add_argument("--body", required=True)
+    parser.add_argument("--action", type=parse_action, action="append", required=True, metavar="KEY=LABEL",
+                        dest="actions")
+    args = parser.parse_args(argv)
+    keys = [key for key, _ in args.actions]
+    if len(set(keys)) != len(keys):
+        parser.error("--action keys must be unique")
+    return args
+
+
+def call_daemon(bus, method, parameters, reply_type):
+    result = bus.call_sync(
+        NOTIFICATIONS_NAME, NOTIFICATIONS_PATH, NOTIFICATIONS_NAME, method, parameters,
+        GLib.VariantType(reply_type) if reply_type else None, Gio.DBusCallFlags.NONE, BUS_CALL_TIMEOUT_MS, None)
+    return result.unpack() if result is not None else None
+
+
+def daemon_renders_markup(bus):
+    try:
+        return "body-markup" in call_daemon(bus, "GetCapabilities", None, "(as)")[0]
+    except GLib.Error as exc:
+        print(f"{PROG}: cannot ask the notification daemon whether it renders markup, escaping the body: {exc}",
+              file=sys.stderr)
+        return True
+
+
+class Question:
+    """One notification and the first thing that answers it. `answer` is None until then."""
+
+    def __init__(self, bus, loop, keys):
+        self.bus = bus
+        self.loop = loop
+        self.keys = keys
+        self.notification_id = None
+        self.daemon = None
+        self.answer = None
+        self.error = None
+
+    def subscribe(self):
+        for interface, member, handler in (
+                (NOTIFICATIONS_NAME, "ActionInvoked", self.on_action_invoked),
+                (NOTIFICATIONS_NAME, "NotificationClosed", self.on_notification_closed)):
+            self.bus.signal_subscribe(None, interface, member, NOTIFICATIONS_PATH, None,
+                                      Gio.DBusSignalFlags.NONE, handler, None)
+        self.bus.signal_subscribe("org.freedesktop.DBus", "org.freedesktop.DBus", "NameOwnerChanged",
+                                  "/org/freedesktop/DBus", NOTIFICATIONS_NAME, Gio.DBusSignalFlags.NONE,
+                                  self.on_name_owner_changed, None)
+
+    def send(self, title, body, actions):
+        if daemon_renders_markup(self.bus):
+            body = xml.sax.saxutils.escape(body)
+        flat_actions = [part for key, label in actions for part in (key, label)]
+        parameters = GLib.Variant(
+            "(susssasa{sv}i)",
+            ("vekrona", 0, "", title, body, flat_actions, {"urgency": GLib.Variant("y", URGENCY_NORMAL)}, -1))
+        # The reply's sender is the unique name of the daemon that shows the notification, which no later
+        # lookup of the well-known name can promise after a restart.
+        message = Gio.DBusMessage.new_method_call(
+            NOTIFICATIONS_NAME, NOTIFICATIONS_PATH, NOTIFICATIONS_NAME, "Notify")
+        message.set_body(parameters)
+        reply, _serial = self.bus.send_message_with_reply_sync(
+            message, Gio.DBusSendMessageFlags.NONE, BUS_CALL_TIMEOUT_MS, None)
+        if reply.get_message_type() == Gio.DBusMessageType.ERROR:
+            reply.to_gerror()
+        self.notification_id = reply.get_body().unpack()[0]
+        self.daemon = reply.get_sender()
+
+    def finish(self, answer):
+        if self.answer is None and self.error is None:
+            self.answer = answer
+            self.loop.quit()
+
+    def fail(self, message):
+        if self.answer is None and self.error is None:
+            self.error = message
+            self.loop.quit()
+
+    def from_daemon(self, sender):
+        return sender == self.daemon
+
+    def on_action_invoked(self, connection, sender, path, interface, signal, params, user_data):
+        notification_id, key = params.unpack()
+        if self.from_daemon(sender) and notification_id == self.notification_id and key in self.keys:
+            self.finish(key)
+
+    def on_notification_closed(self, connection, sender, path, interface, signal, params, user_data):
+        notification_id = params.unpack()[0]
+        if self.from_daemon(sender) and notification_id == self.notification_id:
+            self.finish("closed")
+
+    def on_name_owner_changed(self, connection, sender, path, interface, signal, params, user_data):
+        _name, old_owner, _new_owner = params.unpack()
+        if self.from_daemon(old_owner):
+            self.finish("closed")
+
+    def on_timeout(self):
+        try:
+            call_daemon(self.bus, "CloseNotification", GLib.Variant("(u)", (self.notification_id,)), None)
+        except GLib.Error as exc:
+            self.fail(f"failed to close the notification after the timeout: {exc}")
+        else:
+            self.finish("timeout")
+        return False
+
+
+def ask(args):
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    loop = GLib.MainLoop()
+    question = Question(bus, loop, {key for key, _ in args.actions})
+    question.subscribe()
+    question.send(args.title, args.body, args.actions)
+    GLib.timeout_add(int(args.timeout * 1000), question.on_timeout)
+    loop.run()
+    if question.error:
+        die(question.error)
+    return question.answer
+
+
+def main():
+    args = parse_args(sys.argv[1:])
+    try:
+        answer = ask(args)
+    except GLib.Error as exc:
+        die(f"cannot ask through the notification daemon: {exc}")
+    print(answer)
+
+
+if __name__ == "__main__":
+    main()

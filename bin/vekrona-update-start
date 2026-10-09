@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Starts a vekrona update unit without waiting for it. A polkit denial or a missing unit would otherwise be
+# lost behind a launcher or a notification action, so a failure is shown as a critical notification.
+set -euo pipefail
+
+[[ $# -eq 1 && "$1" == vekrona-update-*.service ]] || {
+  printf 'usage: %s vekrona-update-UNIT.service\n' "$(basename "$0")" >&2
+  exit 2
+}
+unit="$1"
+
+if ! output="$(systemctl start --no-block "$unit" 2>&1)"; then
+  message="systemctl start $unit failed: $output"
+  printf '%s: %s\n' "$(basename "$0")" "$message" >&2
+  notify-send -u critical -a vekrona -- "vekrona update" "$message" \
+    || printf '%s: WARN: failed to show this error as a notification\n' "$(basename "$0")" >&2
+  exit 1
+fi
