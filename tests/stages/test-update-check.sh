@@ -13,7 +13,7 @@ JSON="$VEKRONA_STATE_DIR/updates.json"
 check() { run_as_root "$REPO/libexec/vekrona-update-check" 2>"$work/err"; }
 reset() {
   rm -f "$JSON" "$VEKRONA_STATE_DIR/update-skip" "$work"/units/*
-  echo '{"upgrades":[]}' >"$work/dnf.json"; echo 0 >"$work/dnf.rc"
+  echo '{}' >"$work/dnf.json"; echo 0 >"$work/dnf.rc"
   : >"$work/flatpak.tsv"; echo '{}' >"$work/mise.json"; : >"$work/installed.tsv"
   : >"$FAKE_LOG"
 }

@@ -95,12 +95,10 @@ UPDATE_GROUPS_JQ='
 update_collect_groups() {
   local dir="$1" status=0
   "$VEKRONA_PROTON" stage
+  # With --json, dnf5 exits 0 whether or not updates exist (the exit status 100 belongs to the plain output), and
+  # prints {} when there are none.
   dnf5 check-upgrade --refresh --json </dev/null >"$dir/dnf.json" || status=$?
-  case "$status" in
-    0) : >"$dir/dnf.json" ;;
-    100) ;;
-    *) die "dnf5 check-upgrade failed with exit status $status" ;;
-  esac
+  [[ "$status" -eq 0 ]] || die "dnf5 check-upgrade failed with exit status $status"
   rpm -qa --qf '%{NAME}.%{ARCH}\t%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\n' | sort -V >"$dir/installed.tsv"
   flatpak remote-ls --updates --system --columns=application,version >"$dir/flatpak.tsv"
   mise_system outdated --json >"$dir/mise.json"

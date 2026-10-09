@@ -6,7 +6,8 @@
 #   sessions/ID          logind session ID, "Key=Value" lines (add_session)
 #   inhibitors           what `systemd-inhibit --list` prints (systemd-inhibit's table rows)
 #   units/UNIT.active    exists while the unit is active
-#   dnf.json, dnf.rc     what `dnf5 check-upgrade --json` prints, and its exit status
+#   dnf.json, dnf.rc     what `dnf5 check-upgrade --json` prints, and the exit status of check-upgrade: 0 nothing,
+#                        100 updates (plain output only; --json exits 0 then, as dnf5 does), anything else a failure
 #   upgrade.rc           exit status of `dnf5 upgrade`
 #   notify.fails         exists while notify-send fails
 #   flatpak.tsv, mise.json, installed.tsv   what flatpak remote-ls, mise outdated and rpm -qa print
@@ -22,7 +23,7 @@ make_world() {
   mkdir -p "$w/bin" "$w/sessions" "$w/units" "$w/state" "$w/repos" "$w/mise"
   : >"$w/log"
   : >"$w/inhibitors"
-  echo '{"upgrades":[]}' >"$w/dnf.json"
+  echo '{}' >"$w/dnf.json"
   echo 0 >"$w/dnf.rc"
   echo 0 >"$w/upgrade.rc"
   : >"$w/flatpak.tsv"
@@ -70,7 +71,9 @@ F
 #!/usr/bin/env bash
 echo "dnf5 $*" >>"$FAKE_WORLD/log"
 case "$1" in
-  check-upgrade) [[ " $* " != *" --json "* ]] || cat "$FAKE_WORLD/dnf.json"; exit "$(<"$FAKE_WORLD/dnf.rc")" ;;
+  check-upgrade) rc="$(<"$FAKE_WORLD/dnf.rc")"
+                 if [[ " $* " == *" --json "* ]]; then cat "$FAKE_WORLD/dnf.json"; [[ "$rc" -ne 100 ]] || rc=0; fi
+                 exit "$rc" ;;
   upgrade) if flock --nonblock "$VEKRONA_UPDATE_LOCK" true; then echo "dnf5 ran without the update lock" >>"$FAKE_WORLD/log"; fi
            exit "$(<"$FAKE_WORLD/upgrade.rc")" ;;
   offline) case "$2" in status) cat "$FAKE_WORLD/offline.status" ;; log) echo "offline log line" ;; esac ;;
