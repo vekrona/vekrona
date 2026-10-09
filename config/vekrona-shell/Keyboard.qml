@@ -59,7 +59,11 @@ Singleton {
         const env = Quickshell.env("XKB_DEFAULT_LAYOUT");
         const envIds = env ? String(env).split(",").map(id => id.trim()) : [];
         const lined = envIds.length === names.length;
-        layouts = names.map((name, index) => layoutFor(lined ? envIds[index] : idForSwayName(name), name));
+        const fresh = names.map((name, index) => layoutFor(lined ? envIds[index] : idForSwayName(name), name));
+        // A switch reports the same list once per keyboard device; a new array would make every Repeater over it rebuild its rows
+        // and resize the menu and the on-screen display mid-frame, so only a changed list is assigned.
+        if (JSON.stringify(fresh) !== JSON.stringify(layouts))
+            layouts = fresh;
         activeIndex = keyboard.xkb_active_layout_index ?? 0;
         available = true;
         error = "";
