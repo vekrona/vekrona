@@ -15,6 +15,7 @@ class StorageState(Enum):
     NOT_APPLIED = "not_applied"
     MANUAL_PLAIN = "manual_plain"
     MANUAL_LUKS = "manual_luks"
+    MANUAL_NOT_BTRFS = "manual_not_btrfs"
     MISMATCH = "mismatch"
     FOREIGN_PASSPHRASE = "foreign_passphrase"
     MATCH = "match"
@@ -41,12 +42,14 @@ def with_encryption(request, password):
     return encrypted
 
 
-def classify(method, request, *, mounts_encrypted, has_luks, password_matches, has_disks):
+def classify(method, request, *, mounts_encrypted, root_is_btrfs, has_luks, password_matches, has_disks):
     if not has_disks:
         return StorageState.NO_DISK
     if not method:
         return StorageState.NOT_APPLIED
     if method != PARTITIONING_METHOD_AUTOMATIC:
+        if not root_is_btrfs:
+            return StorageState.MANUAL_NOT_BTRFS
         return StorageState.MANUAL_LUKS if has_luks else StorageState.MANUAL_PLAIN
     if request.encrypted and not password_matches(request.passphrase):
         return StorageState.FOREIGN_PASSPHRASE

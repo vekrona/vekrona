@@ -11,7 +11,9 @@ Prerequisites:
   manager.
 - Network access.
 - Btrfs root subvolume, with `/boot` on its own filesystem (the installer's default layout;
-  nothing checks it, and `bin/vekrona-rollback` only warns when `/boot` holds
+  the installer's sign-in screen and `install.sh` refuse a root that is not
+  btrfs, but nothing checks the rest of the layout, and `bin/vekrona-rollback`
+  only warns when `/boot` holds
   a kernel the restored root has no modules for). Stage
   `20-snapper` and `bin/vekrona-rollback` assume btrfs and snapper.
   The root subvolume must be named `root` (`vekrona-rollback` renames and
@@ -83,7 +85,9 @@ space for dual-boot), and then offers two ways:
   password. The sign-in screen says so while the layout is automatic, and shows
   a notice when it actually replaced another passphrase. To keep your own
   passphrase, use custom partitioning.
-- **Custom** and **Blivet-GUI** partitioning: your layout is taken as it is.
+- **Custom** and **Blivet-GUI** partitioning: your layout is taken as it is,
+  except that `/` must be btrfs: otherwise the sign-in screen stays incomplete,
+  says why, and Begin Installation stays disabled.
   Encrypting is your choice, and the passphrase is the one you set in
   Anaconda's own dialog, which the sign-in password does not replace. If you
   also enroll a security key and the layout has an encrypted device, the
