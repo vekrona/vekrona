@@ -184,12 +184,11 @@ PanelWindow {
         }
     }
 
-    IpcHandler {
-        target: "keyboard"
+    // Shown once Sway reports the new layout, so the panel maps with its final content instead of redrawing as it appears.
+    Connections {
+        target: Keyboard
 
-        function announce(): void {
-            if (Keyboard.layouts.length < 2)
-                return;
+        function onSwitched(): void {
             root.showLayouts();
         }
     }
