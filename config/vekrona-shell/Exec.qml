@@ -35,19 +35,21 @@ Singleton {
     // non-zero (-1 without an exit status) also when the binary could not be started. The returned
     // handle's kill() stops the process; onDone is not called after that.
     function run(argv: list<string>, onDone): var {
-        const lifetime = {
-            alive: true
-        };
+        let alive = true;
         const runner = job.createObject(root, {
             argv: argv,
-            onDone: onDone,
-            lifetime: lifetime
+            onDone: (code, stdout, stderr) => {
+                alive = false;
+                onDone(code, stdout, stderr);
+            }
         });
         runner.running = true;
         return {
             kill: () => {
-                if (lifetime.alive)
-                    runner.cancel();
+                if (!alive)
+                    return;
+                alive = false;
+                runner.cancel();
             }
         };
     }
@@ -60,7 +62,6 @@ Singleton {
 
             required property list<string> argv
             required property var onDone
-            required property var lifetime
             property bool cancelled: false
             property bool started: false
             property bool finished: false
@@ -76,7 +77,6 @@ Singleton {
                 if (finished)
                     return;
                 finished = true;
-                lifetime.alive = false;
                 try {
                     if (!cancelled)
                         onDone(code, out, err);

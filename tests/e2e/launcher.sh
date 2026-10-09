@@ -14,8 +14,12 @@ shell_up() { vekrona-dev sh qs -c vekrona-shell ipc show >/dev/null; }
 export -f shell_up
 window_count() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq '[.. | objects | select((.type? == \"con\" or .type? == \"floating_con\") and .pid? != null)] | length'"; }
 nothing_matches() { vekrona-dev see text 'No matches'; }
-query_cleared() { ! nothing_matches && vekrona-dev see text "\\bSearch\\b"; }
-export -f terminal_open terminal_closed nothing_matches query_cleared
+module_failures() { vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-shell | grep -c 'launcher: module .* failed' || [[ $? -eq 1 ]]; }
+query_cleared() { ! nothing_matches && panel_shown; }
+# Whether the web module's bookmark and history lookup is not running: it has answered the query typed so far.
+places_idle() { ! vekrona-dev sh pgrep -f '[v]ekrona-firefox places' >/dev/null; }
+query_extended() { vekrona-dev see text 'zzzzqqqqq'; }
+export -f terminal_open terminal_closed nothing_matches query_cleared places_idle query_extended
 export APP_ID_REGEX
 
 export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"
@@ -34,9 +38,16 @@ vekrona-dev key super-spc
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_shown
 log "ok: Super+Space opens the launcher"
 
+failures_before="$(module_failures)"
 vekrona-dev type zzzzqqqq
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nothing_matches
 log "ok: a query that matches no application says so"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- places_idle
+vekrona-dev type q
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- query_extended
+[[ "$(module_failures)" == "$failures_before" ]] || die "typing on after a module answered made a launcher module fail"
+log "ok: a query typed after the modules answered the one before fails no module"
+vekrona-dev key backspace
 
 vekrona-dev key esc
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- query_cleared
