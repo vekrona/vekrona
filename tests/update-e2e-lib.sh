@@ -84,8 +84,8 @@ export OFFLINE_MARKER
 export -f marker_exists marker_absent offline_transaction_stored
 
 cleanup_test_update() {
-  vekrona-dev run sudo rm -rf "$SYSTEM_DROPIN_DIR/$NIGHT_UNIT.d" "$SYSTEM_DROPIN_DIR/systemd-suspend.service.d"
-  vekrona-dev run sudo systemctl daemon-reload
+  vekrona-dev run sudo rm -rf "$SYSTEM_DROPIN_DIR/$NIGHT_UNIT.d"
+  real_suspend
   vekrona-dev run sudo dnf5 offline clean
   vekrona-dev run sudo rm -f "$OFFLINE_MARKER" /var/lib/vekrona/update-skip
   vekrona-dev run sudo dnf remove -y "$TEST_PKG"

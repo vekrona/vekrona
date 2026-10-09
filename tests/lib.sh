@@ -44,6 +44,26 @@ ssh_sessions_restore() {
   vekrona-dev session
 }
 
+# The VM forbids suspend (AllowSuspend=no, its virtio-gpu cannot resume), which makes logind refuse before it emits
+# anything. These drop-ins under /run allow it and replace the suspend itself with /usr/bin/true, so the VM keeps
+# running while logind still emits PrepareForSleep, which scenarios wait on. /run is gone after a reboot.
+FAKE_SUSPEND_SLEEP_DIR=/run/systemd/sleep.conf.d
+FAKE_SUSPEND_UNIT_DIR=/run/systemd/system/systemd-suspend.service.d
+fake_suspend() {
+  vekrona-dev run sudo bash -c '
+install -d "$1" "$2"
+printf "[Sleep]\nAllowSuspend=yes\n" >"$1/zz-test.conf"
+printf "[Service]\nExecStart=\nExecStart=/usr/bin/true\n" >"$2/zz-test.conf"
+systemctl daemon-reload
+' _ "$FAKE_SUSPEND_SLEEP_DIR" "$FAKE_SUSPEND_UNIT_DIR"
+}
+real_suspend() {
+  vekrona-dev run sudo bash -c 'rm -rf "$1/zz-test.conf" "$2" && systemctl daemon-reload' _ "$FAKE_SUSPEND_SLEEP_DIR" "$FAKE_SUSPEND_UNIT_DIR"
+}
+# True when the guest file $1, which a PrepareForSleep watcher writes, holds a signal.
+sleep_signalled() { vekrona-dev run grep -q '"data":\[true\]' "$1"; }
+export -f sleep_signalled
+
 clear_notifications() { vekrona-dev sh qs -c vekrona-shell ipc call notifications clearAll >/dev/null; }
 # A toast hides itself after five seconds, which is less than a few OCR passes take. The centre keeps every notification, buttons included, until it is closed.
 open_notification_centre() { vekrona-dev sh qs -c vekrona-shell ipc call notifications toggle >/dev/null; }

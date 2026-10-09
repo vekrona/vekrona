@@ -23,34 +23,28 @@ booted_again() {
   [[ "$now" != "$1" ]]
 }
 greeter_up() { vekrona-dev run systemctl is-active --quiet greetd 2>/dev/null; }
-suspend_signalled() { vekrona-dev run grep -q '"data":\[true\]' "$SUSPEND_OUT"; }
-export -f boot_id booted_again greeter_up suspend_signalled
+export -f boot_id booted_again greeter_up
 export SUSPEND_OUT
 
-trap 'cleanup_test_update; vekrona-dev run rm -f "$SUSPEND_OUT"' EXIT
+trap 'cleanup_test_update; vekrona-dev run sudo rm -f "$SUSPEND_OUT"' EXIT
 
 # A greeter with nobody logged in.
 previous_boot="$(boot_id)"
 vekrona-dev run sudo systemctl reboot --no-block
 vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- booted_again "$previous_boot"
 vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- greeter_up
-[[ -z "$(vekrona-dev run loginctl list-sessions --no-legend | awk '$6 == "user"')" ]] || die "somebody is logged in at the greeter"
+[[ "$(vekrona-dev run bash -c 'for id in $(loginctl list-sessions --no-legend | awk "{print \$1}"); do loginctl show-session "$id" -p Type --value; done | grep -c "^wayland$" || true')" == 0 ]] || die "somebody is logged in at the greeter"
 
-vekrona-dev run sudo bash -c '
-install -d "$1/systemd-suspend.service.d"
-printf "[Service]\nExecStart=\nExecStart=/usr/bin/true\n" >"$1/systemd-suspend.service.d/zz-test.conf"
-systemctl daemon-reload
-' _ "$SYSTEM_DROPIN_DIR"
+fake_suspend
 vekrona-dev spawn --root "$SUSPEND_OUT" -- timeout "$SUSPEND_MONITOR_SEC" busctl --system --json=short --limit-messages=1 \
   --match="type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'" monitor
 vekrona-dev run sudo systemctl start --wait "$NIGHT_UNIT"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- suspend_signalled
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sleep_signalled "$SUSPEND_OUT"
 log "ok: nothing pending and nobody there suspends the machine"
 
 publish_test_update
 run_check_expecting_only_the_test_update
-vekrona-dev run sudo rm -rf "$SYSTEM_DROPIN_DIR/systemd-suspend.service.d"
-vekrona-dev run sudo systemctl daemon-reload
+real_suspend
 
 previous_boot="$(boot_id)"
 vekrona-dev run sudo systemctl start --no-block "$NIGHT_UNIT"
