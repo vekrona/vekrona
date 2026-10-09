@@ -84,6 +84,7 @@ present_iff() {
 }
 
 sway_runs() { [[ -n "$(sway_socket)" ]]; }
+user_unit_not_failed() { ! systemctl --user is-failed --quiet "$1"; }
 active_when_sway_runs() { ! sway_runs || systemctl --user is-active --quiet "$1"; }
 
 verify_greetd_active() {
@@ -371,6 +372,8 @@ if ran 50-user; then
   check assert "vekrona-calendar.timer enabled" user_unit_enabled vekrona-calendar.timer
   check assert "vekrona-weather.timer active while sway runs" active_when_sway_runs vekrona-weather.timer
   check assert "vekrona-calendar.timer active while sway runs" active_when_sway_runs vekrona-calendar.timer
+  check assert "vekrona-weather.service has not failed" user_unit_not_failed vekrona-weather.service
+  check assert "vekrona-calendar.service has not failed" user_unit_not_failed vekrona-calendar.service
   check assert "khal config linked" eq "$(readlink -f "$HOME/.config/khal/config")" "$(readlink -f "$VEKRONA_ROOT/config/khal/config")"
   check assert "vdirsyncer example linked" eq "$(readlink -f "$HOME/.config/vdirsyncer/config.example")" "$(readlink -f "$VEKRONA_ROOT/config/vdirsyncer/config.example")"
   check assert_file_contains /etc/geoclue/conf.d/90-vekrona.conf "^allowed=true\$"

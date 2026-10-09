@@ -14,6 +14,7 @@ ICON_S_LOGICAL_PX="$(vekrona_token_get size size-icon-s)"
 INK="$(vekrona_token_get color ink dark)"
 BAR="$(vekrona_token_get color surface-1 dark)"
 INK_TRAY="$ROOT/tests/e2e/tray-ink.py"
+MENU_LABEL="Fake menu entry"
 GUEST_DIR=/tmp/bar-tray
 GUEST_SNI="$GUEST_DIR/fake-sni.py"
 GUEST_LOG=/tmp/bar-tray-fake-sni.log
@@ -62,7 +63,7 @@ measure_icon() {
   if ! vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- tray_ink_ok; then
     log "the $name tray icon did not settle within ${STEP_TIMEOUT_SEC}s at scale $scale; measuring the final state"
   fi
-  python3 "$INK_TRAY" "$without_icon" "$(vekrona-dev shot)" "$bar_px" "$icon_px" "$INK" "$BAR" "$shape" || die "the $name tray icon is drawn wrongly at scale $scale, see the measurement above"
+  python3 "$INK_TRAY" "$without_icon" "$(vekrona-dev shot)" "$bar_px" "$icon_px" "$INK" "$BAR" "$shape" | tee "$MEASURE_FILE" || die "the $name tray icon is drawn wrongly at scale $scale, see the measurement above"
 }
 check_icon() {
   local name="$1" kind="$2" shape="$3" scale="$4" without_icon="$5"
@@ -89,12 +90,18 @@ check_scale_change() {
   stop_fake_icons
 }
 
+MEASURE_FILE="$(mktemp)"
+menu_shown() { vekrona-dev see text "$MENU_LABEL"; }
+menu_errors() { vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-shell | grep -c 'QApplication mode' || [[ $? -eq 1 ]]; }
+export -f menu_shown
+export MENU_LABEL
+
 vekrona-dev session
 clear_notifications
-trap 'stop_fake_icons; reset_output' EXIT
+trap 'stop_fake_icons; reset_output; rm -f "$MEASURE_FILE"' EXIT
 # The fake icon must be the only one in the tray, or the measured box would depend on the order of the icons.
 if vekrona-dev sh systemctl --user is-active --quiet "$TRAY_UNIT"; then
-  trap 'stop_fake_icons; reset_output; start_tray_unit' EXIT
+  trap 'stop_fake_icons; reset_output; rm -f "$MEASURE_FILE"; start_tray_unit' EXIT
   vekrona-dev sh systemctl --user stop "$TRAY_UNIT"
 fi
 vekrona-dev run mkdir -p "$GUEST_DIR"
@@ -120,3 +127,16 @@ check_scale_change "${SCALES[0]}" "${SCALES[1]}"
 log "ok: a tray icon on the bar is redrawn whole when the output scale goes from ${SCALES[0]} to ${SCALES[1]}"
 check_scale_change "${SCALES[1]}" "${SCALES[0]}"
 log "ok: a tray icon on the bar is redrawn whole when the output scale goes from ${SCALES[1]} to ${SCALES[0]}"
+
+set_output 1
+settle_output
+without_icon="$(vekrona-dev shot)"
+start_icon "$GUEST_DIR/tailscale.png"
+measure_icon "Tailscale" dots 1 "$without_icon"
+read -r left right top bottom < <(sed -n 's/^icon box x \([0-9]*\)-\([0-9]*\) y \([0-9]*\)-\([0-9]*\):.*/\1 \2 \3 \4/p' "$MEASURE_FILE")
+menu_errors_before="$(menu_errors)"
+vekrona-dev click "$(((left + right) / 2))" "$(((top + bottom) / 2))" --button right
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- menu_shown
+[[ "$(menu_errors)" == "$menu_errors_before" ]] || die "right-clicking a tray icon made the shell complain that it is not in QApplication mode"
+log "ok: right-clicking a tray icon opens its menu"
+stop_fake_icons
