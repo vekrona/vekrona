@@ -1024,7 +1024,7 @@ copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio md.obsidian.Obsidian)
 
 # shellcheck disable=SC2034
-VEKRONA_X11_FLATPAKS=(md.obsidian.Obsidian org.signal.Signal)
+VEKRONA_X11_FLATPAKS=(org.signal.Signal)
 
 # shellcheck disable=SC2034
 declare -A VEKRONA_PINNED_PKGS=(
