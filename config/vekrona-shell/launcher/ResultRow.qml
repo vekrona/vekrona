@@ -38,7 +38,7 @@ Item {
         style: VekronaTheme.type.label
         color: VekronaTheme.c.inkMuted
         elide: Text.ElideRight
-        text: root.entry.title
+        text: root.entry.title ?? ""
     }
 
     Label {
@@ -47,7 +47,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         style: VekronaTheme.type.body
         color: VekronaTheme.c.inkMuted
-        text: root.entry.title
+        text: root.entry.title ?? ""
     }
 
     Item {
