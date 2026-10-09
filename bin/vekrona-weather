@@ -3,8 +3,9 @@
 
 The location is ~/.config/vekrona/weather.json {"latitude": .., "longitude": .., "name": ".."} when that file
 exists, otherwise GeoClue. A network or location failure is written into the output's "error" field next to the
-last good data and exits 0. A malformed override or malformed API data exits 1, so the systemd unit fails and
-vekrona-error records it.
+last good data and exits 0; so does a null in the API data, which Open-Meteo sends for a missing value. A
+malformed override or structurally malformed API data exits 1, so the systemd unit fails and vekrona-error
+records it.
 """
 import datetime
 import json
@@ -104,14 +105,17 @@ def fetch(location):
     try:
         data = json.loads(body)
         current, daily = data["current"], data["daily"]
+        rows = list(zip(daily["time"], daily["weather_code"], daily["temperature_2m_max"], daily["temperature_2m_min"],
+                        strict=True))
+        values = [current["temperature_2m"], current["weather_code"], current["is_day"], *(v for row in rows for v in row)]
+        if any(value is None for value in values):
+            raise Surfaced("Open-Meteo returned null for a value of the forecast")
         return {
             "current": {"temperature": float(current["temperature_2m"]),
                         "weather_code": int(current["weather_code"]),
                         "is_day": bool(current["is_day"])},
             "daily": [{"date": date, "weather_code": int(code), "max": float(high), "min": float(low)}
-                      for date, code, high, low in zip(daily["time"], daily["weather_code"],
-                                                       daily["temperature_2m_max"], daily["temperature_2m_min"],
-                                                       strict=True)]}
+                      for date, code, high, low in rows]}
     except (ValueError, KeyError, TypeError) as exc:
         die(f"the forecast is not Open-Meteo JSON: {exc!r}")
 

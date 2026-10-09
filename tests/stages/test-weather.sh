@@ -27,6 +27,14 @@ VEKRONA_WEATHER_URL="file://$scratch/missing.json" "$ROOT/bin/vekrona-weather" 2
 [[ "$(output_field current)" == '{"temperature": 37.4, "weather_code": 3, "is_day": true}' ]] || die "an unreachable forecast must keep the last good current weather"
 log "ok: a fetch failure sets error and keeps the last good data"
 
+for null_path in '.current.temperature_2m' '.current.weather_code' '.daily.temperature_2m_max[3]'; do
+  jq "$null_path = null" "$ROOT/tests/fixtures/open-meteo.json" >"$scratch/null.json"
+  VEKRONA_WEATHER_URL="file://$scratch/null.json" "$ROOT/bin/vekrona-weather" 2>/dev/null || die "a null at $null_path must be surfaced in the output, not fail the unit"
+  [[ "$(output_field error)" == *null* ]] || die "a null at $null_path must set error: $(output_field error)"
+  [[ "$(output_field current)" == '{"temperature": 37.4, "weather_code": 3, "is_day": true}' ]] || die "a null at $null_path must keep the last good current weather"
+done
+log "ok: a null in the forecast sets error and keeps the last good data"
+
 printf 'not json' >"$scratch/garbage.json"
 if VEKRONA_WEATHER_URL="file://$scratch/garbage.json" "$ROOT/bin/vekrona-weather" 2>/dev/null; then
   die "a forecast that is not JSON must fail the unit"
