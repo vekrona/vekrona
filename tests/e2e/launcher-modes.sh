@@ -7,14 +7,17 @@ source "$ROOT/tests/lib.sh"
 STEP_TIMEOUT_SEC=60
 
 window_count() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq '[.. | objects | select((.type? == \"con\" or .type? == \"floating_con\") and .pid? != null)] | length'"; }
-# The footer says "Enter mode" only while the /calc suggestion is selected; the module title is on screen as the badge once the mode is entered.
+# The footer says "Enter mode" only while the /calc suggestion is selected. Once the mode is entered the calculator lists
+# nothing for an empty query and says so (the badge in the search field is too small for OCR); the root list says nothing.
 suggestion_shown() { vekrona-dev see text 'Enter mode'; }
-mode_entered() { vekrona-dev see text 'Calculator' && ! suggestion_shown; }
-mode_left() { ! vekrona-dev see text 'Calculator'; }
+mode_entered() { vekrona-dev see text 'Nothing to show' && ! suggestion_shown; }
+mode_left() { ! vekrona-dev see text 'Nothing to show'; }
 actions_shown() { vekrona-dev see text 'Filter actions'; }
 actions_hidden() { ! actions_shown; }
 app_listed() { vekrona-dev see text 'Ghostty'; }
-export -f suggestion_shown mode_entered mode_left actions_shown actions_hidden app_listed
+percent_answered() { vekrona-dev see text '\b230\b'; }
+refusal_shown() { vekrona-dev see text 'Couldn.t evaluate'; }
+export -f percent_answered refusal_shown suggestion_shown mode_entered mode_left actions_shown actions_hidden app_listed
 
 export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"
 
@@ -34,6 +37,20 @@ vekrona-dev type ' '
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- mode_entered
 log "ok: /calc and a space enter the calculator mode, shown as a badge"
 
+vekrona-dev type '12.5% of 1840'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- percent_answered
+log "ok: /calc answers \"12.5% of 1840\" with 230"
+
+errors_before="$(shell_errors)"
+vekrona-dev key ctrl-a
+vekrona-dev key backspace
+vekrona-dev type '5 apples + 3'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- refusal_shown
+[[ "$(shell_errors)" == "$errors_before" ]] || die "an expression qalc cannot evaluate is the user's input and must not log a shell error"
+log "ok: an expression qalc cannot evaluate is said so in the list and is not a shell error"
+
+vekrona-dev key ctrl-a
+vekrona-dev key backspace
 vekrona-dev key ret
 vekrona-dev key backspace
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- mode_left
