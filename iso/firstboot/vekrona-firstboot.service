@@ -1,7 +1,7 @@
 [Unit]
 Description=vekrona first-boot install
 ConditionPathExists=!/var/lib/vekrona/firstboot.done
-Before=getty@tty1.service
+Before=getty@tty1.service display-manager.service
 Wants=network-online.target
 After=network-online.target systemd-user-sessions.service
 
