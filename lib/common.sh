@@ -621,6 +621,17 @@ ensure_target_kernel_devel() {
   ensure_pkg "kernel-devel-$(newest_installed_kver)"
 }
 
+# Dies listing the processes (PID and command) with their working directory, executable or an open file under $1.
+# lsof +D is the exact check: fuser -m would report every process on the whole filesystem $1 lives on.
+die_if_path_in_use() {
+  local dir="$1" status=0 raw users
+  require_cmd lsof
+  raw="$(root lsof -w -F pc +D "$dir")" || status=$?
+  ((status <= 1)) || die "lsof failed with status $status while checking whether $dir is in use"
+  users="$(awk '/^p/ { pid = substr($0, 2) } /^c/ { print pid, substr($0, 2) }' <<<"$raw" | sort -u)"
+  [[ -z "$users" ]] || die "$dir is in use by:"$'\n'"$users"
+}
+
 AKMODS_WAIT_SECONDS=900
 
 # An akmod-* RPM's posttrans starts a background akmods that takes its lock only after its init, so the lock alone

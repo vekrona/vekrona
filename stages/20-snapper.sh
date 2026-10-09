@@ -84,9 +84,11 @@ ensure_nix_subvolume() {
   [[ ! -e /nix || -d /nix ]] || die "/nix exists and is not a directory"
   mountpoint -q /nix && die "/nix is mounted from something other than the nix subvolume: $(nix_source)"
 
-  pkg_installed nix-daemon && stop_nix_daemon_units
+  stop_nix_daemon_units
 
   if [[ -d /nix && -n "$(ls -A /nix 2>/dev/null)" && ! -e "$NIX_PRE_VEKRONA" ]]; then
+    ensure_pkg lsof
+    die_if_path_in_use /nix
     log "moving existing /nix aside: $NIX_PRE_VEKRONA"
     root mv /nix "$NIX_PRE_VEKRONA"
   fi
