@@ -15,6 +15,16 @@ log_has() { vekrona-dev run grep -q "$2" "$1"; }
 export -f shown gone log_has
 
 notify() { vekrona-dev sh notify-send "$@"; }
+# The dismiss button's centre, measured from the right edge of the screen.
+DISMISS_FROM_RIGHT_PX=37
+dismiss_toast() {
+  local x y width
+  read -r x y <<<"$(vekrona-dev see find "^$1\$")"
+  [[ -n "${x:-}" ]] || die "the toast $1 must be on screen, but OCR found it nowhere"
+  width="$(vekrona-dev sh bash -c "swaymsg -t get_outputs | jq -r '.[0].rect.width'")"
+  vekrona-dev click "$((width - DISMISS_FROM_RIGHT_PX))" "$y"
+  vekrona-dev move 100 500
+}
 
 vekrona-dev session
 vekrona-dev move 100 500
@@ -71,6 +81,18 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- gone 'first text'
 notify -r "$replaced_id" 'Replaced' 'second text'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'second text'
 log "ok: a replaced notification shows its new text as a fresh toast after the old one expired"
+
+clear_notifications
+for title in Alpha Bravo Charlie Delta Echo Foxtrot; do
+  notify -u critical "$title" 'pile'
+done
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Foxtrot'
+gone 'Bravo' || die "six critical toasts must show only the newest four, but the second oldest is on screen"
+dismiss_toast Charlie
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- gone 'Charlie'
+gone 'Bravo' || die "dismissing a toast must not bring an older one back onto the screen"
+shown 'Foxtrot' || die "dismissing a toast must leave the others on screen"
+log "ok: a dismissed toast leaves a gap that no older toast fills"
 
 clear_notifications
 notify 'Kept' 'in the centre'
