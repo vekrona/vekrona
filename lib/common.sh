@@ -1242,6 +1242,12 @@ ensure_fstab_entry() {
   [[ "$(whitespace_normalized "$existing")" == "$(whitespace_normalized "$line")" ]] || die "fstab entry not written for $mountpoint"
 }
 
+require_btrfs_root() {
+  local fs
+  fs="$(findmnt -no FSTYPE /)" || die "could not determine the root filesystem type (findmnt failed)"
+  [[ "$fs" == btrfs ]] || die "the root filesystem is ${fs:-unknown}, but vekrona needs btrfs (snapper snapshots of /, the /nix subvolume); reinstall Fedora with a btrfs root (the default layout)"
+}
+
 root_btrfs_device() {
   local device
   device="$(findmnt -no SOURCE /)"
