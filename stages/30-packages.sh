@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
+source "$ROOT/lib/proton.sh"
 
 for pkg in "${!VEKRONA_PINNED_PKGS[@]}"; do
   ensure_pkg_from_repo "${VEKRONA_PINNED_PKGS[$pkg]}" "$pkg"
@@ -24,6 +25,13 @@ for pkg in "${VEKRONA_DESKTOP_PKGS[@]}"; do
 done
 ensure_pkg "${desktop_pkgs_except_pinned[@]}"
 ensure_1password_repo_file
+
+# The repo directory and its metadata must exist before dnf reads the repo file, or every dnf run fails on it.
+ensure_pkg createrepo_c jq
+root "$ROOT/bin/vekrona-proton" stage
+ensure_root_file "$ROOT/etc/yum.repos.d/vekrona-proton.repo" /etc/yum.repos.d/vekrona-proton.repo
+mapfile -t proton_pkgs < <(proton_package_names)
+ensure_pkg "${proton_pkgs[@]}"
 
 declare -a desktop_pkgs
 read_pkg_list desktop_pkgs vekrona_desktop_pkgs

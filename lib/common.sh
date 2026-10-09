@@ -738,13 +738,19 @@ download_file() {
     --output "$dest" "$url" || die "download failed: $url"
 }
 
-fetch_pinned() {
-  local url="$1" sha256="$2" dest="$3" actual
-  require_cmd sha256sum
+# The one verified-download chokepoint: fetches url and dies, leaving no file at dest, unless its checksum matches.
+# algorithm is sha256 or sha512; sum is the lowercase hex digest published by the source.
+fetch_verified() {
+  local url="$1" algorithm="$2" sum="$3" dest="$4" actual
+  case "$algorithm" in
+    sha256 | sha512) ;;
+    *) die "unsupported checksum algorithm for $url: $algorithm" ;;
+  esac
+  require_cmd "${algorithm}sum"
   log "fetching: $url"
   download_file "$url" "$dest"
-  actual="$(sha256sum "$dest" | awk '{print $1}')"
-  [[ "$actual" == "$sha256" ]] || die "sha256 mismatch for $url (expected $sha256, got $actual)"
+  actual="$("${algorithm}sum" "$dest" | awk '{print $1}')"
+  [[ "$actual" == "$sum" ]] || { rm -f "$dest"; die "$algorithm mismatch for $url (expected $sum, got $actual)"; }
 }
 
 ensure_root_file_absent() {

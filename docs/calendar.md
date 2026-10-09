@@ -29,6 +29,9 @@ Proton Calendar has no CalDAV, so Vekrona subscribes to a share link.
 2. Under "Share via link" create a link with "Full view" access and copy it.
 3. Paste it as the `url` of `[storage proton_remote]`.
 
+The Proton Mail desktop app (it includes Proton Calendar) shows its own calendar reminders; the bar widget does not
+read from it and stays fed by this ICS link.
+
 Caveats: share links need a paid plan, the link is read-only, and Proton refreshes it only every few hours
 (up to 8 h), so new events appear late.
 
