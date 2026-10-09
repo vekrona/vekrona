@@ -27,3 +27,7 @@ there. Use the vekrona-dev VM (`~/wrk/vekrona-dev`, see its CLAUDE.md):
 `vekrona-dev install`, `vekrona-dev session`, reproduce with real key
 presses, check the screen with `vekrona-dev see`, and capture the behavior
 as a `tests/e2e/` scenario that fails before the fix and passes after it.
+
+## Upgrading Fedora to a new major release
+
+`stages/10-nvidia.sh`, `stages/70-verify.sh` and `stages/90b-remove.sh` hardcode the CUDA repo release (`fedora44` current, `fedora43` stale) on purpose: vekrona stays on a release NVIDIA already publishes. When moving to the next Fedora release, first check that NVIDIA publishes `cuda-fedora<N>`, then bump both names in all three files (current → N, stale → N-1).
