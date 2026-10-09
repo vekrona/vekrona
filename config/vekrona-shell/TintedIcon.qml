@@ -31,9 +31,12 @@ Canvas {
         return mask;
     }
 
+    // Qt Canvas draws in item units but getImageData reads window pixels (Screen.devicePixelRatio rounds a 1.5 scale up to 2, so use
+    // the window's), and its putImageData paints nothing, so the mask is drawn back as an image. Without smooth:false a texel
+    // that misses a screen pixel is blurred.
+    smooth: false
     width: size
     height: size
-    canvasSize: Qt.size(size * Screen.devicePixelRatio, size * Screen.devicePixelRatio)
     onSourceChanged: loadImage(source)
     onTintChanged: requestPaint()
     onImageLoaded: requestPaint()
@@ -43,15 +46,18 @@ Canvas {
         if (!isImageLoaded(source))
             return;
         const ctx = getContext("2d");
-        const w = Math.round(canvasSize.width);
-        const h = Math.round(canvasSize.height);
-        ctx.clearRect(0, 0, w, h);
-        ctx.drawImage(source, 0, 0, w, h);
-        const mask = maskOf(ctx.getImageData(0, 0, w, h).data, w, h);
-        ctx.clearRect(0, 0, w, h);
-        for (let p = 0; p < w * h; p++) {
-            ctx.fillStyle = Qt.rgba(tint.r, tint.g, tint.b, mask[p]);
-            ctx.fillRect(p % w, Math.floor(p / w), 1, 1);
+        const px = Math.round(size * Window.window.devicePixelRatio);
+        ctx.clearRect(0, 0, size, size);
+        ctx.drawImage(source, 0, 0, size, size);
+        const mask = maskOf(ctx.getImageData(0, 0, px, px).data, px, px);
+        const tinted = ctx.createImageData(px, px);
+        for (let p = 0; p < px * px; p++) {
+            tinted.data[4 * p] = Math.round(tint.r * 255);
+            tinted.data[4 * p + 1] = Math.round(tint.g * 255);
+            tinted.data[4 * p + 2] = Math.round(tint.b * 255);
+            tinted.data[4 * p + 3] = Math.round(mask[p] * 255);
         }
+        ctx.clearRect(0, 0, size, size);
+        ctx.drawImage(tinted, 0, 0, size, size);
     }
 }
