@@ -54,7 +54,9 @@ record_found() { [[ -n "$("$1" "$2")" ]]; }
 find_record_using() {
   local timeout="$1" query="$2" arg="$3"
   wait_until "$timeout" record_found "$query" "$arg" || return 1
-  "$query" "$arg" | head -1
+  local records
+  records="$("$query" "$arg")"
+  head -n1 <<<"$records"
 }
 
 find_record_by_marker() { find_record_using "${2:-30}" ids_by_marker "$1"; }
@@ -279,9 +281,10 @@ check_prompt_is_one_fenced_json_object() {
 }
 
 check_no_notify_failures_logged() {
-  journalctl --user -u vekrona-errors --since "$TEST_START" --no-pager 2>/dev/null \
-    | grep -q "failed to send a desktop notification" \
-    && fail "the watcher logged a failed Notify call during this test run"
+  local log
+  log="$(journalctl --user -u vekrona-errors --since "$TEST_START" --no-pager 2>/dev/null)"
+  ! grep -q "failed to send a desktop notification" <<<"$log" \
+    || fail "the watcher logged a failed Notify call during this test run"
   echo "ok: no failed Notify calls logged during this test run"
 }
 

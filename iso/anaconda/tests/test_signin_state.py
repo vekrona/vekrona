@@ -74,7 +74,10 @@ class SensitivityTest(unittest.TestCase):
         for state in (StorageState.NO_DISK, StorageState.NOT_APPLIED):
             with self.subTest(state):
                 self.assertFalse(snapshot(state).sensitive)
-        applied = (StorageState.MATCH, StorageState.MISMATCH, StorageState.MANUAL_PLAIN, StorageState.MANUAL_LUKS)
+        applied = (
+            StorageState.MATCH, StorageState.MISMATCH, StorageState.MANUAL_PLAIN, StorageState.MANUAL_LUKS,
+            StorageState.MANUAL_NOT_BTRFS,
+        )
         for state in applied:
             with self.subTest(state):
                 self.assertTrue(snapshot(state).sensitive)
@@ -85,6 +88,9 @@ class SensitivityTest(unittest.TestCase):
 
     def test_without_an_account_the_screen_stays_closed(self):
         self.assertFalse(snapshot(StorageState.MATCH, username="").sensitive)
+
+    def test_manual_layout_whose_root_is_not_btrfs_is_incomplete(self):
+        self.assertFalse(snapshot(StorageState.MANUAL_NOT_BTRFS).completed)
 
     def test_layout_with_another_passphrase_is_incomplete(self):
         self.assertFalse(snapshot(StorageState.MISMATCH).completed)
@@ -349,6 +355,11 @@ class HubStatusTest(unittest.TestCase):
         guard.account_error = "org.freedesktop.DBus.Error.NoReply"
         self.assertEqual(hub_status(snapshot(StorageState.MATCH), guard), guidance.STATUS_PASSWORD_NOT_SAVED)
         self.assertIn("NoReply", screen_notice(snapshot(StorageState.MATCH), guard))
+
+    def test_a_root_that_is_not_btrfs_is_named_in_the_status_and_the_notice(self):
+        state = snapshot(StorageState.MANUAL_NOT_BTRFS)
+        self.assertEqual(hub_status(state, EncryptionGuard()), guidance.STATUS_ROOT_NOT_BTRFS)
+        self.assertIn("btrfs", screen_notice(state, EncryptionGuard()))
 
     def test_manual_layouts_report_the_methods_like_a_matching_one(self):
         for state in (StorageState.MANUAL_PLAIN, StorageState.MANUAL_LUKS):

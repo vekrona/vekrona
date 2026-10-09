@@ -87,16 +87,19 @@ ensure_pkg() {
   for p in "${missing[@]}"; do pkg_installed "$p" || die "package did not install: $p"; done
 }
 
+# Prints the repo an installed package came from; nothing when it is not installed (dnf exits 0 then).
+installed_from_repo() { dnf repoquery --installed --qf '%{from_repo}\n' "$1"; }
+
 ensure_pkg_from_repo() {
   local repo="$1"; shift
   local p
   for p in "$@"; do
     local from
-    from="$(dnf repoquery --installed --qf '%{from_repo}\n' "$p" 2>/dev/null || true)"
+    from="$(installed_from_repo "$p")" || die "dnf repoquery failed for $p"
     if [[ "$from" == "$repo" ]]; then log "$p already from $repo"; continue; fi
     log "installing $p from $repo"
     root dnf install -y --from-repo="$repo" "$p"
-    from="$(dnf repoquery --installed --qf '%{from_repo}\n' "$p" 2>/dev/null)"
+    from="$(installed_from_repo "$p")" || die "dnf repoquery failed for $p"
     [[ "$from" == "$repo" ]] || die "$p installed from $from, expected $repo"
   done
 }
@@ -181,12 +184,16 @@ ensure_copr_absent() {
 }
 
 ensure_root_file() {
-  local src="$1" dst="$2" mode="${3:-0644}"
+  local src="$1" dst="$2" mode="${3:-0644}" want_mode tmp
   [[ -f "$src" ]] || die "source missing: $src"
-  if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then log "up to date: $dst"; return 0; fi
+  want_mode="$(printf '%o' "$((8#$mode))")"
+  if [[ -f "$dst" ]] && cmp -s "$src" "$dst" && [[ "$(stat -c %a "$dst")" == "$want_mode" ]]; then log "up to date: $dst"; return 0; fi
   log "installing: $dst"
-  root install -D -m "$mode" "$src" "$dst"
+  root install -d "$(dirname "$dst")"
+  tmp="$(root mktemp "$dst.XXXXXX")"
+  root install -m "$mode" "$src" "$tmp" && root mv -f "$tmp" "$dst" || { root rm -f "$tmp"; die "install failed: $dst"; }
   cmp -s "$src" "$dst" || die "content mismatch after install: $dst"
+  [[ "$(stat -c %a "$dst")" == "$want_mode" ]] || die "mode mismatch after install: $dst"
 }
 
 # grep -q on a file: 0 match, 1 no match; any other grep status (unreadable file, a directory) is an error, not "absent".
@@ -195,6 +202,23 @@ file_grep_q() {
   grep -q "$@" || status=$?
   [[ $status -le 1 ]] || die "grep -q $* failed with exit status $status"
   return "$status"
+}
+
+# snapper_rows_after <number>: the snapper CSV rows on stdin whose snapshot number (first field) is above <number>.
+snapper_rows_after() {
+  [[ "$1" =~ ^[0-9]+$ ]] || die "snapper_rows_after: not a snapshot number: $1"
+  awk -F, -v n="$1" '$1 + 0 > n + 0' || die "snapper_rows_after: awk failed on the snapshot list"
+}
+
+# write_file_atomic <path> <content>: replaces <path> in one rename, so a process watching or reading it never sees a
+# truncated or half-written file. The parent directory must exist.
+write_file_atomic() {
+  local path="$1" content="$2" tmp
+  tmp="$(dirname "$path")/.$(basename "$path").tmp.$$"
+  if ! { printf '%s' "$content" > "$tmp" && mv -fT "$tmp" "$path"; }; then
+    rm -f "$tmp"
+    die "could not write $path"
+  fi
 }
 
 ensure_line() {
@@ -337,13 +361,11 @@ prune_vekrona_links() {
   done < <(vekrona_links --stale "$@")
 }
 
-# Every directory stage 50 links into, one per line (70-verify scans the same set). ~/.config/ghostty is
-# listed only so prune_vekrona_links retires the config link earlier installs made there (vekrona no longer
-# ships a Ghostty config); a dotfiles-managed or regular ~/.config/ghostty/config is never touched.
+# Every directory stage 50 links into, one per line (70-verify scans the same set).
 vekrona_link_dirs() {
   local d
   printf '%s\n' \
-    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/ghostty" "$HOME/.config/autostart" \
+    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/autostart" \
     "$HOME/.config/systemd/user" "$HOME/.config/fontconfig/conf.d" \
     "$HOME/.config/quickshell" \
     "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/bin" \
@@ -381,17 +403,38 @@ ensure_system_unit() {
     fi
     if [[ -n "$now" ]]; then
       case "$state" in
-        enabled)  [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]] || root systemctl start "$u" ;;
-        disabled) [[ "$(systemctl is-active "$u" 2>/dev/null || true)" != active ]] || root systemctl stop "$u" ;;
+        enabled)  unit_is_active "$u" || root systemctl start "$u" ;;
+        disabled) ! unit_is_active "$u" || root systemctl stop "$u" ;;
       esac
     fi
     log "unit $u: $state"
   done
 }
 
+# unit_state <var> is-active|is-enabled <unit> [systemctl flags]  Stores the state word systemctl prints. Both verbs
+# print the state even when they exit non-zero (is-active: 3 inactive, 4 not found; is-enabled: 1 disabled, masked or
+# linked, 4 not found; static, alias and indirect exit 0). Any other status, or output that is not one state word (an
+# unreachable bus, for one), means systemctl itself failed. The caller's shell must run this, not a $(...) subshell,
+# for the die to stop the install.
+unit_state() {
+  local var="$1" verb="$2" out rc=0
+  shift 2
+  out="$(systemctl "$verb" "$@")" || rc=$?
+  case "$verb:$rc" in
+    is-active:0 | is-active:3 | is-active:4 | is-enabled:0 | is-enabled:1 | is-enabled:4) ;;
+    *) die "systemctl $verb $* failed with status $rc (its stderr is above)" ;;
+  esac
+  [[ -n "$out" && "$out" != *[[:space:]]* ]] || die "systemctl $verb $* printed no single unit state word (stdout: '$out'; its stderr is above)"
+  printf -v "$var" %s "$out"
+}
+
+# unit_is_active|unit_is_enabled <unit> [systemctl flags, e.g. --user]
+unit_is_active() { local state; unit_state state is-active "$@"; [[ "$state" == active ]]; }
+unit_is_enabled() { local state; unit_state state is-enabled "$@"; [[ "$state" == enabled ]]; }
+
 unit_matches_state() {
   local current
-  current="$(systemctl is-enabled "$1" 2>/dev/null || true)"
+  unit_state current is-enabled "$1"
   case "$2" in
     enabled)  [[ "$current" == enabled ]] ;;
     disabled) [[ "$current" == disabled || "$current" == masked || "$current" == static ]] ;;
@@ -413,9 +456,9 @@ ensure_utc_rtc() {
 ensure_system_unit_active() {
   local u
   for u in "$@"; do
-    if [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]]; then log "unit active: $u"; continue; fi
+    if unit_is_active "$u"; then log "unit active: $u"; continue; fi
     root systemctl start "$u"
-    [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]] || die "unit not active: $u"
+    unit_is_active "$u" || die "unit not active: $u"
   done
 }
 
@@ -443,10 +486,10 @@ prune_dead_quickshell_instances() {
 ensure_user_unit_enabled() {
   local u
   for u in "$@"; do
-    if [[ "$(systemctl --user is-enabled "$u" 2>/dev/null || true)" == "enabled" ]]; then log "user unit enabled: $u"; continue; fi
+    if unit_is_enabled "$u" --user; then log "user unit enabled: $u"; continue; fi
     systemctl --user daemon-reload
     systemctl --user enable "$u"
-    [[ "$(systemctl --user is-enabled "$u" 2>/dev/null || true)" == "enabled" ]] || die "user unit not enabled: $u"
+    unit_is_enabled "$u" --user || die "user unit not enabled: $u"
   done
 }
 
@@ -459,13 +502,19 @@ ensure_user_unit_stopped() {
   done
 }
 
+user_in_group() {
+  local user="$1" group="$2" groups
+  groups="$(id -nG "$user")" || die "id -nG $user failed"
+  [[ " $groups " == *" $group "* ]]
+}
+
 ensure_user_in_group() {
   local group="$1"
   getent group "$group" >/dev/null || die "group missing: $group"
-  if id -nG "$VEKRONA_USER" | tr ' ' '\n' | grep -qx "$group"; then log "$VEKRONA_USER in $group"; return 0; fi
+  if user_in_group "$VEKRONA_USER" "$group"; then log "$VEKRONA_USER in $group"; return 0; fi
   log "adding $VEKRONA_USER to $group (re-login required)"
   root usermod -aG "$group" "$VEKRONA_USER"
-  getent group "$group" | grep -q "\b$VEKRONA_USER\b" || die "user not added to $group"
+  user_in_group "$VEKRONA_USER" "$group" || die "user not added to $group"
 }
 
 vekrona_sysfs() { printf '%s' "${VEKRONA_SYSFS_ROOT:-}/sys"; }
@@ -646,6 +695,19 @@ wait_for_running_akmods() {
     124) die "timed out after $AKMODS_WAIT_SECONDS s waiting for a running akmods build" ;;
     *) die "waiting for a running akmods build failed with status $status" ;;
   esac
+}
+
+# newest_akmods_failure_log <cache dir> <module> <kernel version>: the most recently written build log of a failed
+# <module> build for that kernel. Each akmod version leaves its own log, so the newest one is the build that just failed.
+# Prints nothing and returns 1 when there is none.
+newest_akmods_failure_log() {
+  local candidate newest=""
+  for candidate in "$1/$2"/*-for-"$3".failed.log; do
+    [[ -e "$candidate" ]] || continue
+    if [[ -z "$newest" || "$candidate" -nt "$newest" ]]; then newest="$candidate"; fi
+  done
+  [[ -n "$newest" ]] || return 1
+  printf '%s' "$newest"
 }
 
 build_akmods_for_target_kernel() {
@@ -1004,7 +1066,7 @@ ensure_kernel_arg() {
 
 session_is_sway() { [[ "${XDG_CURRENT_DESKTOP:-}" == "sway" ]]; }
 
-session_started_by_gdm() { [[ "$(systemctl is-active gdm 2>/dev/null || true)" == "active" ]]; }
+session_started_by_gdm() { unit_is_active gdm; }
 
 dm_unit_target() {
   local f=/etc/systemd/system/display-manager.service
@@ -1015,7 +1077,7 @@ dm_is_greetd() { [[ "$(dm_unit_target 2>/dev/null || true)" == greetd.service ]]
 
 default_target_is_graphical() { [[ "$(systemctl get-default)" == graphical.target ]]; }
 
-greetd_enabled() { [[ "$(systemctl is-enabled greetd 2>/dev/null || true)" == enabled ]]; }
+greetd_enabled() { unit_is_enabled greetd; }
 
 enable_greetd_login_manager() {
   if greetd_enabled; then
@@ -1118,16 +1180,22 @@ flatpak_installed() {
   grep -qx -- "$1" <<<"$apps"
 }
 
+flatpak_remotes_system() {
+  flatpak remotes --system --show-disabled --columns=name,options || die "flatpak remotes failed"
+}
+
 flatpak_remote_system_enabled() {
-  local name="$1" line
-  line="$(flatpak remotes --system --show-disabled --columns=name,options 2>/dev/null | awk -F'\t' -v n="$name" '$1==n')"
+  local name="$1" remotes line
+  remotes="$(flatpak_remotes_system)"
+  line="$(awk -F'\t' -v n="$name" '$1==n' <<<"$remotes")"
   [[ -n "$line" ]] || return 1
   [[ "$line" != *disabled* ]]
 }
 
 flatpak_remote_system_exists() {
-  local name="$1"
-  flatpak remotes --system --show-disabled --columns=name 2>/dev/null | grep -qx "$name"
+  local name="$1" remotes
+  remotes="$(flatpak_remotes_system)"
+  awk -F'\t' -v n="$name" '$1==n { found=1 } END { exit !found }' <<<"$remotes"
 }
 
 ensure_flatpak_remote_system() {
@@ -1240,6 +1308,12 @@ ensure_fstab_entry() {
   printf '%s\n' "$line" | root tee -a /etc/fstab >/dev/null
   existing="$(fstab_line_for_mountpoint "$mountpoint")" || die "fstab entry not written for $mountpoint"
   [[ "$(whitespace_normalized "$existing")" == "$(whitespace_normalized "$line")" ]] || die "fstab entry not written for $mountpoint"
+}
+
+require_btrfs_root() {
+  local fs
+  fs="$(findmnt -no FSTYPE /)" || die "could not determine the root filesystem type (findmnt failed)"
+  [[ "$fs" == btrfs ]] || die "the root filesystem is ${fs:-unknown}, but vekrona needs btrfs (snapper snapshots of /, the /nix subvolume); reinstall Fedora with a btrfs root (the default layout)"
 }
 
 root_btrfs_device() {

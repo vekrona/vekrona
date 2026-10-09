@@ -21,11 +21,15 @@ def _is_behind_luks(device_tree, device_id):
     return any(format_type(device_tree, ancestor) == LUKS_FORMAT_TYPE for ancestor in ancestors)
 
 
+def _root_is_btrfs(device_tree):
+    root_id = device_tree.GetMountPoints().get("/")
+    return root_id is not None and format_type(device_tree, root_id) == BTRFS_FORMAT_TYPE
+
+
 def _mounts_encrypted(device_tree):
-    mount_points = device_tree.GetMountPoints()
-    root_id = mount_points.get("/")
-    if root_id is None or format_type(device_tree, root_id) != BTRFS_FORMAT_TYPE:
+    if not _root_is_btrfs(device_tree):
         return False
+    mount_points = device_tree.GetMountPoints()
     system_ids = [
         device_id
         for mount_point, device_id in mount_points.items()
@@ -40,7 +44,7 @@ def read_state(password_matches, *, wait_until_idle, storage, get_partitioning_p
     object_path = storage.AppliedPartitioning
     if not has_disks or not object_path:
         return classify(
-            None, None, mounts_encrypted=False, has_luks=False,
+            None, None, mounts_encrypted=False, root_is_btrfs=False, has_luks=False,
             password_matches=password_matches, has_disks=has_disks,
         )
     applied = get_partitioning_proxy(object_path)
@@ -50,6 +54,7 @@ def read_state(password_matches, *, wait_until_idle, storage, get_partitioning_p
         method,
         PartitioningRequest.from_structure(applied.Request) if automatic else None,
         mounts_encrypted=automatic and _mounts_encrypted(device_tree),
+        root_is_btrfs=_root_is_btrfs(device_tree),
         has_luks=not automatic and bool(read_luks_layout(device_tree).backing),
         password_matches=password_matches,
         has_disks=has_disks,

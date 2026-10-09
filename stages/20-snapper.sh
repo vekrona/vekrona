@@ -39,7 +39,7 @@ ensure_root_file "$ROOT/etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.action
 
 assert_file_contains /etc/dnf/libdnf5-plugins/actions.conf 'enabled[[:space:]]*=[[:space:]]*1'
 
-ensure_system_unit enabled snapper-cleanup.timer
+ensure_system_unit --now enabled snapper-cleanup.timer
 
 assert "/.snapshots exists" test -d /.snapshots
 
@@ -61,13 +61,13 @@ stop_nix_daemon_units() {
   local u
   for u in nix-daemon.socket nix-daemon.service; do
     unit_exists "$u" || { log "unit not present: $u"; continue; }
-    if [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]]; then
+    if unit_is_active "$u"; then
       log "stopping unit: $u"
       root systemctl stop "$u"
     else
       log "unit already inactive: $u"
     fi
-    [[ "$(systemctl is-active "$u" 2>/dev/null || true)" != active ]] || die "unit still active: $u"
+    ! unit_is_active "$u" || die "unit still active: $u"
   done
 }
 
