@@ -11,6 +11,9 @@ VEKRONA_USER="$(id -un)"
 VEKRONA_LEGACY_ROOTS=("${HOME:?lib/common.sh needs HOME: a systemd system unit must set Environment=HOME=/root}/vekrona" "$HOME/.local/share/vekrona")
 # Root-owned copy of the checkout's scripts: a unit cannot run from the 0700 user_home_t home directory.
 VEKRONA_SYSTEM_DIR=/usr/local/lib/vekrona
+# The bin/ scripts root runs from there: vekrona-proton from the update units, vekrona-update-ask as the user it asks.
+# shellcheck disable=SC2034
+VEKRONA_SYSTEM_BIN=(vekrona-proton vekrona-update-ask)
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
@@ -200,6 +203,17 @@ ensure_root_file() {
   root_file_current "$src" "$dst" "$mode" || die "content or mode mismatch after install: $dst"
 }
 
+# Installs a unit file from SRC into /etc/systemd/system under its own name and reloads systemd when that changed anything.
+ensure_system_unit_file() {
+  local src="$1" dst="${VEKRONA_SYSTEMD_UNIT_DIR:-/etc/systemd/system}/${1##*/}" changed=1
+  if root_file_current "$src" "$dst" 0644; then changed=0; fi
+  ensure_root_file "$src" "$dst"
+  if [[ $changed -eq 1 ]]; then root systemctl daemon-reload; fi
+}
+
+# Gives a tree installed by root the SELinux labels policy assigns its path (on hosts that have SELinux tools).
+root_restorecon() { if command -v restorecon >/dev/null; then root restorecon -R "$1"; fi; }
+
 # True when DST holds exactly SRC's files (read as root); modes are not compared. __pycache__ is not part of a tree.
 root_tree_matches() { root diff -r -x __pycache__ "$1" "$2" >/dev/null; }
 
@@ -248,7 +262,7 @@ ensure_root_tree() {
   done <<<"$out"
 
   # Every run: an earlier run may have died between copying and labeling.
-  if command -v restorecon >/dev/null; then root restorecon -R "$dst"; fi
+  root_restorecon "$dst"
   root_tree_matches "$src" "$dst" || die "$dst differs from $src after mirroring"
   if [[ $changed -eq 0 ]]; then log "up to date: $dst"; else log "mirrored: $src -> $dst"; fi
 }
@@ -481,6 +495,53 @@ ensure_system_unit_active() {
     root systemctl start "$u"
     [[ "$(systemctl is-active "$u" 2>/dev/null || true)" == active ]] || die "unit not active: $u"
   done
+}
+
+# Prints "UID NAME" for each logind session of a user on Wayland that is the active session of its seat. With "awake"
+# only the sessions where somebody is at the keyboard: not locked and not idle.
+wayland_sessions() {
+  local awake="${1:-}" ids id props key value
+  local -A session=()
+  ids="$(loginctl list-sessions --no-legend | awk '{print $1}')"
+  for id in $ids; do
+    props="$(loginctl show-session "$id" -p Type -p Active -p LockedHint -p IdleHint -p Name -p User)"
+    session=()
+    while IFS='=' read -r key value; do session[$key]=$value; done <<<"$props"
+    [[ "${session[Type]-}" == wayland && "${session[Active]-}" == yes ]] || continue
+    if [[ "$awake" == awake ]]; then
+      [[ "${session[LockedHint]-}" == no && "${session[IdleHint]-}" == no ]] || continue
+    fi
+    printf '%s %s\n' "${session[User]}" "${session[Name]}"
+  done
+}
+
+# Runs a command as user NAME on that user's session bus, which a root unit has no environment for.
+run_in_user_session() {
+  local uid="$1" name="$2"
+  shift 2
+  runuser -u "$name" -- env "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" "$@"
+}
+
+# Shows a desktop notification (notify-send arguments) to every user on a Wayland session. Returns 1, after logging it,
+# when there is no such session: the caller decides whether that matters. A notification that fails is an error.
+notify_user() {
+  local sessions uid name
+  sessions="$(wayland_sessions)"
+  if [[ -z "$sessions" ]]; then
+    log "no graphical session to notify: $*"
+    return 1
+  fi
+  while read -r uid name; do
+    run_in_user_session "$uid" "$name" notify-send -a vekrona "$@" || die "notify-send failed for $name"
+  done <<<"$sessions"
+}
+
+# Asks user UID/NAME through vekrona-update-ask (its arguments follow) and prints the answer: an action key,
+# "timeout" or "closed".
+ask_user() {
+  local uid="$1" name="$2"
+  shift 2
+  run_in_user_session "$uid" "$name" "$VEKRONA_SYSTEM_DIR/bin/vekrona-update-ask" "$@" || die "vekrona-update-ask failed for $name"
 }
 
 # Quickshell never removes the runtime directory (logs, ipc socket) of an instance that has exited.
@@ -848,7 +909,7 @@ assert_repo_key_trusted() {
 }
 
 ensure_1password_repo_file() {
-  ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" /etc/yum.repos.d/1password.repo
+  ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" "${VEKRONA_YUM_REPOS_DIR:-/etc/yum.repos.d}/1password.repo"
 }
 
 import_pinned_repo_key() {
@@ -878,10 +939,10 @@ VEKRONA_AGENT_PKGS=(claude-code mise nodejs24-npm)
 # shellcheck disable=SC2034
 VEKRONA_AGENT_TOOLS=(codex pi opencode cursor-agent)
 
-MISE_SYSTEM_DATA_DIR=/usr/local/share/mise
+MISE_SYSTEM_DATA_DIR="${MISE_SYSTEM_DATA_DIR:-/usr/local/share/mise}"
 MISE_SYSTEM_CONFIG_DIR=/etc/mise
-MISE_SYSTEM_CACHE_DIR=/usr/local/share/mise/cache
-MISE_SYSTEM_STATE_DIR=/usr/local/share/mise/state
+MISE_SYSTEM_CACHE_DIR="$MISE_SYSTEM_DATA_DIR/cache"
+MISE_SYSTEM_STATE_DIR="$MISE_SYSTEM_DATA_DIR/state"
 MISE_SYSTEM_SHIMS_DIR="$MISE_SYSTEM_DATA_DIR/shims"
 MISE_NPM_MIN_RELEASE_AGE_VERSION=11.10.0
 CLAUDE_BIN=/usr/bin/claude
