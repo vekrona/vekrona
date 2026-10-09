@@ -130,7 +130,17 @@ vekrona/
     sway/environment              # SWAY_EXTRA_ARGS="--unsupported-gpu"
     environment.d/vekrona.conf    # QT_QPA_PLATFORM=wayland MOZ_ENABLE_WAYLAND=1 XCURSOR_SIZE PATH; no GPU file here: WLR_DRM_DEVICES is decided at login by bin/vekrona-gpu-env (decision #6)
     xremap/config.yml             # caps-hyper modmap, cmd-layer/terminal-word-nav keymaps, exact_match: true
-    vekrona-shell/                # the Quickshell shell (qs -c vekrona-shell): bar, notifications, polkit, launcher (host plus modules), OSD; Vekrona/ links to quickshell-shared
+    vekrona-shell/                # the Quickshell shell (qs -c vekrona-shell): bar, notifications, polkit, OSD; Vekrona/ links to quickshell-shared
+      Exec.qml                    # the one process runner: run(argv, onDone) with kill(), detached(), unit(), failure()
+      Wireless.qml                # Wi-Fi and Bluetooth state and actions, shared by the bar's network popout and the launcher's Settings module
+      launcher/                   # the launcher: a host plus modules
+        Launcher.qml              # the host: search field, modes (/calc), sub-view stack, ranking, actions, confirm-twice, toast; the module API (close, setQuery, enterMode, pushView, toast)
+        LauncherModule.qml        # the base of every module: moduleId, slash, inMode, widget, opened(), query(), fallbacks(), view(), resultsReady, changed
+        Modules.qml               # instantiates the modules in tie-break order
+        Ranker.js                 # pure ranking, sections and frecency maths
+        Frecency.qml              # launcher-frecency.json in the state dir
+        ResultRow.qml, ActionsPanel.qml, Footer.qml, ModeBadge.qml, WidgetStrip.qml, LauncherMetrics.qml  # the host's parts
+        modules/{Apps,Calculator,Settings,Power,Web,Agent,Clipboard}.qml  # /apps, /calc, /settings, /power, /search, /agent, /clip
     fontconfig/conf.d/50-vekrona-fonts.conf  # sans-serif/system-ui prefer Atkinson Hyperlegible Next, Atkinson Hyperlegible, then Inter, monospace AtkynsonMono Nerd Font > Atkinson Hyperlegible Mono > JetBrainsMono Nerd Font
     tokens.json                   # the Vekrona Design System tokens, verbatim from the design; single source (decision #47)
     design.json                   # toolkit knobs that are not tokens: radius
@@ -169,6 +179,7 @@ vekrona/
     vekrona-caffeine      # systemd-run --user transient unit wrapping systemd-inhibit --what=sleep; 30m/1h/2h/off/status, no-arg toggles
     vekrona-theme         # dark|light|next|list: back up, write the mode, render, roll back on failure
     vekrona-render-theme  # tokens.json + theme mode + design.json -> active-theme.json, gtk.css, gsettings (theme, color-scheme, fonts), qt6ct, firefox userChrome, sway drop-in, rofi -theme-str; called by vekrona-theme and stage 50
+    vekrona-firefox       # places <term> [--limit N] (bookmarks and history of the default profile as JSON lines) and engine-name; backs the launcher's Web module
     vekrona-webapp        # MOZ_APP_REMOTINGNAME=vekrona-<app> firefox --name vekrona-<app> -P vekrona-<app> --new-window <url>
     vekrona-screenshot    # grim+slurp, clipboard, notify with swappy Edit action
     vekrona-record        # wf-recorder

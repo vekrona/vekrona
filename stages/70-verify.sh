@@ -405,6 +405,7 @@ if ran 50-user; then
   check assert "vekrona-lock resolves on PATH" bash -c "command -v vekrona-lock >/dev/null"
   check assert "vekrona-lock Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-lock")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-lock")"
   check assert "vekrona-agent --help runs" bash -c "vekrona-agent --help >/dev/null"
+  check assert "qalc resolves (the launcher's /calc)" bash -c "command -v qalc >/dev/null"
 
   for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
     flatpak_installed "$app_id" || continue

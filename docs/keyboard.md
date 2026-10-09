@@ -75,25 +75,29 @@ mask as some other Hyper+X binding and silently overwrite it.
 ## Launcher
 
 Cmd+Space opens one launcher for applications, the calculator, settings,
-power commands, web search, the coding agent and (by `/clip`) the clipboard
-history. Typing `/` lists the modes; `/calc ` (keyword and a space) enters
-one, shown as a badge before the query. Hyper+v and Hyper+BackSpace open it
-straight in `/clip` and `/power`, and pressing them again closes it.
+power commands, web search, the coding agent and the clipboard history.
+Typing `/` lists the modes; `/calc ` (keyword and a space) enters one, shown
+as a badge before the query. The modes are `/apps`, `/calc`, `/search`,
+`/agent`, `/settings`, `/power` and `/clip`. Hyper+v and Hyper+BackSpace open
+it straight in `/clip` and `/power`, and pressing them again closes it.
+Under the search field a strip of widgets (power commands, settings
+toggles) is one Tab away.
 
 | Key | Action |
 |---|---|
 | Up, Down, Ctrl+N, Ctrl+P | move the selection (PageUp and PageDown by a page) |
 | Enter, Ctrl+Enter | run the first and the second action of the selected row |
 | Ctrl+K | list every action of the selected row; Enter runs one, Escape closes the list |
-| Tab, Shift+Tab | move between the search field and the widget strip under it (in a mode suggestion, Tab enters the mode) |
+| Tab, Shift+Tab | go to the widgets under the search field (Tab moves on to the next widget and back to the search field; in a mode suggestion, Tab enters the mode) |
+| Left, Right, Enter or Space on a widget | move between its buttons and press one |
 | Backspace on an empty query | leave the mode (or the sub-view) |
 | Escape | disarm a confirmation, then leave the sub-view, the mode, clear the query, close |
 
-A destructive command (log out, restart, shut down) asks for a second Enter;
-Escape cancels. What you open often moves up: results are ranked with a
-frecency score kept in `$XDG_STATE_HOME/vekrona/launcher-frecency.json`
-that halves every seven days, and the empty launcher lists the six most
-recent.
+A destructive command (log out, restart, shut down, also from the Power
+widget) asks you to press Enter twice to confirm; Escape cancels. What you
+open often moves up: results are ranked with a frecency score kept in
+`$XDG_STATE_HOME/vekrona/launcher-frecency.json` that halves every seven
+days, and the empty launcher lists the six most recent.
 
 ## App switcher
 
