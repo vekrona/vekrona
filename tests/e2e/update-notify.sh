@@ -41,6 +41,7 @@ vekrona-dev run sudo systemctl daemon-reload
 
 updates_write "$(updates_pending_json 2.1.3)"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'updates are ready'
+open_notification_centre
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'claude-code'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Not tonight'
 shown 'Install now' || die "the update toast must offer Install now"
@@ -48,6 +49,7 @@ log "ok: a new update check pops up a toast with both buttons"
 
 vekrona-dev click-text '^Install$'
 vekrona-dev move 100 500
+close_notification_centre
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- install_marked
 log "ok: Install now starts vekrona-update-now.service without a password"
 
@@ -56,10 +58,13 @@ clear_notifications
 # first toast is already remembered.
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- notify_finished
 updates_write "$(updates_pending_json 2.1.4)"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'updates are ready'
+open_notification_centre
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Not tonight'
 vekrona-dev run sudo systemctl start "$NIGHT_TIMER"
 [[ "$(vekrona-dev run systemctl is-active "$NIGHT_TIMER")" == active ]] || die "the scenario could not arm $NIGHT_TIMER"
 vekrona-dev click-text '^tonight$'
 vekrona-dev move 100 500
+close_notification_centre
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- night_timer_stopped
 log "ok: Not tonight starts vekrona-update-skip.service, which stops the night timer"

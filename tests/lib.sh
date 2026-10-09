@@ -45,6 +45,9 @@ ssh_sessions_restore() {
 }
 
 clear_notifications() { vekrona-dev sh qs -c vekrona-shell ipc call notifications clearAll >/dev/null; }
+# A toast hides itself after five seconds, which is less than a few OCR passes take. The centre keeps every notification, buttons included, until it is closed.
+open_notification_centre() { vekrona-dev sh qs -c vekrona-shell ipc call notifications toggle >/dev/null; }
+close_notification_centre() { vekrona-dev sh qs -c vekrona-shell ipc call notifications close >/dev/null; }
 
 SCREEN_COLORS="$VEKRONA_ROOT/tests/e2e/screen_colors.py"
 export SCREEN_COLORS
