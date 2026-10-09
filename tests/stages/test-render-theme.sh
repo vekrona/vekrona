@@ -391,7 +391,7 @@ for bad in '"0"' '-1' '0.5' 'true' 'null'; do
   jq ".radius = $bad" "$ROOT/config/design.json" > "$repo/config/design.json"
   fails "design radius $bad" "radius" gtk
 done
-jq 'del(.barInnerPadding)' "$ROOT/config/design.json" > "$repo/config/design.json"
+jq 'del(.radius)' "$ROOT/config/design.json" > "$repo/config/design.json"
 fails "a design.json missing a key" "keys must be exactly" gtk
 jq '. + {gap: 8}' "$ROOT/config/design.json" > "$repo/config/design.json"
 fails "a design.json with a retired key" "keys must be exactly" gtk

@@ -1081,13 +1081,6 @@ ensure_flatpak_app_system() {
   flatpak_installed "$app_id" || die "flatpak app not installed: $app_id"
 }
 
-vekrona_design_get() {
-  local key="$1" value
-  value="$(jq -er --arg k "$key" '.[$k]' "$VEKRONA_ROOT/config/design.json")" || die "config/design.json: no value for '$key'"
-  [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "config/design.json: '$key' is not a non-negative number: '$value'"
-  printf '%s' "$value"
-}
-
 # vekrona_token_get <group> <name> [mode]: one value of config/tokens.json. The color group needs a
 # mode (dark|light); the others take none. A trailing "px" is stripped.
 vekrona_token_get() {

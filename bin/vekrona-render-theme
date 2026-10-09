@@ -16,8 +16,7 @@ import vekrona_theme
 PROG = "vekrona-render-theme"
 TARGETS = ("shell", "gtk", "qt", "firefox", "sway")
 ALL_TARGETS = TARGETS + ("rofi",)
-DESIGN_INT_KEYS = ("radius", "widgetPadding", "trayIconSpacing", "barInnerPadding")
-DESIGN_KEYS = DESIGN_INT_KEYS
+DESIGN_KEYS = ("radius",)
 
 die = vekrona_cli.make_die(PROG, __file__)
 REPO = vekrona_cli.repo_root(__file__)
@@ -64,7 +63,7 @@ def load_design():
         die(f"could not read {design_file}: {e}")
     if not isinstance(data, dict) or set(data) != set(DESIGN_KEYS):
         die(f"{design_file}: keys must be exactly {', '.join(DESIGN_KEYS)}")
-    for key in DESIGN_INT_KEYS:
+    for key in DESIGN_KEYS:
         value = data[key]
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             die(f"{design_file}: {key} is not a non-negative integer: {value!r}")

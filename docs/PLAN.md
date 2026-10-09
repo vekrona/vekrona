@@ -132,7 +132,7 @@ vekrona/
     vekrona-shell/                # the Quickshell shell (qs -c vekrona-shell): bar, notifications, polkit, launcher, clipboard, OSD, power menu; Vekrona/ links to quickshell-shared
     fontconfig/conf.d/50-vekrona-fonts.conf  # sans-serif/system-ui prefer Atkinson Hyperlegible Next, Atkinson Hyperlegible, then Inter, monospace AtkynsonMono Nerd Font > Atkinson Hyperlegible Mono > JetBrainsMono Nerd Font
     tokens.json                   # the Vekrona Design System tokens, verbatim from the design; single source (decision #47)
-    design.json                   # toolkit knobs that are not tokens: radius, widgetPadding, trayIconSpacing, barInnerPadding
+    design.json                   # toolkit knobs that are not tokens: radius
     quickshell-shared/Vekrona/    # VekronaTheme QML singleton for the lock (symlinked as config/vekrona-lock/Vekrona)
     systemd-user/
       xremap.service

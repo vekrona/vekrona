@@ -96,9 +96,8 @@ environment variable to take effect. Qt's Fusion style keeps its small corners
 and filled selection, which the design does not allow elsewhere.
 
 The design has radius 0, no shadows, and a 2px accent underline as the only
-selection highlight. `config/design.json` holds the few toolkit knobs that are
-not design tokens: `radius`, `widgetPadding`, `trayIconSpacing`,
-and `barInnerPadding`. Gaps and padding come from the spacing
+selection highlight. `config/design.json` holds `radius`, the one toolkit knob that is
+not a design token. Gaps and padding come from the spacing
 tokens (`space-2` is 8, `space-3` is 12). To change the look, change
 `config/design.json` or re-import `config/tokens.json`, then run
 `./install.sh 50-user` to apply.
