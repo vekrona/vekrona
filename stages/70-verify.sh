@@ -423,6 +423,14 @@ if ran 50-user; then
   check assert "vekrona-night.service linked" file_exists "$HOME/.config/systemd/user/vekrona-night.service"
   check assert "vekrona-weather.timer enabled" user_unit_enabled vekrona-weather.timer
   check assert "vekrona-calendar.timer enabled" user_unit_enabled vekrona-calendar.timer
+  check assert "vekrona-update-notify.service linked" file_exists "$HOME/.config/systemd/user/vekrona-update-notify.service"
+  check assert "vekrona-update-notify.path linked" file_exists "$HOME/.config/systemd/user/vekrona-update-notify.path"
+  check assert "vekrona-update-notify.service enabled" user_unit_enabled vekrona-update-notify.service
+  check assert "vekrona-update-notify.path enabled" user_unit_enabled vekrona-update-notify.path
+  check assert "vekrona-update-notify.path active while sway runs" active_when_sway_runs vekrona-update-notify.path
+  for tool in vekrona-update-ask vekrona-update-notify vekrona-update-start; do
+    check assert "$tool resolves on PATH" bash -c "command -v $tool >/dev/null"
+  done
   check assert "vekrona-weather.timer active while sway runs" active_when_sway_runs vekrona-weather.timer
   check assert "vekrona-calendar.timer active while sway runs" active_when_sway_runs vekrona-calendar.timer
   check assert "vekrona-weather.service runs successfully while sway runs" runs_when_sway_runs vekrona-weather.service

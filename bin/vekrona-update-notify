@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Tell the user that updates are waiting, once per distinct set of updates.
+
+Reads the state file the root-side check writes, asks through vekrona-update-ask, and starts the unit
+that matches the answer. No answer (timeout, dismissed) starts nothing: the night run takes over."""
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import vekrona_cli
+
+PROG = "vekrona-update-notify"
+
+UPDATES_FILE = os.environ.get("VEKRONA_UPDATES_FILE", "/var/lib/vekrona/updates.json")
+TITLE = "Hey dude(-ssa), updates are ready"
+MAX_ITEMS_LISTED = 5
+ANSWER_UNITS = {"install": "vekrona-update-now.service", "skip": "vekrona-update-skip.service"}
+
+die = vekrona_cli.make_die(PROG, __file__)
+
+
+def log(message):
+    print(f"{PROG}: {message}", file=sys.stderr)
+
+
+def notified_file():
+    return os.path.join(vekrona_cli.vekrona_state_dir(), "update-notified")
+
+
+def load_groups(path):
+    """The pending groups, or None when the root check has not written the file yet."""
+    try:
+        with open(path) as f:
+            state = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        die(f"cannot read {path}: {exc}")
+    try:
+        if not isinstance(state["pending"], bool):
+            raise TypeError("pending is not a boolean")
+        groups = state["groups"]
+        if not isinstance(groups, list):
+            raise TypeError("groups is not a list")
+        if not state["pending"]:
+            return []
+        named = [(group["name"], [(item["name"], item["from"], item["to"]) for item in group["items"]])
+                 for group in groups]
+        return [(name, items) for name, items in named if items]
+    except (KeyError, TypeError) as exc:
+        die(f"{path} is malformed: {exc!r}")
+
+
+def describe_item(name, old, new):
+    return f"{name} {old} → {new}" if old and new else name
+
+
+def describe_group(name, items):
+    if len(items) > MAX_ITEMS_LISTED:
+        listed = ", ".join(describe_item(*item) for item in items[:MAX_ITEMS_LISTED])
+        return f"{name}: {len(items)} updates: {listed}, …"
+    return f"{name}: " + ", ".join(describe_item(*item) for item in items)
+
+
+def body_of(groups):
+    return "\n".join(describe_group(name, items) for name, items in groups)
+
+
+def fingerprint(groups):
+    return hashlib.sha256(json.dumps(groups).encode()).hexdigest()
+
+
+def already_notified(digest):
+    try:
+        with open(notified_file()) as f:
+            return f.read().strip() == digest
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        die(f"cannot read {notified_file()}: {exc}")
+
+
+def remember(digest):
+    path = notified_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temporary = f"{path}.tmp"
+    with open(temporary, "w") as f:
+        f.write(digest + "\n")
+    os.replace(temporary, path)
+
+
+def seconds_until_midnight():
+    now = datetime.now()
+    midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
+    return max(1, int((midnight - now).total_seconds()))
+
+
+def ask(body):
+    tool = vekrona_cli.resolve_tool(__file__, "vekrona-update-ask")
+    if not tool:
+        die("vekrona-update-ask not found")
+    result = subprocess.run(
+        [tool, "--timeout", str(seconds_until_midnight()), "--title", TITLE, "--body", body,
+         "--action", "install=Install now", "--action", "skip=Not tonight"],
+        stdout=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        die(f"vekrona-update-ask exited with status {result.returncode}")
+    return result.stdout.strip()
+
+
+def start(unit):
+    tool = vekrona_cli.resolve_tool(__file__, "vekrona-update-start")
+    if not tool:
+        die("vekrona-update-start not found")
+    if subprocess.run([tool, unit]).returncode != 0:
+        sys.exit(1)
+
+
+def main():
+    groups = load_groups(UPDATES_FILE)
+    if groups is None:
+        log(f"{UPDATES_FILE} does not exist yet: the update check has not run, nothing is pending")
+        return
+    if not groups:
+        log("nothing is pending")
+        return
+    digest = fingerprint(groups)
+    if already_notified(digest):
+        log("already told about these updates")
+        return
+    answer = ask(body_of(groups))
+    remember(digest)
+    if answer in ANSWER_UNITS:
+        start(ANSWER_UNITS[answer])
+    elif answer not in ("timeout", "closed"):
+        die(f"vekrona-update-ask answered {answer!r}")
+
+
+if __name__ == "__main__":
+    main()

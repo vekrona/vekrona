@@ -1,0 +1,13 @@
+[Unit]
+Description=Tell the user that updates are ready
+PartOf=sway-session.target
+After=sway-session.target vekrona-shell.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/vekrona-update-notify
+# It waits for an answer to the notification, until midnight at the latest.
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=sway-session.target

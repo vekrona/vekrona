@@ -16,6 +16,7 @@ run_suite() {
 }
 
 run_suite "error pipeline" python3 -B -m unittest discover -v -s tests/errors -p 'test_*.py'
+run_suite "update pipeline, user side" python3 -B -m unittest discover -v -s tests/updates -p 'test_*.py'
 run_suite "stage helpers" bash tests/stages/run.sh
 # The add-ons import the real pyanaconda and pykickstart (DBus structures, spoke
 # base classes), which are installed in the vekrona-dev guest, not on a host.
