@@ -27,11 +27,9 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: mouse.pressed ? VekronaTheme.c.surface3 : mouse.containsMouse ? VekronaTheme.c.surface2 : "transparent"
-    }
-
-    Selection {
-        shown: root.emphasized
+        color: mouse.pressed ? VekronaTheme.c.surface3
+             : root.emphasized ? VekronaTheme.c.selected
+             : mouse.containsMouse ? VekronaTheme.c.surface2 : "transparent"
     }
 
     Row {
