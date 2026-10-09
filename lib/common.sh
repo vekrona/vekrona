@@ -181,12 +181,16 @@ ensure_copr_absent() {
 }
 
 ensure_root_file() {
-  local src="$1" dst="$2" mode="${3:-0644}"
+  local src="$1" dst="$2" mode="${3:-0644}" want_mode tmp
   [[ -f "$src" ]] || die "source missing: $src"
-  if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then log "up to date: $dst"; return 0; fi
+  want_mode="$(printf '%o' "$((8#$mode))")"
+  if [[ -f "$dst" ]] && cmp -s "$src" "$dst" && [[ "$(stat -c %a "$dst")" == "$want_mode" ]]; then log "up to date: $dst"; return 0; fi
   log "installing: $dst"
-  root install -D -m "$mode" "$src" "$dst"
+  root install -d "$(dirname "$dst")"
+  tmp="$(root mktemp "$dst.XXXXXX")"
+  root install -m "$mode" "$src" "$tmp" && root mv -f "$tmp" "$dst" || { root rm -f "$tmp"; die "install failed: $dst"; }
   cmp -s "$src" "$dst" || die "content mismatch after install: $dst"
+  [[ "$(stat -c %a "$dst")" == "$want_mode" ]] || die "mode mismatch after install: $dst"
 }
 
 # grep -q on a file: 0 match, 1 no match; any other grep status (unreadable file, a directory) is an error, not "absent".
