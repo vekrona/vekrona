@@ -69,8 +69,9 @@ fi
 
 require_cmd akmods dracut lsinitrd flock
 
-# akmod-nvidia's posttrans starts a background akmods build; every akmods run holds this lock, so wait for it
+# akmod-nvidia's posttrans starts a background akmods build: wait for its process, then for the lock it holds,
 # instead of queueing a redundant rebuild behind it.
+wait_for_running_akmods
 AKMODS_LOCK=/run/akmods/akmods.lock
 AKMODS_LOCK_TIMEOUT_STATUS=1 # flock -w exits 1 on timeout, so any other status is a different failure
 root install -d -m 0755 "$(dirname "$AKMODS_LOCK")"

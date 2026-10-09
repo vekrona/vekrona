@@ -86,6 +86,7 @@ die_wl_build_failed() {
 }
 
 ensure_wl_module() {
+  wait_for_running_akmods
   if wl_module_built; then
     log "ok: wl module present for kernel $target_kver"
     return 0

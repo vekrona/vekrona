@@ -621,6 +621,22 @@ ensure_target_kernel_devel() {
   ensure_pkg "kernel-devel-$(newest_installed_kver)"
 }
 
+AKMODS_WAIT_SECONDS=900
+
+# An akmod-* RPM's posttrans starts a background akmods that takes its lock only after its init, so the lock alone
+# can be won before that build exists. akmods is a bash script, so its process name (comm) is "akmods".
+# pidwait exits 1 when no such process runs.
+wait_for_running_akmods() {
+  local status=0
+  require_cmd pidwait timeout
+  timeout "$AKMODS_WAIT_SECONDS" pidwait -x akmods || status=$?
+  case "$status" in
+    0 | 1) ;;
+    124) die "timed out after $AKMODS_WAIT_SECONDS s waiting for a running akmods build" ;;
+    *) die "waiting for a running akmods build failed with status $status" ;;
+  esac
+}
+
 build_akmods_for_target_kernel() {
   local target_kver
   target_kver="$(uname -r)"
