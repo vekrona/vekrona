@@ -1,15 +1,13 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Services.Mpris
-import Quickshell.Services.Pipewire
 import Quickshell.Wayland
 import "Vekrona"
+import "."
 
 PanelWindow {
     id: root
 
-    readonly property PwNode sink: Pipewire.defaultAudioSink
     readonly property int hideAfterMs: 1500
     readonly property int trackWidth: 8 * VekronaTheme.sizeTarget
     property string glyph
@@ -22,25 +20,12 @@ PanelWindow {
     }
 
     function stepVolume(delta: real): void {
-        sink.audio.volume = Math.max(0, Math.min(1, sink.audio.volume + delta));
-        show(volumeGlyph(), sink.audio.volume);
-    }
-
-    function volumeGlyph(): string {
-        const level = sink.audio.volume;
-        return sink.audio.muted || level === 0 ? "volume_off" : level <= 0.33 ? "volume_down" : "volume_up";
+        Audio.setVolume(Audio.volume + delta);
+        show(Audio.glyph, Audio.volume);
     }
 
     function stepBrightness(step: int, sign: string): void {
-        const change = changeComponent.createObject(root, {
-            step: step + "%" + sign
-        });
-        change.running = true;
-    }
-
-    function player(): MprisPlayer {
-        const players = Mpris.players.values;
-        return players.find(candidate => candidate.isPlaying) ?? players[0] ?? null;
+        Exec.capture(["brightnessctl", "--machine-readable", "set", step + "%" + sign], text => show("brightness_medium", parseInt(text.split(",")[3]) / 100));
     }
 
     visible: hide.running
@@ -54,33 +39,9 @@ PanelWindow {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "vekrona-osd"
 
-    PwObjectTracker {
-        objects: [root.sink]
-    }
-
     Timer {
         id: hide
         interval: root.hideAfterMs
-    }
-
-    Component {
-        id: changeComponent
-
-        Process {
-            id: change
-
-            required property string step
-
-            command: ["brightnessctl", "--machine-readable", "set", step]
-            stdout: StdioCollector {
-                onStreamFinished: root.show("brightness_medium", parseInt(text.split(",")[3]) / 100)
-            }
-            stderr: StdioCollector {
-                onStreamFinished: if (text !== "")
-                    console.error("brightnessctl: " + text)
-            }
-            onExited: change.destroy()
-        }
     }
 
     Rectangle {
@@ -135,8 +96,8 @@ PanelWindow {
         }
 
         function mute(): void {
-            root.sink.audio.muted = !root.sink.audio.muted;
-            root.show(root.volumeGlyph(), root.sink.audio.volume);
+            Audio.toggleMute();
+            root.show(Audio.glyph, Audio.volume);
         }
     }
 
@@ -156,19 +117,19 @@ PanelWindow {
         target: "mpris"
 
         function playPause(): void {
-            root.player()?.togglePlaying();
+            Audio.player?.togglePlaying();
         }
 
         function pause(): void {
-            root.player()?.pause();
+            Audio.player?.pause();
         }
 
         function next(): void {
-            root.player()?.next();
+            Audio.player?.next();
         }
 
         function previous(): void {
-            root.player()?.previous();
+            Audio.player?.previous();
         }
     }
 }

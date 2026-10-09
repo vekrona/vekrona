@@ -65,6 +65,14 @@ shown 'Critical one' || die "a critical notification must never expire"
 log "ok: a normal notification expires and a critical one stays"
 
 clear_notifications
+replaced_id="$(notify -p -t 1000 'Replaced' 'first text')"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'first text'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- gone 'first text'
+notify -r "$replaced_id" 'Replaced' 'second text'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'second text'
+log "ok: a replaced notification shows its new text as a fresh toast after the old one expired"
+
+clear_notifications
 notify 'Kept' 'in the centre'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'in the centre'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- gone 'in the centre'

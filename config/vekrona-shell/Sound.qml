@@ -1,35 +1,22 @@
 import QtQuick
 import QtQuick.Layouts
-import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
 import "Vekrona"
+import "."
 
 BarPill {
     id: root
 
     required property var bar
-    readonly property PwNode sink: Pipewire.defaultAudioSink
-    readonly property real volume: sink?.audio?.volume ?? 0
-    readonly property bool muted: sink?.audio?.muted ?? true
-    readonly property int percent: Math.round(100 * volume)
     readonly property real wheelStep: 0.05
     readonly property var sinks: Pipewire.nodes.values.filter(node => node.type === PwNodeType.AudioSink)
-    readonly property MprisPlayer player: Mpris.players.values[0] ?? null
 
-    function setVolume(fraction: real): void {
-        sink.audio.volume = Math.max(0, Math.min(1, fraction));
-    }
-
-    icon: muted || percent === 0 ? "volume_off" : percent <= 33 ? "volume_down" : "volume_up"
-    value: percent + " %"
+    icon: Audio.glyph
+    value: Audio.percent + " %"
     ariaName: "Sound"
     onClicked: bar.togglePopout(popout)
-    onRightClicked: sink.audio.muted = !muted
-    onWheel: delta => setVolume(volume + (delta > 0 ? wheelStep : -wheelStep))
-
-    PwObjectTracker {
-        objects: [root.sink]
-    }
+    onRightClicked: Audio.toggleMute()
+    onWheel: delta => Audio.setVolume(Audio.volume + (delta > 0 ? wheelStep : -wheelStep))
 
     Popout {
         id: popout
@@ -42,20 +29,20 @@ BarPill {
 
             BarPill {
                 icon: "volume_off"
-                filled: root.muted
+                filled: Audio.muted
                 ariaName: "Mute"
-                onClicked: root.sink.audio.muted = !root.muted
+                onClicked: Audio.toggleMute()
             }
 
             Slider {
-                value: root.volume
+                value: Audio.volume
                 ariaName: "Volume"
-                onMoved: fraction => root.setVolume(fraction)
+                onMoved: fraction => Audio.setVolume(fraction)
             }
 
             Label {
                 style: VekronaTheme.type.label
-                text: root.percent + " %"
+                text: Audio.percent + " %"
             }
         }
 
@@ -68,39 +55,39 @@ BarPill {
                 Layout.fillWidth: true
                 icon: "speaker"
                 value: modelData.description
-                emphasized: modelData === root.sink
+                emphasized: modelData === Audio.sink
                 ariaName: "Output " + modelData.description
                 onClicked: Pipewire.preferredDefaultAudioSink = modelData
             }
         }
 
         RowLayout {
-            visible: root.player !== null
+            visible: Audio.player !== null
             spacing: VekronaTheme.space1
 
             Label {
                 Layout.fillWidth: true
                 style: VekronaTheme.type.body
                 elide: Text.ElideRight
-                text: [root.player?.trackTitle, root.player?.trackArtist].filter(s => s).join(" - ")
+                text: [Audio.player?.trackTitle, Audio.player?.trackArtist].filter(s => s).join(" - ")
             }
 
             BarPill {
                 icon: "skip_previous"
                 ariaName: "Previous track"
-                onClicked: root.player.previous()
+                onClicked: Audio.player.previous()
             }
 
             BarPill {
-                icon: root.player?.isPlaying ? "pause" : "play_arrow"
+                icon: Audio.player?.isPlaying ? "pause" : "play_arrow"
                 ariaName: "Play or pause"
-                onClicked: root.player.togglePlaying()
+                onClicked: Audio.player.togglePlaying()
             }
 
             BarPill {
                 icon: "skip_next"
                 ariaName: "Next track"
-                onClicked: root.player.next()
+                onClicked: Audio.player.next()
             }
         }
     }

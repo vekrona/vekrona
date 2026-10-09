@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell.Io
 import "."
 
 Picker {
@@ -21,17 +20,5 @@ Picker {
     items: entries(history, query)
     onChosen: item => Exec.detached(["bash", "-c", "set -eo pipefail; cliphist decode \"$1\" | wl-copy", "_", item.line])
     onOpenChanged: if (open)
-        list.running = true
-
-    Process {
-        id: list
-        command: ["cliphist", "list"]
-        stdout: StdioCollector {
-            onStreamFinished: root.history = text.split("\n").filter(line => line !== "")
-        }
-        stderr: StdioCollector {
-            onStreamFinished: if (text !== "")
-                console.error("cliphist list: " + text)
-        }
-    }
+        Exec.capture(["cliphist", "list"], text => history = text.split("\n").filter(line => line !== ""))
 }

@@ -1,4 +1,5 @@
 singleton Exec 1.0 Exec.qml
+singleton Audio 1.0 Audio.qml
 Bar 1.0 Bar.qml
 Desktops 1.0 Desktops.qml
 WindowTitle 1.0 WindowTitle.qml

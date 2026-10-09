@@ -18,12 +18,23 @@ BarPill {
     readonly property var adapter: Bluetooth.defaultAdapter
     readonly property var pairedDevices: adapter ? adapter.devices.values.filter(device => device.paired) : []
     property var passwordFor: null
+    property string failure: ""
 
     function wifiGlyph(strength: real): string {
         return strength >= 0.66 ? "wifi" : strength >= 0.33 ? "wifi_2_bar" : "wifi_1_bar";
     }
 
+    function connectionFailed(network, reason): void {
+        failure = network.name + ": " + ConnectionFailReason.toString(reason);
+        console.error("Wi-Fi " + failure);
+        if (network.security !== WifiSecurityType.Open) {
+            passwordFor = network;
+            password.forceActiveFocus();
+        }
+    }
+
     function chooseNetwork(network): void {
+        failure = "";
         if (network.connected) {
             network.disconnect();
         } else if (network.known || network.security === WifiSecurityType.Open) {
@@ -43,7 +54,10 @@ BarPill {
         anchorItem: root
         open: root.bar.openPopout === popout
         onDismissed: root.bar.openPopout = null
-        onOpenChanged: if (!open) root.passwordFor = null
+        onOpenChanged: if (!open) {
+            root.passwordFor = null;
+            root.failure = "";
+        }
 
         Repeater {
             model: root.wifiNetworks
@@ -57,7 +71,23 @@ BarPill {
                 emphasized: modelData.connected
                 ariaName: "Wi-Fi " + modelData.name
                 onClicked: root.chooseNetwork(modelData)
+
+                Connections {
+                    target: modelData
+                    function onConnectionFailed(reason): void {
+                        root.connectionFailed(modelData, reason);
+                    }
+                }
             }
+        }
+
+        Label {
+            visible: root.failure !== ""
+            Layout.maximumWidth: VekronaTheme.sizeTarget * 8
+            wrapMode: Text.Wrap
+            color: VekronaTheme.c.dangerInk
+            style: VekronaTheme.type.body
+            text: root.failure
         }
 
         Rectangle {

@@ -12,7 +12,7 @@ Row {
     property int ramPercent: 0
 
     function readCpu(stat: string): void {
-        const fields = stat.split("\n")[0].trim().split(/\s+/).slice(1).map(Number);
+        const fields = stat.split("\n")[0].trim().split(/\s+/).slice(1, 9).map(Number);
         const idle = fields[3] + fields[4];
         const total = fields.reduce((sum, n) => sum + n, 0);
         const busy = total - idle;
@@ -54,13 +54,13 @@ Row {
         icon: "speed"
         value: root.cpuPercent + " %"
         ariaName: "CPU load"
-        onClicked: Exec.detached(["ghostty", "-e", "btop"])
+        onClicked: Exec.detached(Exec.inTerminal(["btop"]))
     }
 
     BarPill {
         icon: "memory"
         value: root.ramPercent + " %"
         ariaName: "Memory use"
-        onClicked: Exec.detached(["ghostty", "-e", "btop"])
+        onClicked: Exec.detached(Exec.inTerminal(["btop"]))
     }
 }

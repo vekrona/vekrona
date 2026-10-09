@@ -43,13 +43,8 @@ Item {
         color: VekronaTheme.c.ink
     }
 
-    Rectangle {
-        visible: root.activeFocus
-        anchors.fill: parent
-        anchors.margins: VekronaTheme.focusOffset
-        color: "transparent"
-        border.width: VekronaTheme.borderFocus
-        border.color: VekronaTheme.c.focus
+    FocusRing {
+        shown: root.activeFocus
     }
 
     MouseArea {

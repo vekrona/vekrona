@@ -10,13 +10,16 @@ PanelWindow {
 
     readonly property AuthFlow flow: agent.flow
     readonly property int panelWidth: 12 * VekronaTheme.sizeTarget
+    readonly property string currentUser: Quickshell.env("USER")
+    readonly property bool currentUserListed: (flow?.identities ?? []).some(identity => !identity.isGroup && identity.string === currentUser)
+    readonly property string identityNote: !flow?.selectedIdentity ? "" : (currentUserListed ? "" : currentUser + " may not authenticate this request. ") + "Password for " + flow.selectedIdentity.string
     property bool attempted: false
 
     function selectCurrentUser(): void {
         const identities = flow.identities;
         if (identities.length < 2)
             return;
-        const current = identities.find(identity => !identity.isGroup && identity.string === Quickshell.env("USER"));
+        const current = identities.find(identity => !identity.isGroup && identity.string === currentUser);
         if (current && current !== flow.selectedIdentity)
             flow.selectedIdentity = current;
     }
@@ -103,6 +106,15 @@ PanelWindow {
                     text: root.flow?.message ?? ""
                 }
 
+                Label {
+                    visible: text !== ""
+                    Layout.fillWidth: true
+                    style: VekronaTheme.type.body
+                    color: VekronaTheme.c.inkMuted
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    text: root.identityNote
+                }
+
                 Rectangle {
                     Layout.fillWidth: true
                     implicitHeight: VekronaTheme.sizeTarget
@@ -135,13 +147,8 @@ PanelWindow {
                         text: root.flow?.inputPrompt ?? ""
                     }
 
-                    Rectangle {
-                        visible: password.activeFocus
-                        anchors.fill: parent
-                        anchors.margins: VekronaTheme.focusOffset
-                        color: "transparent"
-                        border.width: VekronaTheme.borderFocus
-                        border.color: VekronaTheme.c.focus
+                    FocusRing {
+                        shown: password.activeFocus
                     }
                 }
 

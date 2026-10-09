@@ -25,6 +25,12 @@ Singleton {
         });
     }
 
+    function revive(notification: Notification): void {
+        const next = Object.assign({}, expired);
+        delete next[notification.id];
+        expired = next;
+    }
+
     function toggleCenter(): void {
         setCenterOpen(!centerOpen);
     }
@@ -50,6 +56,10 @@ Singleton {
         bodyHyperlinksSupported: false
         onNotification: notification => {
             notification.tracked = true;
+            const reshow = () => root.revive(notification);
+            notification.summaryChanged.connect(reshow);
+            notification.bodyChanged.connect(reshow);
+            notification.closed.connect(reshow);
             if (!root.centerOpen)
                 root.unseen = true;
         }
@@ -103,7 +113,7 @@ Singleton {
                     Layout.fillWidth: true
 
                     Timer {
-                        running: notification.urgency !== NotificationUrgency.Critical
+                        running: notification.urgency !== NotificationUrgency.Critical && !root.expired[notification.id]
                         interval: notification.expireTimeout > 0 ? notification.expireTimeout : root.defaultTimeoutMs
                         onTriggered: root.expire(toast.modelData)
                     }

@@ -5,8 +5,6 @@ import "."
 Picker {
     id: root
 
-    readonly property var terminal: ["ghostty", "-e"]
-
     function entries(applications, query: string): var {
         const needle = query.toLowerCase();
         const byName = (a, b) => a.name.localeCompare(b.name);
@@ -15,7 +13,7 @@ Picker {
         return matches.filter(startsWithQuery).sort(byName).concat(matches.filter(app => !startsWithQuery(app)).sort(byName)).map(app => ({
                     label: app.name,
                     iconPath: Quickshell.iconPath(app.icon, "application-x-executable"),
-                    command: app.runInTerminal ? root.terminal.concat(app.command) : app.command
+                    command: app.runInTerminal ? Exec.inTerminal(app.command) : app.command
                 }));
     }
 

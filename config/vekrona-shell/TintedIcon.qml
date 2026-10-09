@@ -7,7 +7,9 @@ Canvas {
     required property url source
     required property color tint
     property int size: VekronaTheme.iconS
-    readonly property real opaqueAlpha: 0.98
+    // Some tray icons (Tailscale's) ship an opaque square. A corner alpha of at least opaqueIconAlpha marks one, and
+    // opaqueContrastGain scales its glyph's contrast to the corner colour into the mask.
+    readonly property real opaqueIconAlpha: 0.98
     readonly property real opaqueContrastGain: 2
 
     function luminance(px: var, i: int): real {
@@ -20,7 +22,7 @@ Canvas {
 
     function maskOf(px: var, w: int, h: int): var {
         const corners = cornerOffsets(w, h);
-        const opaque = corners.every(c => px[c + 3] >= opaqueAlpha * 255);
+        const opaque = corners.every(c => px[c + 3] >= opaqueIconAlpha * 255);
         const background = luminance(px, corners[0]);
         const mask = new Array(w * h);
         for (let p = 0; p < w * h; p++) {
