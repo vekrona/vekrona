@@ -1,7 +1,7 @@
 [Unit]
 Description=vekrona error watcher
 PartOf=sway-session.target
-After=sway-session.target
+After=sway-session.target vekrona-shell.service
 OnFailure=vekrona-errors-failed.service
 
 [Service]

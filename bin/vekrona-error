@@ -951,7 +951,10 @@ def cmd_watch(args):
             name, old_owner, new_owner = params.unpack()
             if name != "org.freedesktop.Notifications":
                 return
-            self.owner = new_owner or None
+            self._set_owner(new_owner or None)
+
+        def _set_owner(self, owner):
+            self.owner = owner
             self.notif_map.clear()
             self._persist_notif_map()
 
@@ -1326,6 +1329,9 @@ def cmd_watch(args):
     bus.signal_subscribe(None, "org.freedesktop.DBus", "NameOwnerChanged",
                           "/org/freedesktop/DBus", "org.freedesktop.Notifications",
                           Gio.DBusSignalFlags.NONE, watcher._on_name_owner_changed, None)
+    current_owner = get_name_owner(bus, "org.freedesktop.Notifications")
+    if current_owner != watcher.owner:
+        watcher._set_owner(current_owner)
 
     def on_sigterm():
         watcher.flush_cursor_on_exit()

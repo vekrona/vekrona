@@ -5,6 +5,8 @@ After=sway-session.target
 ConditionEnvironment=XDG_CURRENT_DESKTOP=sway
 
 [Service]
+Type=dbus
+BusName=org.freedesktop.Notifications
 ExecStart=/usr/bin/qs -c vekrona-shell
 SyslogIdentifier=vekrona-shell
 Restart=always
