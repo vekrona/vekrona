@@ -2,7 +2,7 @@
 Description=Refresh the Vekrona weather forecast
 
 [Timer]
-OnStartupSec=30s
+OnActiveSec=30s
 OnUnitActiveSec=15min
 
 [Install]
