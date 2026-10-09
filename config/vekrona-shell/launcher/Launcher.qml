@@ -232,6 +232,16 @@ PanelWindow {
         }
     }
 
+    function notifyClosed(): void {
+        for (const module of moduleList) {
+            try {
+                module.closed();
+            } catch (e) {
+                reportModuleFailure(module, e);
+            }
+        }
+    }
+
     function reportModuleFailure(module: var, error: var): void {
         console.error("launcher: module " + module.moduleId + " failed:", error);
         showToast(module.title + " failed: " + error);
@@ -670,6 +680,7 @@ PanelWindow {
             pendingActivation = -1;
             collected = {};
             collectedContext = "";
+            notifyClosed();
         }
     }
     onActionsOpenChanged: {

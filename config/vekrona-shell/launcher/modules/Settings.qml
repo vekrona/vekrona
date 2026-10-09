@@ -3,7 +3,7 @@ import ".."
 import "../.." as Shell
 import "../../Vekrona"
 
-// Theme, night light, caffeine, Wi-Fi, Bluetooth, audio output, the coding agent, keybindings and updates.
+// Theme, night light, caffeine, Wi-Fi, Bluetooth and its pairing, audio output, the coding agent, keybindings and updates.
 LauncherModule {
     id: root
 
@@ -32,9 +32,13 @@ LauncherModule {
             title: "Audio output",
             viewId: "audio"
         })
+    readonly property var bluetoothView: ({
+            title: "Pair a Bluetooth device",
+            viewId: "bluetooth"
+        })
     readonly property var settingRows: buildRows()
-    // What the Wi-Fi and audio views show, to tell the host to re-query only when it changes.
-    readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? ""])
+    // What the Wi-Fi, Bluetooth and audio views show, to tell the host to re-query only when it changes.
+    readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Wireless.scanning, Shell.Wireless.unpairedDevices.map(device => [device.address, device.name, device.pairing]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? ""])
 
     function setting(key: string, heading: string, icon: string, fields: var): var {
         return Object.assign({
@@ -129,8 +133,8 @@ LauncherModule {
         }));
         if (Shell.Wireless.adapter) {
             rows.push(setting("bluetooth", bluetooth ? "Turn Bluetooth off" : "Turn Bluetooth on", bluetooth ? "bluetooth" : "bluetooth_disabled", {
-                subtitle: bluetooth ? "Now on" : "Now off",
-                keywords: ["bluetooth", "bt", "wireless", "headphones", "pair"],
+                subtitle: Shell.Wireless.bluetoothBlocked ? "Blocked by rfkill" : bluetooth ? "Now on" : "Now off",
+                keywords: ["bluetooth", "bt", "wireless", "headphones", "pair", "rfkill"],
                 aliases: ["bt", "bluetooth"],
                 actions: [
                     {
@@ -140,6 +144,20 @@ LauncherModule {
                     }
                 ]
             }));
+            if (bluetooth) {
+                rows.push(setting("bluetooth-pair", "Pair a Bluetooth device", "bluetooth_searching", {
+                    subtitle: Shell.Wireless.scanning ? "Searching for devices" : "Put the device in pairing mode first",
+                    keywords: ["bluetooth", "bt", "pair", "scan", "headphones", "controller", "mouse", "keyboard", "new"],
+                    aliases: ["pair"],
+                    actions: [
+                        {
+                            id: "scan",
+                            label: "Scan for devices",
+                            run: () => root.scanBluetooth()
+                        }
+                    ]
+                }));
+            }
         }
         rows.push(setting("audio-output", "Audio output", "speaker", {
             subtitle: Shell.Audio.sink ? Shell.Audio.sink.description : "No output",
@@ -223,6 +241,48 @@ LauncherModule {
                 }));
     }
 
+    // The scan control, then the devices found that are not paired yet.
+    function bluetoothRows(): var {
+        const scanning = Shell.Wireless.scanning;
+        const rows = [
+            {
+                id: "settings:bluetooth:scan",
+                title: scanning ? "Searching for devices" : "Not searching",
+                subtitle: "Put the device in pairing mode",
+                glyph: "bluetooth_searching",
+                kind: "Bluetooth",
+                actions: [
+                    {
+                        id: "scan",
+                        label: scanning ? "Stop scanning" : "Scan again",
+                        run: () => {
+                            Shell.Wireless.setScanning(!scanning);
+                            return false;
+                        }
+                    }
+                ]
+            }
+        ];
+        for (const device of Shell.Wireless.unpairedDevices) {
+            rows.push({
+                id: "settings:bluetooth:" + device.address,
+                title: device.name,
+                subtitle: device.pairing ? "Pairing" : "",
+                glyph: device.pairing ? "sync" : "bluetooth",
+                kind: "Bluetooth device",
+                keywords: ["bluetooth", "pair"],
+                actions: [
+                    {
+                        id: "pair",
+                        label: "Pair",
+                        run: () => root.pairBluetooth(device)
+                    }
+                ]
+            });
+        }
+        return rows;
+    }
+
     function audioRows(): var {
         return Shell.Audio.sinks.map(sink => ({
                     id: "settings:sink:" + sink.name,
@@ -288,8 +348,24 @@ LauncherModule {
         return report(Shell.Wireless.toggleWifi());
     }
 
+    // Returns false while rfkill is being lifted, so the launcher stays open to show how that ended.
     function switchBluetooth(): bool {
-        return report(Shell.Wireless.toggleBluetooth());
+        const unblocking = Shell.Wireless.bluetoothBlocked;
+        Shell.Wireless.toggleBluetooth(reason => launcher.toast(reason));
+        return !unblocking;
+    }
+
+    function scanBluetooth(): bool {
+        Shell.Wireless.setScanning(true);
+        launcher.pushView(moduleId, bluetoothView);
+        return false;
+    }
+
+    // Returns false: the launcher stays open to show how the pairing ended.
+    function pairBluetooth(device): bool {
+        launcher.toast("Pairing with " + device.name);
+        Shell.Wireless.pairDevice(device, reason => launcher.toast(reason));
+        return false;
     }
 
     // Returns false while a connect is under way, so the launcher stays open to show how it ended.
@@ -350,6 +426,10 @@ LauncherModule {
         refresh();
     }
 
+    function closed(): void {
+        Shell.Wireless.setScanning(false);
+    }
+
     function query(text, reqId) {
         return settingRows;
     }
@@ -358,6 +438,8 @@ LauncherModule {
         switch (viewId) {
         case "wifi":
             return wifiRows();
+        case "bluetooth":
+            return bluetoothRows();
         case "audio":
             return audioRows();
         case "agent":

@@ -132,10 +132,10 @@ vekrona/
     xremap/config.yml             # caps-hyper modmap, cmd-layer/terminal-word-nav keymaps, exact_match: true
     vekrona-shell/                # the Quickshell shell (qs -c vekrona-shell): bar, notifications, polkit, OSD; Vekrona/ links to quickshell-shared
       Exec.qml                    # the one process runner: run(argv, onDone) with kill(), detached(), unit(), failure()
-      Wireless.qml                # Wi-Fi and Bluetooth state and actions, shared by the bar's network popout and the launcher's Settings module
+      Wireless.qml                # Wi-Fi and Bluetooth state and actions (rfkill unblock, scanning, pairing without a PIN, forgetting), shared by the bar's network popout and the launcher's Settings module
       launcher/                   # the launcher: a host plus modules
         Launcher.qml              # the host: search field, modes (/calc), sub-view stack, ranking, actions, confirm-twice, toast; the module API (close, setQuery, enterMode, pushView, toast)
-        LauncherModule.qml        # the base of every module: moduleId, slash, inMode, widget, opened(), query(), fallbacks(), view(), resultsReady, changed
+        LauncherModule.qml        # the base of every module: moduleId, slash, inMode, widget, opened(), closed(), query(), fallbacks(), view(), resultsReady, changed
         Modules.qml               # instantiates the modules in tie-break order
         Ranker.js                 # pure ranking, sections and frecency maths
         Frecency.qml              # launcher-frecency.json in the state dir

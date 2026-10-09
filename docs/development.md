@@ -108,7 +108,15 @@ login manager stage leaves the machine booting straight into the greeter.
 
 What a VM cannot test, because it has none of the hardware involved: the
 NVIDIA stage and every GPU feature that depends on it (stage `10-nvidia` is
-always skipped), the real monitor's modes, and Bluetooth.
+always skipped) and the real monitor's modes.
+
+Bluetooth is testable with a virtual controller: the kernel module `hci_vhci`
+(package `kernel-modules`) provides `/dev/vhci`, and BlueZ's emulator `btvirt`
+(shipped in `bluez-libs-devel`) opens it and answers the HCI commands, so
+`hci0` appears in BlueZ and rfkill like a real adapter. `tests/e2e/bluetooth-rfkill.sh`
+installs both in the guest, starts `btvirt -l1`, restarts `bluetooth.service`
+(it only starts while `/sys/class/bluetooth` exists) and removes the
+controller on exit. It cannot test pairing or audio, since no peer device exists.
 
 ### VM session lifecycle
 

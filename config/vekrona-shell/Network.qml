@@ -10,6 +10,7 @@ BarPill {
     required property var bar
     property var passwordFor: null
     property string failure: ""
+    property string bluetoothFailure: ""
 
     function connectionFailed(network, reason): void {
         failure = Wireless.failureText(network, reason);
@@ -39,9 +40,14 @@ BarPill {
         anchorItem: root
         open: root.bar.openPopout === popout
         onDismissed: root.bar.openPopout = null
-        onOpenChanged: if (!open) {
+        onOpenChanged: {
+            // A pairing can end after the popout closed: its failure must not greet the next opening.
+            root.bluetoothFailure = "";
+            if (open)
+                return;
             root.passwordFor = null;
             root.failure = "";
+            Wireless.setScanning(false);
         }
 
         Repeater {
@@ -112,25 +118,79 @@ BarPill {
             visible: Wireless.adapter !== null
             Layout.fillWidth: true
             icon: Wireless.bluetoothEnabled ? "bluetooth" : "bluetooth_disabled"
-            value: "Bluetooth"
+            value: Wireless.bluetoothBlocked ? "Bluetooth blocked" : "Bluetooth"
             emphasized: Wireless.bluetoothEnabled
-            ariaName: "Bluetooth power"
-            onClicked: Wireless.toggleBluetooth()
+            ariaName: Wireless.bluetoothBlocked ? "Bluetooth power, blocked by rfkill" : "Bluetooth power"
+            onClicked: {
+                root.bluetoothFailure = "";
+                Wireless.toggleBluetooth(reason => root.bluetoothFailure = reason);
+            }
         }
 
         Repeater {
             model: Wireless.pairedDevices
 
+            RowLayout {
+                required property var modelData
+
+                Layout.fillWidth: true
+                spacing: 0
+
+                BarPill {
+                    Layout.fillWidth: true
+                    icon: modelData.connected ? "bluetooth_connected" : "bluetooth"
+                    value: modelData.name
+                    emphasized: modelData.connected
+                    ariaName: "Bluetooth " + modelData.name
+                    onClicked: modelData.connected ? modelData.disconnect() : modelData.connect()
+                }
+
+                BarPill {
+                    icon: "link_off"
+                    ariaName: "Forget " + modelData.name
+                    onClicked: Wireless.forgetDevice(modelData)
+                }
+            }
+        }
+
+        BarPill {
+            visible: Wireless.bluetoothEnabled
+            Layout.fillWidth: true
+            icon: "bluetooth_searching"
+            value: Wireless.scanning ? "Searching for devices" : "Pair new device"
+            emphasized: Wireless.scanning
+            ariaName: "Pair new device"
+            onClicked: {
+                root.bluetoothFailure = "";
+                Wireless.setScanning(!Wireless.scanning);
+            }
+        }
+
+        Repeater {
+            model: Wireless.scanning ? Wireless.unpairedDevices : []
+
             BarPill {
                 required property var modelData
 
                 Layout.fillWidth: true
-                icon: modelData.connected ? "bluetooth_connected" : "bluetooth"
-                value: modelData.name
-                emphasized: modelData.connected
-                ariaName: "Bluetooth " + modelData.name
-                onClicked: modelData.connected ? modelData.disconnect() : modelData.connect()
+                icon: modelData.pairing ? "sync" : "bluetooth"
+                value: modelData.pairing ? modelData.name + ", pairing" : modelData.name
+                emphasized: modelData.pairing
+                ariaName: "Pair " + modelData.name
+                onClicked: {
+                    root.bluetoothFailure = "";
+                    Wireless.pairDevice(modelData, reason => root.bluetoothFailure = reason);
+                }
             }
+        }
+
+        Label {
+            visible: root.bluetoothFailure !== ""
+            Layout.maximumWidth: VekronaTheme.sizeTarget * 8
+            wrapMode: Text.Wrap
+            color: VekronaTheme.c.dangerInk
+            style: VekronaTheme.type.body
+            text: root.bluetoothFailure
         }
     }
 }

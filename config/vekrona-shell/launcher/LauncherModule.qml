@@ -2,7 +2,7 @@ import QtQuick
 import ".." as Shell
 
 // The base of every launcher module (modules/*.qml). The host (Launcher.qml) sets `launcher` and
-// calls opened, query, fallbacks and view.
+// calls opened, closed, query, fallbacks and view.
 //
 // A result is {id: "<moduleId>:<key>", title, subtitle?, iconPath?, glyph?, kind, keywords?, aliases?,
 // score?, card?: "calc", checked?, actions: [action]}. A result with a `score` (0..1) skips fuzzy matching
@@ -41,6 +41,10 @@ Item {
 
     // Called on every module each time the launcher opens: refresh state that goes stale while it is closed.
     function opened() {
+    }
+
+    // Called on every module each time the launcher closes: stop what only runs while it is open.
+    function closed() {
     }
 
     // The row that tells an asynchronous request failed: "Couldn’t <what>" with the reason below it.
