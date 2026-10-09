@@ -9,3 +9,4 @@ Perf 1.0 Perf.qml
 Sound 1.0 Sound.qml
 Network 1.0 Network.qml
 Battery 1.0 Battery.qml
+TintedIcon 1.0 TintedIcon.qml

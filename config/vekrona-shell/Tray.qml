@@ -1,8 +1,6 @@
 import QtQuick
-import QtQuick.Effects
 import Quickshell
 import Quickshell.Services.SystemTray
-import Quickshell.Widgets
 import "Vekrona"
 
 Row {
@@ -24,28 +22,10 @@ Row {
                 color: mouse.pressed ? VekronaTheme.c.surface3 : mouse.containsMouse ? VekronaTheme.c.surface2 : "transparent"
             }
 
-            IconImage {
-                id: glyph
+            TintedIcon {
                 anchors.centerIn: parent
-                implicitSize: VekronaTheme.iconS
                 source: item.modelData.icon
-                layer.enabled: true
-                visible: false
-            }
-
-            Rectangle {
-                id: ink
-                anchors.fill: glyph
-                color: VekronaTheme.c.ink
-                layer.enabled: true
-                visible: false
-            }
-
-            MultiEffect {
-                anchors.fill: glyph
-                source: ink
-                maskEnabled: true
-                maskSource: glyph
+                tint: VekronaTheme.c.ink
             }
 
             QsMenuAnchor {
