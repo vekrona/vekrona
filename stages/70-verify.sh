@@ -7,6 +7,7 @@ source "$ROOT/lib/authselect-vekrona.sh"
 source "$ROOT/lib/pam-u2f.sh"
 source "$ROOT/lib/luks-fido2.sh"
 source "$ROOT/lib/facetimehd.sh"
+source "$ROOT/lib/proton.sh"
 source "$ROOT/lib/display-scale.sh"
 
 [[ "${1:-}" == "--all" ]] && VEKRONA_VERIFY_ALL=1
@@ -55,6 +56,12 @@ user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true
 # rpm -q exits 1 for an absent package and for a broken rpm database alike, so only its "is not installed" answer counts.
 pkg_absent() { [[ "$(LC_ALL=C rpm -q "$1" 2>&1 || true)" == "package $1 is not installed" ]]; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
+# The package owns at least one .desktop file under /usr/share/applications, and every one of them is on disk.
+pkg_desktop_files_present() {
+  local files file
+  files="$(rpm -ql "$1" | grep '^/usr/share/applications/.*\.desktop$')" || return 1
+  while IFS= read -r file; do [[ -f "$file" ]] || return 1; done <<<"$files"
+}
 file_executable() { [[ -x "$1" ]]; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
 module_built_for_running_kernel() { modinfo -k "$(uname -r)" "$1" >/dev/null 2>&1; }
@@ -221,6 +228,13 @@ if ran 30-packages; then
     warn_check "versionlock entry matches fc$os_version_id: $entry" eq "$fcver" "$os_version_id"
   done < <(versionlock_evrs)
   check assert "greetd user exists" bash -c "getent passwd greetd >/dev/null"
+
+  check assert "/etc/yum.repos.d/vekrona-proton.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/vekrona-proton.repo" /etc/yum.repos.d/vekrona-proton.repo
+  check assert "repo enabled: vekrona-proton" repo_enabled vekrona-proton
+  for p in $(proton_package_names); do
+    check assert "package installed: $p" pkg_installed "$p"
+    check assert "$p ships its .desktop file" pkg_desktop_files_present "$p"
+  done
 
   check assert "package installed: tuned-ppd" pkg_installed tuned-ppd
   check assert "rpm -q dms finds nothing (retired)" pkg_absent dms

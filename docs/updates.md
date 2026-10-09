@@ -65,6 +65,30 @@ warns when a lock's `.fcNN` suffix no longer matches the running Fedora
 version, which is the signal that a lock is now holding back more than
 intended.
 
+## Proton apps
+
+Proton Mail (which includes Calendar), Proton Pass and Proton Authenticator are native apps installed from Proton's
+own RPMs. Proton publishes them only as files linked from JSON feeds (`proton.me/download/.../version.json`), has no dnf
+repo for them, and its apps do not update themselves on Linux. So `bin/vekrona-proton` builds the repo:
+
+- `vekrona-proton stage` (root) reads each feed (`lib/proton.sh`, `VEKRONA_PROTON_FEEDS`), picks the newest `Stable`
+  release whose rollout is 100% (a half-rolled-out release is skipped until Proton finishes it), downloads its `.rpm`
+  and checks the SHA512 from the feed. It keeps one RPM per package in `/var/lib/vekrona/proton-repo/` and runs
+  `createrepo_c --update`. It downloads only when the feed is newer than the installed package and the RPM is not
+  already staged, so running it again is harmless.
+- `etc/yum.repos.d/vekrona-proton.repo` points dnf at that directory (`includepkgs` limits it to the three packages), so
+  plain `dnf install` and `dnf upgrade` handle the apps like any others, snapper snapshots included.
+- `vekrona-proton check` (any user, read-only) prints the installed and the latest feed version of each package.
+- Stage `30-packages` stages, installs the repo file, then installs the packages. `vekrona-update` does not run
+  `vekrona-proton stage` yet, so run `sudo vekrona-proton stage` before `vekrona-update` to pick up new releases.
+
+Trust model: Proton signs none of these RPMs (no GPG signature, no `repo_gpgcheck`), so the repo has `gpgcheck=0`.
+What protects a download is TLS to `proton.me` plus the SHA512 from the feed on the same origin, and every RPM URL
+in a feed must start with `https://proton.me/download/`. That catches a corrupted or truncated download and a feed
+entry that points elsewhere, but not a compromise of proton.me itself: whoever controls the feed controls the
+checksum too. The repo directory is root-owned and only `vekrona-proton stage` writes to it. The downloaded RPM's
+name and version must match the feed's before it enters the repo.
+
 To change the `minimum_release_age` cooldown, edit the one line in
 `etc/mise/config.toml` and re-run `./install.sh 55`, which reinstalls the
 file and re-runs `mise_system install`/`reshim` against the new setting; the
