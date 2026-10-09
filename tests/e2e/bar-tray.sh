@@ -5,9 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-# A tray icon is drawn once per screen pixel, so a fractional scale is where it breaks. Scale 1.5 needs a bigger mode for the
+# A tray icon is drawn once per screen pixel, so a fractional scale is where it breaks. A fractional scale needs a bigger mode for the
 # right-side widgets to keep the tray in the right half of the screen.
-SCALES=(1 1.5)
+SCALES=(1 1.25 1.5)
 FIXTURES="$ROOT/tests/fixtures/tray"
 BAR_HEIGHT_LOGICAL_PX=$(($(vekrona_token_get size size-bar) - $(vekrona_token_get border border-hair)))
 ICON_S_LOGICAL_PX="$(vekrona_token_get size size-icon-s)"
@@ -96,6 +96,7 @@ menu_errors() { vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-sh
 export -f menu_shown
 export MENU_LABEL
 
+"$ROOT/tests/bake-shaders.sh" --check
 vekrona-dev session
 clear_notifications
 trap 'stop_fake_icons; reset_output; rm -f "$MEASURE_FILE"' EXIT
@@ -117,16 +118,18 @@ for scale in "${SCALES[@]}"; do
   log "ok: at scale $scale an opaque tray icon shows its dots as ink on the bar, not a solid ink square"
   check_icon "alpha" alpha disc "$scale" "$without_icon"
   log "ok: at scale $scale a tray icon with transparency keeps its shape as an ink silhouette"
-  check_icon "1Password" "$GUEST_DIR/1password.png" disc "$scale" "$without_icon"
-  log "ok: at scale $scale the real 1Password tray icon is a whole ink disc"
+  check_icon "1Password" "$GUEST_DIR/1password.png" badged-disc "$scale" "$without_icon"
+  log "ok: at scale $scale the real 1Password tray icon is an ink disc that keeps its opaque ring and keyhole as holes"
+  check_icon "themed" "themed:$GUEST_DIR/themed-disc.png" disc "$scale" "$without_icon"
+  log "ok: at scale $scale a tray icon that the icon theme supplies, as Steam's does, is a whole ink disc of the icon size"
   check_icon "Tailscale" "$GUEST_DIR/tailscale.png" dots "$scale" "$without_icon"
   log "ok: at scale $scale the real Tailscale tray icon is ink dots on the bar"
 done
 
-check_scale_change "${SCALES[0]}" "${SCALES[1]}"
-log "ok: a tray icon on the bar is redrawn whole when the output scale goes from ${SCALES[0]} to ${SCALES[1]}"
-check_scale_change "${SCALES[1]}" "${SCALES[0]}"
-log "ok: a tray icon on the bar is redrawn whole when the output scale goes from ${SCALES[1]} to ${SCALES[0]}"
+check_scale_change "${SCALES[0]}" "${SCALES[-1]}"
+log "ok: a tray icon on the bar is redrawn whole when the output scale goes from ${SCALES[0]} to ${SCALES[-1]}"
+check_scale_change "${SCALES[-1]}" "${SCALES[0]}"
+log "ok: a tray icon on the bar is redrawn whole when the output scale goes from ${SCALES[-1]} to ${SCALES[0]}"
 
 set_output 1
 settle_output

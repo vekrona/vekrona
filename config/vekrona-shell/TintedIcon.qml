@@ -1,7 +1,7 @@
 import QtQuick
 import "Vekrona"
 
-Canvas {
+Item {
     id: root
 
     required property url source
@@ -11,53 +11,49 @@ Canvas {
     // opaqueContrastGain scales its glyph's contrast to the corner colour into the mask.
     readonly property real opaqueIconAlpha: 0.98
     readonly property real opaqueContrastGain: 2
+    // A non-opaque icon is tinted by its alpha, minus the opaque details that differ from its body (the most common opaque color).
+    // A luminance difference of 0.5 leaves a quarter of the ink, a hole; a difference of 0.2, such as a shaded rim, keeps 70%; a flat
+    // body or an anti-aliased edge, at about 0, stays whole.
+    readonly property real bodyContrastGain: 1.5
 
-    function luminance(px: var, i: int): real {
-        return (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
-    }
-
-    function cornerOffsets(w: int, h: int): var {
-        return [0, 4 * (w - 1), 4 * w * (h - 1), 4 * (w * h - 1)];
-    }
-
-    function maskOf(px: var, w: int, h: int): var {
-        const corners = cornerOffsets(w, h);
-        const opaque = corners.every(c => px[c + 3] >= opaqueIconAlpha * 255);
-        const background = luminance(px, corners[0]);
-        const mask = new Array(w * h);
-        for (let p = 0; p < w * h; p++) {
-            mask[p] = opaque ? Math.min(1, opaqueContrastGain * Math.abs(luminance(px, 4 * p) - background)) : px[4 * p + 3] / 255;
-        }
-        return mask;
-    }
-
-    // Qt Canvas draws in item units but getImageData reads window pixels (Screen.devicePixelRatio rounds a 1.5 scale up to 2, so use
-    // the window's), and its putImageData paints nothing, so the mask is drawn back as an image. Without smooth:false a texel
-    // that misses a screen pixel is blurred.
-    smooth: false
     width: size
     height: size
-    onSourceChanged: loadImage(source)
-    onTintChanged: requestPaint()
-    onImageLoaded: requestPaint()
-    Component.onCompleted: loadImage(source)
-
-    onPaint: {
-        if (!isImageLoaded(source))
-            return;
-        const ctx = getContext("2d");
-        const px = Math.round(size * Window.window.devicePixelRatio);
-        ctx.clearRect(0, 0, size, size);
-        ctx.drawImage(source, 0, 0, size, size);
-        const mask = maskOf(ctx.getImageData(0, 0, px, px).data, px, px);
-        const tinted = ctx.createImageData(px, px);
-        for (let p = 0; p < px * px; p++) {
-            tinted.data[4 * p] = Math.round(tint.r * 255);
-            tinted.data[4 * p + 1] = Math.round(tint.g * 255);
-            tinted.data[4 * p + 2] = Math.round(tint.b * 255);
-            tinted.data[4 * p + 3] = Math.round(mask[p] * 255);
+    // The icon's position in the window, in logical pixels. It reads every ancestor's x and y, so it follows them. A box that
+    // starts between two screen pixels is sampled half a pixel off, which skews the icon, so the shader effect moves to the pixel grid.
+    readonly property point windowOffset: {
+        let x = 0, y = 0;
+        for (let item = root; item; item = item.parent) {
+            x += item.x;
+            y += item.y;
         }
-        ctx.clearRect(0, 0, size, size);
-        ctx.drawImage(tinted, 0, 0, size, size);
+        return Qt.point(x, y);
+    }
+    readonly property real dpr: Window.window ? Window.window.devicePixelRatio : 1
+
+    // Loaded at the physical pixels of its logical size and smoothly scaled; the shader reads it and nothing paints it.
+    Image {
+        id: image
+        source: root.source
+        sourceSize: Qt.size(root.size, root.size)
+        smooth: true
+        visible: false
+    }
+
+    // tinted-icon.frag.qsb is baked from tinted-icon.frag by tests/bake-shaders.sh.
+    ShaderEffect {
+        function snapped(logical: real): real {
+            return Math.round(logical * root.dpr) / root.dpr;
+        }
+        x: snapped(root.windowOffset.x) - root.windowOffset.x
+        y: snapped(root.windowOffset.y) - root.windowOffset.y
+        width: snapped(root.size)
+        height: snapped(root.size)
+        // The shader's sampler and uniforms, by name.
+        property Image source: image
+        property color tint: root.tint
+        property real opaqueIconAlpha: root.opaqueIconAlpha
+        property real opaqueContrastGain: root.opaqueContrastGain
+        property real bodyContrastGain: root.bodyContrastGain
+        fragmentShader: "tinted-icon.frag.qsb"
     }
 }
