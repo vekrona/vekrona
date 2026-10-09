@@ -7,6 +7,43 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 # any report from a test fail loudly instead.
 export VEKRONA_JOURNAL_SOCKET=/nonexistent/vekrona-test-journal-socket
 
+# logind suspends only when every session that can idle is idle, and the ssh session vekrona-dev works through
+# never is: it has no terminal to take an idle time from. Class "background" takes it out of that count and out of the
+# candidates for the user's Display session, the one swayidle's idle hint lands on. pam_systemd reads the class from
+# the PAM environment, so the scenario adds a pam_env line to sshd's PAM stack and replaces its own ssh session, which
+# the next vekrona-dev call reconnects.
+# vekrona-dev reads the lock state through its own ssh session, which matches the session the lock screen writes to
+# (the Display session) only while the ssh session is the user's first. Restoring therefore also logs the sway session
+# out and in again, so that the ssh session is the only one left when the next login starts.
+SSH_SESSION_ENV=/etc/vekrona-e2e-ssh-session.env
+ssh_session_class() { vekrona-dev run bash -c 'loginctl show-session "$XDG_SESSION_ID" -p Class --value' 2>/dev/null; }
+ssh_session_is_background() { [[ "$(ssh_session_class)" == background ]]; }
+ssh_session_is_user() { [[ "$(ssh_session_class)" == user ]]; }
+sway_gone() { ! vekrona-dev run pgrep -x sway >/dev/null; }
+# sway can die before it answers the command that ends it, so the status says nothing: sway_gone is the check.
+logout_sway() {
+  vekrona-dev sh swaymsg exit >/dev/null || true
+  vekrona-dev until --timeout 60 -- sway_gone
+}
+export -f ssh_session_class ssh_session_is_background ssh_session_is_user sway_gone
+replace_ssh_session() { vekrona-dev run bash -c 'sudo systemd-run --no-block loginctl terminate-session "$XDG_SESSION_ID"' >/dev/null; }
+ssh_sessions_background() {
+  vekrona-dev run sudo bash -c '
+printf "XDG_SESSION_CLASS=background\n" >"$1"
+grep -q "$1" /etc/pam.d/sshd || sed -i "/^session    include      password-auth/i session    required     pam_env.so envfile=$1" /etc/pam.d/sshd
+' _ "$SSH_SESSION_ENV"
+  ssh_session_is_background || replace_ssh_session
+  vekrona-dev until --timeout 60 -- ssh_session_is_background
+}
+# The pam_env line goes first: with its file gone, a remaining line would refuse every ssh login.
+ssh_sessions_restore() {
+  vekrona-dev run sudo bash -c 'sed -i "\|$1|d" /etc/pam.d/sshd && rm -f "$1"' _ "$SSH_SESSION_ENV"
+  ssh_session_is_user || replace_ssh_session
+  vekrona-dev until --timeout 60 -- ssh_session_is_user
+  logout_sway
+  vekrona-dev session
+}
+
 clear_notifications() { vekrona-dev sh qs -c vekrona-shell ipc call notifications clearAll >/dev/null; }
 
 SCREEN_COLORS="$VEKRONA_ROOT/tests/e2e/screen_colors.py"

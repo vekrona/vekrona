@@ -7,8 +7,7 @@ source "$ROOT/tests/lib.sh"
 STEP_TIMEOUT_SEC=60
 
 shown() { vekrona-dev see text "$1"; }
-sway_gone() { ! vekrona-dev run pgrep -x sway >/dev/null; }
-export -f shown sway_gone
+export -f shown
 
 cleanup() {
   updates_restore
@@ -20,8 +19,7 @@ cleanup() {
 vekrona-dev session
 updates_stash
 trap cleanup EXIT
-vekrona-dev sh swaymsg exit
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sway_gone
+logout_sway
 log "ok: logged out"
 
 updates_write "$(updates_pending_json 2.1.3)"
