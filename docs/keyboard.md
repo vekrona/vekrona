@@ -45,6 +45,7 @@ Sway defines `$hyper` as `Mod4+Ctrl+Mod1` and binds the rest on it:
 | Hyper+slash | show the keybindings help panel (`vekrona-keybindings`) |
 | Hyper+a | open the coding agent (`vekrona-agent --pick`) |
 | Hyper+Shift+a | pick a recorded error and open the agent on it (`vekrona-error pick`) |
+| Hyper+Space | switch to the next keyboard layout and show it on screen (no backward key; the bar item's menu picks one directly) |
 | Hyper+1..9, Hyper+0 | move the focused container to workspace 1 through 10 |
 | Hyper+r | enter resize mode (h/j/k/l or arrows resize, Return or Escape exits) |
 | Hyper+t | toggle floating |
@@ -158,8 +159,7 @@ active Vekrona theme mode (generated into `~/.local/state/vekrona/active-theme.j
 Alternative chords (`h` / `Left`) and the workspace 1..10 bindings (Cmd to switch, Hyper to move) are
 collapsed into single rows; picking a Sway row runs its command through
 `swaymsg`. It also lists the xremap Caps Lock and Cmd-layer remaps
-(`config/xremap/config.yml`) and the `Alt+Alt` layout toggle, both
-informational only. `vekrona-keybindings --list` prints the same rows as
+(`config/xremap/config.yml`), informational only. `vekrona-keybindings --list` prints the same rows as
 plain text and `--check` fails if any `bindsym` in the Sway config is
 missing its `#:` description, or if a `cmd-layer` remap shadows a Sway
 `Mod4` or `Mod4+Shift` binding (xremap sees keys before Sway, so that binding
@@ -210,16 +210,15 @@ system X11 keymap, the layouts chosen in the installer (Anaconda writes
 at every login, runs `bin/vekrona-xkb-env`; that script turns the file into
 `XKB_DEFAULT_LAYOUT`, `_VARIANT`, `_MODEL` and `_OPTIONS`, which Sway uses
 because the config sets no `xkb_layout`. It always adds
-`shift:both_capslock_cancel`. With more than one layout it replaces any
-layout-switch option the installer chose (such as Alt+Shift) with
-`grp:alts_toggle`, so Left Alt and Right Alt pressed together cycle the
-layouts; with one layout there is no switch. A system with no X11 keymap gets
-`us`, silently. If the tool is missing or the file is unreadable or
-malformed, the session still starts, with `us` and
-`shift:both_capslock_cancel`, and the cause is logged at priority `err`
-(`journalctl -t vekrona-xkb-env`); the error watcher (see [Errors](errors.md))
-records it and shows a toast once the session is up, and `./install.sh 70`
-fails until the keymap is fixed.
+`shift:both_capslock_cancel` and drops any system layout-switch option the
+installer chose (such as Alt+Shift or `grp:alts_toggle`). Hyper+Space
+switches the layout instead (a Sway binding that runs `input type:keyboard
+xkb_switch_layout next`). A system with no X11 keymap gets `us`, silently.
+If the tool is missing or the file is unreadable or malformed, the session
+still starts, with `us` and `shift:both_capslock_cancel`, and the cause is
+logged at priority `err` (`journalctl -t vekrona-xkb-env`); the error watcher
+(see [Errors](errors.md)) records it and shows a toast once the session is
+up, and `./install.sh 70` fails until the keymap is fixed.
 
 To change layouts later, run `localectl set-x11-keymap us,ua` (variants and
 options are further arguments) and log out and in again; `vekrona-keybindings`

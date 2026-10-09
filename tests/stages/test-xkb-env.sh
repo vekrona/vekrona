@@ -40,10 +40,10 @@ XKB_DEFAULT_MODEL=''
 XKB_DEFAULT_OPTIONS='shift:both_capslock_cancel'"
 
 write_conf "us,ua" "" "grp:alt_shift_toggle,caps:escape"
-expect_output "several layouts get Alt+Alt instead of the installer's switch combo" "XKB_DEFAULT_LAYOUT='us,ua'
+expect_output "several layouts drop the installer's switch combo" "XKB_DEFAULT_LAYOUT='us,ua'
 XKB_DEFAULT_VARIANT=''
 XKB_DEFAULT_MODEL=''
-XKB_DEFAULT_OPTIONS='caps:escape,grp:alts_toggle,shift:both_capslock_cancel'"
+XKB_DEFAULT_OPTIONS='caps:escape,shift:both_capslock_cancel'"
 
 write_conf "de" "nodeadkeys" "grp:alt_shift_toggle"
 expect_output "variant is kept and a stray group switch is dropped for one layout" "XKB_DEFAULT_LAYOUT='de'
@@ -95,7 +95,7 @@ write_conf "us,ua" "" "grp_led:scroll,shift:both_capslock_cancel"
 expect_output "grp_led option is kept and shift:both_capslock_cancel is not duplicated" "XKB_DEFAULT_LAYOUT='us,ua'
 XKB_DEFAULT_VARIANT=''
 XKB_DEFAULT_MODEL=''
-XKB_DEFAULT_OPTIONS='grp_led:scroll,shift:both_capslock_cancel,grp:alts_toggle'"
+XKB_DEFAULT_OPTIONS='grp_led:scroll,shift:both_capslock_cancel'"
 
 stubs="$scratch/stubs"
 mkdir -p "$stubs"

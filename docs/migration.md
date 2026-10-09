@@ -56,16 +56,15 @@ not the real machine's package set.
 Sway used to hardcode the layouts `us,ua`. It now follows the system X11 keymap
 (`/etc/X11/xorg.conf.d/00-keyboard.conf`, see [Keyboard](keyboard.md)). A
 machine installed or migrated before this change usually has only `us` there,
-so after the update and the next login the Ukrainian layout and the Alt+Alt
-toggle are gone. Nothing changes the system keymap for you; to get them back,
+so after the update and the next login the Ukrainian layout is gone. Nothing changes the system keymap for you; to get it back,
 run once:
 
 ```
 localectl set-x11-keymap us,ua
 ```
 
-and log out and in. The Alt+Alt toggle is added automatically whenever more
-than one layout is configured. `localectl status` shows the current "X11
+and log out and in. Hyper+Space switches to the next layout whenever more
+than one is configured. `localectl status` shows the current "X11
 Layout".
 
 ## Rollout order

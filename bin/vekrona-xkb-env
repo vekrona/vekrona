@@ -50,7 +50,6 @@ IFS=, read -ra system_option_list <<<"$system_options"
 for option in "${system_option_list[@]}"; do
   [[ -z "$option" || "$option" == grp:* ]] || options+=("$option")
 done
-[[ "$layout" != *,* ]] || options+=("grp:alts_toggle")
 [[ " ${options[*]} " == *" shift:both_capslock_cancel "* ]] || options+=("shift:both_capslock_cancel")
 
 options_csv="$(IFS=,; echo "${options[*]}")"
