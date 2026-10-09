@@ -1,0 +1,8 @@
+// vekrona-caffeine holds its sleep inhibitor from a systemd user unit, which runs outside every login session.
+// polkit treats such a process as remote and inactive and asks for an administrator password, so allow the wheel
+// group to hold the inhibitor, and nothing else.
+polkit.addRule(function(action, subject) {
+  if (action.id == "org.freedesktop.login1.inhibit-block-sleep" && subject.isInGroup("wheel")) {
+    return polkit.Result.YES;
+  }
+});

@@ -64,6 +64,12 @@ pkg_desktop_files_present() {
 }
 file_executable() { [[ -x "$1" ]]; }
 logind_idle_action() { [[ "$(loginctl show-session -p IdleAction --value)" == suspend ]]; }
+# logind arms its idle timer only when it starts, so IdleAction is live only for a logind that started after the drop-in.
+logind_started_after_idle_dropin() {
+  local started
+  started="$(date -d "$(systemctl show systemd-logind -p ActiveEnterTimestamp --value)" +%s)"
+  (( started >= $(stat -c %Y /etc/systemd/logind.conf.d/vekrona-idle.conf) ))
+}
 mem_sleep_offers_deep() { grep -qw deep /sys/power/mem_sleep; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
 module_built_for_running_kernel() { modinfo -k "$(uname -r)" "$1" >/dev/null 2>&1; }
@@ -292,7 +298,9 @@ if ran 40-system; then
   for unit_file in "$VEKRONA_ROOT"/etc/systemd/system/vekrona-update-*; do
     check assert "/etc/systemd/system/${unit_file##*/} matches the checkout" root_files_equal "$unit_file" "/etc/systemd/system/${unit_file##*/}"
   done
-  check assert "update polkit rule matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/polkit-1/rules.d/50-vekrona-update.rules" /etc/polkit-1/rules.d/50-vekrona-update.rules
+  for rule in "$VEKRONA_ROOT"/etc/polkit-1/rules.d/50-vekrona-*.rules; do
+    check assert "polkit rule ${rule##*/} matches the checkout" root_files_equal "$rule" "/etc/polkit-1/rules.d/${rule##*/}"
+  done
   check assert "vekrona-update-check.timer enabled" unit_enabled vekrona-update-check.timer
   check assert "vekrona-update-check.timer active" unit_active vekrona-update-check.timer
   check assert "vekrona-update-post.service enabled" unit_enabled vekrona-update-post.service
@@ -304,7 +312,8 @@ if ran 40-system; then
   check assert "default error mutes installed" file_exists /etc/vekrona/errors-mute.d/10-vendor-noise.conf
   check assert "logind inhibit-delay drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf
   check assert "logind idle drop-in present" file_exists /etc/systemd/logind.conf.d/vekrona-idle.conf
-  check assert "running logind has IdleAction=suspend (drop-ins reloaded)" logind_idle_action
+  check assert "running logind has IdleAction=suspend" logind_idle_action
+  check assert "logind started after its idle drop-in, so its idle timer is armed" logind_started_after_idle_dropin
   check assert "sleep drop-in present" file_exists /etc/systemd/sleep.conf.d/vekrona.conf
   warn_check "hardware offers deep suspend (/sys/power/mem_sleep lists deep); otherwise suspend falls back to s2idle" mem_sleep_offers_deep
   check assert "oomd drop-in present" file_exists /etc/systemd/oomd.conf.d/vekrona.conf

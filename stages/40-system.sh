@@ -16,7 +16,9 @@ root_restorecon "$VEKRONA_SYSTEM_DIR"
 for unit in "$VEKRONA_ROOT"/etc/systemd/system/vekrona-update-*; do
   ensure_system_unit_file "$unit"
 done
-ensure_root_file "$VEKRONA_ROOT/etc/polkit-1/rules.d/50-vekrona-update.rules" /etc/polkit-1/rules.d/50-vekrona-update.rules
+for rule in "$VEKRONA_ROOT"/etc/polkit-1/rules.d/50-vekrona-*.rules; do
+  ensure_root_file "$rule" "/etc/polkit-1/rules.d/${rule##*/}"
+done
 ensure_system_unit --now enabled vekrona-update-check.timer
 ensure_system_unit enabled vekrona-update-post.service
 
@@ -48,8 +50,9 @@ for dropin in "${LOGIND_DROPINS[@]}"; do
   ensure_root_file "$VEKRONA_ROOT/etc/systemd/logind.conf.d/${dropin##*/}" "$dropin"
 done
 if [[ "$(logind_dropins_fingerprint)" != "$logind_before" ]]; then
-  log "logind drop-ins changed: reloading systemd-logind (SIGHUP, sessions stay up)"
-  root systemctl reload systemd-logind
+  # A reload re-reads IdleAction but logind arms its idle timer only when it starts, so the new action would wait for a reboot.
+  log "logind drop-ins changed: restarting systemd-logind (sessions stay up)"
+  root systemctl restart systemd-logind
 fi
 ensure_root_file "$VEKRONA_ROOT/etc/systemd/sleep.conf.d/vekrona.conf" /etc/systemd/sleep.conf.d/vekrona.conf
 ensure_root_file "$VEKRONA_ROOT/etc/systemd/oomd.conf.d/vekrona.conf" /etc/systemd/oomd.conf.d/vekrona.conf
