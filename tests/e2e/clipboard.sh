@@ -35,8 +35,9 @@ log "ok: Hyper+v opens the clipboard history"
 vekrona-dev type zzzzqqqq
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nothing_matches
 log "ok: a query that matches no entry says so"
-vekrona-dev key esc
+vekrona-dev key "$OPEN_CHORD"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
+log "ok: Hyper+v again closes the clipboard history"
 
 vekrona-dev key "$OPEN_CHORD"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_shown

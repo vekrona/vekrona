@@ -1,0 +1,10 @@
+singleton LauncherMetrics 1.0 LauncherMetrics.qml
+LauncherModule 1.0 LauncherModule.qml
+Launcher 1.0 Launcher.qml
+Modules 1.0 Modules.qml
+Frecency 1.0 Frecency.qml
+ResultRow 1.0 ResultRow.qml
+ActionsPanel 1.0 ActionsPanel.qml
+Footer 1.0 Footer.qml
+ModeBadge 1.0 ModeBadge.qml
+WidgetStrip 1.0 WidgetStrip.qml

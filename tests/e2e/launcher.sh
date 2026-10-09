@@ -14,7 +14,8 @@ shell_up() { vekrona-dev sh qs -c vekrona-shell ipc show >/dev/null; }
 export -f shell_up
 window_count() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq '[.. | objects | select((.type? == \"con\" or .type? == \"floating_con\") and .pid? != null)] | length'"; }
 nothing_matches() { vekrona-dev see text 'No matches'; }
-export -f terminal_open terminal_closed nothing_matches
+query_cleared() { ! nothing_matches && vekrona-dev see text "\\bSearch\\b"; }
+export -f terminal_open terminal_closed nothing_matches query_cleared
 export APP_ID_REGEX
 
 export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"
@@ -37,11 +38,21 @@ vekrona-dev type zzzzqqqq
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nothing_matches
 log "ok: a query that matches no application says so"
 
-vekrona-dev key ret
+vekrona-dev key esc
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- query_cleared
+panel_shown || die "the first Escape must only clear the query, not close the launcher"
+log "ok: Escape clears the query first"
+
 vekrona-dev key esc
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
-log "ok: Enter on no match and Escape close the launcher"
+log "ok: a second Escape closes the launcher"
 
+vekrona-dev key super-spc
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_shown
+vekrona-dev type zzzzqqqq
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nothing_matches
+vekrona-dev key super-spc
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
 vekrona-dev key super-spc
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_shown
 ! nothing_matches || die "reopening the launcher must clear the previous query"
@@ -52,8 +63,8 @@ vekrona-dev key ret
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- terminal_open
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
 log "ok: a case-insensitive query launches the application and closes the launcher"
-[[ "$(window_count)" == "$((windows_before + 1))" ]] || die "only the searched application may open, but windows went from $windows_before to $(window_count): Enter on an empty result list must launch nothing"
-log "ok: Enter on no match launched nothing"
+[[ "$(window_count)" == "$((windows_before + 1))" ]] || die "only the searched application may open, but windows went from $windows_before to $(window_count)"
+log "ok: only the searched application opened"
 
 close_terminals
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- terminal_closed

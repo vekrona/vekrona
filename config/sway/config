@@ -29,16 +29,16 @@ focus_follows_mouse yes
 
 #: Open terminal
 bindsym --no-repeat $hyper+Return exec $term
-#: Toggle clipboard history
-bindsym --no-repeat --to-code $hyper+v exec qs -c vekrona-shell ipc call clipboard toggle
+#: Open the clipboard history
+bindsym --no-repeat --to-code $hyper+v exec qs -c vekrona-shell ipc call launcher open clip
 #: Toggle notification center
 bindsym --no-repeat --to-code $hyper+n exec qs -c vekrona-shell ipc call notifications toggle
 #: Lock screen
 bindsym --no-repeat $hyper+Escape exec vekrona-lock
 #: Lock screen
 bindsym --no-repeat --to-code Mod4+Ctrl+q exec vekrona-lock
-#: Toggle power menu
-bindsym --no-repeat $hyper+BackSpace exec qs -c vekrona-shell ipc call powermenu toggle
+#: Open the power commands
+bindsym --no-repeat $hyper+BackSpace exec qs -c vekrona-shell ipc call launcher open power
 #: Show keybindings help
 bindsym --no-repeat $hyper+slash exec vekrona-keybindings
 #: Open the coding agent

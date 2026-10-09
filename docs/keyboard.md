@@ -38,10 +38,10 @@ Sway defines `$hyper` as `Mod4+Ctrl+Mod1` and binds the rest on it:
 | Binding | Action |
 |---|---|
 | Hyper+Return | launch ghostty |
-| Hyper+v | `qs -c vekrona-shell ipc call clipboard toggle` |
+| Hyper+v | `qs -c vekrona-shell ipc call launcher open clip` (the launcher in its clipboard history mode) |
 | Hyper+n | `qs -c vekrona-shell ipc call notifications toggle` |
 | Hyper+Escape | `vekrona-lock` |
-| Hyper+BackSpace | `qs -c vekrona-shell ipc call powermenu toggle` |
+| Hyper+BackSpace | `qs -c vekrona-shell ipc call launcher open power` (the launcher in its power mode) |
 | Hyper+slash | show the keybindings help panel (`vekrona-keybindings`) |
 | Hyper+a | open the coding agent (`vekrona-agent --pick`) |
 | Hyper+Shift+a | pick a recorded error and open the agent on it (`vekrona-error pick`) |
@@ -71,6 +71,29 @@ Shift is not folded into the Hyper mask itself: Hyper is exactly
 Ctrl+Alt+Super, and Hyper+Shift is a separate binding on top of it. Putting
 Shift inside the Hyper mask would make Hyper+Shift+X carry the same modifier
 mask as some other Hyper+X binding and silently overwrite it.
+
+## Launcher
+
+Cmd+Space opens one launcher for applications, the calculator, settings,
+power commands, web search, the coding agent and (by `/clip`) the clipboard
+history. Typing `/` lists the modes; `/calc ` (keyword and a space) enters
+one, shown as a badge before the query. Hyper+v and Hyper+BackSpace open it
+straight in `/clip` and `/power`, and pressing them again closes it.
+
+| Key | Action |
+|---|---|
+| Up, Down, Ctrl+N, Ctrl+P | move the selection (PageUp and PageDown by a page) |
+| Enter, Ctrl+Enter | run the first and the second action of the selected row |
+| Ctrl+K | list every action of the selected row; Enter runs one, Escape closes the list |
+| Tab, Shift+Tab | move between the search field and the widget strip under it (in a mode suggestion, Tab enters the mode) |
+| Backspace on an empty query | leave the mode (or the sub-view) |
+| Escape | disarm a confirmation, then leave the sub-view, the mode, clear the query, close |
+
+A destructive command (log out, restart, shut down) asks for a second Enter;
+Escape cancels. What you open often moves up: results are ranked with a
+frecency score kept in `$XDG_STATE_HOME/vekrona/launcher-frecency.json`
+that halves every seven days, and the empty launcher lists the six most
+recent.
 
 ## App switcher
 

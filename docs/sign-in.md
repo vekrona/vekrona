@@ -54,7 +54,7 @@ with your password always available as a fallback.
 - After install, enroll another finger with `fprintd-enroll <finger>`.
 
 **Lock screen:** `vekrona-lock` (swayidle starts it on idle and before suspend, and
-the lock bindings and the power menu start it directly). The key is touch-only (no PIN prompt,
+the lock bindings and the launcher's power commands start it directly). The key is touch-only (no PIN prompt,
 `etc/pam.d/vekrona-lock-u2f`): while a key is plugged in, just touch it, no
 click needed. The lock screen never answers a PAM prompt, so a PIN prompt
 would hang it. That is why the credential must not carry `+pin`: pam_u2f would

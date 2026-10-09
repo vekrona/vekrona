@@ -1,14 +1,11 @@
 //@ pragma UseQApplication
 import Quickshell
+import "launcher"
 
 ShellRoot {
     Launcher {
         id: launcher
     }
-
-    Clipboard {}
-
-    PowerMenu {}
 
     Osd {}
 
