@@ -203,6 +203,17 @@ snapper_rows_after() {
   awk -F, -v n="$1" '$1 + 0 > n + 0' || die "snapper_rows_after: awk failed on the snapshot list"
 }
 
+# write_file_atomic <path> <content>: replaces <path> in one rename, so a process watching or reading it never sees a
+# truncated or half-written file. The parent directory must exist.
+write_file_atomic() {
+  local path="$1" content="$2" tmp
+  tmp="$(dirname "$path")/.$(basename "$path").tmp.$$"
+  if ! { printf '%s' "$content" > "$tmp" && mv -fT "$tmp" "$path"; }; then
+    rm -f "$tmp"
+    die "could not write $path"
+  fi
+}
+
 ensure_line() {
   local file="$1" line="$2"
   if [[ -f "$file" ]] && file_grep_q -xF -- "$line" "$file"; then log "line present in $file: $line"; return 0; fi

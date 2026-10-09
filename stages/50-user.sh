@@ -56,10 +56,10 @@ theme_name_file="$(vekrona_theme_name_file)"
 ensure_dir "$theme_state_dir"
 if [[ ! -f "$theme_name_file" ]]; then
   log "seeding theme mode: $theme_name_file = dark"
-  printf 'dark\n' > "$theme_name_file"
+  write_file_atomic "$theme_name_file" $'dark\n'
 elif [[ "$(cat "$theme_name_file")" != dark && "$(cat "$theme_name_file")" != light ]]; then
   log "migrating legacy theme '$(cat "$theme_name_file")' to dark: $theme_name_file"
-  printf 'dark\n' > "$theme_name_file"
+  write_file_atomic "$theme_name_file" $'dark\n'
 else
   log "theme mode already present: $theme_name_file"
 fi
