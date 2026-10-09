@@ -13,7 +13,8 @@ BarPill {
     value: Keyboard.available && Keyboard.current ? Keyboard.current.code : "--"
     ariaName: "Keyboard layout: " + (Keyboard.current?.name ?? "unknown")
     visible: Keyboard.layouts.length > 1
-    valueMinWidth: widestCode.advanceWidth
+    // A pill that changes width on a switch shifts the right-aligned cluster, and with it the menu anchored to the pill.
+    valueMinWidth: Math.ceil(widestCode.advanceWidth)
 
     // Right click is the one-handed switch; the wheel does nothing, so a trackpad brushing the bar never changes what you type.
     onClicked: bar.togglePopout(popout)
@@ -25,7 +26,8 @@ BarPill {
         font.pixelSize: VekronaTheme.type.label.size
         font.weight: VekronaTheme.type.label.weight
         font.letterSpacing: VekronaTheme.type.label.tracking * VekronaTheme.type.label.size
-        text: Keyboard.layouts.reduce((widest, layout) => layout.code.length > widest.length ? layout.code : widest, "--")
+        // Every code is two letters (Keyboard.layoutFor), and no two letters are wider than these.
+        text: "WW"
     }
 
     Popout {
