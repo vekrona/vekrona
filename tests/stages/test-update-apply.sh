@@ -12,7 +12,8 @@ MARKER="$VEKRONA_STATE_DIR/offline-pending"
 
 apply() { run_as_root "$REPO/libexec/vekrona-update-apply" "$@" 2>"$work/err"; }
 reset() {
-  rm -f "$MARKER" "$VEKRONA_STATE_DIR"/updates.json
+  rm -f "$MARKER" "$VEKRONA_STATE_DIR"/updates.json "$work/offline.empty"
+  echo "No offline transaction is stored." >"$work/offline.status"
   echo 0 >"$work/dnf.rc"; echo 0 >"$work/upgrade.rc"
   # What the 1Password RPM's %post leaves behind.
   sed 's/^repo_gpgcheck=1/repo_gpgcheck=0/' "$REPO/etc/yum.repos.d/1password.repo" >"$work/repos/1password.repo"
@@ -65,6 +66,13 @@ absent 'dnf5 upgrade'
 absent 'offline reboot'
 [[ ! -e "$MARKER" ]] || die "a marker was written with no transaction stored"
 log "ok: with nothing for dnf, Flatpak and mise run and the machine does not reboot"
+
+reset; echo 100 >"$work/dnf.rc"; touch "$work/offline.empty"
+apply --offline
+in_order '^dnf5 upgrade --offline -y$'
+absent 'offline reboot'
+[[ ! -e "$MARKER" ]] || die "a marker was written although dnf stored no transaction"
+log "ok: updates dnf lists but cannot install store nothing, so the machine does not reboot for them"
 
 reset; echo 7 >"$work/dnf.rc"
 if apply --offline; then die "a failing dnf check-upgrade was accepted"; fi

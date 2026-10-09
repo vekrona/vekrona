@@ -89,7 +89,13 @@ update_offline() {
     0) log "dnf has nothing to install, so there is nothing to reboot for" ;;
     100)
       dnf5 upgrade --offline -y
-      stored=1
+      # check-upgrade also lists updates dnf skips (a repository that lags behind another leaves packages whose
+      # dependencies do not match), and then dnf stores nothing.
+      if dnf5 offline status | grep -q 'An offline transaction was initiated'; then
+        stored=1
+      else
+        log "dnf could install none of the listed updates, so there is nothing to reboot for"
+      fi
       ;;
     *) die "dnf5 check-upgrade failed with exit status $status" ;;
   esac

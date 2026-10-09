@@ -11,7 +11,8 @@
 #   upgrade.rc           exit status of `dnf5 upgrade`
 #   notify.fails         exists while notify-send fails
 #   flatpak.tsv, mise.json, installed.tsv   what flatpak remote-ls, mise outdated and rpm -qa print
-#   offline.status       what `dnf5 offline status` prints
+#   offline.status       what `dnf5 offline status` prints; `dnf5 upgrade --offline` stores a transaction unless
+#                        offline.empty exists (dnf skipped everything check-upgrade listed)
 #   answer               what vekrona-update-ask prints
 #
 # The scripts insist on root, which a user namespace that maps the caller to uid 0 gives them (run_as_root).
@@ -75,6 +76,9 @@ case "$1" in
                  if [[ " $* " == *" --json "* ]]; then cat "$FAKE_WORLD/dnf.json"; [[ "$rc" -ne 100 ]] || rc=0; fi
                  exit "$rc" ;;
   upgrade) if flock --nonblock "$VEKRONA_UPDATE_LOCK" true; then echo "dnf5 ran without the update lock" >>"$FAKE_WORLD/log"; fi
+           if [[ " $* " == *" --offline "* && ! -e "$FAKE_WORLD/offline.empty" ]]; then
+             echo "An offline transaction was initiated on today." >"$FAKE_WORLD/offline.status"
+           fi
            exit "$(<"$FAKE_WORLD/upgrade.rc")" ;;
   offline) case "$2" in status) cat "$FAKE_WORLD/offline.status" ;; log) echo "offline log line" ;; esac ;;
 esac
