@@ -50,6 +50,10 @@ PanelWindow {
 
         Tray {}
 
+        Weather {
+            bar: root
+        }
+
         Perf {}
 
         Sound {

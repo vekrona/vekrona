@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Fetch the weather for the bar's Weather widget into $XDG_STATE_HOME/vekrona/weather.json.
+
+The location is ~/.config/vekrona/weather.json {"latitude": .., "longitude": .., "name": ".."} when that file
+exists, otherwise GeoClue. A network or location failure is written into the output's "error" field next to the
+last good data and exits 0. A malformed override or malformed API data exits 1, so the systemd unit fails and
+vekrona-error records it.
+"""
+import datetime
+import json
+import os
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import vekrona_cli
+
+PROG = "vekrona-weather"
+DEFAULT_URL = "https://api.open-meteo.com/v1/forecast"
+FETCH_TIMEOUT_SEC = 20
+GEOCLUE_TIMEOUT_SEC = 30
+GEOCLUE_DESKTOP_ID = "vekrona-weather"
+FORECAST_DAYS = 7
+
+
+class Surfaced(Exception):
+    """A failure that is reported in the output file instead of failing the unit."""
+
+
+def die(msg):
+    print(f"{PROG}: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def coordinate(value, name, low, high, source):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+        die(f"{source}: {name} must be a number from {low} to {high}, got {value!r}")
+    return float(value)
+
+
+def override_location(path):
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        die(f"cannot read {path}: {exc}")
+    if not isinstance(data, dict) or not isinstance(data.get("name"), str):
+        die(f'{path}: expected an object like {{"latitude": 52.5, "longitude": 13.4, "name": "Berlin"}}')
+    return {"name": data["name"],
+            "latitude": coordinate(data.get("latitude"), "latitude", -90, 90, path),
+            "longitude": coordinate(data.get("longitude"), "longitude", -180, 180, path)}
+
+
+def geoclue_location():
+    try:
+        import gi
+        gi.require_version("Geoclue", "2.0")
+        from gi.repository import Geoclue, GLib
+    except (ImportError, ValueError) as exc:
+        raise Surfaced(f"GeoClue is not available: {exc}")
+    loop = GLib.MainLoop()
+    outcome = {}
+
+    def located(_source, result):
+        try:
+            outcome["simple"] = Geoclue.Simple.new_finish(result)
+        except GLib.Error as exc:
+            outcome["error"] = exc.message
+        loop.quit()
+
+    def timed_out():
+        outcome["error"] = f"GeoClue gave no location within {GEOCLUE_TIMEOUT_SEC} s"
+        loop.quit()
+        return False
+
+    Geoclue.Simple.new(GEOCLUE_DESKTOP_ID, Geoclue.AccuracyLevel.CITY, None, located)
+    timeout_id = GLib.timeout_add_seconds(GEOCLUE_TIMEOUT_SEC, timed_out)
+    loop.run()
+    if "error" in outcome:
+        raise Surfaced(outcome["error"])
+    GLib.source_remove(timeout_id)
+    location = outcome["simple"].get_location()
+    latitude, longitude = location.get_property("latitude"), location.get_property("longitude")
+    return {"name": location.get_property("description") or f"{latitude:.2f}, {longitude:.2f}",
+            "latitude": latitude, "longitude": longitude}
+
+
+def fetch(location):
+    query = urllib.parse.urlencode({
+        "latitude": location["latitude"], "longitude": location["longitude"],
+        "current": "temperature_2m,weather_code,is_day",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+        "timezone": "auto", "forecast_days": FORECAST_DAYS})
+    url = f"{os.environ.get('VEKRONA_WEATHER_URL', DEFAULT_URL)}?{query}"
+    try:
+        with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SEC) as response:
+            body = response.read()
+    except (urllib.error.URLError, OSError) as exc:
+        raise Surfaced(f"cannot fetch the forecast: {exc}")
+    try:
+        data = json.loads(body)
+        current, daily = data["current"], data["daily"]
+        return {
+            "current": {"temperature": float(current["temperature_2m"]),
+                        "weather_code": int(current["weather_code"]),
+                        "is_day": bool(current["is_day"])},
+            "daily": [{"date": date, "weather_code": int(code), "max": float(high), "min": float(low)}
+                      for date, code, high, low in zip(daily["time"], daily["weather_code"],
+                                                       daily["temperature_2m_max"], daily["temperature_2m_min"],
+                                                       strict=True)]}
+    except (ValueError, KeyError, TypeError) as exc:
+        die(f"the forecast is not Open-Meteo JSON: {exc!r}")
+
+
+def previous_output(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        die(f"cannot read the previous output {path}: {exc}")
+
+
+def write_atomically(path, data):
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".weather.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+            f.write("\n")
+        os.replace(temp_path, path)
+    except BaseException:
+        os.unlink(temp_path)
+        raise
+
+
+def main():
+    output_path = os.path.join(vekrona_cli.vekrona_state_dir(), "weather.json")
+    override_path = os.path.join(vekrona_cli.vekrona_config_dir(), "weather.json")
+    previous = previous_output(output_path)
+    result = {"fetched_at": previous.get("fetched_at"), "location": previous.get("location"),
+              "current": previous.get("current"), "daily": previous.get("daily", []), "error": None}
+    try:
+        location = override_location(override_path) if os.path.exists(override_path) else geoclue_location()
+        result["location"] = location
+        result.update(fetch(location))
+        result["fetched_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    except Surfaced as exc:
+        result["error"] = str(exc)
+        print(f"{PROG}: {exc}", file=sys.stderr)
+    write_atomically(output_path, result)
+
+
+main()

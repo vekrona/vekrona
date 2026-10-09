@@ -1,0 +1,7 @@
+[Unit]
+Description=Vekrona weather forecast for the bar
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/vekrona-weather
+TimeoutStartSec=120

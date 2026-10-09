@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
 ensure_root_file "$VEKRONA_ROOT/etc/greetd/config.toml" /etc/greetd/config.toml
+ensure_root_file "$VEKRONA_ROOT/etc/geoclue/conf.d/90-vekrona.conf" /etc/geoclue/conf.d/90-vekrona.conf
 
 STALE_TUIGREET_TMPFILES=/etc/tmpfiles.d/vekrona-tuigreet.conf
 if [[ -e "$STALE_TUIGREET_TMPFILES" ]]; then

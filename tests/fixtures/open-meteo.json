@@ -1,0 +1,67 @@
+{
+  "latitude": 52.52,
+  "longitude": 13.419998,
+  "generationtime_ms": 0.05,
+  "utc_offset_seconds": 7200,
+  "timezone": "Europe/Berlin",
+  "timezone_abbreviation": "GMT+2",
+  "elevation": 38.0,
+  "current_units": {
+    "time": "iso8601",
+    "interval": "seconds",
+    "temperature_2m": "°C",
+    "weather_code": "wmo code",
+    "is_day": ""
+  },
+  "current": {
+    "time": "2026-10-09T14:30",
+    "interval": 900,
+    "temperature_2m": 37.4,
+    "weather_code": 3,
+    "is_day": 1
+  },
+  "daily_units": {
+    "time": "iso8601",
+    "weather_code": "wmo code",
+    "temperature_2m_max": "°C",
+    "temperature_2m_min": "°C"
+  },
+  "daily": {
+    "time": [
+      "2026-10-09",
+      "2026-10-10",
+      "2026-10-11",
+      "2026-10-12",
+      "2026-10-13",
+      "2026-10-14",
+      "2026-10-15"
+    ],
+    "weather_code": [
+      3,
+      61,
+      63,
+      0,
+      2,
+      45,
+      95
+    ],
+    "temperature_2m_max": [
+      24.1,
+      19.8,
+      17.2,
+      18.5,
+      20.3,
+      16.9,
+      15.0
+    ],
+    "temperature_2m_min": [
+      12.4,
+      11.9,
+      10.3,
+      8.7,
+      9.9,
+      10.1,
+      9.6
+    ]
+  }
+}

@@ -994,7 +994,7 @@ declare -A VEKRONA_PINNED_PKGS=(
 VEKRONA_DESKTOP_PKGS=(
   adw-gtk3-theme 1password 1password-cli NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl btop
   danksearch dconf dgop dms ffmpeg firefox flatpak gamemode gamescope ghostty
-  gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver
+  geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver
   jq kanshi
   libnotify mangohud matugen mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio playerctl polkit
   python3 python3-gobject python3-pyyaml python3-vdf qt6ct quickshell rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
