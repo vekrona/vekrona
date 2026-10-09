@@ -11,7 +11,6 @@ QUICK_ENTRY=VekronaQuickExit
 APPLICATIONS_DIR='$HOME/.local/share/applications'
 PERF_REGEX='%'
 
-shell_errors() { vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-shell | grep -cE 'ERROR.*qml.* exited [0-9]+: ' || [[ $? -eq 1 ]]; }
 errors_after() { (($(shell_errors) > ERRORS_BEFORE)); }
 btop_open() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -e '[.. | objects | select((.name? // \"\") == \"btop\")] | length > 0' >/dev/null"; }
 perf_position() { vekrona-dev see find "$PERF_REGEX" >"$POSITION_FILE"; }
@@ -35,7 +34,7 @@ launch() {
   vekrona-dev key ret
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
 }
-export -f btop_open perf_position quick_entry_ran errors_after shell_errors
+export -f btop_open perf_position quick_entry_ran errors_after
 export PERF_REGEX
 
 export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"

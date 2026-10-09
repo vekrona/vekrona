@@ -34,7 +34,7 @@ print_usage() {
   cat <<USAGE
 usage: $PROG [--pick] [--choose] [--prompt TEXT | --error ID] [--dry-run]
        $PROG set <tool>
-       $PROG get
+       $PROG get                 (prints nothing when no default is set)
        $PROG list
        $PROG choose
 
@@ -198,10 +198,8 @@ cmd_set() {
 }
 
 cmd_get() {
-  local tool
-  tool="$(read_default || true)"
-  [[ -n "$tool" ]] || die "no default agent harness set; run '$PROG set <tool>' or '$PROG --pick'"
-  echo "$tool"
+  [[ -f "$AGENT_CONFIG_FILE" ]] || return 0
+  cat "$AGENT_CONFIG_FILE"
 }
 
 cmd_list() {

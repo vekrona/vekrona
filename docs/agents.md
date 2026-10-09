@@ -214,7 +214,7 @@ The default harness is a single id in
 
 ```
 vekrona-agent set claude         # set the default harness
-vekrona-agent get                # print the default harness
+vekrona-agent get                # print the default harness, nothing when none is set
 vekrona-agent list                # every known harness: installed? default?
 vekrona-agent choose              # always show the picker, set the default, then launch
 vekrona-agent                     # launch the default harness (fails with no usable default)

@@ -14,3 +14,7 @@ export SCREEN_COLORS
 panel_shown() { [[ "$(python3 "$SCREEN_COLORS" center "$(vekrona-dev shot)")" == "$PANEL_HEX" ]]; }
 panel_hidden() { ! panel_shown; }
 export -f panel_shown panel_hidden
+
+# How many failed commands the shell has logged: the lines the error pipeline turns into entries in the error store.
+shell_errors() { vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-shell | grep -cE 'ERROR.*qml.* exited [0-9]+: ' || [[ $? -eq 1 ]]; }
+export -f shell_errors
