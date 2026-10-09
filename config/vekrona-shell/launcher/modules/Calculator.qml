@@ -6,7 +6,7 @@ LauncherModule {
     id: root
 
     readonly property var expressionStart: /^[\s(]*[-+]?[\d.,]/
-    readonly property var expressionWord: /[-+*\/^%=×÷]|\b(to|in|of|as|mod)\b/i
+    readonly property var expressionWord: /[-+*\/^%=×÷(]|\b(to|in|of|as|mod)\b/i
     property var current: null
 
     function looksLikeExpression(text: string): bool {
