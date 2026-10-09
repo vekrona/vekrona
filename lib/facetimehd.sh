@@ -23,7 +23,7 @@ facetimehd_dkms_registered() {
 
 install_facetimehd_source() {
   local tmp="$1" unpacked dkms_version
-  fetch_pinned "$FACETIMEHD_URL" "$FACETIMEHD_SHA256" "$tmp/src.tar.gz"
+  fetch_verified "$FACETIMEHD_URL" sha256 "$FACETIMEHD_SHA256" "$tmp/src.tar.gz"
   tar -xzf "$tmp/src.tar.gz" -C "$tmp"
   unpacked="$tmp/facetimehd-$FACETIMEHD_VERSION"
   dkms_version="$(sed -n 's/^PACKAGE_VERSION=//p' "$unpacked/dkms.conf")"
@@ -70,7 +70,7 @@ facetimehd_firmware_is_current() {
 
 install_facetimehd_firmware() {
   local tmp="$1" built actual
-  fetch_pinned "$FACETIMEHD_FIRMWARE_URL" "$FACETIMEHD_FIRMWARE_SHA256" "$tmp/firmware.tar.gz"
+  fetch_verified "$FACETIMEHD_FIRMWARE_URL" sha256 "$FACETIMEHD_FIRMWARE_SHA256" "$tmp/firmware.tar.gz"
   tar -xzf "$tmp/firmware.tar.gz" -C "$tmp"
   built="$tmp/facetimehd-firmware-$FACETIMEHD_FIRMWARE_COMMIT"
   log "extracting facetimehd firmware from Apple's macOS update (large download)"

@@ -35,6 +35,23 @@ out="$(FAKE_CURL_FAIL=1 download_file "https://example.invalid/b.rpm" "$work/b.r
 [[ "$out" == *"download failed: https://example.invalid/b.rpm"* ]] || die "failure does not name the URL: $out"
 log "ok: a failed download dies naming the URL"
 
-out="$(fetch_pinned "https://example.invalid/c" "0000" "$work/c" 2>&1)" && die "fetch_pinned accepted a wrong sha256"
-[[ "$out" == *"sha256 mismatch"* ]] || die "no sha256 mismatch error: $out"
-log "ok: fetch_pinned still verifies sha256"
+# The fake curl writes "payload\n" to every destination.
+for algorithm in sha256 sha512; do
+  sum="$(echo payload | "${algorithm}sum" | awk '{print $1}')"
+  fetch_verified "https://example.invalid/c" "$algorithm" "$sum" "$work/c-$algorithm"
+  [[ -f "$work/c-$algorithm" ]] || die "fetch_verified did not keep a file whose $algorithm matches"
+done
+log "ok: fetch_verified keeps a download whose checksum matches (sha256, sha512)"
+
+for algorithm in sha256 sha512; do
+  rm -f "$work/d"
+  out="$(fetch_verified "https://example.invalid/d" "$algorithm" "0000" "$work/d" 2>&1)" && die "fetch_verified accepted a wrong $algorithm"
+  [[ "$out" == *"$algorithm mismatch for https://example.invalid/d"* ]] || die "no $algorithm mismatch error: $out"
+  [[ ! -e "$work/d" ]] || die "fetch_verified left the unverified $algorithm download behind"
+done
+log "ok: fetch_verified dies on a checksum mismatch and removes the download"
+
+out="$(fetch_verified "https://example.invalid/f" md5 "0000" "$work/f" 2>&1)" && die "fetch_verified accepted md5"
+[[ "$out" == *"unsupported checksum algorithm"* ]] || die "no unsupported-algorithm error: $out"
+[[ ! -e "$work/f" ]] || die "fetch_verified downloaded before rejecting the algorithm"
+log "ok: an unknown algorithm dies before downloading"

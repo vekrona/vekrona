@@ -11,7 +11,7 @@ SCOPEBUDDY_LINK="/usr/local/bin/scb"
 
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
-fetch_pinned "$SCOPEBUDDY_URL" "$SCOPEBUDDY_SHA256" "$tmp"
+fetch_verified "$SCOPEBUDDY_URL" sha256 "$SCOPEBUDDY_SHA256" "$tmp"
 
 if [[ -f "$SCOPEBUDDY_BIN" ]] && cmp -s "$tmp" "$SCOPEBUDDY_BIN"; then
   log "scopebuddy up to date: $SCOPEBUDDY_BIN"
