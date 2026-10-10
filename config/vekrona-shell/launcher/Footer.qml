@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import "../Vekrona"
 import "."
 
-// The line under the list: the module of the selected row on the left, what Enter and Ctrl+K do on the right.
+// The line under the list: the module of the selected row (or of the open mode) on the left, what Enter, Ctrl+K and Esc do on the right.
 Item {
     id: root
 
@@ -14,6 +14,8 @@ Item {
     property string primaryLabel
     // The label of the armed action, or "" when nothing is armed.
     property string armedLabel
+    // What Esc does while no row is selectable, or "" when a row is selected.
+    property string escapeLabel
     property bool hasActions: false
 
     signal primaryClicked
@@ -106,6 +108,12 @@ Item {
             label: root.primaryLabel
             key: "↵"
             onClicked: root.primaryClicked()
+        }
+
+        Hint {
+            visible: root.escapeLabel !== ""
+            label: root.escapeLabel
+            key: "Esc"
         }
 
         Rectangle {
