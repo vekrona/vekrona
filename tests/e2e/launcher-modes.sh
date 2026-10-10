@@ -7,17 +7,16 @@ source "$ROOT/tests/lib.sh"
 STEP_TIMEOUT_SEC=60
 
 window_count() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq '[.. | objects | select((.type? == \"con\" or .type? == \"floating_con\") and .pid? != null)] | length'"; }
-# The footer says "Enter mode" only while the /calc suggestion is selected. Once the mode is entered the calculator lists
-# nothing for an empty query and says so (the badge in the search field is too small for OCR); the root list says nothing.
-suggestion_shown() { vekrona-dev see text 'Enter mode'; }
-mode_entered() { vekrona-dev see text 'Nothing to show' && ! suggestion_shown; }
-mode_left() { ! vekrona-dev see text 'Nothing to show'; }
-actions_shown() { vekrona-dev see text 'Filter actions'; }
-actions_hidden() { ! actions_shown; }
+suggestion_shown() { launcher_is '.query == "/calc" and .mode == "" and .selectedId == "mode:calc"'; }
+mode_entered() { launcher_is '.mode == "calc" and .query == "" and .rows == 0'; }
+mode_left() { launcher_is '.open and .mode == "" and .query == ""'; }
+actions_shown() { launcher_is '.actionsOpen'; }
+actions_hidden() { launcher_is '.open and (.actionsOpen | not)'; }
+leave_hint_shown() { vekrona-dev see text 'Leave mode'; }
 app_listed() { vekrona-dev see text 'Ghostty'; }
 percent_answered() { vekrona-dev see text '\b230\b'; }
 refusal_shown() { vekrona-dev see text 'Couldn.t evaluate'; }
-export -f percent_answered refusal_shown suggestion_shown mode_entered mode_left actions_shown actions_hidden app_listed
+export -f percent_answered refusal_shown suggestion_shown mode_entered mode_left actions_shown actions_hidden leave_hint_shown app_listed
 
 export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"
 
@@ -35,7 +34,9 @@ log "ok: a leading slash suggests the modes"
 
 vekrona-dev type ' '
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- mode_entered
-log "ok: /calc and a space enter the calculator mode, shown as a badge"
+log "ok: /calc and a space enter the calculator mode"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- leave_hint_shown
+log "ok: with nothing listed the footer says how to leave the mode"
 
 vekrona-dev type '12.5% of 1840'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- percent_answered
@@ -64,7 +65,6 @@ log "ok: Ctrl+K opens the actions of the selected row"
 
 vekrona-dev key esc
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- actions_hidden
-panel_shown || die "Escape on the actions panel must close only the panel, not the launcher"
 log "ok: Escape closes the actions panel and keeps the launcher"
 
 vekrona-dev key ctrl-k
@@ -74,6 +74,6 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- actions_hidden
 log "ok: Ctrl+K again closes the actions panel"
 
 vekrona-dev key super-spc
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- launcher_closed
 [[ "$(window_count)" == "$windows_before" ]] || die "nothing in this scenario launches an application, but windows went from $windows_before to $(window_count)"
 log "ok: no key in this scenario launched anything"

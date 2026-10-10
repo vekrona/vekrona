@@ -13,12 +13,12 @@ terminal_pids() { vekrona-dev sh pgrep -x "$APP_ID_REGEX" | paste -sd,; }
 shell_up() { vekrona-dev sh qs -c vekrona-shell ipc show >/dev/null; }
 export -f shell_up
 window_count() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq '[.. | objects | select((.type? == \"con\" or .type? == \"floating_con\") and .pid? != null)] | length'"; }
-nothing_matches() { vekrona-dev see text 'No matches'; }
 module_failures() { vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-shell | grep -c 'launcher: module .* failed' || [[ $? -eq 1 ]]; }
-query_cleared() { ! nothing_matches && panel_shown; }
+nothing_matches() { launcher_is '.query == "zzzzqqqq" and .rows == 0'; }
+query_cleared() { launcher_is '.open and .query == ""'; }
 # Whether the web module's bookmark and history lookup is not running: it has answered the query typed so far.
 places_idle() { ! vekrona-dev sh pgrep -f '[v]ekrona-firefox places' >/dev/null; }
-query_extended() { vekrona-dev see text 'zzzzqqqqq'; }
+query_extended() { launcher_is '.query == "zzzzqqqqq"'; }
 export -f terminal_open terminal_closed nothing_matches query_cleared places_idle query_extended
 export APP_ID_REGEX
 
@@ -41,7 +41,7 @@ log "ok: Super+Space opens the launcher"
 failures_before="$(module_failures)"
 vekrona-dev type zzzzqqqq
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nothing_matches
-log "ok: a query that matches no application says so"
+log "ok: a query that matches no application lists no row"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- places_idle
 vekrona-dev type q
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- query_extended
@@ -51,11 +51,10 @@ vekrona-dev key backspace
 
 vekrona-dev key esc
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- query_cleared
-panel_shown || die "the first Escape must only clear the query, not close the launcher"
-log "ok: Escape clears the query first"
+log "ok: Escape clears the query first and keeps the launcher open"
 
 vekrona-dev key esc
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- launcher_closed
 log "ok: a second Escape closes the launcher"
 
 vekrona-dev key super-spc
@@ -63,10 +62,9 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_shown
 vekrona-dev type zzzzqqqq
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nothing_matches
 vekrona-dev key super-spc
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- launcher_closed
 vekrona-dev key super-spc
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_shown
-! nothing_matches || die "reopening the launcher must clear the previous query"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- query_cleared
 log "ok: reopening starts from an empty query"
 
 vekrona-dev type GHOSTTY
