@@ -23,7 +23,11 @@ booted_again() {
   [[ "$now" != "$1" ]]
 }
 greeter_up() { vekrona-dev run systemctl is-active --quiet greetd 2>/dev/null; }
-export -f boot_id booted_again greeter_up
+# sshd can still reset connections for a moment after the greeter is up, so an ssh failure is retried like a "no".
+no_graphical_login() {
+  [[ "$(vekrona-dev run bash -c 'set -o pipefail; for id in $(loginctl list-sessions --no-legend | awk "{print \$1}"); do loginctl show-session "$id" -p Type --value; done | grep -c "^wayland$" || [[ $? -eq 1 ]]' 2>/dev/null)" == 0 ]]
+}
+export -f boot_id booted_again greeter_up no_graphical_login
 export SUSPEND_OUT
 
 trap 'cleanup_test_update; vekrona-dev run sudo rm -f "$SUSPEND_OUT"' EXIT
@@ -33,7 +37,7 @@ previous_boot="$(boot_id)"
 vekrona-dev run sudo systemctl reboot --no-block
 vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- booted_again "$previous_boot"
 vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- greeter_up
-[[ "$(vekrona-dev run bash -c 'for id in $(loginctl list-sessions --no-legend | awk "{print \$1}"); do loginctl show-session "$id" -p Type --value; done | grep -c "^wayland$" || true')" == 0 ]] || die "somebody is logged in at the greeter"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- no_graphical_login || die "somebody is logged in at the greeter"
 
 require_nothing_pending
 fake_suspend
