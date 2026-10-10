@@ -51,6 +51,13 @@ printf "[vekrona-test]\nname=vekrona test\nbaseurl=file://%s\nenabled=1\ngpgchec
   vekrona-dev run sudo createrepo_c --quiet --update "$TEST_REPO_DIR"
 }
 
+# Fails when the guest has anything pending at all, which a scenario about "nothing pending" cannot tolerate.
+require_nothing_pending() {
+  vekrona-dev run sudo systemctl start --wait vekrona-update-check.service
+  [[ "$(vekrona-dev run sudo jq -r .pending "$UPDATES_JSON")" == false ]] \
+    || die "the guest has pending updates: $(vekrona-dev run sudo jq -c '[.groups[] | .items[].name]' "$UPDATES_JSON"). Run 'vekrona-dev run sudo dnf upgrade -y' first"
+}
+
 # Runs the check and fails unless the test package is the only pending dnf update.
 run_check_expecting_only_the_test_update() {
   vekrona-dev run sudo systemctl start --wait vekrona-update-check.service

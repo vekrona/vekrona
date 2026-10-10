@@ -35,6 +35,7 @@ vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- booted_again "$previous_boot"
 vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- greeter_up
 [[ "$(vekrona-dev run bash -c 'for id in $(loginctl list-sessions --no-legend | awk "{print \$1}"); do loginctl show-session "$id" -p Type --value; done | grep -c "^wayland$" || true')" == 0 ]] || die "somebody is logged in at the greeter"
 
+require_nothing_pending
 fake_suspend
 vekrona-dev spawn --root "$SUSPEND_OUT" -- timeout "$SUSPEND_MONITOR_SEC" busctl --system --json=short --limit-messages=1 \
   --match="type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'" monitor
