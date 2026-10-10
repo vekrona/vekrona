@@ -36,6 +36,7 @@ player_off_bus() { ! player_on_bus; }
 track_shown() { vekrona-dev see text "$TRACK_REGEX"; }
 track_hidden() { ! track_shown; }
 sink_listed() { vekrona-dev see text "$SINK_NAME"; }
+sink_hidden() { ! sink_listed; }
 art_shown() {
   local shot pixels
   shot="$(vekrona-dev shot)"
@@ -43,7 +44,7 @@ art_shown() {
   rm -f "$shot"
   ((pixels >= MIN_ART_PIXELS))
 }
-export -f window_open focused_app_id focused_is player_on_bus player_off_bus track_shown track_hidden sink_listed art_shown
+export -f window_open focused_app_id focused_is player_on_bus player_off_bus track_shown track_hidden sink_listed sink_hidden art_shown
 
 await() {
   local failure="$1"
@@ -117,3 +118,8 @@ vekrona-dev move "$PARK_X" "$PARK_Y"
 await "the popout never listed the output $SINK_NAME" sink_listed
 await "the popout still shows the track of a player that is gone" track_hidden
 log "ok: without a player, the popout lists the outputs and no track"
+
+vekrona-dev click "$pill_x" "$pill_y"
+vekrona-dev move "$PARK_X" "$PARK_Y"
+await "clicking the sound pill again did not close the popout" sink_hidden
+log "ok: clicking the sound pill again closes the popout, so the next scenario starts without it"
