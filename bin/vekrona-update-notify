@@ -17,7 +17,7 @@ import vekrona_cli
 PROG = "vekrona-update-notify"
 
 UPDATES_FILE = os.environ.get("VEKRONA_UPDATES_FILE", "/var/lib/vekrona/updates.json")
-TITLE = "Hey dude(-ssa), updates are ready"
+TITLE = "Updates available"
 MAX_ITEMS_LISTED = 5
 ANSWER_UNITS = {"install": "vekrona-update-now.service", "skip": "vekrona-update-skip.service"}
 

@@ -3,7 +3,7 @@ import unittest
 
 from update_harness import UpdateAskTestCase
 
-ASK = ["--timeout", "300", "--title", "Hey dude", "--body", "Agents: pi 1 → 2",
+ASK = ["--timeout", "300", "--title", "Updates available", "--body", "Agents: pi 1 → 2",
        "--action", "install=Install now", "--action", "skip=Not tonight"]
 
 
@@ -17,7 +17,7 @@ class AnswerTest(UpdateAskTestCase):
         process, notification = self.ask_notification(daemon)
         self.assertEqual(
             (notification["summary"], notification["body"], notification["actions"]),
-            ("Hey dude", "Agents: pi 1 → 2", ["install", "Install now", "skip", "Not tonight"]))
+            ("Updates available", "Agents: pi 1 → 2", ["install", "Install now", "skip", "Not tonight"]))
         daemon.command(f"action {notification['id']} skip")
         self.finish(process)
 

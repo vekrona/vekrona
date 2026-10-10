@@ -40,7 +40,7 @@ vekrona-dev run sudo bash -c 'printf "[Service]\nExecStart=\nExecStart=/usr/bin/
 vekrona-dev run sudo systemctl daemon-reload
 
 updates_write "$(updates_pending_json 2.1.3)"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'updates are ready'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Updates available'
 open_notification_centre
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'claude-code'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Not tonight'
@@ -58,7 +58,7 @@ clear_notifications
 # first toast is already remembered.
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- notify_finished
 updates_write "$(updates_pending_json 2.1.4)"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'updates are ready'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Updates available'
 open_notification_centre
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Not tonight'
 vekrona-dev run sudo systemctl start "$NIGHT_TIMER"

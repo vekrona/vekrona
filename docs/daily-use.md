@@ -38,7 +38,7 @@ vekrona-webapp syncthing
 ### Updates
 
 The system checks for updates every morning at 9:00 (and five minutes after boot). When something is pending, a
-toast says "Hey dude(-ssa), updates are ready" and lists what changes, one line per group (System packages, Agents,
+toast says "Updates available" and lists what changes, one line per group (System packages, Agents,
 Flatpak, Proton). A group with more than five updates shows its count and the first five.
 
 - **Install now** updates in the background and does not restart anything. The toast stays on screen, or in the
