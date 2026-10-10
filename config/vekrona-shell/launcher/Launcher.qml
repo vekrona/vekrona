@@ -739,7 +739,7 @@ PanelWindow {
             root.pushView(settingsModule, push);
         }
 
-        // The launcher's state as compact JSON, for tests: {open, mode, query, view, selectedId, armed, actionsOpen, rows}.
+        // The launcher's state as compact JSON, for tests: {open, mode, query, view, selectedId, armed, actionsOpen, rows, empty}.
         function state(): string {
             return JSON.stringify({
                 open: root.shown,
@@ -749,7 +749,8 @@ PanelWindow {
                 selectedId: root.selectedId,
                 armed: root.armed !== null,
                 actionsOpen: root.actionsOpen,
-                rows: root.rows.filter(entry => entry.type === "row").length
+                rows: root.rows.filter(entry => entry.type === "row").length,
+                empty: root.rows.some(entry => entry.type === "empty")
             });
         }
     }

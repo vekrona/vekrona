@@ -93,7 +93,7 @@ updates_pending_json() {
   printf '{"checked":"2026-10-09T09:00:03+02:00","pending":true,"night_armed":true,"groups":[{"name":"Agents","items":[{"name":"claude-code","from":"2.1.0","to":"%s"}]}]}' "$1"
 }
 
-# The launcher's state as JSON: {open, mode, query, view, selectedId, armed, actionsOpen, rows}. Tests assert on it, not on OCR of small text.
+# The launcher's state as JSON: {open, mode, query, view, selectedId, armed, actionsOpen, rows, empty}, where empty says the list shows its "No matches" or "Nothing to show" line. Tests assert on it, not on OCR of small text.
 launcher_state() { vekrona-dev sh qs -c vekrona-shell ipc call launcher state; }
 # Whether the jq filter holds for the launcher's state, e.g. launcher_is '.mode == "calc" and .rows == 0'.
 launcher_is() { launcher_state | jq -e "$1" >/dev/null; }
