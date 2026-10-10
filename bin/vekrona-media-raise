@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Focuses the window of an MPRIS player. MPRIS Raise needs an activation token that players such as
+# Firefox lack on Sway, so this finds the window by process instead: the process that owns the bus name,
+# or its nearest ancestor with a window (a terminal running mpv or cmus).
+set -euo pipefail
+
+usage() {
+  printf 'usage: %s <mpris-bus-name>\n' "$(basename "$0")" >&2
+  exit 2
+}
+
+[[ $# -eq 1 && -n "$1" ]] || usage
+name="$1"
+
+reply="$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetConnectionUnixProcessID s "$name")"
+owner="${reply#u }"
+[[ "$owner" =~ ^[0-9]+$ ]] || { printf 'vekrona-media-raise: unexpected reply for %s: %s\n' "$name" "$reply" >&2; exit 1; }
+
+# The parent of pid, read after the last ')' of /proc/<pid>/stat, because the command name may contain spaces and parentheses.
+parent_of() {
+  local stat fields
+  stat="$(<"/proc/$1/stat")"
+  read -ra fields <<<"${stat##*) }"
+  printf '%s\n' "${fields[1]}"
+}
+
+pid="$owner"
+while ((pid > 1)); do
+  if out="$(swaymsg "[pid=$pid] focus" 2>&1)"; then
+    exit 0
+  fi
+  [[ "$out" == *"No matching node"* ]] || { printf 'vekrona-media-raise: swaymsg failed: %s\n' "$out" >&2; exit 1; }
+  pid="$(parent_of "$pid")"
+done
+
+printf 'vekrona-media-raise: no window belongs to %s (pid %s) or its ancestors\n' "$name" "$owner" >&2
+exit 1

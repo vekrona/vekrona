@@ -23,7 +23,14 @@ Item {
     signal wheel(int delta)
 
     implicitHeight: VekronaTheme.sizeTarget
-    implicitWidth: 2 * VekronaTheme.space2 + content.width + (trailing !== "" ? VekronaTheme.space4 + trailingLabel.implicitWidth : 0) + overhang
+    // The content at its natural width. The value elides when the pill is narrower.
+    readonly property real valueNaturalWidth: Math.max(valueLabel.implicitWidth, valueMinWidth)
+    readonly property real trailingWidth: trailing !== "" ? VekronaTheme.space4 + trailingLabel.implicitWidth : 0
+    readonly property real contentWidth: (iconBox.visible ? iconBox.width : 0)
+        + (iconBox.visible && valueLabel.visible ? content.spacing : 0)
+        + (valueLabel.visible ? valueNaturalWidth : 0)
+
+    implicitWidth: 2 * VekronaTheme.space2 + contentWidth + trailingWidth + overhang
 
     Accessible.role: Accessible.Button
     Accessible.name: ariaName
@@ -54,15 +61,20 @@ Item {
             Pictogram {
                 name: root.icon
                 filled: root.filled
+                color: root.enabled ? VekronaTheme.c.ink : VekronaTheme.c.inkDisabled
             }
         }
 
         Label {
+            id: valueLabel
             visible: root.value !== ""
             anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(root.valueNaturalWidth, Math.max(0, root.width - 2 * VekronaTheme.space2 - root.overhang
+                - root.trailingWidth - (iconBox.visible ? iconBox.width + content.spacing : 0)))
+            elide: Text.ElideRight
             style: VekronaTheme.type.label
+            color: root.enabled ? VekronaTheme.c.ink : VekronaTheme.c.inkDisabled
             text: root.value
-            width: Math.max(implicitWidth, root.valueMinWidth)
         }
     }
 
