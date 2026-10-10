@@ -16,8 +16,10 @@ Singleton {
     readonly property var newestFirst: server.trackedNotifications.values.slice().reverse()
     property bool centerOpen: false
     property bool unseen: false
+    // Ids of the notifications that are off the screen as toasts (timed out or pushed off by newer ones) but still in the centre.
     property var expired: ({})
-    readonly property bool toasting: !centerOpen && server.trackedNotifications.values.slice(-maxToasts).some(notification => !expired[notification.id])
+    readonly property var visibleToasts: server.trackedNotifications.values.filter(notification => !expired[notification.id])
+    readonly property bool toasting: !centerOpen && visibleToasts.length > 0
 
     function expire(notification: Notification): void {
         expired = Object.assign({}, expired, {
@@ -25,10 +27,24 @@ Singleton {
         });
     }
 
-    function revive(notification: Notification): void {
+    function forget(notification: Notification): void {
         const next = Object.assign({}, expired);
         delete next[notification.id];
         expired = next;
+    }
+
+    // A toast that left the screen never comes back because another one was dismissed, so only the newest maxToasts stay.
+    function trimToasts(): void {
+        const overflow = server.trackedNotifications.values.filter(notification => !expired[notification.id]).slice(0, -maxToasts);
+        if (overflow.length > 0)
+            expired = Object.assign({}, expired, ...overflow.map(notification => ({
+                        [notification.id]: true
+                    })));
+    }
+
+    function reshow(notification: Notification): void {
+        forget(notification);
+        trimToasts();
     }
 
     function toggleCenter(): void {
@@ -56,12 +72,19 @@ Singleton {
         bodyHyperlinksSupported: false
         onNotification: notification => {
             notification.tracked = true;
-            const reshow = () => root.revive(notification);
-            notification.summaryChanged.connect(reshow);
-            notification.bodyChanged.connect(reshow);
-            notification.closed.connect(reshow);
+            notification.summaryChanged.connect(() => root.reshow(notification));
+            notification.bodyChanged.connect(() => root.reshow(notification));
+            notification.closed.connect(() => root.forget(notification));
             if (!root.centerOpen)
                 root.unseen = true;
+        }
+    }
+
+    Connections {
+        target: server.trackedNotifications
+
+        function onValuesChanged(): void {
+            root.trimToasts();
         }
     }
 
@@ -100,20 +123,20 @@ Singleton {
             spacing: VekronaTheme.space2
 
             Repeater {
-                model: server.trackedNotifications
+                model: ScriptModel {
+                    values: root.visibleToasts
+                }
 
                 NotificationCard {
                     id: toast
 
                     required property Notification modelData
-                    required property int index
 
                     notification: modelData
-                    visible: !root.expired[modelData.id] && index >= server.trackedNotifications.values.length - root.maxToasts
                     Layout.fillWidth: true
 
                     Timer {
-                        running: notification.urgency !== NotificationUrgency.Critical && !root.expired[notification.id]
+                        running: notification.urgency !== NotificationUrgency.Critical
                         interval: notification.expireTimeout > 0 ? notification.expireTimeout : root.defaultTimeoutMs
                         onTriggered: root.expire(toast.modelData)
                     }
@@ -187,7 +210,9 @@ Singleton {
                     Layout.fillHeight: true
                     clip: true
                     spacing: VekronaTheme.space2
-                    model: root.newestFirst
+                    model: ScriptModel {
+                        values: root.newestFirst
+                    }
 
                     delegate: NotificationCard {
                         required property Notification modelData

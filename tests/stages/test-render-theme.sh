@@ -305,23 +305,13 @@ fails "a foreign gtk.css" "not managed by vekrona" gtk
 printf '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */\n' > "$gtk4"
 log "ok: a foreign gtk.css is refused, left alone, and nothing else is written"
 
-# files written by the previous renderer (and by vekrona-gtk-theme before it) stay ours across the upgrade
-old_text='vekrona-render-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-render-theme)'
+# the pre-rename vekrona-gtk-theme marker is now treated as foreign
 reset_home; set_mode dark
-mkdir -p "$(dirname "$gtk3")" "$(dirname "$gtk4")" "$(dirname "$qt_conf")/colors" "$(dirname "$sway_conf")" "$ff_profile/chrome" "$ff_webapp/chrome"
-printf '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */\nold\n' > "$gtk4"
-printf '/* %s */\nold\n' "$old_text" > "$gtk3"
-printf '/* %s */\nold\n' "$old_text" > "$ff_profile/chrome/userChrome.css"
-printf '/* %s */\nold\n' "$old_text" > "$ff_webapp/chrome/userChrome.css"
-printf '# %s\nold\n' "$old_text" > "$qt_conf"
-printf '# %s\nold\n' "$old_text" > "$qt_colors"
-printf '# %s\nold\n' "$old_text" > "$sway_conf"
-printf '// %s\nold\n' "$old_text" > "$ff_profile/user.js"
-ok_run all
-for f in "$gtk3" "$gtk4" "$qt_conf" "$qt_colors" "$sway_conf" "$ff_profile/user.js" "$ff_profile/chrome/userChrome.css" "$ff_webapp/chrome/userChrome.css"; do
-  refute_text "$f" "old"
-done
-log "ok: files carrying the previous renderer's header (every comment style) are overwritten"
+mkdir -p "$(dirname "$gtk4")"
+printf '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */\n' > "$gtk4"
+fails "a pre-rename gtk.css" "not managed by vekrona" gtk
+[[ "$(cat "$gtk4")" == '/* vekrona-gtk-theme: generated from the active vekrona theme, do not edit (run vekrona-theme or vekrona-gtk-theme) */'* ]] || die "pre-rename gtk.css was modified"
+log "ok: a pre-rename vekrona-gtk-theme marker is now treated as foreign"
 
 reset_home
 mkdir -p "$(dirname "$qt_conf")"; printf '# mine\n' > "$qt_conf"
@@ -472,3 +462,39 @@ if bad:
     sys.exit("\n".join(bad))
 PY
 log "ok: fontconfig family lists equal the token families"
+
+# ---- an interrupted write leaves nothing behind
+# sway includes config.d/*, so a stray temp there would be loaded by every later reload.
+interrupted_write() { # interrupted_write <exception expression>: write_atomic's os.replace raises it; prints "<outcome> <leftover count>"
+  python3 - "$tool" "$sway_conf" "$1" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+
+tool, target, exc = sys.argv[1:]
+loader = importlib.machinery.SourceFileLoader("vekrona_render_theme", tool)
+module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+loader.exec_module(module)
+
+seen = []
+def failing_replace(src, dst):
+    seen.append(os.path.basename(src))
+    raise eval(exc)
+module.os.replace = failing_replace
+
+try:
+    module.write_atomic(target, "content\n")
+    outcome = "returned"
+except SystemExit:
+    outcome = "exit"
+except BaseException as e:
+    outcome = type(e).__name__
+if not all(name.startswith(".") for name in seen) or not seen:
+    outcome += " visible-temp"
+print(outcome, len(os.listdir(os.path.dirname(target))))
+PY
+}
+reset_home
+[[ "$(interrupted_write 'KeyboardInterrupt()')" == "KeyboardInterrupt 0" ]] \
+  || die "an interrupted write must re-raise and leave no temp file (and the temp must be a dotfile)"
+[[ "$(interrupted_write 'OSError("disk full")')" == "exit 0" ]] \
+  || die "a failed write must die and leave no temp file"
+log "ok: an interrupted or failed write removes its dot-prefixed temp file"

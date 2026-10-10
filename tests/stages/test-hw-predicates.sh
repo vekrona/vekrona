@@ -197,7 +197,7 @@ problem="$(PATH="$sb_root/empty-bin" VEKRONA_SYSFS_ROOT="$sb_root" secure_boot_p
 
 rmdir "$sb_root/sys/firmware/efi"
 MOK_SB="SecureBoot enabled" MOK_KEY="is not enrolled" expect_sb_fine "a legacy BIOS boot has no Secure Boot"
-PATH="$sb_root/empty-bin" VEKRONA_SYSFS_ROOT="$sb_root" secure_boot_problem | grep -q . && die "a legacy BIOS boot needed mokutil"
+[[ -z "$(PATH="$sb_root/empty-bin" VEKRONA_SYSFS_ROOT="$sb_root" secure_boot_problem)" ]] || die "a legacy BIOS boot needed mokutil"
 mkdir "$sb_root/sys/firmware/efi"
 log "ok: Secure Boot blocks akmods only when enabled and the key is not enrolled; an unverifiable state refuses with its reason"
 

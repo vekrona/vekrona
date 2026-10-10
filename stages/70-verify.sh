@@ -46,7 +46,6 @@ file_exists() { [[ -e "$1" ]]; }
 fprintd_sees_reader() { fprintd-list "$VEKRONA_USER" >/dev/null 2>&1; }
 file_absent() { [[ ! -e "$1" && ! -L "$1" ]]; }
 dir_exists() { [[ -d "$1" ]]; }
-group_member() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
 gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
 not_repo_enabled() { ! repo_enabled "$1"; }
 copr_enabled() { repo_enabled "$(copr_id "$1")"; }
@@ -209,6 +208,7 @@ if ran 20-snapper; then
   root dnf remove -y hello
   snapshots_csv="$(snapper_csv)"
   n1="$(tail -1 <<<"$snapshots_csv" | cut -d, -f1)"
+  snapshots_csv="$(snapper_rows_after "$n0" <<<"$snapshots_csv")"
   check assert "at least 2 new snapshots from install/remove round-trip" ge "$((n1 - n0))" 2
   check assert "pre snapshot has cleanup=number" csv_row_matches '^[0-9]+,pre,number$'
   check assert "post snapshot has cleanup=number" csv_row_matches '^[0-9]+,post,number$'
@@ -277,9 +277,8 @@ if ran 30-packages; then
   done
   check assert "package absent: ffmpeg-free" pkg_absent ffmpeg-free
 
-  pkg_from_repo() { dnf repoquery --installed --qf '%{from_repo}\n' "$1" 2>/dev/null || true; }
   for p in "${!VEKRONA_PINNED_PKGS[@]}"; do
-    check assert "package installed from pinned repo: $p" eq "$(pkg_from_repo "$p")" "${VEKRONA_PINNED_PKGS[$p]}"
+    check assert "package installed from pinned repo: $p" eq "$(installed_from_repo "$p")" "${VEKRONA_PINNED_PKGS[$p]}"
   done
 
   for stale in "$HOME/.local/zed.app" "$HOME/.local/bin/zed" "$HOME/.local/share/applications/dev.zed.Zed.desktop"; do
@@ -321,7 +320,7 @@ if ran 40-system; then
   check assert "usb autosuspend drop-in present iff not a laptop" present_iff wants_usb_autosuspend_dropin file_exists /etc/modprobe.d/vekrona-usb-autosuspend.conf
   check assert "no stale dGPU udev rule from an earlier install" file_absent /etc/udev/rules.d/70-vekrona-dgpu.rules
   warn_check "no dead /dev/dri/vekrona-dgpu node from the old udev rule (reboot pending)" file_absent /dev/dri/vekrona-dgpu
-  check assert "$VEKRONA_USER in input group" group_member "$VEKRONA_USER" input
+  check assert "$VEKRONA_USER in input group" user_in_group "$VEKRONA_USER" input
   check assert "/dev/uinput exists" file_exists /dev/uinput
 
   for u in tailscaled nix-daemon.service; do

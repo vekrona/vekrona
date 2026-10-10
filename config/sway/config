@@ -50,7 +50,7 @@ bindsym --no-repeat --to-code $hyper+Shift+a exec vekrona-error pick
 bindsym --no-repeat Mod4+Space exec qs -c vekrona-shell ipc call launcher toggle
 
 #: Switch to the next keyboard layout
-bindsym --no-repeat $hyper+space input type:keyboard xkb_switch_layout next; exec qs -c vekrona-shell ipc call keyboard announce
+bindsym --no-repeat $hyper+space input type:keyboard xkb_switch_layout next
 
 #: Switch to workspace 1
 bindsym Mod4+1 workspace number 1

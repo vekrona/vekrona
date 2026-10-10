@@ -52,7 +52,7 @@ run_shot() {
   PATH="$stubs:$PATH" "$tool" "$@" >/dev/null 2>"$scratch/stderr" || rc=$?
 }
 
-saved_file() { find "$shots" -name '*.png' 2>/dev/null | head -n 1; }
+saved_file() { find "$shots" -name '*.png' -print -quit 2>/dev/null; }
 no_files() { [[ -z "$(saved_file)" ]]; }
 logged() { [[ -e "$logs/$1" ]]; }
 expect_rc() { [[ "$rc" == "$1" ]] || die "$2: expected exit $1, got $rc: $(cat "$scratch/stderr")"; }

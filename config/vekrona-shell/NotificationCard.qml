@@ -11,11 +11,19 @@ Rectangle {
     property int bodyLines: 4
     readonly property string imageSource: notification.image !== "" ? notification.image : notification.appIcon === "" ? "" : notification.appIcon.startsWith("/") ? notification.appIcon : Quickshell.iconPath(notification.appIcon, true)
 
-    function activate(): void {
-        const actions = notification.actions;
-        const action = actions.find(candidate => candidate.identifier === "default") ?? actions[0];
+    // Brings the sender's window forward, then runs the action, if any. Sway does not focus a window for
+    // the app itself: Quickshell sends no activation token with the action, and without one Sway ignores
+    // the app's focus request.
+    function invoke(action: NotificationAction): void {
+        const entry = DesktopEntries.byId(notification.desktopEntry);
+        Windows.focusApp([notification.desktopEntry, entry?.startupClass ?? "", notification.appName]);
         if (action)
             action.invoke();
+    }
+
+    function activate(): void {
+        const actions = notification.actions;
+        invoke(actions.find(candidate => candidate.identifier === "default") ?? actions[0] ?? null);
     }
 
     implicitHeight: content.implicitHeight + 2 * VekronaTheme.space3
@@ -82,7 +90,7 @@ Rectangle {
 
                         value: modelData.text
                         ariaName: modelData.text
-                        onClicked: modelData.invoke()
+                        onClicked: root.invoke(modelData)
                     }
                 }
             }

@@ -163,6 +163,18 @@ class ReadStateTest(unittest.TestCase):
         partitionings = {APPLIED: FakePartitioning(method="INTERACTIVE")}
         self.assertEqual(state(partitionings, tree), StorageState.MANUAL_PLAIN)
 
+    def test_manual_layout_with_a_root_that_is_not_btrfs_is_refused(self):
+        tree = encrypted_tree()
+        tree._formats["root"] = "ext4"
+        partitionings = {APPLIED: FakePartitioning(method="INTERACTIVE")}
+        self.assertEqual(state(partitionings, tree), StorageState.MANUAL_NOT_BTRFS)
+
+    def test_manual_layout_without_a_root_is_refused(self):
+        tree = encrypted_tree()
+        del tree._mount_points["/"]
+        partitionings = {APPLIED: FakePartitioning(method="INTERACTIVE")}
+        self.assertEqual(state(partitionings, tree), StorageState.MANUAL_NOT_BTRFS)
+
     def test_manual_layout_ignores_the_password_and_never_matches(self):
         partitionings = {APPLIED: FakePartitioning(method="INTERACTIVE")}
         self.assertEqual(state(partitionings, encrypted_tree(), password="x"), StorageState.MANUAL_LUKS)

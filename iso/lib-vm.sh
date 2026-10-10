@@ -107,7 +107,7 @@ vm_unlock() {
 
 vm_qemu_process_name() {
   local pid="$1" name
-  name="$(tr '\0' '\n' < "/proc/$pid/cmdline" | awk '$0 == "-name" { getline; print; exit }')"
+  name="$(tr '\0' '\n' < "/proc/$pid/cmdline" | awk '$0 == "-name" && !seen { getline; print; seen = 1 }')"
   name="${name#guest=}"
   echo "${name%%,*}"
 }
@@ -194,7 +194,7 @@ vm_print_foreign() {
   echo "qemu processes:"
   for pid in $(vm_qemu_pids); do
     printf '  pid=%s name=%s m=%s cgroup=%s\n' "$pid" "$(vm_qemu_process_name "$pid")" \
-      "$(tr '\0' '\n' < "/proc/$pid/cmdline" | awk '$0 == "-m" { getline; print; exit }')" \
+      "$(tr '\0' '\n' < "/proc/$pid/cmdline" | awk '$0 == "-m" && !seen { getline; print; seen = 1 }')" \
       "$(awk -F: '$1 == "0" { print $3 }' "/proc/$pid/cgroup")"
   done
   domains="$(vm_libvirt_running_domains)"

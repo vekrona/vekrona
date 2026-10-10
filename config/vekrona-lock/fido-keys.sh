@@ -18,10 +18,10 @@ wait_accessible() {
 }
 
 count_keys() {
-  local path n=0
+  local path props n=0
   for path in /sys/class/hidraw/*; do
     [[ -e "$path" ]] || continue
-    if udevadm info -q property -p "$path" | grep -qx 'ID_FIDO_TOKEN=1' && wait_accessible "/dev/${path##*/}"; then
+    if props="$(udevadm info -q property -p "$path")" && grep -qx 'ID_FIDO_TOKEN=1' <<<"$props" && wait_accessible "/dev/${path##*/}"; then
       n=$((n + 1))
     fi
   done

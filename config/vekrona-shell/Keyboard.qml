@@ -14,6 +14,11 @@ Singleton {
     property bool available: false
     // Why the last query or switch failed; empty after the next successful query.
     property string error: ""
+    // Set by a switch the shell starts itself (the menu, a right click), which the person is already looking at.
+    property bool quiet: false
+
+    // The active layout changed from outside the shell (Hyper+Space, swaymsg), after the new layout is known.
+    signal switched()
 
     readonly property var current: activeIndex >= 0 && activeIndex < layouts.length ? layouts[activeIndex] : null
 
@@ -62,11 +67,20 @@ Singleton {
         const fresh = names.map((name, index) => layoutFor(lined ? envIds[index] : idForSwayName(name), name));
         // A switch reports the same list once per keyboard device; a new array would make every Repeater over it rebuild its rows
         // and resize the menu and the on-screen display mid-frame, so only a changed list is assigned.
-        if (JSON.stringify(fresh) !== JSON.stringify(layouts))
+        const sameList = JSON.stringify(fresh) === JSON.stringify(layouts);
+        if (!sameList)
             layouts = fresh;
-        activeIndex = keyboard.xkb_active_layout_index ?? 0;
+        const index = keyboard.xkb_active_layout_index ?? 0;
+        const moved = sameList && activeIndex >= 0 && index !== activeIndex;
+        activeIndex = index;
         available = true;
         error = "";
+        if (!moved)
+            return;
+        if (quiet)
+            quiet = false;
+        else
+            switched();
     }
 
     function fail(reason: string): void {
@@ -97,14 +111,19 @@ Singleton {
     // `layout` is an index or "next"; Sway's input event then refreshes `activeIndex`.
     function switchTo(layout: string): void {
         const argv = ["swaymsg", "input", "type:keyboard", "xkb_switch_layout", layout];
+        quiet = true;
         Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0)
+            if (code !== 0) {
+                quiet = false;
                 fail(Exec.failure(argv, code, stderr));
+            }
         });
     }
 
     function select(index: int): void {
-        switchTo(String(index));
+        // Picking the current layout changes nothing, so no event would clear `quiet`.
+        if (index !== activeIndex)
+            switchTo(String(index));
     }
 
     function next(): void {

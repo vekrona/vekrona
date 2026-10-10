@@ -89,6 +89,7 @@ fi
 export VEKRONA_STAGES="${verify_scope[*]}"
 if [[ $list_only -eq 1 ]]; then printf '%s\n' "${run[@]}"; exit 0; fi
 [[ $EUID -eq 0 ]] && die "run as your user, not root; stages call sudo where needed"
+if array_has 20-snapper "${verify_scope[@]}"; then require_btrfs_root; fi
 
 for stage in "${run[@]}"; do
   log "=== stage $stage ==="
