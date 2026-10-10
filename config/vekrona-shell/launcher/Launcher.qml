@@ -49,6 +49,15 @@ PanelWindow {
     readonly property string selectedId: selectedEntry === null ? "" : selectedEntry.result.id
     readonly property var selectedActions: selectedEntry === null ? [] : selectedEntry.result.actions ?? []
     readonly property var panelActions: actionsEntry === null ? [] : actionsEntry.result.actions ?? []
+    readonly property string escapeStep: armed !== null ? "disarm" : viewStack.length > 0 ? "back" : modeModule !== null ? "leaveMode" : search.text !== "" ? "clear" : "close"
+    readonly property string escapeLabel: selectedEntry !== null ? "" : ({
+            "disarm": "",
+            "back": "Back",
+            "leaveMode": "Leave mode",
+            "clear": "Clear",
+            "close": "Close"
+        })[escapeStep]
+    readonly property var footerModule: selectedEntry !== null ? selectedEntry.module : viewStack.length > 0 ? viewStack[viewStack.length - 1].module : modeModule
     readonly property string breadcrumb: viewStack.length === 0 ? "" : [viewStack[0].module.title].concat(viewStack.map(frame => frame.title)).join(" › ")
     readonly property real listContentHeight: rows.reduce((sum, entry) => sum + LauncherMetrics.heightOf(entry), 0)
     // The search field's middle sits on the screen's middle; the list takes the room below it.
@@ -561,16 +570,23 @@ PanelWindow {
     }
 
     function handleEscape(): void {
-        if (armed !== null)
+        switch (escapeStep) {
+        case "disarm":
             armed = null;
-        else if (viewStack.length > 0)
+            break;
+        case "back":
             popView();
-        else if (modeModule !== null)
+            break;
+        case "leaveMode":
             exitMode();
-        else if (search.text !== "")
+            break;
+        case "clear":
             applyQuery("");
-        else
+            break;
+        case "close":
             closeLauncher();
+            break;
+        }
     }
 
     function openActions(): void {
@@ -721,6 +737,21 @@ PanelWindow {
                 return;
             }
             root.pushView(settingsModule, push);
+        }
+
+        // The launcher's state as compact JSON, for tests: {open, mode, query, view, selectedId, armed, actionsOpen, rows, empty}.
+        function state(): string {
+            return JSON.stringify({
+                open: root.shown,
+                mode: root.activeSlash,
+                query: search.text,
+                view: root.breadcrumb,
+                selectedId: root.selectedId,
+                armed: root.armed !== null,
+                actionsOpen: root.actionsOpen,
+                rows: root.rows.filter(entry => entry.type === "row").length,
+                empty: root.rows.some(entry => entry.type === "empty")
+            });
         }
     }
 
@@ -950,8 +981,9 @@ PanelWindow {
 
                 Footer {
                     Layout.fillWidth: true
-                    glyph: root.selectedEntry === null ? "" : root.selectedEntry.module.glyph
-                    title: root.selectedEntry === null ? "" : root.selectedEntry.module.title
+                    glyph: root.footerModule === null ? "" : root.footerModule.glyph
+                    title: root.footerModule === null ? "" : root.footerModule.title
+                    escapeLabel: root.escapeLabel
                     toastText: root.toastText
                     primaryLabel: root.selectedActions.length > 0 ? root.selectedActions[0].label : ""
                     armedLabel: root.armed === null ? "" : root.armed.action.label

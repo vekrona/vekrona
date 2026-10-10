@@ -132,6 +132,8 @@ vekrona/
     xremap/config.yml             # caps-hyper modmap, cmd-layer/terminal-word-nav keymaps, exact_match: true
     vekrona-shell/                # the Quickshell shell (qs -c vekrona-shell): bar, notifications, polkit, OSD; Vekrona/ links to quickshell-shared
       Exec.qml                    # the one process runner: run(argv, onDone) with kill(), detached(), unit(), failure()
+      Sound.qml                   # the bar's sound pill and its popout: MediaCard, VolumeControl, OutputList, split by Vekrona/Rule hairlines
+      MediaCard.qml               # the current MPRIS player: track art, title, "artist · player", transport; a click focuses the player's window through bin/vekrona-media-raise
       Wireless.qml                # Wi-Fi and Bluetooth state and actions (rfkill unblock, scanning, pairing without a PIN, forgetting), shared by the bar's network popout and the launcher's Settings module
       launcher/                   # the launcher: a host plus modules
         Launcher.qml              # the host: search field, modes (/calc), sub-view stack, ranking, actions, confirm-twice, toast; the module API (close, setQuery, enterMode, pushView, toast)
@@ -185,6 +187,7 @@ vekrona/
     vekrona-webapp        # MOZ_APP_REMOTINGNAME=vekrona-<app> firefox --name vekrona-<app> -P vekrona-<app> --new-window <url>
     vekrona-screenshot    # grim+slurp, clipboard, notify with swappy Edit action
     vekrona-record        # wf-recorder
+    vekrona-media-raise   # focuses an MPRIS player's window: bus name -> owning pid (busctl), then swaymsg [pid=N] focus on it or its nearest ancestor with a window
     vekrona-update        # snapper pre snapshot -> dnf upgrade --refresh -> flatpak update -> mise_system upgrade+reshim -> snapper post snapshot (EXIT trap), prints the pre number and the rollback hint
   vm/
     session-check.sh      # waits for the sway IPC socket with an inotifywait watch started before sway launches, starts `sway-session.target`, retries `qs -c vekrona-shell ipc show` bounded to 30 s, validates xremap config; headless Sway (systemd-run --user): `WLR_BACKENDS=headless`; inotify-tools/python3 are installed by stage 30-packages before this script ever runs, not by the kickstart

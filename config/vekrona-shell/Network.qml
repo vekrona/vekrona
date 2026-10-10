@@ -81,29 +81,16 @@ BarPill {
             text: root.failure
         }
 
-        Rectangle {
+        TextField {
+            id: password
             visible: root.passwordFor !== null
             Layout.fillWidth: true
-            implicitHeight: VekronaTheme.sizeTarget
-            color: "transparent"
-            border.width: VekronaTheme.borderControl
-            border.color: VekronaTheme.c.line
-
-            TextInput {
-                id: password
-                anchors.fill: parent
-                anchors.margins: VekronaTheme.space2
-                verticalAlignment: TextInput.AlignVCenter
-                echoMode: TextInput.Password
-                color: VekronaTheme.c.ink
-                font.family: VekronaTheme.fontSans
-                font.pixelSize: VekronaTheme.type.body.size
-                Accessible.name: "Wi-Fi password"
-                onAccepted: {
-                    root.passwordFor.connectWithPsk(text);
-                    text = "";
-                    root.passwordFor = null;
-                }
+            echoMode: TextInput.Password
+            accessibleName: "Wi-Fi password"
+            onAccepted: {
+                root.passwordFor.connectWithPsk(text);
+                text = "";
+                root.passwordFor = null;
             }
         }
 

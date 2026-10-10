@@ -11,6 +11,9 @@ Perf 1.0 Perf.qml
 Sound 1.0 Sound.qml
 KeyboardLayout 1.0 KeyboardLayout.qml
 LayoutRow 1.0 LayoutRow.qml
+MediaCard 1.0 MediaCard.qml
+VolumeControl 1.0 VolumeControl.qml
+OutputList 1.0 OutputList.qml
 Network 1.0 Network.qml
 singleton Wireless 1.0 Wireless.qml
 Battery 1.0 Battery.qml

@@ -27,6 +27,21 @@ Singleton {
         Pipewire.preferredDefaultAudioSink = node;
     }
 
+    // Focuses the window of player. The helper finds the window by process, which works for every player
+    // on Sway. MPRIS Raise is the fallback: it needs a window activation token that some players lack.
+    function raisePlayer(player: MprisPlayer): void {
+        const argv = ["vekrona-media-raise", player.dbusName];
+        Exec.run(argv, (code, stdout, stderr) => {
+            if (code === 0)
+                return;
+            // The player may have quit while the helper ran; then there is nothing to raise.
+            if (player?.canRaise)
+                player.raise();
+            else
+                Exec.failure(argv, code, stderr);
+        });
+    }
+
     function toggleMute(): void {
         if (!sink?.audio) {
             console.error("cannot mute: there is no default audio sink");
