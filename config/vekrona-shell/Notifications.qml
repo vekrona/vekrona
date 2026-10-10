@@ -18,8 +18,8 @@ Singleton {
     property bool unseen: false
     // Ids of the notifications that are off the screen as toasts (timed out or pushed off by newer ones) but still in the centre.
     property var expired: ({})
-    readonly property var toasts: server.trackedNotifications.values.filter(notification => !expired[notification.id])
-    readonly property bool toasting: !centerOpen && toasts.length > 0
+    readonly property var visibleToasts: server.trackedNotifications.values.filter(notification => !expired[notification.id])
+    readonly property bool toasting: !centerOpen && visibleToasts.length > 0
 
     function expire(notification: Notification): void {
         expired = Object.assign({}, expired, {
@@ -35,7 +35,7 @@ Singleton {
 
     // A toast that left the screen never comes back because another one was dismissed, so only the newest maxToasts stay.
     function trimToasts(): void {
-        const overflow = toasts.slice(0, -maxToasts);
+        const overflow = server.trackedNotifications.values.filter(notification => !expired[notification.id]).slice(0, -maxToasts);
         if (overflow.length > 0)
             expired = Object.assign({}, expired, ...overflow.map(notification => ({
                         [notification.id]: true
@@ -75,9 +75,16 @@ Singleton {
             notification.summaryChanged.connect(() => root.reshow(notification));
             notification.bodyChanged.connect(() => root.reshow(notification));
             notification.closed.connect(() => root.forget(notification));
-            root.trimToasts();
             if (!root.centerOpen)
                 root.unseen = true;
+        }
+    }
+
+    Connections {
+        target: server.trackedNotifications
+
+        function onValuesChanged(): void {
+            root.trimToasts();
         }
     }
 
@@ -117,7 +124,7 @@ Singleton {
 
             Repeater {
                 model: ScriptModel {
-                    values: root.toasts
+                    values: root.visibleToasts
                 }
 
                 NotificationCard {
