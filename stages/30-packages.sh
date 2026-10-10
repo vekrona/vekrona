@@ -19,6 +19,10 @@ versionlock_absent "${VEKRONA_RETIRED_PKGS[@]}"
 
 ensure_pkg_swapped ffmpeg-free ffmpeg
 
+# proton-vpn-daemon's %posttrans starts a service that loads libclang-cpp through python3-bcc.
+# ldconfig refreshes ld.so.cache only after %posttrans, so python3-bcc goes into an earlier transaction.
+ensure_pkg python3-bcc
+
 desktop_pkgs_except_pinned=()
 for pkg in "${VEKRONA_DESKTOP_PKGS[@]}"; do
   [[ -n "${VEKRONA_PINNED_PKGS[$pkg]+x}" ]] || desktop_pkgs_except_pinned+=("$pkg")
