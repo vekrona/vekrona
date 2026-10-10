@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/authselect-vekrona.sh"
 source "$ROOT/lib/pam-u2f.sh"
+source "$ROOT/lib/yubikey-otp.sh"
 source "$ROOT/lib/luks-fido2.sh"
 source "$ROOT/lib/facetimehd.sh"
 source "$ROOT/lib/proton.sh"
@@ -348,6 +349,7 @@ if ran 45-auth; then
   if [[ -e "$(u2f_keys_path)" ]]; then
     check assert "$(u2f_keys_path) has no +pin credential flag (it makes pam_u2f ask the PIN on the touch-only lock screen; rerun ./install.sh 45)" not u2f_keys_have_pin_flag "$(u2f_keys_path)"
   fi
+  check assert "no plugged-in YubiKey acts as a keyboard (a touch would type an OTP into the lock screen as a wrong password; run: ykman config usb --disable OTP, then replug the key)" yubico_has_no_keyboard
   warn_check "fprintd sees a fingerprint reader (with-fingerprint is enabled regardless; none present, plug in a USB reader)" fprintd_sees_reader
 
   crypttab_content="$(read_crypttab)"

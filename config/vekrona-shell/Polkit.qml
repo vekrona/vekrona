@@ -115,41 +115,15 @@ PanelWindow {
                     text: root.identityNote
                 }
 
-                Rectangle {
+                TextField {
+                    id: password
                     Layout.fillWidth: true
-                    implicitHeight: VekronaTheme.sizeTarget
-                    color: "transparent"
-                    border.width: VekronaTheme.borderControl
-                    border.color: VekronaTheme.c.line
-
-                    TextInput {
-                        id: password
-                        anchors.fill: parent
-                        anchors.margins: VekronaTheme.space2
-                        verticalAlignment: TextInput.AlignVCenter
-                        echoMode: TextInput.Password
-                        enabled: root.flow?.isResponseRequired ?? false
-                        focus: true
-                        color: VekronaTheme.c.ink
-                        font.family: VekronaTheme.fontSans
-                        font.pixelSize: VekronaTheme.type.body.size
-                        Accessible.name: "Password"
-                        Keys.onReturnPressed: root.submit()
-                        Keys.onEnterPressed: root.submit()
-                    }
-
-                    Label {
-                        visible: password.text === ""
-                        anchors.fill: password
-                        verticalAlignment: Text.AlignVCenter
-                        style: VekronaTheme.type.body
-                        color: VekronaTheme.c.inkMuted
-                        text: root.flow?.inputPrompt ?? ""
-                    }
-
-                    FocusRing {
-                        shown: password.activeFocus
-                    }
+                    echoMode: TextInput.Password
+                    enabled: root.flow?.isResponseRequired ?? false
+                    focus: true
+                    accessibleName: "Password"
+                    placeholder: root.flow?.inputPrompt ?? ""
+                    onAccepted: root.submit()
                 }
 
                 Label {
