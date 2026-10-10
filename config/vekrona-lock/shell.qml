@@ -326,46 +326,26 @@ ShellRoot {
                         color: VekronaTheme.dark.inkMuted
                     }
 
-                    Rectangle {
-                        id: fieldFrame
+                    TextField {
+                        id: field
                         // Twelve touch targets wide; tall enough for one body line plus the control padding.
                         width: 12 * VekronaTheme.sizeTarget
                         height: VekronaTheme.type.body.line + 2 * VekronaTheme.space3
-                        color: VekronaTheme.dark.surface2
-                        border.width: VekronaTheme.borderControl
-                        border.color: VekronaTheme.dark.lineStrong
+                        padding: VekronaTheme.space3
+                        colors: VekronaTheme.dark
+                        fill: VekronaTheme.dark.surface2
+                        borderColor: VekronaTheme.dark.lineStrong
+                        echoMode: TextInput.Password
+                        focus: true
 
-                        TextInput {
-                            id: field
-                            anchors.fill: parent
-                            anchors.margins: VekronaTheme.space3
-                            verticalAlignment: TextInput.AlignVCenter
-                            echoMode: TextInput.Password
-                            color: VekronaTheme.dark.ink
-                            selectionColor: VekronaTheme.dark.accent
-                            selectedTextColor: VekronaTheme.dark.onAccent
-                            font.family: VekronaTheme.fontSans
-                            font.pixelSize: VekronaTheme.type.body.size
-                            font.weight: VekronaTheme.type.body.weight
-                            font.letterSpacing: VekronaTheme.type.body.tracking * VekronaTheme.type.body.size
-                            focus: true
-
-                            onActiveFocusChanged: {
-                                if (!activeFocus)
-                                    forceActiveFocus();
-                            }
-                            Keys.onPressed: root.keyPressed()
-                            onAccepted: {
-                                root.submit(text);
-                                text = "";
-                            }
+                        onActiveFocusChanged: {
+                            if (!activeFocus)
+                                forceActiveFocus();
                         }
-
-                        // The lock screen is always dark, whatever the desktop mode.
-                        FocusRing {
-                            shown: field.activeFocus
-                            outer: VekronaTheme.dark.focus
-                            inner: VekronaTheme.dark.focusInner
+                        onKeyPressed: root.keyPressed()
+                        onAccepted: {
+                            root.submit(text);
+                            text = "";
                         }
                     }
                 }
@@ -373,7 +353,7 @@ ShellRoot {
                 Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     // Fixed height so the layout does not jump when the line is empty.
-                    width: fieldFrame.width
+                    width: field.width
                     height: Math.max(VekronaTheme.iconS, VekronaTheme.type.label.line)
 
                     Row {
