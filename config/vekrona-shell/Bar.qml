@@ -82,8 +82,6 @@ PanelWindow {
         Calendar {
             bar: root
         }
-
-        Clock {}
     }
 
     Catcher {

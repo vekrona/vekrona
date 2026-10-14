@@ -5,7 +5,7 @@ import Quickshell
 import Quickshell.Io
 import "Vekrona"
 
-BarPill {
+Row {
     id: root
 
     required property var bar
@@ -51,10 +51,19 @@ BarPill {
         return monthOffset === 0 && day === today.getDate();
     }
 
-    icon: "calendar_month"
-    value: upcoming ? elide(upcoming.start.slice(11) + " " + upcoming.title) : ""
-    ariaName: "Calendar"
-    onClicked: bar.togglePopout(popout)
+    BarPill {
+        visible: root.upcoming !== null
+        value: root.upcoming ? root.elide(root.upcoming.start.slice(11) + " " + root.upcoming.title) : ""
+        ariaName: "Next event"
+        onClicked: root.bar.togglePopout(popout)
+    }
+
+    BarPill {
+        id: dateTime
+        value: Qt.formatDateTime(clock.date, "ddd d MMM HH:mm")
+        ariaName: "Calendar"
+        onClicked: root.bar.togglePopout(popout)
+    }
 
     SystemClock {
         id: clock
@@ -75,7 +84,7 @@ BarPill {
 
     Popout {
         id: popout
-        anchorItem: root
+        anchorItem: dateTime
         open: root.bar.openPopout === popout
         onDismissed: root.bar.openPopout = null
         onOpenChanged: if (!open)
