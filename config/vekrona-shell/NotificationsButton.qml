@@ -4,10 +4,6 @@ import "."
 BarPill {
     icon: "notifications"
     ariaName: "Notifications"
+    badgeCount: Notifications.unseenCount
     onClicked: Notifications.toggleCenter()
-
-    Badge {
-        dot: true
-        count: Notifications.unseen ? 1 : 0
-    }
 }

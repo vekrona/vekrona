@@ -4,7 +4,7 @@ The right-side bar is the run of ink clusters (glyphs more than CLUSTER_GAP px a
 not broken by a gap of SECTION_BREAK px or more. A widget starts at each pictogram (a cluster at least
 icon_size // 2 + 2 px tall, taller than any text) and takes the text clusters after it: its value, or the words of the
 clock. A value is right-aligned in a slot as wide as the widest value, so the gap between a pictogram and its value
-varies, and the widget's right edge is what stays put. Unread badges (red dots and counters) overhang their glyph by design: their
+varies, and the widget's right edge is what stays put. Unread badges (red counters) overhang their glyph by design: their
 pixels are not measured as glyph ink, but a badge widens the widget it touches."""
 from png_rows import read_png_rows
 

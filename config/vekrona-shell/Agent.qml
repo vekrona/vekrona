@@ -16,14 +16,9 @@ BarPill {
 
     icon: "smart_toy"
     ariaName: "Open coding agent"
-    overhang: badge.overhang
+    badgeCount: unreadCount
     onClicked: Exec.detached(["vekrona-agent", "--pick"])
     onRightClicked: Exec.detached(["vekrona-error", "pick"])
-
-    Badge {
-        id: badge
-        count: root.unreadCount
-    }
 
     FileView {
         path: root.unreadPath
