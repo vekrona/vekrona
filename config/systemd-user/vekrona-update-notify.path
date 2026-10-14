@@ -1,7 +1,6 @@
 [Unit]
 Description=Watch the update check for new updates
 PartOf=sway-session.target
-After=sway-session.target
 
 [Path]
 PathChanged=/var/lib/vekrona/updates.json
