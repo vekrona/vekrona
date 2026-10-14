@@ -5,10 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-# The Perf widget's CPU and RAM values never reach 100, so only the sound pill matches. OCR reads the slashed zero as O or drops the space before the percent sign.
+# The Perf widget's CPU and RAM values stay below 100 in an idle VM, so only the sound pill matches. OCR reads the slashed zero as O or drops the space before the percent sign.
 FULL_VOLUME_REGEX="1[0O][0O] ?%"
 VOLUMES=(0.42 0.64)
-# A changed value moves the pill's centre by a few characters, but the neighbouring Perf pills sit further away.
+# The pill keeps its width and right-aligns its value, so a changed value moves the text's centre by a few characters, but the neighbouring Perf pills sit further away.
 PILL_DRIFT_PX=40
 
 volume_shown() {

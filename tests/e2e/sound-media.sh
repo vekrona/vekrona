@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-# The Perf widget's CPU and RAM values never reach 100, so only the sound pill matches. OCR reads the slashed zero as O or drops the space before the percent sign.
+# The Perf widget's CPU and RAM values stay below 100 in an idle VM, so only the sound pill matches. OCR reads the slashed zero as O or drops the space before the percent sign.
 FULL_VOLUME_REGEX="1[0O][0O] ?%"
 PLAYER_BUS_NAME=org.mpris.MediaPlayer2.vekronatest
 # The windows are foot terminals: Ghostty's GL renderer crashes on the guest's llvmpipe while the popout covers it.

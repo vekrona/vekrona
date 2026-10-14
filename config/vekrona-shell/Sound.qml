@@ -11,6 +11,7 @@ BarPill {
 
     icon: Audio.glyph
     value: Audio.percent + " %"
+    widestValue: "100 %"
     ariaName: "Sound"
     onClicked: bar.togglePopout(popout)
     onRightClicked: Audio.toggleMute()

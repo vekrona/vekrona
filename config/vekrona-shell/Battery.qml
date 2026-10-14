@@ -14,5 +14,6 @@ BarPill {
     icon: charging ? "battery_charging_full" : full ? "battery_full" : "battery_" + Math.min(levels, Math.floor(levels * percent / 100)) + "_bar"
     filled: charging
     value: percent + " %"
+    widestValue: "100 %"
     ariaName: "Battery"
 }

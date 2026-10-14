@@ -61,6 +61,7 @@ Row {
     BarPill {
         id: dateTime
         value: Qt.formatDateTime(clock.date, "ddd d MMM HH:mm")
+        widestValue: "Wed 28 May 28:28"
         ariaName: "Calendar"
         onClicked: root.bar.togglePopout(popout)
     }

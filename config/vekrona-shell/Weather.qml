@@ -43,6 +43,7 @@ BarPill {
     visible: report !== null
     icon: current && !report.error ? glyph(current.weather_code, current.is_day) : "cloud_off"
     value: current ? degrees(current.temperature) : ""
+    widestValue: "-88 °C"
     ariaName: "Weather"
     onClicked: bar.togglePopout(popout)
 

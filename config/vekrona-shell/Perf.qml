@@ -53,6 +53,7 @@ Row {
     BarPill {
         icon: "speed"
         value: root.cpuPercent + " %"
+        widestValue: "100 %"
         ariaName: "CPU load"
         onClicked: Exec.detached(Exec.inTerminal(["btop"]))
     }
@@ -60,6 +61,7 @@ Row {
     BarPill {
         icon: "memory"
         value: root.ramPercent + " %"
+        widestValue: "100 %"
         ariaName: "Memory use"
         onClicked: Exec.detached(Exec.inTerminal(["btop"]))
     }

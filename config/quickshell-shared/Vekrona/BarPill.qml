@@ -10,8 +10,8 @@ Item {
     property bool filled: false
     property string ariaName
     property real overhang: 0
-    // Keeps the value at least this wide, so a pill whose value changes does not shift its neighbours.
-    property real valueMinWidth: 0
+    // The widest value this pill will show. The pill reserves its width, so a changing value does not shift its neighbours.
+    property string widestValue
     // Reserves the icon's slot even with no icon, so rows that show a mark only on one of them stay aligned.
     property bool keepIconSlot: false
     // Muted text at the right edge, for rows wider than their content.
@@ -24,7 +24,7 @@ Item {
 
     implicitHeight: VekronaTheme.sizeTarget
     // The content at its natural width. The value elides when the pill is narrower.
-    readonly property real valueNaturalWidth: Math.max(valueLabel.implicitWidth, valueMinWidth)
+    readonly property real valueNaturalWidth: Math.max(valueLabel.implicitWidth, widestLabel.implicitWidth)
     readonly property real trailingWidth: trailing !== "" ? VekronaTheme.space4 + trailingLabel.implicitWidth : 0
     readonly property real contentWidth: (iconBox.visible ? iconBox.width : 0)
         + (iconBox.visible && valueLabel.visible ? content.spacing : 0)
@@ -72,10 +72,20 @@ Item {
             width: Math.min(root.valueNaturalWidth, Math.max(0, root.width - 2 * VekronaTheme.space2 - root.overhang
                 - root.trailingWidth - (iconBox.visible ? iconBox.width + content.spacing : 0)))
             elide: Text.ElideRight
+            horizontalAlignment: Text.AlignRight
+            font.features: { "tnum": 1 }
             style: VekronaTheme.type.label
             color: root.enabled ? VekronaTheme.c.ink : VekronaTheme.c.inkDisabled
             text: root.value
         }
+    }
+
+    Label {
+        id: widestLabel
+        visible: false
+        font.features: { "tnum": 1 }
+        style: VekronaTheme.type.label
+        text: root.widestValue
     }
 
     Label {
