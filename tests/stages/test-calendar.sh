@@ -59,10 +59,19 @@ assert_json '[.events[].start] == ([.events[].start] | sort)' "events must be so
 log "ok: all-day, midnight-spanning and unicode events render correctly"
 
 mkdir -p "$XDG_CONFIG_HOME/vdirsyncer"
-: >"$XDG_CONFIG_HOME/vdirsyncer/config"
+vdirsyncer_config="$XDG_CONFIG_HOME/vdirsyncer/config"
+# One pair of a vdirsyncer config: the remote storage holds $2 as its url.
+pair_config() {
+  printf '[pair %s]\na = "%s_remote"\nb = "%s_local"\n\n[storage %s_remote]\ntype = "http"\nurl = "%s"\n\n[storage %s_local]\ntype = "filesystem"\n\n' \
+    "$1" "$1" "$1" "$1" "$2" "$1"
+}
+: >"$vdirsyncer_config"
 render
-assert_json '.configured == true' "a vdirsyncer config makes the calendar configured"
-log "ok: a vdirsyncer config marks the calendar configured"
+assert_json '.configured == false' "a vdirsyncer config without a pair is not configured"
+pair_config proton https://example.com/ical >"$vdirsyncer_config"
+render
+assert_json '.configured == true' "a vdirsyncer config with a filled-in pair makes the calendar configured"
+log "ok: a filled-in pair marks the calendar configured"
 
 fake_bin="$scratch/bin"
 mkdir -p "$fake_bin"
@@ -85,34 +94,60 @@ grep -q 'https://calendar.example.com' "$scratch/sync.err" || die "the redacted 
 grep -q '500 Server Error' "$scratch/sync.err" || die "redacting a URL must keep the rest of the error: $(cat "$scratch/sync.err")"
 log "ok: a URL in a sync error is cut to its host"
 
-cp "$ROOT/config/vdirsyncer/config.example" "$XDG_CONFIG_HOME/vdirsyncer/config"
-printf '#!/usr/bin/env bash\necho called >"%s"\necho "fake vdirsyncer must not run" >&2\nexit 1\n' "$scratch/vdirsyncer.called" >"$fake_bin/vdirsyncer"
+# The shipped template holds one pair per provider. Filling in one provider must be enough: the sync runs for that
+# pair alone and the placeholder pairs are skipped without a word.
+cp "$ROOT/config/vdirsyncer/config.example" "$vdirsyncer_config"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\n' "$scratch/vdirsyncer.calls" >"$fake_bin/vdirsyncer"
+rm -f "$output" "$scratch/vdirsyncer.calls"
+if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then
+  die "a config whose pairs are all placeholders must fail a sync run by hand"
+fi
+grep -q 'no pair' "$scratch/sync.err" || die "the error must say that no pair is filled in: $(cat "$scratch/sync.err")"
+[[ ! -e "$scratch/vdirsyncer.calls" ]] || die "vdirsyncer must not run while every pair is a placeholder"
+assert_json '.configured == false' "a config of placeholder pairs must render as not configured"
+log "ok: a sync by hand with only placeholder pairs fails before vdirsyncer runs"
+
+sed -i 's#/url/PLACEHOLDER/calendar.ics?CacheKey=PLACEHOLDER&PassphraseKey=PLACEHOLDER#/url/id/calendar.ics?CacheKey=k\&PassphraseKey=p#' "$vdirsyncer_config"
+rm -f "$output"
+PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err" || die "a filled-in pair must sync: $(cat "$scratch/sync.err")"
+[[ "$(cat "$scratch/vdirsyncer.calls")" == $'metasync proton\nsync proton' ]] \
+  || die "only the filled-in pair may be synced: $(cat "$scratch/vdirsyncer.calls")"
+assert_json '.configured == true' "one filled-in pair among placeholder pairs must render as configured"
+log "ok: with one provider filled in, only its pair is synced and the placeholder pairs are skipped"
+
+# A commented-out line does not count: not a PLACEHOLDER in a comment, and not a storage definition either.
+sed -i 's/^url = "https:\/\/calendar.google.com.*/url = "https:\/\/google.example.com\/ical"\n# url = "PLACEHOLDER"/' "$vdirsyncer_config"
+rm -f "$scratch/vdirsyncer.calls"
+PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err" || die "a commented-out PLACEHOLDER must not block a pair: $(cat "$scratch/sync.err")"
+[[ "$(cat "$scratch/vdirsyncer.calls")" == $'metasync proton google\nsync proton google' ]] \
+  || die "a pair with a commented-out PLACEHOLDER must be synced: $(cat "$scratch/vdirsyncer.calls")"
+sed -i 's/^\[storage proton_local\]/# [storage proton_local]/' "$vdirsyncer_config"
 rm -f "$output"
 if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then
-  die "a config that still has placeholder storages must fail a sync run by hand"
+  die "a pair that uses a storage the config does not define must fail the sync"
 fi
-for storage in proton_remote google_remote microsoft_remote; do
-  grep -q "$storage" "$scratch/sync.err" || die "the error must name the placeholder storage $storage: $(cat "$scratch/sync.err")"
-done
-[[ ! -e "$scratch/vdirsyncer.called" ]] || die "vdirsyncer must not run while placeholder storages remain"
-assert_json '.configured == false' "a placeholder config must render as not configured"
-log "ok: a sync by hand with placeholder storages fails before vdirsyncer runs and names them"
+grep -q 'proton_local' "$scratch/sync.err" || die "the error must name the missing storage: $(cat "$scratch/sync.err")"
+log "ok: a pair that uses an undefined storage fails the sync"
 
 # systemd's ExecCondition: 0 runs the sync, 1-254 skip the unit without failing it, 255 fails it.
 status_of() { local status=0; "$@" 2>/dev/null || status=$?; echo "$status"; }
+cp "$ROOT/config/vdirsyncer/config.example" "$vdirsyncer_config"
 rm -f "$output"
-[[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 1 ]] || die "a placeholder config must skip the unit (exit 1)"
+[[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 1 ]] || die "a config of placeholder pairs must skip the unit (exit 1)"
 assert_json '.configured == false' "skipping the unit must still render the not-configured calendar"
-rm "$XDG_CONFIG_HOME/vdirsyncer/config"
+rm "$vdirsyncer_config"
 rm -f "$output"
 [[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 1 ]] || die "a missing config must skip the unit (exit 1)"
 assert_json '.configured == false' "a missing config must render as not configured"
-: >"$XDG_CONFIG_HOME/vdirsyncer/config"
-[[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 0 ]] || die "a config without placeholders must run the unit (exit 0)"
-rm "$XDG_CONFIG_HOME/vdirsyncer/config"
+pair_config proton https://example.com/ical >"$vdirsyncer_config"
+pair_config google https://PLACEHOLDER.example.com/ >>"$vdirsyncer_config"
+[[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 0 ]] || die "a config with a filled-in pair must run the unit (exit 0)"
+sed -i 's/^b = "google_local"/b = "nowhere"/' "$vdirsyncer_config"
+[[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 255 ]] || die "a pair that uses an undefined storage must fail the unit (exit 255), not skip it"
+rm "$vdirsyncer_config"
 mkdir -p "$scratch/readonly"
 chmod 500 "$scratch/readonly"
 [[ "$(status_of env XDG_STATE_HOME="$scratch/readonly/state" "$ROOT/bin/vekrona-calendar" configured)" == 255 ]] \
   || die "a render that breaks must fail the unit (exit 255), not skip it"
 chmod 700 "$scratch/readonly"
-log "ok: an unconfigured calendar skips the unit, a broken render fails it"
+log "ok: an unconfigured calendar skips the unit, a broken config or render fails it"

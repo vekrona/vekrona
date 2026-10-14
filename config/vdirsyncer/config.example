@@ -1,4 +1,5 @@
-# Copy this file to ~/.config/vdirsyncer/config, keep only the providers you use, and fill in the placeholders.
+# Copy this file to ~/.config/vdirsyncer/config and replace every PLACEHOLDER of the providers you use.
+# Providers that keep a PLACEHOLDER are skipped, so the others can stay as they are.
 # The file holds secrets, so it is yours and Vekrona never overwrites it. docs/calendar.md has the details.
 
 [general]
@@ -49,8 +50,8 @@ conflict_resolution = "a wins"
 [storage icloud_remote]
 type = "caldav"
 url = "https://caldav.icloud.com/"
-username = "APPLE_ID_EMAIL"
-password = "APP_SPECIFIC_PASSWORD"
+username = "PLACEHOLDER"
+password = "PLACEHOLDER"
 
 [storage icloud_local]
 type = "filesystem"
@@ -67,9 +68,9 @@ conflict_resolution = "a wins"
 
 [storage nextcloud_remote]
 type = "caldav"
-url = "https://HOST/remote.php/dav"
-username = "USERNAME"
-password = "APP_PASSWORD"
+url = "https://PLACEHOLDER/remote.php/dav"
+username = "PLACEHOLDER"
+password = "PLACEHOLDER"
 
 [storage nextcloud_local]
 type = "filesystem"

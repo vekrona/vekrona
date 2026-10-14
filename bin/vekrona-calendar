@@ -29,8 +29,9 @@ events_json() {
 
 render() {
   mkdir -p "$CALENDAR_ROOT" "$STATE_DIR"
-  local ready=false events temp
-  is_configured && ready=true
+  local ready=false events pairs temp
+  pairs="$(ready_pairs)"
+  [[ -z "$pairs" ]] || ready=true
   events="$(events_json)"
   temp="$(mktemp "$STATE_DIR/.calendar.XXXXXX")"
   if ! jq -n --argjson configured "$ready" --argjson events "$events" \
@@ -45,42 +46,86 @@ redact_urls() {
   sed -E 's#(https?://)[^/@[:space:]"]*@#\1#g; s#(https?://[^/[:space:]"]+)[^[:space:]"]*#\1/<redacted>#g'
 }
 
-# The storages of the vdirsyncer config that still hold a PLACEHOLDER, space-separated. Commented lines do not count.
-placeholder_storages() {
+# The one definition of "configured": the names of the pairs of the vdirsyncer config that are ready to sync, one per
+# line. A pair is ready when neither of its storages (`a`, `b`) holds a PLACEHOLDER; the template ships one pair per
+# provider and nobody fills in all of them, so the pairs that are still placeholders are skipped silently. Commented
+# lines do not count. A pair that names a storage the config does not define is an error.
+ready_pairs() {
   [[ -f "$VDIRSYNCER_CONFIG" ]] || return 0
-  awk '
-    /^[[:space:]]*\[/ { name = ""; if (match($0, /\[storage [^]]+\]/)) name = substr($0, RSTART + 9, RLENGTH - 10) }
-    name != "" && !/^[[:space:]]*#/ && /PLACEHOLDER/ && !seen[name]++ { printf "%s ", name }
+  awk -v prog="$PROG" -v config="$VDIRSYNCER_CONFIG" '
+    function die(message) {
+      printf "%s: %s\n", prog, message > "/dev/stderr"
+      exit 1
+    }
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*\[/ {
+      kind = ""
+      name = ""
+      if (match($0, /\[(pair|storage) [^]]+\]/)) {
+        split(substr($0, RSTART + 1, RLENGTH - 2), words, " ")
+        kind = words[1]
+        name = words[2]
+        if (kind == "pair") pairs[++pair_count] = name
+        else defined[name] = 1
+      }
+      next
+    }
+    kind == "pair" && match($0, /^[[:space:]]*[ab][[:space:]]*=[[:space:]]*"[^"]*"/) {
+      side = $0
+      sub(/^[[:space:]]*/, "", side)
+      side = substr(side, 1, 1)
+      value = substr($0, RSTART, RLENGTH)
+      sub(/^[^"]*"/, "", value)
+      sub(/"$/, "", value)
+      storage[name, side] = value
+    }
+    kind == "storage" && /PLACEHOLDER/ { placeholder[name] = 1 }
+    END {
+      for (i = 1; i <= pair_count; i++) {
+        pair = pairs[i]
+        ready = 1
+        for (side_index = 1; side_index <= 2; side_index++) {
+          side = (side_index == 1) ? "a" : "b"
+          wanted = storage[pair, side]
+          if (wanted == "") die("pair " pair " in " config " has no " side " storage")
+          if (!(wanted in defined)) die("pair " pair " in " config " uses the storage " wanted ", which the config does not define")
+          if (wanted in placeholder) ready = 0
+        }
+        if (ready) print pair
+      }
+    }
   ' "$VDIRSYNCER_CONFIG"
 }
 
-# The one definition of "configured": a vdirsyncer config exists and no storage in it is still a placeholder.
-is_configured() {
-  [[ -f "$VDIRSYNCER_CONFIG" && -z "$(placeholder_storages)" ]]
-}
-
 # The unit's ExecCondition. Exit 0 runs the sync. Exit 1 skips it without failing the unit: an unconfigured calendar
-# is not an error, the popout says so. systemd treats 255 as a failure, so a render that breaks must not exit 1.
+# is not an error, the popout says so. systemd treats 255 as a failure, so a broken config or render must not exit 1.
 configured() {
-  is_configured && exit 0
+  local pairs
   trap 'exit 255' EXIT
+  pairs="$(ready_pairs)"
+  if [[ -n "$pairs" ]]; then
+    trap - EXIT
+    exit 0
+  fi
   render
   trap - EXIT
   exit 1
 }
 
 sync() {
-  local status=0 output placeholders
-  if ! is_configured; then
+  local status=0 output pairs
+  pairs="$(ready_pairs)"
+  if [[ -z "$pairs" ]]; then
     render
-    placeholders="$(placeholder_storages)"
-    if [[ -n "$placeholders" ]]; then
-      fail "fill in or delete the placeholder storages in $VDIRSYNCER_CONFIG: ${placeholders% } (see docs/calendar.md)"
+    if [[ -f "$VDIRSYNCER_CONFIG" ]]; then
+      fail "no pair in $VDIRSYNCER_CONFIG is filled in yet: replace the PLACEHOLDERs of one provider (see docs/calendar.md)"
     fi
     fail "no $VDIRSYNCER_CONFIG yet (see docs/calendar.md)"
   fi
+  local -a ready
+  mapfile -t ready <<<"$pairs"
   output="$(mktemp)"
-  { vdirsyncer metasync && vdirsyncer sync; } >"$output" 2>&1 || status=$?
+  { vdirsyncer metasync "${ready[@]}" && vdirsyncer sync "${ready[@]}"; } >"$output" 2>&1 || status=$?
   redact_urls <"$output" >&2
   if ((status != 0)) && grep -q 'vdirsyncer discover' "$output"; then
     # shellcheck disable=SC2016 # the backticks are literal: they quote the command for the user
