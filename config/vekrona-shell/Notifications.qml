@@ -15,7 +15,9 @@ Singleton {
     readonly property int cardWidth: 12 * VekronaTheme.sizeTarget
     readonly property var newestFirst: server.trackedNotifications.values.slice().reverse()
     property bool centerOpen: false
-    property int unseenCount: 0
+    // Ids grow with arrival, so the notifications newer than the last one the user saw are the unseen ones.
+    property int seenUpTo: 0
+    readonly property int unseenCount: centerOpen ? 0 : server.trackedNotifications.values.filter(notification => notification.id > seenUpTo).length
     // Ids of the notifications that are off the screen as toasts (timed out or pushed off by newer ones) but still in the centre.
     property var expired: ({})
     readonly property var visibleToasts: server.trackedNotifications.values.filter(notification => !expired[notification.id])
@@ -51,14 +53,17 @@ Singleton {
         setCenterOpen(!centerOpen);
     }
 
+    function markSeen(): void {
+        seenUpTo = Math.max(seenUpTo, ...server.trackedNotifications.values.map(notification => notification.id));
+    }
+
     function setCenterOpen(open: bool): void {
         centerOpen = open;
-        if (open)
-            unseenCount = 0;
+        markSeen();
     }
 
     function clearAll(): void {
-        unseenCount = 0;
+        markSeen();
         for (const notification of server.trackedNotifications.values.slice())
             notification.dismiss();
     }
@@ -75,8 +80,6 @@ Singleton {
             notification.summaryChanged.connect(() => root.reshow(notification));
             notification.bodyChanged.connect(() => root.reshow(notification));
             notification.closed.connect(() => root.forget(notification));
-            if (!root.centerOpen)
-                root.unseenCount++;
         }
     }
 

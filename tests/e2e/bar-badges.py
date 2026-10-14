@@ -5,8 +5,9 @@ usage: bar-badges.py SCREENSHOT.png BAR_HEIGHT DANGER_HEX COUNT MIN_NUMBER_PIXEL
 
 A badge is a run of columns holding DANGER_HEX pixels in the top BAR_HEIGHT rows. Prints each badge's bounds and
 how many pixels inside it are not DANGER_HEX (the number's ink); exits 1 when the bar does not show exactly COUNT
-badges, their widths, heights or top edges differ, or one holds fewer than MIN_NUMBER_PIXELS ink pixels, which is
-a bare square without a number.
+badges, their widths, heights, top edges or numbers' ink differ (badges with the same count draw the same glyphs, so
+the same number of ink pixels), or one holds fewer than MIN_NUMBER_PIXELS ink pixels, which is a bare square
+without a number.
 """
 import sys
 
@@ -42,7 +43,7 @@ def main():
             failures.append(f"the badge at x {x0}..{x1} shows no number: {ink} ink pixels, need {min_number_pixels}")
     if len(badges) != count:
         failures.append(f"the bar shows {len(badges)} badges, expected {count}")
-    for name, values in (("widths", [b[1] - b[0] + 1 for b in badges]), ("heights", [b[3] - b[2] + 1 for b in badges]), ("top edges", [b[2] for b in badges])):
+    for name, values in (("widths", [b[1] - b[0] + 1 for b in badges]), ("heights", [b[3] - b[2] + 1 for b in badges]), ("top edges", [b[2] for b in badges]), ("number pixels", inks)):
         if len(set(values)) > 1:
             failures.append(f"the badges' {name} differ: {values}")
     for failure in failures:

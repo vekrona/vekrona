@@ -9,8 +9,8 @@ Item {
     property bool emphasized: false
     property bool filled: false
     property string ariaName
-    // Unread count in a badge at the icon's top right corner; 0 hides it.
-    property int badgeCount: 0
+    // Unread count in a badge at the icon's top right corner. -1 has no badge; 0 hides it but keeps the room for it.
+    property int badgeCount: -1
     // The widest value this pill will show. The pill reserves its width, so a changing value does not shift its neighbours.
     property string widestValue
     // Reserves the icon's slot even with no icon, so rows that show a mark only on one of them stay aligned.
@@ -30,7 +30,7 @@ Item {
         + (iconBox.visible && valueLabel.visible ? content.spacing : 0)
         + (valueLabel.visible ? valueLabel.implicitWidth : 0)
 
-    implicitWidth: 2 * VekronaTheme.space2 + contentWidth + trailingWidth + badge.overhang
+    implicitWidth: Math.ceil(2 * VekronaTheme.space2 + contentWidth + trailingWidth + badge.overhang)
 
     Accessible.role: Accessible.Button
     Accessible.name: ariaName

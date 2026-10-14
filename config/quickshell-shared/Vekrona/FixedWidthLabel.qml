@@ -14,7 +14,7 @@ Item {
     property color color: VekronaTheme.c.ink
     property int elide: Text.ElideNone
 
-    implicitWidth: Math.max(shown.implicitWidth, measure.implicitWidth)
+    implicitWidth: Math.ceil(Math.max(shown.implicitWidth, measure.implicitWidth))
     implicitHeight: shown.implicitHeight
 
     Label {
