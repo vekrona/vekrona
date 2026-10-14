@@ -83,7 +83,7 @@ whether the dry run reports each held-back release is not verified, so do not
 rely on its output to explain a run that changes less than expected. Both mise
 upgrade steps run through `mise_system_strict`, which fails on the
 `minimum_release_age is set for` warning. `mise outdated` (the check) is not known to apply the cooldown, so a
-release the cooldown holds back may show as pending until it ages. After the upgrade, `mise prune
+release the cooldown holds back may show as pending until it ages. `mise_system_strict` also fails when mise warns that it could not look up the latest versions (a DNS error or timeout), because mise still exits 0 and prints "All tools are up to date" then. After the upgrade, `mise prune
 --tools --yes` removes superseded tool versions, so old installs do not pile
 up under `/usr/local/share/mise/installs`.
 

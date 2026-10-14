@@ -49,7 +49,7 @@ sudo_refresh() {
 # A crashed sway leaves its socket behind, so only sockets whose sway PID is alive count; for the same reason a
 # SWAYSOCK inherited by a tmux that outlived its sway is used only if sway answers on it.
 sway_socket() {
-  local socket pid live=()
+  local socket pid running=()
   if [[ -n "${SWAYSOCK:-}" ]] && swaymsg -s "$SWAYSOCK" -t get_version >/dev/null 2>&1; then
     printf '%s\n' "$SWAYSOCK"
     return 0
@@ -58,10 +58,10 @@ sway_socket() {
     [[ -S "$socket" ]] || continue
     pid="${socket%.sock}"
     pid="${pid##*.}"
-    [[ -d "/proc/$pid" ]] && live+=("$socket")
+    [[ -d "/proc/$pid" ]] && running+=("$socket")
   done
-  ((${#live[@]} <= 1)) || die "more than one running sway session, cannot tell which to reload: ${live[*]}"
-  ((${#live[@]} == 0)) || printf '%s\n' "${live[0]}"
+  ((${#running[@]} <= 1)) || die "more than one running sway session, cannot tell which to reload: ${running[*]}"
+  ((${#running[@]} == 0)) || printf '%s\n' "${running[0]}"
 }
 
 # The sway config is symlinked into the checkout, so a running session keeps the old one until it is told to reload.
@@ -204,7 +204,10 @@ ensure_root_file() {
   log "installing: $dst"
   root install -d "$(dirname "$dst")"
   tmp="$(root mktemp "$dst.XXXXXX")"
-  root install -m "$mode" "$src" "$tmp" && root mv -f "$tmp" "$dst" || { root rm -f "$tmp"; die "install failed: $dst"; }
+  if ! { root install -m "$mode" "$src" "$tmp" && root mv -f "$tmp" "$dst"; }; then
+    root rm -f "$tmp"
+    die "install failed: $dst"
+  fi
   root_file_current "$src" "$dst" "$mode" || die "content or mode mismatch after install: $dst"
 }
 
@@ -820,6 +823,23 @@ wait_for_running_akmods() {
   esac
 }
 
+AKMODS_LOCK="${AKMODS_LOCK:-/run/akmods/akmods.lock}"
+AKMODS_LOCK_TIMEOUT_STATUS=1 # flock -w exits 1 on timeout, so any other status is a different failure
+
+# Returns once no akmods build runs: waits for its process, then for the lock it holds, instead of queueing a redundant
+# rebuild behind it.
+wait_for_akmods_idle() {
+  local lock_status=0
+  wait_for_running_akmods
+  root install -d -m 0755 "$(dirname "$AKMODS_LOCK")"
+  root flock -w "$AKMODS_WAIT_SECONDS" "$AKMODS_LOCK" true || lock_status=$?
+  case "$lock_status" in
+    0) ;;
+    "$AKMODS_LOCK_TIMEOUT_STATUS") die "timed out after $AKMODS_WAIT_SECONDS s waiting for a running akmods build (lock $AKMODS_LOCK)" ;;
+    *) die "flock on $AKMODS_LOCK failed with status $lock_status" ;;
+  esac
+}
+
 # newest_akmods_failure_log <cache dir> <module> <kernel version>: the most recently written build log of a failed
 # <module> build for that kernel. Each akmod version leaves its own log, so the newest one is the build that just failed.
 # Prints nothing and returns 1 when there is none.
@@ -1038,6 +1058,11 @@ mise_system_strict() {
     rm -f "$output"
     die "mise $* cannot enforce minimum_release_age (see the warning above): the 1-day cooldown would not cover transitive dependencies"
   fi
+  # A failed version lookup (dns error, timeout) is only a warning to mise: it exits 0 and prints "All tools are up to date".
+  if grep -qE 'Error getting latest version|Remote versions cannot be fetched' "$output"; then
+    rm -f "$output"
+    die "mise $* could not look up the latest versions (see the warnings above), so it checked nothing"
+  fi
   rm -f "$output"
   [[ $status -eq 0 ]] || die "mise $* failed with exit status $status"
 }
@@ -1184,6 +1209,34 @@ akmods_dropin_active() {
   local unit
   unit="$(systemctl cat "akmods@$1.service")" || die "cannot read unit akmods@$1.service"
   grep -qxF 'ExecStartPost=/usr/bin/dracut -f --kver %i' <<<"$unit"
+}
+
+# Builds the proprietary nvidia module for kernel $1 unless it exists; dies when the build fails or the module is wrong.
+ensure_nvidia_module() {
+  local kver="$1" problem
+  if [[ "$(nvidia_module_license "$kver")" == NVIDIA ]]; then
+    log "ok: proprietary nvidia module already built for $kver"
+  else
+    log "building the proprietary nvidia module for $kver"
+    root akmods --rebuild --kernels "$kver" || die "akmods failed for $kver, see /var/log/akmods/akmods.log"
+  fi
+  problem="$(nvidia_module_problem "$kver")"
+  [[ -z "$problem" ]] || die "$problem; see /var/log/akmods/akmods.log"
+  log "ok: nvidia module for $kver is proprietary (license NVIDIA)"
+}
+
+# Regenerates the initramfs of kernel $1 when it lacks nvidia or is stale; dies unless the image then carries nvidia and
+# its options.
+ensure_nvidia_initramfs() {
+  local kver="$1"
+  if initramfs_needs_nvidia_regen "$kver"; then
+    log "regenerating initramfs for $kver"
+    root dracut -f --kver "$kver" || die "dracut failed for $kver"
+    initramfs_has_nvidia "$kver" || die "initramfs for $kver still lacks nvidia after dracut"
+    initramfs_has_nvidia_options "$kver" || die "initramfs for $kver lacks $NVIDIA_MODPROBE_CONF after dracut"
+  else
+    log "ok: initramfs for $kver contains nvidia and is newer than the module and its config"
+  fi
 }
 
 ensure_kernel_arg() {

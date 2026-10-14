@@ -9,6 +9,7 @@ export VEKRONA_ERROR_REPORTER=/usr/bin/true
 VEKRONA_STATE_DIR="${VEKRONA_STATE_DIR:-/var/lib/vekrona}"
 VEKRONA_UPDATES_JSON="$VEKRONA_STATE_DIR/updates.json"
 VEKRONA_UPDATE_SKIP_FILE="$VEKRONA_STATE_DIR/update-skip"
+# shellcheck disable=SC2034 # read by vekrona-update-apply and vekrona-update-post, which source this file
 VEKRONA_OFFLINE_MARKER="$VEKRONA_STATE_DIR/offline-pending"
 VEKRONA_UPDATE_LOCK="${VEKRONA_UPDATE_LOCK:-/run/vekrona-update.lock}"
 VEKRONA_NIGHT_TIMER=vekrona-update-night.timer
@@ -31,6 +32,18 @@ update_lock() {
 
 # Every dnf transaction ends here: the 1Password RPM's %post rewrites its repo file and disables repo_gpgcheck.
 update_postflight() { ensure_1password_repo_file; }
+
+# The newest kernel is the default boot entry. kernel-install builds its initramfs before akmods@<kver> has built
+# nvidia, and the akmods@ drop-in regenerates it only after a successful build, so a failed build leaves an initramfs
+# without nvidia that nothing else reports. Dies then, naming the way out.
+update_ensure_nvidia_boots() {
+  pkg_installed akmod-nvidia || return 0
+  local kver
+  kver="$(newest_installed_kver)"
+  wait_for_akmods_idle
+  (ensure_nvidia_module "$kver" && ensure_nvidia_initramfs "$kver") \
+    || die "kernel $kver cannot show the display without nvidia; boot the previous kernel from the GRUB menu and look at /var/log/akmods/akmods.log"
+}
 
 update_skipped_today() { [[ -f "$VEKRONA_UPDATE_SKIP_FILE" && "$(<"$VEKRONA_UPDATE_SKIP_FILE")" == "$(date +%F)" ]]; }
 
@@ -72,6 +85,7 @@ update_publish() {
 # check-upgrade document; a package offered for two architectures counts once), $flatpak (lines "application<TAB>version")
 # and $mise (mise outdated --json). Empty groups go. claude-code comes from dnf but belongs with the other agents, and
 # the Proton RPMs come from the local vekrona-proton repo.
+# shellcheck disable=SC2016 # jq variables ($installed, $dnf, ...) are meant to stay unexpanded
 UPDATE_GROUPS_JQ='
   def evr: sub("^0:"; "");
   def lines: split("\n") | map(select(length > 0) | split("\t"));

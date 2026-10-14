@@ -19,6 +19,7 @@ reset() {
   rm -f "$work"/sessions/* "$work/notify.fails"
   sed 's/^repo_gpgcheck=1/repo_gpgcheck=0/' "$REPO/etc/yum.repos.d/1password.repo" >"$work/repos/1password.repo"
   : >"$FAKE_LOG"
+  : >"$work/packages"; echo 0 >"$work/akmods.rc"; echo 0 >"$work/dracut.rc"
 }
 
 reset; add_session 1
@@ -58,3 +59,17 @@ reset; rm "$MARKER"
 if post; then die "ran without the marker"; fi
 grep -q 'no offline update is pending' "$work/err" || die "no marker error: $(cat "$work/err")"
 log "ok: without the marker there is nothing to report"
+
+OLD_KVER=7.2.9-200.fc44.x86_64 NEW_KVER=7.2.10-200.fc44.x86_64
+reset; add_session 1; add_nvidia_machine "$OLD_KVER" "$NEW_KVER"
+kernel_state "$OLD_KVER" module nvidia-initramfs; kernel_state "$NEW_KVER" module initramfs
+post
+grep -q "^dracut -f --kver $NEW_KVER\$" "$FAKE_LOG" || die "the new kernel's initramfs was not regenerated: $(cat "$FAKE_LOG")"
+log "ok: an offline update that left the newest kernel's initramfs without nvidia regenerates it"
+
+reset; add_session 1; add_nvidia_machine "$OLD_KVER" "$NEW_KVER"
+kernel_state "$OLD_KVER" module nvidia-initramfs; kernel_state "$NEW_KVER" initramfs; echo 1 >"$work/akmods.rc"
+if post; then die "an akmods build failure for the newest kernel was accepted"; fi
+grep -q 'boot the previous kernel' "$work/err" || die "no way out in the error: $(cat "$work/err")"
+grep -q 'notify-send' "$FAKE_LOG" && die "reported an update as installed although the newest kernel cannot show the display"
+log "ok: a failed akmods build after an offline update fails the unit instead of announcing success"

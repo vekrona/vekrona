@@ -19,6 +19,7 @@ update_check
 
 if [[ "$offline_status" == *"No offline transaction is stored."* ]]; then
   log "the offline update finished"
+  update_ensure_nvidia_boots
   notify_user -u normal "System updated" "The updates were installed." \
     || log "nobody is logged in to read it"
 else

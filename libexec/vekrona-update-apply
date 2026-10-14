@@ -76,6 +76,7 @@ update_online() {
   dnf5 upgrade --refresh -y
   update_postflight
   update_flatpak_and_mise
+  update_ensure_nvidia_boots
 }
 
 # Sets stored=1 when dnf has a transaction waiting for the offline boot.

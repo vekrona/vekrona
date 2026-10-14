@@ -69,30 +69,9 @@ fi
 
 require_cmd akmods dracut lsinitrd flock
 
-# akmod-nvidia's posttrans starts a background akmods build: wait for its process, then for the lock it holds,
-# instead of queueing a redundant rebuild behind it.
-wait_for_running_akmods
-AKMODS_LOCK=/run/akmods/akmods.lock
-AKMODS_LOCK_TIMEOUT_STATUS=1 # flock -w exits 1 on timeout, so any other status is a different failure
-root install -d -m 0755 "$(dirname "$AKMODS_LOCK")"
-lock_status=0
-root flock -w 900 "$AKMODS_LOCK" true || lock_status=$?
-case "$lock_status" in
-  0) ;;
-  "$AKMODS_LOCK_TIMEOUT_STATUS") die "timed out after 900 s waiting for a running akmods build (lock $AKMODS_LOCK)" ;;
-  *) die "flock on $AKMODS_LOCK failed with status $lock_status" ;;
-esac
-
-if [[ "$(nvidia_module_license "$target_kver")" == NVIDIA ]]; then
-  log "ok: proprietary nvidia module already built for $target_kver"
-else
-  log "building the proprietary nvidia module for $target_kver"
-  root akmods --rebuild --kernels "$target_kver" || die "akmods failed, see /var/log/akmods/akmods.log"
-fi
-
-nvidia_problem="$(nvidia_module_problem "$target_kver")"
-[[ -z "$nvidia_problem" ]] || die "$nvidia_problem; see /var/log/akmods/akmods.log"
-log "ok: nvidia module for $target_kver is proprietary (license NVIDIA)"
+# akmod-nvidia's posttrans starts a background akmods build.
+wait_for_akmods_idle
+ensure_nvidia_module "$target_kver"
 
 nvidia_version="$(modinfo -k "$target_kver" -F version nvidia)"
 [[ "${nvidia_version%%.*}" -ge 615 ]] || die "unexpected nvidia module version: $nvidia_version (expected >= 615)"
@@ -111,14 +90,7 @@ akmods_dropin_active "$target_kver" || die "akmods@$target_kver.service does not
 # nvidia loads from the initramfs, so this goes in before the regeneration below, which bakes it into the image.
 ensure_root_file "$ROOT/etc/modprobe.d/vekrona-nvidia.conf" "$NVIDIA_MODPROBE_CONF"
 
-if initramfs_needs_nvidia_regen "$target_kver"; then
-  log "regenerating initramfs for $target_kver"
-  root dracut -f --kver "$target_kver"
-  initramfs_has_nvidia "$target_kver" || die "initramfs for $target_kver still lacks nvidia after dracut"
-  initramfs_has_nvidia_options "$target_kver" || die "initramfs for $target_kver lacks $NVIDIA_MODPROBE_CONF after dracut"
-else
-  log "ok: initramfs for $target_kver contains nvidia and is newer than the module and its config"
-fi
+ensure_nvidia_initramfs "$target_kver"
 
 mapfile -t kernel_args < <(nvidia_kernel_args)
 ensure_kernel_arg "${kernel_args[@]}"

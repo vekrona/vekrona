@@ -18,6 +18,8 @@ reset() {
   # What the 1Password RPM's %post leaves behind.
   sed 's/^repo_gpgcheck=1/repo_gpgcheck=0/' "$REPO/etc/yum.repos.d/1password.repo" >"$work/repos/1password.repo"
   : >"$FAKE_LOG"
+  : >"$work/packages"; echo 0 >"$work/akmods.rc"; echo 0 >"$work/dracut.rc"; rm -f "$work/dracut.nonvidia"
+  rm -f "$work/mise.warns"
 }
 # True when the log has these lines in this order (other lines may lie between them).
 in_order() {
@@ -90,3 +92,51 @@ log "ok: unknown or mixed arguments print the usage"
 if "$REPO/libexec/vekrona-update-apply" --online 2>"$work/err"; then die "ran as a regular user"; fi
 grep -q 'must run as root' "$work/err" || die "no root requirement error: $(cat "$work/err")"
 log "ok: a regular user is refused"
+
+OLD_KVER=7.2.9-200.fc44.x86_64 NEW_KVER=7.2.10-200.fc44.x86_64
+nvidia_apply() { reset; add_nvidia_machine "$OLD_KVER" "$NEW_KVER"; }
+
+nvidia_apply; kernel_state "$OLD_KVER" module nvidia-initramfs; kernel_state "$NEW_KVER" module nvidia-initramfs
+apply --online
+absent '^akmods'; absent '^dracut'
+log "ok: a newest kernel whose initramfs carries nvidia is left alone"
+
+nvidia_apply; kernel_state "$OLD_KVER" module nvidia-initramfs; kernel_state "$NEW_KVER" module initramfs
+apply --online
+in_order "^dracut -f --kver $NEW_KVER\$"
+absent '^akmods'; absent "dracut.*$OLD_KVER"
+grep -q nvidia.ko "$work/sysroot/boot/initramfs-$NEW_KVER.img" || die "the new kernel's initramfs still lacks nvidia"
+log "ok: an initramfs without nvidia is regenerated for the newest kernel only"
+
+nvidia_apply; kernel_state "$OLD_KVER" module nvidia-initramfs; kernel_state "$NEW_KVER" initramfs
+apply --online
+in_order "^akmods --rebuild --kernels $NEW_KVER\$" "^dracut -f --kver $NEW_KVER\$"
+log "ok: a missing module is built before the initramfs is regenerated"
+
+nvidia_apply; kernel_state "$OLD_KVER" module nvidia-initramfs; kernel_state "$NEW_KVER" initramfs; echo 1 >"$work/akmods.rc"
+if apply --online; then die "an akmods build failure for the newest kernel was accepted"; fi
+grep -q "boot the previous kernel" "$work/err" || die "no way out in the error: $(cat "$work/err")"
+absent '^dracut'
+in_order '^snapper .*--pre-number 10'
+log "ok: a failed akmods build fails the run with the way out, and the snapshot pair is still closed"
+
+nvidia_apply; kernel_state "$OLD_KVER" module nvidia-initramfs; kernel_state "$NEW_KVER" module initramfs; touch "$work/dracut.nonvidia"
+if apply --online; then die "an initramfs still lacking nvidia after dracut was accepted"; fi
+grep -q "still lacks nvidia" "$work/err" || die "no initramfs error: $(cat "$work/err")"
+log "ok: an initramfs that dracut leaves without nvidia fails the run"
+
+reset; kernel_state "$OLD_KVER" initramfs
+echo "$OLD_KVER" >"$work/kernels"
+apply --online
+absent '^akmods'; absent '^dracut'
+log "ok: without akmod-nvidia the kernels are left alone"
+
+nvidia_apply; kernel_state "$OLD_KVER" module nvidia-initramfs; kernel_state "$NEW_KVER" initramfs
+apply --offline
+absent '^akmods'; absent '^dracut'
+log "ok: --offline leaves the initramfs to the boot that installs the kernel"
+
+reset; touch "$work/mise.warns"
+if apply --online; then die "mise lookups that failed with a zero exit status were accepted"; fi
+grep -q 'could not look up the latest versions' "$work/err" || die "no mise error: $(cat "$work/err")"
+log "ok: mise warnings about failed version lookups fail the run although mise exits 0"
