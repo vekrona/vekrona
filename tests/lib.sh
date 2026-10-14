@@ -1,7 +1,10 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2016 # the bash -c bodies below run on the VM, where their $variables must expand, not here
 # Every shell test sources this instead of lib/common.sh. die() reports through the system journal, where the
 # user's vekrona-errors watcher turns each record into a real entry in the error store, so a test's expected
 # failures would land there. The reporter is therefore replaced for this test and for every process it starts.
 export VEKRONA_ERROR_REPORTER=/usr/bin/true
+# shellcheck source=../lib/common.sh source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 # `vekrona-error report` writes to the journal socket, which feeds the user's real error store. A missing path makes
 # any report from a test fail loudly instead.
@@ -100,3 +103,7 @@ launcher_is() { launcher_state | jq -e "$1" >/dev/null; }
 launcher_open() { launcher_is '.open'; }
 launcher_closed() { launcher_is '.open | not'; }
 export -f launcher_state launcher_is launcher_open launcher_closed
+
+# Guard: a test process killed by a signal must not drop a coredump on the host, where vekrona-error would record it as a
+# real crash. systemd-coredump honors a core size limit of 0 (its %c), and every process a test starts inherits it.
+ulimit -c 0

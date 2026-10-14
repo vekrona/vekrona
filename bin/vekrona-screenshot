@@ -44,8 +44,12 @@ case "$MODE" in
     trap 'rm -f "$slurp_err"' EXIT
     slurp_rc=0
     geometry="$(slurp "${slurp_args[@]}" < <(printf '%s' "${boxes:+$boxes$'\n'}") 2>"$slurp_err")" || slurp_rc=$?
-    ((slurp_rc <= 128)) || fail "slurp crashed (signal $((slurp_rc - 128)))"
-    if ((slurp_rc != 0)); then
+    # slurp 1.5.0 can segfault in its final roundtrip, after it has printed the geometry (TODO.md). The crash is still
+    # recorded by systemd-coredump, so a well-formed geometry is used; without one the signal is reported.
+    if ((slurp_rc > 128)) && [[ ! "$geometry" =~ ^-?[0-9]+,-?[0-9]+\ [0-9]+x[0-9]+$ ]]; then
+      fail "slurp crashed (signal $((slurp_rc - 128)))"
+    fi
+    if ((slurp_rc != 0 && slurp_rc <= 128)); then
       [[ "$(<"$slurp_err")" == "selection cancelled" ]] && exit 0
       fail "slurp: $(<"$slurp_err")"
     fi

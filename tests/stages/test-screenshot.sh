@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # the stub bodies are written to files literally and expand when the stub runs
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,7 +34,10 @@ if [[ "${*: -1}" == - ]]; then printf PNGBYTES; else printf PNGBYTES > "${*: -1}
 [[ "${GRIM_FAIL:-}" != 1 ]] || exit 1'
 stub slurp 'echo "$*" >> "$SCRATCH/logs/slurp"
 cat > "$SCRATCH/logs/slurp.stdin"
-[[ -z "${SLURP_SIGNAL:-}" ]] || exit $((128 + SLURP_SIGNAL))
+if [[ -n "${SLURP_SIGNAL:-}" ]]; then
+  [[ -z "${SLURP_OUT:-}" ]] || echo "$SLURP_OUT"
+  exit $((128 + SLURP_SIGNAL))
+fi
 if [[ -n "${SLURP_OUT:-}" ]]; then echo "$SLURP_OUT"; else echo "${SLURP_ERR:-selection cancelled}" >&2; exit 1; fi'
 stub swaymsg 'case "$2" in get_tree) cat "$SCRATCH/tree.json";; get_outputs) cat "$SCRATCH/outputs.json";; *) exit 1;; esac'
 stub wl-copy 'cat > "$SCRATCH/logs/clip"
@@ -143,6 +147,18 @@ logged slurp || die "after a selection ends, the next screenshot must select aga
 log "ok: a screenshot started during a selection exits quietly"
 
 SLURP_SIGNAL=11 SLURP_OUT="100,200 400x300" run_shot area
+expect_rc 0 "slurp crash after the geometry"
+grep -q -- "-g 100,200 400x300" "$logs/grim" || die "slurp crash after the geometry: the printed geometry must be captured: $(cat "$logs/grim" 2>&1)"
+[[ -n "$(saved_file)" ]] || die "slurp crash after the geometry: the screenshot must be saved"
+log "ok: a slurp that crashed after printing its geometry still takes the shot"
+
+SLURP_SIGNAL=11 SLURP_OUT="lizard" run_shot area
+expect_rc 1 "slurp crash with a malformed geometry"
+grep -q "slurp crashed (signal 11)" "$scratch/stderr" || die "slurp crash with a malformed geometry: the signal must be reported: $(cat "$scratch/stderr")"
+logged grim && die "slurp crash with a malformed geometry: nothing may be captured"
+log "ok: a slurp that crashed with a malformed geometry is reported"
+
+SLURP_SIGNAL=11 run_shot area
 expect_rc 1 "slurp crash"
 grep -q "slurp crashed (signal 11)" "$scratch/stderr" || die "slurp crash: the signal must be reported: $(cat "$scratch/stderr")"
 grep -q -- "-u critical" "$logs/notify" || die "slurp crash: critical notification expected"
