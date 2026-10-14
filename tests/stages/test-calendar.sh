@@ -72,6 +72,7 @@ rm "$output"
 if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then
   die "a failing vdirsyncer must fail the sync"
 fi
+# shellcheck disable=SC2016 # the backticks are literal text of the message
 grep -q 'run `vdirsyncer discover` once by hand' "$scratch/sync.err" || die "a pair that needs discovery must tell the user to run vdirsyncer discover"
 [[ -f "$output" ]] || die "a failing sync must still render the calendar"
 log "ok: a failing sync still renders and fails the unit"
@@ -88,11 +89,30 @@ cp "$ROOT/config/vdirsyncer/config.example" "$XDG_CONFIG_HOME/vdirsyncer/config"
 printf '#!/usr/bin/env bash\necho called >"%s"\necho "fake vdirsyncer must not run" >&2\nexit 1\n' "$scratch/vdirsyncer.called" >"$fake_bin/vdirsyncer"
 rm -f "$output"
 if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then
-  die "a config that still has placeholder storages must fail the sync"
+  die "a config that still has placeholder storages must fail a sync run by hand"
 fi
 for storage in proton_remote google_remote microsoft_remote; do
   grep -q "$storage" "$scratch/sync.err" || die "the error must name the placeholder storage $storage: $(cat "$scratch/sync.err")"
 done
 [[ ! -e "$scratch/vdirsyncer.called" ]] || die "vdirsyncer must not run while placeholder storages remain"
-assert_json '.configured == true' "a placeholder config must still render the calendar"
-log "ok: a config with placeholder storages fails before vdirsyncer runs and names them"
+assert_json '.configured == false' "a placeholder config must render as not configured"
+log "ok: a sync by hand with placeholder storages fails before vdirsyncer runs and names them"
+
+# systemd's ExecCondition: 0 runs the sync, 1-254 skip the unit without failing it, 255 fails it.
+status_of() { local status=0; "$@" 2>/dev/null || status=$?; echo "$status"; }
+rm -f "$output"
+[[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 1 ]] || die "a placeholder config must skip the unit (exit 1)"
+assert_json '.configured == false' "skipping the unit must still render the not-configured calendar"
+rm "$XDG_CONFIG_HOME/vdirsyncer/config"
+rm -f "$output"
+[[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 1 ]] || die "a missing config must skip the unit (exit 1)"
+assert_json '.configured == false' "a missing config must render as not configured"
+: >"$XDG_CONFIG_HOME/vdirsyncer/config"
+[[ "$(status_of "$ROOT/bin/vekrona-calendar" configured)" == 0 ]] || die "a config without placeholders must run the unit (exit 0)"
+rm "$XDG_CONFIG_HOME/vdirsyncer/config"
+mkdir -p "$scratch/readonly"
+chmod 500 "$scratch/readonly"
+[[ "$(status_of env XDG_STATE_HOME="$scratch/readonly/state" "$ROOT/bin/vekrona-calendar" configured)" == 255 ]] \
+  || die "a render that breaks must fail the unit (exit 255), not skip it"
+chmod 700 "$scratch/readonly"
+log "ok: an unconfigured calendar skips the unit, a broken render fails it"

@@ -15,9 +15,11 @@ All providers are read-only: Vekrona shows events, it does not create or change 
 4. Run `systemctl --user start vekrona-calendar.service`. It syncs, then renders `calendar.json`, so the widget
    updates at once. After that the timer keeps it fresh.
 
-Until `~/.config/vdirsyncer/config` exists, the popout says "No calendars yet. See docs/calendar.md."
+Until `~/.config/vdirsyncer/config` exists and has no `PLACEHOLDER` left, the popout says "No calendars yet. See docs/calendar.md."
+The unit is skipped, not failed, in that state: `ExecCondition=vekrona-calendar configured` exits 1, which systemd treats as "condition not met".
 If a sync fails, the unit fails and `vekrona-error` records it; the widget keeps showing the last synced events.
-The unit refuses to sync while any `PLACEHOLDER` remains in the config, and the error names those storages (for example `proton_remote`); fill in or delete each one.
+Running `vekrona-calendar sync` by hand while `~/.config/vdirsyncer/config` is missing fails (only the unit is skipped, through `ExecCondition`).
+Running `vekrona-calendar sync` by hand while any `PLACEHOLDER` remains in the config fails and names those storages (for example `proton_remote`); fill in or delete each one.
 
 ## Providers
 

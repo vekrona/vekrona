@@ -8,7 +8,7 @@ VDIRSYNCER_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/vdirsyncer/config"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/vekrona"
 
 usage() {
-  printf 'usage: %s sync|render\n' "$PROG" >&2
+  printf 'usage: %s sync|render|configured\n' "$PROG" >&2
   exit 1
 }
 
@@ -29,11 +29,11 @@ events_json() {
 
 render() {
   mkdir -p "$CALENDAR_ROOT" "$STATE_DIR"
-  local configured=false events temp
-  [[ -f "$VDIRSYNCER_CONFIG" ]] && configured=true
+  local ready=false events temp
+  is_configured && ready=true
   events="$(events_json)"
   temp="$(mktemp "$STATE_DIR/.calendar.XXXXXX")"
-  if ! jq -n --argjson configured "$configured" --argjson events "$events" \
+  if ! jq -n --argjson configured "$ready" --argjson events "$events" \
     '{configured: $configured, events: $events}' >"$temp"; then
     rm -f "$temp"
     fail "cannot write the calendar"
@@ -45,25 +45,48 @@ redact_urls() {
   sed -E 's#(https?://)[^/@[:space:]"]*@#\1#g; s#(https?://[^/[:space:]"]+)[^[:space:]"]*#\1/<redacted>#g'
 }
 
+# The storages of the vdirsyncer config that still hold a PLACEHOLDER, space-separated. Commented lines do not count.
+placeholder_storages() {
+  [[ -f "$VDIRSYNCER_CONFIG" ]] || return 0
+  awk '
+    /^[[:space:]]*\[/ { name = ""; if (match($0, /\[storage [^]]+\]/)) name = substr($0, RSTART + 9, RLENGTH - 10) }
+    name != "" && !/^[[:space:]]*#/ && /PLACEHOLDER/ && !seen[name]++ { printf "%s ", name }
+  ' "$VDIRSYNCER_CONFIG"
+}
+
+# The one definition of "configured": a vdirsyncer config exists and no storage in it is still a placeholder.
+is_configured() {
+  [[ -f "$VDIRSYNCER_CONFIG" && -z "$(placeholder_storages)" ]]
+}
+
+# The unit's ExecCondition. Exit 0 runs the sync. Exit 1 skips it without failing the unit: an unconfigured calendar
+# is not an error, the popout says so. systemd treats 255 as a failure, so a render that breaks must not exit 1.
+configured() {
+  is_configured && exit 0
+  trap 'exit 255' EXIT
+  render
+  trap - EXIT
+  exit 1
+}
+
 sync() {
   local status=0 output placeholders
-  if [[ -f "$VDIRSYNCER_CONFIG" ]]; then
-    placeholders="$(awk '
-      /^[[:space:]]*\[/ { name = ""; if (match($0, /\[storage [^]]+\]/)) name = substr($0, RSTART + 9, RLENGTH - 10) }
-      name != "" && !/^[[:space:]]*#/ && /PLACEHOLDER/ && !seen[name]++ { printf "%s ", name }
-    ' "$VDIRSYNCER_CONFIG")"
+  if ! is_configured; then
+    render
+    placeholders="$(placeholder_storages)"
     if [[ -n "$placeholders" ]]; then
-      render
       fail "fill in or delete the placeholder storages in $VDIRSYNCER_CONFIG: ${placeholders% } (see docs/calendar.md)"
     fi
-    output="$(mktemp)"
-    { vdirsyncer metasync && vdirsyncer sync; } >"$output" 2>&1 || status=$?
-    redact_urls <"$output" >&2
-    if ((status != 0)) && grep -q 'vdirsyncer discover' "$output"; then
-      printf '%s: run `vdirsyncer discover` once by hand, then start vekrona-calendar.service again\n' "$PROG" >&2
-    fi
-    rm -f "$output"
+    fail "no $VDIRSYNCER_CONFIG yet (see docs/calendar.md)"
   fi
+  output="$(mktemp)"
+  { vdirsyncer metasync && vdirsyncer sync; } >"$output" 2>&1 || status=$?
+  redact_urls <"$output" >&2
+  if ((status != 0)) && grep -q 'vdirsyncer discover' "$output"; then
+    # shellcheck disable=SC2016 # the backticks are literal: they quote the command for the user
+    printf '%s: run `vdirsyncer discover` once by hand, then start vekrona-calendar.service again\n' "$PROG" >&2
+  fi
+  rm -f "$output"
   render
   exit "$status"
 }
@@ -72,5 +95,6 @@ sync() {
 case "$1" in
   render) render ;;
   sync) sync ;;
+  configured) configured ;;
   *) usage ;;
 esac
