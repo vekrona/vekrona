@@ -1,6 +1,7 @@
 module Vekrona
 singleton VekronaTheme 1.0 VekronaTheme.qml
 Label 1.0 Label.qml
+FixedWidthLabel 1.0 FixedWidthLabel.qml
 Pictogram 1.0 Pictogram.qml
 BarPill 1.0 BarPill.qml
 Badge 1.0 Badge.qml

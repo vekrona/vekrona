@@ -21,20 +21,10 @@ RowLayout {
     }
 
     // Fits the widest value, so the slider does not move as the number changes.
-    Label {
-        Layout.preferredWidth: widest.advanceWidth
+    FixedWidthLabel {
         Layout.rightMargin: VekronaTheme.space2
-        horizontalAlignment: Text.AlignRight
         style: VekronaTheme.type.label
         text: Audio.percent + " %"
-
-        TextMetrics {
-            id: widest
-            font.family: VekronaTheme.fontSans
-            font.pixelSize: VekronaTheme.type.label.size
-            font.weight: VekronaTheme.type.label.weight
-            font.letterSpacing: VekronaTheme.type.label.tracking * VekronaTheme.type.label.size
-            text: "100 %"
-        }
+        widest: "100 %"
     }
 }

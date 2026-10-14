@@ -25,11 +25,10 @@ Item {
 
     implicitHeight: VekronaTheme.sizeTarget
     // The content at its natural width. The value elides when the pill is narrower.
-    readonly property real valueNaturalWidth: Math.max(valueLabel.implicitWidth, widestLabel.implicitWidth)
     readonly property real trailingWidth: trailing !== "" ? VekronaTheme.space4 + trailingLabel.implicitWidth : 0
     readonly property real contentWidth: (iconBox.visible ? iconBox.width : 0)
         + (iconBox.visible && valueLabel.visible ? content.spacing : 0)
-        + (valueLabel.visible ? valueNaturalWidth : 0)
+        + (valueLabel.visible ? valueLabel.implicitWidth : 0)
 
     implicitWidth: 2 * VekronaTheme.space2 + contentWidth + trailingWidth + badge.overhang
 
@@ -71,27 +70,18 @@ Item {
             }
         }
 
-        Label {
+        FixedWidthLabel {
             id: valueLabel
             visible: root.value !== ""
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.min(root.valueNaturalWidth, Math.max(0, root.width - 2 * VekronaTheme.space2 - badge.overhang
+            width: Math.min(valueLabel.implicitWidth, Math.max(0, root.width - 2 * VekronaTheme.space2 - badge.overhang
                 - root.trailingWidth - (iconBox.visible ? iconBox.width + content.spacing : 0)))
             elide: Text.ElideRight
-            horizontalAlignment: Text.AlignRight
-            font.features: { "tnum": 1 }
             style: VekronaTheme.type.label
             color: root.enabled ? VekronaTheme.c.ink : VekronaTheme.c.inkDisabled
             text: root.value
+            widest: root.widestValue
         }
-    }
-
-    Label {
-        id: widestLabel
-        visible: false
-        font.features: { "tnum": 1 }
-        style: VekronaTheme.type.label
-        text: root.widestValue
     }
 
     Label {
