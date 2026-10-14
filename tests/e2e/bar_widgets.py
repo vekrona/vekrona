@@ -1,10 +1,13 @@
 """Find the right-side bar widgets on a screenshot, without knowing how many there are.
 
 The right-side bar is the run of ink clusters (glyphs more than CLUSTER_GAP px apart) that ends at the right edge and is
-not broken by a gap of SECTION_BREAK px or more. A widget starts at each pictogram (a cluster at least
-icon_size // 2 + 2 px tall, taller than any text) and takes the text clusters after it: its value, or the words of the
-clock. A value is right-aligned in a slot as wide as the widest value, so the gap between a pictogram and its value
-varies, and the widget's right edge is what stays put. Unread badges (red counters) overhang their glyph by design: their
+not broken by a gap of SECTION_BREAK px or more. Each cluster is a pictogram or text. A pictogram is a near-square mark
+at least icon_size * 2 // 3 px tall (no wider than 1.5 times its height); the tallest text, a word with an ascender and a
+descender such as "Aug", is 12 px tall but at least 24 px wide. A widget starts at each pictogram and takes the text
+after it, its value. Text clusters closer than word_join px are one run of text (a value, or the words of the clock);
+another run starts a widget of its own, and so does the rightmost run, the clock, even when it follows an icon-only pill.
+A value is right-aligned in a slot as wide as the widest value, so the gap between a pictogram and its value varies,
+and the widget's right edge is what stays put. Unread badges (red counters) overhang their glyph by design: their
 pixels are not measured as glyph ink, but a badge widens the widget it touches."""
 from png_rows import read_png_rows
 
@@ -15,7 +18,16 @@ BADGE_JOIN_GAP = 6
 SECTION_BREAK = 80
 
 
-def find_widgets(path, bar_height, icon_size):
+def cluster_height(ink, cluster):
+    ys = [y for x in range(cluster[0], cluster[1] + 1) for y in ink[x]]
+    return max(ys) - min(ys) + 1
+
+
+def is_pictogram(width, height, icon_size):
+    return height >= icon_size * 2 // 3 and 2 * width <= 3 * height
+
+
+def find_widgets(path, bar_height, icon_size, word_join):
     """Return (right_bar, groups, widgets, ink, badges): the clusters of the right bar, the clusters grouped per widget,
     each widget's (x0, x1, vertical ink center), the ink rows per column and the badge boxes."""
     width, rows, channels = read_png_rows(path)
@@ -66,16 +78,22 @@ def find_widgets(path, bar_height, icon_size):
         if right_bar[0][0] - cluster[1] - 1 >= SECTION_BREAK:
             break
         right_bar.insert(0, cluster)
-    def is_pictogram(cluster):
-        ys = [y for x in range(cluster[0], cluster[1] + 1) for y in ink[x]]
-        return max(ys) - min(ys) + 1 >= icon_size // 2 + 2
+    def is_picto(cluster):
+        return is_pictogram(cluster[1] - cluster[0] + 1, cluster_height(ink, cluster), icon_size)
 
-    groups = []
+    runs = []
     for cluster in right_bar:
-        if groups and not is_pictogram(cluster):
-            groups[-1].append(cluster)
+        if runs and not is_picto(cluster) and not is_picto(runs[-1][-1]) and cluster[0] - runs[-1][-1][1] - 1 < word_join:
+            runs[-1].append(cluster)
         else:
-            groups.append([cluster])
+            runs.append([cluster])
+    groups = []
+    for i, run in enumerate(runs):
+        is_value = not is_picto(run[0]) and i < len(runs) - 1 and groups and is_picto(groups[-1][-1])
+        if is_value:
+            groups[-1].extend(run)
+        else:
+            groups.append(run)
     widgets = []
     for group in groups:
         x0, x1 = group[0][0], group[-1][1]

@@ -72,6 +72,63 @@ clear_notifications() { vekrona-dev sh qs -c vekrona-shell ipc call notification
 open_notification_centre() { vekrona-dev sh qs -c vekrona-shell ipc call notifications toggle >/dev/null; }
 close_notification_centre() { vekrona-dev sh qs -c vekrona-shell ipc call notifications close >/dev/null; }
 
+# The bar's clock shows the guest's date, which tests cannot choose while lima's guest agent keeps syncing it from the
+# host, and Quickshell's SystemClock never notices a jump until the shell restarts. clock_pin stops the agent, sets
+# the date ("YYYY-MM-DD HH:MM:SS") and restarts the shell; clock_restore undoes all three. The guest's seconds of
+# uptime carry the real time across the pin, and the agent then syncs the exact time again.
+clock_pin() {
+  CLOCK_REAL_EPOCH="$(vekrona-dev run date +%s)"
+  CLOCK_UPTIME_SEC="$(vekrona-dev run awk '{ print int($1) }' /proc/uptime)"
+  vekrona-dev run sudo systemctl stop lima-guestagent
+  vekrona-dev run sudo date -s "$1" >/dev/null
+  vekrona-dev sh systemctl --user restart vekrona-shell.service
+}
+clock_restore() {
+  local uptime
+  uptime="$(vekrona-dev run awk '{ print int($1) }' /proc/uptime)"
+  vekrona-dev run sudo date -s "@$((CLOCK_REAL_EPOCH + uptime - CLOCK_UPTIME_SEC))" >/dev/null
+  vekrona-dev run sudo systemctl start lima-guestagent
+  vekrona-dev sh systemctl --user restart vekrona-shell.service
+}
+
+# The agent icon's badge counts the file the error watcher writes. The shell watches that file only when it exists as the
+# shell starts, so a scenario writes it with unread_set and then restarts the shell (clock_pin does). unread_stash stops
+# the watcher and keeps the original, unread_restore puts both back.
+UNREAD_FILE='~/.local/state/vekrona/errors/unread'
+UNREAD_STASH='~/.local/state/vekrona/errors/unread.e2e-stash'
+unread_stash() {
+  vekrona-dev sh systemctl --user stop vekrona-errors.service
+  vekrona-dev sh bash -c "if [[ -e $UNREAD_FILE ]]; then cp -p $UNREAD_FILE $UNREAD_STASH; else rm -f $UNREAD_STASH; fi"
+}
+unread_set() { vekrona-dev sh bash -c "mkdir -p ~/.local/state/vekrona/errors && echo $1 > $UNREAD_FILE"; }
+unread_restore() {
+  vekrona-dev sh bash -c "if [[ -e $UNREAD_STASH ]]; then cat $UNREAD_STASH > $UNREAD_FILE && rm $UNREAD_STASH; else rm -f $UNREAD_FILE; fi"
+  vekrona-dev sh systemctl --user start vekrona-errors.service
+}
+
+# The bar's right side is right-aligned, so the x of its leftmost widget moves whenever a widget appears or changes width.
+bar_left_edge() {
+  python3 "$VEKRONA_ROOT/tests/e2e/bar-left-edge.py" "$(vekrona-dev shot)" \
+    "$(($(vekrona_token_get size size-bar) - $(vekrona_token_get border border-hair)))" \
+    "$(vekrona_token_get size size-icon-s)" "$(vekrona_token_get spacing space-2)"
+}
+# A fresh session shows no weather pill until the weather unit's first run, 30 s in, has written its file.
+weather_written() { vekrona-dev run bash -c 'test -e ~/.local/state/vekrona/weather.json'; }
+export -f weather_written
+# Waits until no widget is still on its way, then prints the bar's left edge: the weather pill is in, and two
+# screenshots in a row agree.
+settled_bar_left_edge() {
+  vekrona-dev until --timeout 90 -- weather_written || die "the weather unit never wrote its file, so the bar never showed its pill"
+  local edge next attempt
+  edge="$(bar_left_edge)"
+  for attempt in $(seq 20); do
+    next="$(bar_left_edge)"
+    [[ "$next" == "$edge" ]] && { echo "$edge"; return; }
+    edge="$next"
+  done
+  die "the left edge of the bar kept moving: x=$edge after $attempt screenshots"
+}
+
 SCREEN_COLORS="$VEKRONA_ROOT/tests/e2e/screen_colors.py"
 export SCREEN_COLORS
 panel_shown() { [[ "$(python3 "$SCREEN_COLORS" center "$(vekrona-dev shot)")" == "$PANEL_HEX" ]]; }
