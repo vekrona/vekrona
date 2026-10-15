@@ -22,7 +22,9 @@ events_json() {
     echo '[]'
     return
   fi
-  khal list --json title --json start --json end --json all-day --json location --json calendar \
+  # -v ERROR: khal warns on every Proton event whose end equals its start ("Assuming the event's duration is one
+  # hour"), hundreds of lines per run. Errors still print.
+  khal -v ERROR list --json title --json start --json end --json all-day --json location --json calendar \
     --day-format '' today "$HORIZON" |
     jq -s 'add // [] | map(. + {allDay: (.["all-day"] == "True")} | del(.["all-day"])) | unique_by([.start, .end, .title, .calendar]) | sort_by(.start)'
 }
@@ -113,7 +115,7 @@ configured() {
 }
 
 sync() {
-  local status=0 output pairs
+  local status=0 output pairs report
   pairs="$(ready_pairs)"
   if [[ -z "$pairs" ]]; then
     render
@@ -125,12 +127,12 @@ sync() {
   local -a ready
   mapfile -t ready <<<"$pairs"
   output="$(mktemp)"
-  { vdirsyncer metasync "${ready[@]}" && vdirsyncer sync "${ready[@]}"; } >"$output" 2>&1 || status=$?
-  redact_urls <"$output" >&2
-  if ((status != 0)) && grep -q 'vdirsyncer discover' "$output"; then
-    # shellcheck disable=SC2016 # the backticks are literal: they quote the command for the user
-    printf '%s: run `vdirsyncer discover` once by hand, then start vekrona-calendar.service again\n' "$PROG" >&2
-  fi
+  # -v WARNING: without it vdirsyncer logs a line per copied item on the first sync, and nobody reads them.
+  { vdirsyncer -v WARNING metasync "${ready[@]}" && vdirsyncer -v WARNING sync "${ready[@]}"; } >"$output" 2>&1 || status=$?
+  # Print from this process, not from sed: a writer that exits before journald looks it up is logged without
+  # _SYSTEMD_USER_UNIT, so `journalctl --user -u vekrona-calendar.service` would not show the failure reason.
+  report="$(redact_urls <"$output")"
+  [[ -z "$report" ]] || printf '%s\n' "$report" >&2
   rm -f "$output"
   render
   exit "$status"

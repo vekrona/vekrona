@@ -48,15 +48,27 @@ write_event "$calendars/fixture" allday "Holiday" \
   "DTSTART;VALUE=DATE:$(compact "$today")" "DTEND;VALUE=DATE:$(compact "$tomorrow")"
 write_event "$calendars/fixture" midnight "Night shift" \
   "DTSTART:$(compact "$today")T230000" "DTEND:$(compact "$tomorrow")T010000"
+write_event "$calendars/fixture" instant "Instant" \
+  "DTSTART:$(compact "$today")T150000" "DTEND:$(compact "$today")T150000"
 write_event "$calendars/fixture" unicode 'Quote "q" \\ café 東京' \
   "DTSTART:$(compact "$today")T120000" "DTEND:$(compact "$today")T130000"
-render
+render 2>"$scratch/render.err"
+[[ ! -s "$scratch/render.err" ]] || die "an event that ends when it starts must not make khal warn: $(head -3 "$scratch/render.err")"
 assert_json '[.events[] | select(.title == "Holiday")] | map(.allDay) == [true]' "an all-day event must be flagged allDay"
 assert_json '[.events[] | select(.title == "Weekly sync")][0].allDay == false' "a timed event must not be flagged allDay"
 assert_json "[.events[] | select(.title == \"Night shift\")] | map([.start, .end]) == [[\"$today 23:00\", \"$tomorrow 01:00\"]]" "an event spanning midnight must be listed once with its real start and end"
 assert_json '[.events[] | select(.title | startswith("Quote"))] | map(.title) == ["Quote \"q\" \\ café 東京"]' "quotes, backslashes and unicode must survive"
 assert_json '[.events[].start] == ([.events[].start] | sort)' "events must be sorted by start"
 log "ok: all-day, midnight-spanning and unicode events render correctly"
+
+cp "$XDG_CONFIG_HOME/khal/config" "$scratch/khal.config"
+echo '[[' >>"$XDG_CONFIG_HOME/khal/config"
+if render 2>"$scratch/render.err"; then
+  die "a khal that cannot read its config must fail the render"
+fi
+[[ -s "$scratch/render.err" ]] || die "a khal error must still reach stderr"
+cp "$scratch/khal.config" "$XDG_CONFIG_HOME/khal/config"
+log "ok: khal errors are not silenced"
 
 mkdir -p "$XDG_CONFIG_HOME/vdirsyncer"
 vdirsyncer_config="$XDG_CONFIG_HOME/vdirsyncer/config"
@@ -75,16 +87,20 @@ log "ok: a filled-in pair marks the calendar configured"
 
 fake_bin="$scratch/bin"
 mkdir -p "$fake_bin"
-printf '#!/usr/bin/env bash\necho "Error: pair x: need to run vdirsyncer discover" >&2\nexit 1\n' >"$fake_bin/vdirsyncer"
+# vdirsyncer's own line names the pair to discover; the sync must pass it on once and add no hint of its own that
+# names a bare (placeholder-failing) `vdirsyncer discover`.
+discover_line='critical: Please run `vdirsyncer discover icloud`  before synchronization.'
+printf '#!/usr/bin/env bash\necho "Metasyncing proton"\necho "%s" >&2\nexit 1\n' "$discover_line" >"$fake_bin/vdirsyncer"
 chmod +x "$fake_bin/vdirsyncer"
 rm "$output"
 if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then
   die "a failing vdirsyncer must fail the sync"
 fi
-# shellcheck disable=SC2016 # the backticks are literal text of the message
-grep -q 'run `vdirsyncer discover` once by hand' "$scratch/sync.err" || die "a pair that needs discovery must tell the user to run vdirsyncer discover"
+[[ "$(grep -c 'vdirsyncer discover' "$scratch/sync.err")" == 1 ]] \
+  || die "the pair to discover must be reported exactly once, as vdirsyncer says it: $(cat "$scratch/sync.err")"
+grep -qF "$discover_line" "$scratch/sync.err" || die "vdirsyncer's failure line must reach stderr: $(cat "$scratch/sync.err")"
 [[ -f "$output" ]] || die "a failing sync must still render the calendar"
-log "ok: a failing sync still renders and fails the unit"
+log "ok: a failing sync reports vdirsyncer's line once, still renders and fails the unit"
 
 secret_url='https://calendar.example.com/ical/user%40example.com/private-s3cr3t/basic.ics?token=s3cr3t'
 printf '#!/usr/bin/env bash\necho "Error: pair x: storage y: %s: 500 Server Error" >&2\nexit 1\n' "$secret_url" >"$fake_bin/vdirsyncer"
@@ -110,7 +126,7 @@ log "ok: a sync by hand with only placeholder pairs fails before vdirsyncer runs
 sed -i 's#/url/PLACEHOLDER/calendar.ics?CacheKey=PLACEHOLDER&PassphraseKey=PLACEHOLDER#/url/id/calendar.ics?CacheKey=k\&PassphraseKey=p#' "$vdirsyncer_config"
 rm -f "$output"
 PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err" || die "a filled-in pair must sync: $(cat "$scratch/sync.err")"
-[[ "$(cat "$scratch/vdirsyncer.calls")" == $'metasync proton\nsync proton' ]] \
+[[ "$(cat "$scratch/vdirsyncer.calls")" == $'-v WARNING metasync proton\n-v WARNING sync proton' ]] \
   || die "only the filled-in pair may be synced: $(cat "$scratch/vdirsyncer.calls")"
 assert_json '.configured == true' "one filled-in pair among placeholder pairs must render as configured"
 log "ok: with one provider filled in, only its pair is synced and the placeholder pairs are skipped"
@@ -119,7 +135,7 @@ log "ok: with one provider filled in, only its pair is synced and the placeholde
 sed -i 's/^url = "https:\/\/calendar.google.com.*/url = "https:\/\/google.example.com\/ical"\n# url = "PLACEHOLDER"/' "$vdirsyncer_config"
 rm -f "$scratch/vdirsyncer.calls"
 PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err" || die "a commented-out PLACEHOLDER must not block a pair: $(cat "$scratch/sync.err")"
-[[ "$(cat "$scratch/vdirsyncer.calls")" == $'metasync proton google\nsync proton google' ]] \
+[[ "$(cat "$scratch/vdirsyncer.calls")" == $'-v WARNING metasync proton google\n-v WARNING sync proton google' ]] \
   || die "a pair with a commented-out PLACEHOLDER must be synced: $(cat "$scratch/vdirsyncer.calls")"
 sed -i 's/^\[storage proton_local\]/# [storage proton_local]/' "$vdirsyncer_config"
 rm -f "$output"

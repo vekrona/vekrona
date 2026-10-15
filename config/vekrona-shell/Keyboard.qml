@@ -54,9 +54,10 @@ Singleton {
         for (const input of inputs)
             if (input.type === "keyboard" && (input.xkb_layout_names?.length ?? 0) > (keyboard?.xkb_layout_names.length ?? 0))
                 keyboard = input;
+        // Every keyboard is briefly gone on resume from suspend: that is a state, not a failure, and the next input event ends it.
         if (!keyboard) {
             available = false;
-            fail("Sway reports no keyboard with a layout");
+            error = "";
             return;
         }
         const names = keyboard.xkb_layout_names;

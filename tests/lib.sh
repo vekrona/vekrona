@@ -9,6 +9,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 # `vekrona-error report` writes to the journal socket, which feeds the user's real error store. A missing path makes
 # any report from a test fail loudly instead.
 export VEKRONA_JOURNAL_SOCKET=/nonexistent/vekrona-test-journal-socket
+# The same holds for the desktop: a bin tool's die() (lib/vekrona_cli.py) runs notify-send, which would pop a critical
+# toast on the user's real desktop for every failure a test provokes on purpose. An unreachable session bus makes
+# notify-send fail inside the test, where die() reports it on stderr.
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/vekrona-test-session-bus
 
 # logind suspends only when every session that can idle is idle, and the ssh session vekrona-dev works through
 # never is: it has no terminal to take an idle time from. Class "background" takes it out of that count and out of the
