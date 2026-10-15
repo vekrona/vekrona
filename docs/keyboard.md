@@ -21,8 +21,8 @@ Cmd (plain `Mod4`):
 | Cmd+1..9, Cmd+0 | switch to workspace 1 through 10 |
 | Cmd+arrow keys | focus left/down/up/right |
 | Cmd+Shift+arrow keys | move the focused container left/down/up/right |
-| Cmd+\\ | split vertically: the next window opens to the right of the focused one |
-| Cmd+- | split horizontally: the next window opens below the focused one |
+| Cmd+\\ | open the launcher; the app opens to the right of the focused window |
+| Cmd+- | open the launcher; the app opens below the focused window |
 | Cmd+Return | toggle fullscreen |
 | Cmd+q | kill the focused window |
 | Cmd+Tab, Cmd+Shift+Tab | app switcher (see below) |

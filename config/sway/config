@@ -127,10 +127,10 @@ bindsym --no-repeat --to-code Mod4+q kill
 bindsym --no-repeat --to-code $hyper+t floating toggle
 #: Toggle split layout
 bindsym --no-repeat --to-code $hyper+e layout toggle split
-#: Split horizontally (next window opens below)
-bindsym --to-code Mod4+minus splitv
-#: Split vertically (next window opens to the right)
-bindsym --to-code Mod4+backslash splith
+#: Open the launcher; the app opens below the focused window
+bindsym --no-repeat --to-code Mod4+minus splitv, exec qs -c vekrona-shell ipc call launcher toggle
+#: Open the launcher; the app opens to the right of the focused window
+bindsym --no-repeat --to-code Mod4+backslash splith, exec qs -c vekrona-shell ipc call launcher toggle
 
 #: Go to a new (first empty) workspace
 bindsym --no-repeat --to-code $hyper+equal exec vekrona-workspace-new

@@ -161,6 +161,10 @@ launcher_open() { launcher_is '.open'; }
 launcher_closed() { launcher_is '.open | not'; }
 export -f launcher_state launcher_is launcher_open launcher_closed
 
+# One "<con id> <x> <y>" line per window whose app_id matches the regex $1, in the sway tree's layout order.
+window_rects() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -r '.. | objects | select(.pid? != null and ((.app_id? // \"\") | test(\"$1\"))) | \"\(.id) \(.rect.x) \(.rect.y)\"'"; }
+export -f window_rects
+
 # Guard: a test process killed by a signal must not drop a coredump on the host, where vekrona-error would record it as a
 # real crash. systemd-coredump honors a core size limit of 0 (its %c), and every process a test starts inherits it.
 ulimit -c 0
