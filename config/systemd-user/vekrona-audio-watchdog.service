@@ -1,0 +1,12 @@
+[Unit]
+Description=vekrona audio watchdog
+PartOf=sway-session.target pipewire.service
+After=sway-session.target pipewire.service wireplumber.service
+
+[Service]
+ExecStart=%h/.local/bin/vekrona-audio-watchdog run
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=sway-session.target

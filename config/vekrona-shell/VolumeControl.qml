@@ -24,7 +24,7 @@ RowLayout {
     FixedWidthLabel {
         Layout.rightMargin: VekronaTheme.space2
         style: VekronaTheme.type.label
-        text: Audio.percent + " %"
+        text: Audio.levelText
         widest: "100 %"
     }
 }

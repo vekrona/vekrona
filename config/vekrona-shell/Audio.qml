@@ -9,17 +9,18 @@ Singleton {
 
     readonly property PwNode sink: Pipewire.defaultAudioSink
     readonly property var sinks: Pipewire.nodes.values.filter(node => node.type === PwNodeType.AudioSink)
+    // No default sink is a state (the interface behind a KVM is away), not an error: the controls say so and do nothing.
+    readonly property bool hasOutput: sink?.audio != null
     readonly property real volume: sink?.audio?.volume ?? 0
     readonly property bool muted: sink?.audio?.muted ?? true
     readonly property int percent: Math.round(100 * volume)
+    readonly property string levelText: hasOutput ? percent + " %" : "no output"
     readonly property string glyph: muted || percent === 0 ? "volume_off" : percent <= 33 ? "volume_down" : "volume_up"
     readonly property MprisPlayer player: Mpris.players.values.find(candidate => candidate.isPlaying) ?? Mpris.players.values[0] ?? null
 
     function setVolume(fraction: real): void {
-        if (!sink?.audio) {
-            console.error("cannot set the volume: there is no default audio sink");
+        if (!hasOutput)
             return;
-        }
         sink.audio.volume = Math.max(0, Math.min(1, fraction));
     }
 
@@ -43,10 +44,8 @@ Singleton {
     }
 
     function toggleMute(): void {
-        if (!sink?.audio) {
-            console.error("cannot mute: there is no default audio sink");
+        if (!hasOutput)
             return;
-        }
         sink.audio.muted = !sink.audio.muted;
     }
 
