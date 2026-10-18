@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Measure how much of a tray icon is drawn in the ink color, from screenshots with and without the icon.
+"""Measure how much of a tray icon is drawn in the ink color, from screenshots with the icon and with a blank icon.
 
 usage: tray-ink.py WITHOUT.png WITH.png BAR_HEIGHT ICON_PX INK_HEX BAR_HEX dots|disc|badged-disc
 
-The icon is the leftmost group of changed pixels in the right half of the bar: the tray is the first
-widget of the right-side group, and the widgets right of it do not move when an icon appears. Its box is
+WITHOUT.png shows a blank icon in the tray slot, so the layout is the same in both and only the icon differs. The icon is the leftmost group of changed
+pixels in the right half of the bar: the widgets right of the tray can change on their own, the ones left of it do not. Its box is
 the bounding box of that group. A pixel is ink when it is closer to INK_HEX than to BAR_HEX.
 dots: the icon is dark dots on an opaque light square, so the square must stay bar-colored.
 disc: the icon is a disc on a transparent square, so the disc must be ink.

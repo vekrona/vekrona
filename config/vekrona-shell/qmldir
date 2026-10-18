@@ -1,12 +1,14 @@
 singleton Exec 1.0 Exec.qml
 singleton Audio 1.0 Audio.qml
 singleton Keyboard 1.0 Keyboard.qml
+SwayQuery 1.0 SwayQuery.qml
 Bar 1.0 Bar.qml
 Desktops 1.0 Desktops.qml
 WindowTitle 1.0 WindowTitle.qml
 Agent 1.0 Agent.qml
 Tray 1.0 Tray.qml
 Perf 1.0 Perf.qml
+singleton SystemLoad 1.0 SystemLoad.qml
 Sound 1.0 Sound.qml
 KeyboardLayout 1.0 KeyboardLayout.qml
 LayoutRow 1.0 LayoutRow.qml
@@ -19,11 +21,18 @@ Battery 1.0 Battery.qml
 TintedIcon 1.0 TintedIcon.qml
 Weather 1.0 Weather.qml
 Calendar 1.0 Calendar.qml
+MonthGrid 1.0 MonthGrid.qml
 LauncherButton 1.0 LauncherButton.qml
 Osd 1.0 Osd.qml
 Catcher 1.0 Catcher.qml
 NotificationCard 1.0 NotificationCard.qml
 singleton Notifications 1.0 Notifications.qml
+singleton Errors 1.0 Errors.qml
+singleton KeyboardSurface 1.0 KeyboardSurface.qml
 singleton Windows 1.0 Windows.qml
+singleton Caffeine 1.0 Caffeine.qml
+CaffeinePill 1.0 CaffeinePill.qml
+CaffeineUntil 1.0 CaffeineUntil.qml
+CaffeineChoices 1.0 CaffeineChoices.qml
 NotificationsButton 1.0 NotificationsButton.qml
 Polkit 1.0 Polkit.qml

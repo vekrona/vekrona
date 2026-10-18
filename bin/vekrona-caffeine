@@ -1,79 +1,335 @@
 #!/usr/bin/env bash
+# Keep-awake sessions. Every session is the transient user unit vekrona-caffeine.service running
+# `systemd-inhibit --what=sleep ... vekrona-caffeine wait <kind> [arg]`, so logind will not suspend
+# while it lives. Lock and screen-off still apply (docs/daily-use.md).
+#
+#   for <span>                systemd.time span, e.g. 1h or 90min
+#   until HH:MM               the next HH:MM, today or else tomorrow
+#   until "YYYY-MM-DD HH:MM"  local wall-clock deadline
+#   file <path> [label]       until <path> is renamed or deleted, or has not been written for 60 s;
+#                             the label defaults to the file's name without .part or .crdownload
+#   pid <pid> [name]          until the process exits; the name defaults to the process's command name
+#   toggle                    off when active, else for 1h
+#   off | status
+#
+# `status` prints `off` or one line `kind=<k> end=<epoch|-> preset=<span|-> target=<rest of line>`.
+# Exit status: 0 done, 2 the input was refused (bad span, missing file or process, wrong usage), 1 anything unexpected.
+# `wait` and `ended` are internal: the unit runs `wait`, systemd runs `ended` when the unit stops.
 set -euo pipefail
 
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+source "$(dirname "$SELF")/../lib/common.sh"
 UNIT_NAME="vekrona-caffeine"
 UNIT="$UNIT_NAME.service"
+TIMER_NAME="$UNIT_NAME-end"
+TIMER="$TIMER_NAME.timer"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}"
+STATE="$RUNTIME_DIR/$UNIT_NAME.state"
+# Why a file session ended when it was not the file finishing: the waiter writes `stalled` here.
+REASON="$RUNTIME_DIR/$UNIT_NAME.reason"
+LOCK="$RUNTIME_DIR/$UNIT_NAME.lock"
+LOCK_WAIT_SEC=30
+FILE_IDLE_SEC=60
+WATCH_SETUP_SEC=10
+# systemd-analyze counts in microseconds. 18 digits is about 31 000 years; more would overflow the shell's arithmetic.
+MAX_SPAN_DIGITS=18
 
-usage() {
-  printf 'usage: %s [30m|1h|2h|off|status]\n' "$(basename "$0")" >&2
-  exit 1
+# Exit status 1 is an unexpected failure; REFUSED_EXIT is the command refusing what the user asked for. The shell tells the two apart.
+# Not lib/common.sh's refuse(): that one prints a colored "[vekrona] REFUSED:" line, and the shell shows this message as it is.
+REFUSED_EXIT=2
+
+reject() {
+  printf '%s: %s\n' "$UNIT_NAME" "$*" >&2
+  exit "$REFUSED_EXIT"
 }
 
-seconds_for() {
+usage() {
+  printf 'usage: %s for <span> | until HH:MM | until "YYYY-MM-DD HH:MM" | file <path> [label] | pid <pid> [name] | toggle | off | status\n' \
+    "$UNIT_NAME" >&2
+  exit "$REFUSED_EXIT"
+}
+
+unit_loaded() { [[ "$(systemctl --user show -p LoadState --value "$1")" != not-found ]]; }
+
+unit_active() { systemctl --user is-active --quiet "$UNIT"; }
+
+# Runs a command with the user-facing commands of every other instance held off, so two clicks cannot interleave their
+# stop-and-start. `wait` and `ended` never lock: systemd runs `ended` while `off` holds the lock to stop the unit.
+locked() {
+  exec 9>"$LOCK"
+  flock -w "$LOCK_WAIT_SEC" 9 || die "another $UNIT_NAME command is still running"
+  "$@"
+}
+
+# Stop each unit if it exists. The units are transient with --collect, so none lingers failed.
+clear_units() {
+  local u
+  for u in "$@"; do
+    unit_loaded "$u" || continue
+    systemctl --user stop "$u"
+  done
+}
+
+# Tell the shell's Caffeine singleton to re-read `status`. Two answers are normal and need nothing: no running shell
+# (headless, login), and a shell that is still loading, which reads `status` itself once it is up. While a running shell
+# predates the caffeine target, qs prints "Target not found." and exits 0. So any other answer than an empty one is a failure.
+refresh_shell() {
+  local out rc=0
+  out="$(qs -c vekrona-shell ipc call caffeine refresh 2>&1)" || rc=$?
+  if [[ "$out" == *"No running instances for"* || "$out" == "Not ready to accept queries yet." ]]; then
+    return 0
+  fi
+  if ((rc == 0)) && [[ -z "$out" ]]; then
+    return 0
+  fi
+  printf '%s: shell refresh failed (exit %d): %s\n' "$UNIT_NAME" "$rc" "$out" >&2
+  return 1
+}
+
+# Undoes a start whose unit is already running, and fails with the reason.
+cancel_session() {
+  rm -f "$STATE"
+  systemctl --user stop "$UNIT"
+  die "$1, session cancelled"
+}
+
+describe() {
   case "$1" in
-    30m) echo 1800 ;;
-    1h) echo 3600 ;;
-    2h) echo 7200 ;;
+    for) echo "for $2" ;;
+    until) echo "until $2" ;;
+    file) echo "until $2 finishes" ;;
+    pid) echo "until $2 exits" ;;
+  esac
+}
+
+# One word of an Exec line in a unit file: quoted, with the characters systemd would otherwise interpret escaped.
+unit_file_word() {
+  local word="$1"
+  word="${word//\\/\\\\}"
+  word="${word//\"/\\\"}"
+  word="${word//%/%%}"
+  word="${word//\$/\$\$}"
+  printf '"%s"' "$word"
+}
+
+# The one chokepoint: start_session <kind> <end-epoch|-> <preset|-> <target> [wait-arg]
+start_session() {
+  local kind="$1" end="$2" preset="$3" target="$4" what
+  what="$(describe "$kind" "$target")"
+
+  rm -f "$STATE" # a replaced session must not toast its ending
+  clear_units "$TIMER" "$UNIT"
+  rm -f "$REASON" # after the stop, so the old waiter cannot leave its reason behind
+  printf 'kind=%s end=%s preset=%s target=%s\n' "$kind" "$end" "$preset" "$target" >"$STATE"
+
+  systemd-run --user --quiet --collect --unit="$UNIT_NAME" --description="keep-awake $what" \
+    -p "ExecStopPost=$(unit_file_word "$SELF") ended" \
+    systemd-inhibit --what=sleep --who=vekrona --why="keep-awake $what" \
+    "$SELF" wait "$kind" "${@:5}"
+
+  if [[ "$end" != "-" ]]; then
+    if ! systemd-run --user --quiet --collect --unit="$TIMER_NAME" \
+      --on-calendar="$(date -u -d "@$end" '+%F %T UTC')" --timer-property=AccuracySec=1s \
+      systemctl --user stop "$UNIT"; then
+      cancel_session "could not arm the end timer"
+    fi
+    # A timer armed for a moment already gone never fires, and would leave the session holding forever.
+    if (($(date +%s) >= end)); then
+      cancel_session "the deadline passed while starting"
+    fi
+  fi
+
+  notify-send -a vekrona "Keep-awake on" "Suspend is blocked $what; lock and screen-off still apply"
+  refresh_shell
+}
+
+cmd_for() {
+  local span="$1" analysis us
+  [[ "$span" =~ ^[0-9][^[:space:]]*$ ]] || reject "not a time span: '$span' (example: 1h, 90min)"
+  analysis="$(systemd-analyze timespan "$span" 2>&1)" || reject "not a time span: '$span' (example: 1h, 90min)"
+  us="$(awk 'NR == 2 { print $2 }' <<<"$analysis")"
+  [[ "$us" =~ ^[0-9]+$ ]] || die "systemd-analyze timespan '$span' printed no microseconds: $analysis"
+  ((${#us} <= MAX_SPAN_DIGITS)) || reject "time span '$span' is too long"
+  ((us >= 1000000)) || reject "time span '$span' is shorter than 1 second"
+  start_session for "$(($(date +%s) + us / 1000000))" "$span" "$span"
+}
+
+cmd_until() {
+  local when="$1" end now target
+  now="$(date +%s)"
+  if [[ "$when" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
+    end="$(date -d "$when" +%s 2>/dev/null)" || reject "not a time of day: '$when'"
+    ((end > now)) || end="$(date -d "tomorrow $when" +%s)"
+  elif [[ "$when" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}$ ]]; then
+    end="$(date -d "$when" +%s 2>/dev/null)" || reject "not a deadline: '$when'"
+    ((end > now)) || reject "deadline '$when' is in the past"
+  else
+    reject "not a deadline: '$when' (expected HH:MM or YYYY-MM-DD HH:MM)"
+  fi
+  if [[ "$(date -d "@$end" +%F)" == "$(date -d "@$now" +%F)" ]]; then
+    target="$(date -d "@$end" +%H:%M)"
+  else
+    target="$(date -d "@$end" '+%a %H:%M')"
+  fi
+  start_session until "$end" - "$target"
+}
+
+check_label() {
+  [[ -n "$1" && "$1" != *$'\n'* ]] || reject "the label must be non-empty and a single line"
+}
+
+cmd_file() {
+  local path="$1" label
+  [[ -e "$path" ]] || reject "no such file: $path"
+  if (($# >= 2)); then
+    label="$2"
+  else
+    label="$(basename "$path")"
+    label="${label%.part}"
+    label="${label%.crdownload}"
+  fi
+  check_label "$label"
+  start_session file - - "$label" "$(readlink -f "$path")"
+}
+
+cmd_pid() {
+  local pid="$1" name
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || reject "not a process id: '$pid'"
+  [[ -d "/proc/$pid" ]] || reject "no such process: $pid"
+  if (($# >= 2)); then
+    name="$2"
+  else
+    name="$(<"/proc/$pid/comm")" || die "cannot read the name of process $pid"
+  fi
+  check_label "$name"
+  start_session pid - - "$name" "$pid"
+}
+
+cmd_off() {
+  if unit_active; then
+    systemctl --user stop "$UNIT"
+  fi
+}
+
+cmd_toggle() {
+  if unit_active; then cmd_off; else cmd_for 1h; fi
+}
+
+cmd_status() {
+  if unit_active && [[ -f "$STATE" ]]; then
+    cat "$STATE"
+  else
+    echo off
+  fi
+}
+
+# Waits for a process without a timer: its pidfd is readable once it exits. A process that is gone already has ended.
+wait_pid() {
+  exec python3 -I - "$1" <<'PY'
+import os
+import select
+import sys
+
+try:
+    pidfd = os.pidfd_open(int(sys.argv[1]))
+except ProcessLookupError:
+    sys.exit(0)
+select.select([pidfd], [], [])
+PY
+}
+
+wait_file() {
+  local ev line rc=0 attached=0 watch watcher
+  # A process substitution and not a coproc: a coproc that ends at once (a file that is already gone) takes its file
+  # descriptors with it, and the reads below would hit an unset variable.
+  exec {watch}< <(exec inotifywait -m --format %e -e modify,move_self,delete_self -- "$1" 2>&1)
+  watcher=$!
+  # inotifywait says so once it is attached. A file that ended before that cannot be watched, which is its normal ending.
+  while IFS= read -r -t "$WATCH_SETUP_SEC" -u "$watch" line; do
+    if [[ "$line" == "Watches established." ]]; then
+      attached=1
+      break
+    fi
+  done
+  if ((attached == 0)); then
+    kill "$watcher" 2>/dev/null || true # nothing is left to stop when inotifywait ended on a file that is gone
+    [[ ! -e "$1" ]] || die "inotifywait could not watch $1"
+    return 0
+  fi
+  while true; do
+    read -r -t "$FILE_IDLE_SEC" -u "$watch" ev || {
+      rc=$?
+      break
+    }
+    case "$ev" in
+      *MOVE_SELF* | *DELETE_SELF*) break ;;
+    esac
+  done
+  # read status 1 means inotifywait died (EOF); above 128 means no write for FILE_IDLE_SEC, a normal ending
+  ((rc != 1)) || die "inotifywait ended unexpectedly while watching $1"
+  if ((rc > 128)); then
+    echo stalled >"$REASON"
+  fi
+  kill "$watcher"
+}
+
+# Runs inside the unit; every normal ending exits 0.
+cmd_wait() {
+  case "$1" in
+    for | until) exec sleep infinity ;; # the end timer stops the unit
+    pid) wait_pid "$2" ;;
+    file) wait_file "$2" ;;
     *) usage ;;
   esac
 }
 
-unit_active() { systemctl --user is-active --quiet "$UNIT"; }
-
-start_caffeine() {
-  local dur="$1"
-  local secs
-  secs="$(seconds_for "$dur")"
-  if unit_active; then
-    systemctl --user stop "$UNIT"
-  fi
-  systemctl --user reset-failed "$UNIT" >/dev/null 2>&1 || true
-  systemd-run --user --collect --unit="$UNIT_NAME" --description="caffeine $dur" \
-    systemd-inhibit --what=sleep --who=vekrona --why="caffeine $dur" sleep "$secs"
-  notify-send -a vekrona "Caffeine" "suspend inhibited for $dur; lock and screen-off still apply"
-  echo "caffeine: on for $dur; lock and screen-off still apply"
+# What the toast says when the session ended: $1 is its state line, $2 its reason (`stalled` or empty).
+ended_text() {
+  local kind target
+  kind="${1#kind=}"
+  kind="${kind%% *}"
+  target="${1#*target=}"
+  case "$kind" in
+    file)
+      if [[ "$2" == stalled ]]; then
+        echo "Download stalled for $FILE_IDLE_SEC s: $target"
+      else
+        echo "$target finished"
+      fi
+      ;;
+    *) describe "$kind" "$target" ;;
+  esac
 }
 
-stop_caffeine() {
-  if unit_active; then
-    systemctl --user stop "$UNIT"
-    notify-send -a vekrona "Caffeine" "suspend inhibitor stopped"
-    echo "caffeine: off"
-  else
-    echo "caffeine: off (was not running)"
+# ExecStopPost of the unit. A replaced session removed STATE first, so only a real ending toasts. Every step runs even
+# when an earlier one failed, and the exit status is non-zero then, which marks the unit failed for vekrona-error.
+cmd_ended() {
+  local line="" reason="" rc=0
+  if [[ -f "$STATE" ]]; then
+    line="$(<"$STATE")"
+    rm -f "$STATE"
   fi
+  if [[ -f "$REASON" ]]; then
+    reason="$(<"$REASON")"
+    rm -f "$REASON"
+  fi
+  clear_units "$TIMER" || rc=1
+  refresh_shell || rc=1
+  if [[ -n "$line" ]]; then
+    notify-send -a vekrona "Keep-awake ended" "$(ended_text "$line" "$reason")" || rc=1
+  fi
+  return "$rc"
 }
 
-status_caffeine() {
-  if unit_active; then
-    local desc
-    desc="$(systemctl --user show "$UNIT" -p Description --value)"
-    echo "caffeine: on ($desc)"
-  else
-    echo "caffeine: off"
-  fi
-}
-
-cmd="${1:-}"
-
-case "$cmd" in
-  off)
-    stop_caffeine
-    ;;
-  status)
-    status_caffeine
-    ;;
-  30m|1h|2h)
-    start_caffeine "$cmd"
-    ;;
-  "")
-    if unit_active; then
-      stop_caffeine
-    else
-      start_caffeine 1h
-    fi
-    ;;
-  *)
-    usage
-    ;;
+case "${1:-}" in
+  toggle) [[ $# -eq 1 ]] || usage; locked cmd_toggle ;;
+  for) [[ $# -eq 2 ]] || usage; locked cmd_for "$2" ;;
+  until) [[ $# -eq 2 ]] || usage; locked cmd_until "$2" ;;
+  file) [[ $# -eq 2 || $# -eq 3 ]] || usage; locked cmd_file "${@:2}" ;;
+  pid) [[ $# -eq 2 || $# -eq 3 ]] || usage; locked cmd_pid "${@:2}" ;;
+  off) [[ $# -eq 1 ]] || usage; locked cmd_off ;;
+  status) [[ $# -eq 1 ]] || usage; cmd_status ;;
+  wait) [[ $# -ge 2 ]] || usage; cmd_wait "${@:2}" ;;
+  ended) [[ $# -eq 1 ]] || usage; cmd_ended ;;
+  *) usage ;;
 esac

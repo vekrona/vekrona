@@ -2,7 +2,7 @@
 """Serve one StatusNotifierItem on the session bus until killed, to put a known icon in the bar's tray.
 Its menu, shown on a right click, has the single entry MENU_LABEL.
 
-usage: fake-sni.py opaque|alpha|ICON.png|themed:ICON.png
+usage: fake-sni.py opaque|alpha|blank|plain|ICON.png|themed:ICON.png
 
   ICON.png  a real tray icon, saved as an 8-bit RGBA PNG, served at its own size (png_rows.py must sit next to this script)
 
@@ -11,6 +11,9 @@ usage: fake-sni.py opaque|alpha|ICON.png|themed:ICON.png
 
   opaque  a light, fully opaque square with a 3x3 grid of dark dots, which tinting by alpha alone turns into a solid square
   alpha   a black disc on a transparent background
+  plain   like opaque, with no menu at all, and it prints "activated" when the bar asks it to act (a left click)
+  blank   a fully transparent square: it takes the tray slot and draws nothing, so a screenshot with it is the baseline of the
+          same layout for the icons above
 """
 import os
 import sys
@@ -73,6 +76,8 @@ def menu_call(_connection, _sender, _path, _interface, method, args, invocation)
 
 
 def pixel(kind, x, y):
+    if kind == "blank":
+        return (0, 0, 0, 0)
     if kind == "alpha":
         inside = (x - ALPHA_SIZE / 2 + 0.5) ** 2 + (y - ALPHA_SIZE / 2 + 0.5) ** 2 <= (ALPHA_SIZE / 2) ** 2
         return (0xFF, 0, 0, 0) if inside else (0, 0, 0, 0)
@@ -116,10 +121,15 @@ def main(kind):
         "Menu": GLib.Variant("o", MENU_PATH),
     }
 
+    if kind == "plain":
+        del props["Menu"]
+
     def get_property(_connection, _sender, _path, _interface, name):
         return props[name]
 
-    def call(_connection, _sender, _path, _interface, _method, _args, invocation):
+    def call(_connection, _sender, _path, _interface, method, _args, invocation):
+        if method == "Activate":
+            print("activated", flush=True)
         invocation.return_value(None)
 
     def acquired(connection, _name):
@@ -134,6 +144,6 @@ def main(kind):
     GLib.MainLoop().run()
 
 
-if len(sys.argv) != 2 or not (sys.argv[1] in ("opaque", "alpha") or sys.argv[1].endswith(".png")):
+if len(sys.argv) != 2 or not (sys.argv[1] in ("opaque", "alpha", "blank", "plain") or sys.argv[1].endswith(".png")):
     sys.exit(__doc__)
 main(sys.argv[1])

@@ -13,10 +13,12 @@ FocusScope {
     property string accessibleName
     property var colors: VekronaTheme.c
     property color fill: "transparent"
-    property color borderColor: colors.line
+    property color borderColor: enabled ? colors.line : colors.inkDisabled
     property real padding: VekronaTheme.space2
 
     signal accepted
+    // The user changed the text; a change made by setting `text` does not emit it.
+    signal textEdited
     signal keyPressed(var event)
 
     implicitHeight: VekronaTheme.sizeTarget
@@ -45,6 +47,7 @@ FocusScope {
         Accessible.name: field.accessibleName
         Keys.onPressed: event => field.keyPressed(event)
         onAccepted: field.accepted()
+        onTextEdited: field.textEdited()
     }
 
     Label {

@@ -12,34 +12,23 @@ Vekrona installs a curated set of applications via the following channels:
 - **Zed**: Flathub Flatpak `dev.zed.Zed` (system-wide install, requires hardware Vulkan driver; Fedora-built RPMs freeze on F44 due to GCC 16/LLVM ABI bug rhbz#2464281, unresolved; updates via `flatpak update`)
 - **Spotify**: Firefox webapp with Widevine (replaces the `com.spotify.Client` Flatpak; downloads the Widevine CDM on first launch)
 - **Signal, OBS Studio, Obsidian**: Flathub Flatpaks (system-wide install, `VEKRONA_FLATPAKS`; Obsidian is closed source but has no web version and works on local vault files)
-- **Syncthing**: Fedora repository (the `syncthing` RPM runs as your user service `syncthing.service`; its web GUI at `http://127.0.0.1:8384/` is the Firefox webapp below)
-- **Telegram, Discord, SoundCloud, YouTube, WhatsApp, Syncthing GUI**: Firefox webapps
+- **Syncthing**: Fedora repository (the `syncthing` RPM runs as your user service `syncthing.service`; its web GUI at `http://127.0.0.1:8384/` is the Firefox webapp below, behind a login that stage 50 generates: user `vekrona`, password in `~/.local/state/vekrona/syncthing-gui-password`, which you save in the webapp's Firefox once)
+- **Proton Mail (with Calendar), Pass and Authenticator**: native apps from Proton's own feeds (see [updates](updates.md))
+- **Telegram, Discord, SoundCloud, YouTube, WhatsApp, Syncthing GUI**: Firefox webapps (Spotify above; `vekrona-webapp <app>` starts one, the full list is under Daily operations)
 - **Steam**: RPM Fusion (already installed; stage 60 sets Steam Play preset to `proton_experimental` for all titles)
 - **Nix**: Fedora 44's own `nix` and `nix-daemon` RPMs (flakes enabled by default; `/nix` lives on its own btrfs subvolume `nix` separate from root, so rollbacks never include the Nix store)
-- **devbox**: installed via `nix profile install nixpkgs#devbox` for the desktop user
+- **devbox**: installed for the desktop user with `nix profile install` from a pinned nixpkgs commit (`DEVBOX_NIXPKGS_REV` in stage 50)
 - **Tailscale**: Fedora `updates` repository (no vendor repo needed; `tailscaled` enabled and active, you are operator: `tailscale up` without sudo; tray icon runs via user systemd unit)
 - **btop**: Fedora repository
 - **Non-free codecs**: RPM Fusion (swap `ffmpeg-free` to `ffmpeg`, add freeworld gstreamer plugins, `mesa-va-drivers-freeworld`, openh264 via already-enabled `fedora-cisco-openh264`; VDPAU packages no longer exist in F44)
-
-Webapps are available as follows:
-
-```
-vekrona-webapp youtube
-vekrona-webapp whatsapp
-vekrona-webapp spotify
-vekrona-webapp soundcloud
-vekrona-webapp telegram
-vekrona-webapp discord
-vekrona-webapp syncthing
-```
 
 ## Daily operations
 
 ### Updates
 
 The system checks for updates every morning at 9:00 (and five minutes after boot). When something is pending, a
-toast says "Updates available" and lists what changes, one line per group (System packages, Agents,
-Flatpak, Proton). A group with more than five updates shows its count and the first five.
+toast says "Updates available" and lists what changes, one line per group (System packages, Flatpak,
+Proton). A group with more than five updates shows its count and the first five.
 
 - **Install now** updates in the background and does not restart anything. The toast stays on screen, or in the
   notification center, until midnight.
@@ -49,10 +38,51 @@ Flatpak, Proton). A group with more than five updates shows its count and the fi
 
 You see each set of updates once. If the check runs before you log in, the toast appears when the session starts.
 
-The launcher's Power view (`/power`, or the power buttons) gains two items while updates are pending, placed
+The launcher's Power view (`/power`, or the `Power` tab) gains two items while updates are pending, placed
 before Restart and Shut down: **Update and restart** and **Update and shut down**. Like Restart, each needs a second
 press to run. They install the updates in an offline update and then restart or power off the computer. When
 nothing is pending the items are not there.
+
+### Default firewall zone
+
+Stage `40-system` (`ensure_default_zone`, `lib/firewall.sh`) makes `public` the default firewalld zone. Fedora Workstation's own
+default, `FedoraWorkstation`, accepts every TCP and UDP port from 1025 up from the local network. `public` gets exactly what
+vekrona runs: `mdns` and `dhcpv6-client` (public's own), `syncthing` (22000/tcp and udp, 21027/udp for local discovery; its web
+GUI stays on 127.0.0.1), `steam-streaming` and `steam-lan-transfer` (Steam is installed by stage 30: Remote Play and local game
+transfer), and UDP 6001-6010 for AirPlay (`ensure_airplay_ports`). ssh is closed outside the tailnet (below). A new service is one more
+word in `DEFAULT_ZONE_SERVICES` (`lib/firewall.sh`). If a NetworkManager connection is pinned to the `FedoraWorkstation` zone
+(`nmcli -f connection.zone connection show <name>`), stage 40 reports it and `70-verify` fails until
+`nmcli connection modify <name> connection.zone ''` clears the pin. The `tailnet` zone is unchanged.
+
+### Remote access (ssh over the tailnet)
+
+Stage `40-system` makes sshd take public keys only (`/etc/ssh/sshd_config.d/10-vekrona.conf`: no passwords, no
+keyboard-interactive logins, no root login) and open it to the tailnet only. firewalld has a `tailnet` zone
+(`/etc/firewalld/zones/tailnet.xml`) that holds `tailscale0` and the tailnet's address ranges (`100.64.0.0/10`,
+`fd7a:115c:a1e0::/48`) and allows `ssh` and nothing else; every other zone loses its `ssh` service, and a zone that still lets ssh in
+(an open port 22, or a target that accepts everything, as `trusted`, a hotspot or Docker have) gets a reject rule for it, so the LAN
+cannot reach sshd. sshd itself keeps listening on every address, because tailscaled may come up after it. While you are
+logged in over ssh from outside the tailnet (an install over the LAN), the stage keeps ssh in those zones so that it
+never cuts its own session off, reports that as a failure, and `70-verify` fails until you run `./install.sh 40` again
+from a console or over the tailnet. Put your public key in `~/.ssh/authorized_keys` before you rely on it;
+the stage warns when that file is empty. A machine without firewalld running gets a warning instead of the zone.
+
+The Headscale policy decides who may reach port 22. On `mesh.xiii.site`, the policy has to contain this (this host is
+`100.64.0.7`, the user is `admin@`):
+
+```json
+"groups": { "group:admin": ["admin@"] },
+"hosts":  { "vekrona": "100.64.0.7" },
+"grants": [
+  { "src": ["group:admin"], "dst": ["vekrona"], "ip": ["tcp:22"] }
+]
+```
+
+Remove any broader `*:*` rule: while it exists, every node on the tailnet may open port 22 here, not only the
+admin group.
+
+AirPlay: if the default zone does not open them already (`public`, not `FedoraWorkstation`), stage 40 opens UDP 6001-6010
+there, because AirPlay's timing and control channels use those ports.
 
 ### Display settings
 
@@ -127,32 +157,47 @@ tokens (`space-2` is 8, `space-3` is 12). To change the look, change
 `./install.sh 50-user` to apply.
 
 Caffeine (a fixed wall-clock duration is the point, not something to work
-around): `vekrona-caffeine` starts a transient systemd user unit
-(`systemd-run --user --unit=vekrona-caffeine`) that wraps `systemd-inhibit
---what=sleep` for the given duration (it blocks a manual suspend and
-logind's idle suspend alike; swayidle keeps locking and switching the screen off, which an `idle` inhibitor would
-stop; `etc/polkit-1/rules.d/50-vekrona-caffeine.rules` lets the unit hold it without a password), and sends a desktop notification on start and
-stop; also bound to Hyper+Shift+c.
+around): the bar's cup icon is emphasized while a keep-awake session runs. Left
+click opens a menu (a second click closes it): End session (when active, with the
+target and the time left, in days from 24 hours on), Stay awake for (1h/2h/5h/12h/24h
+presets), Stay awake until (the day pill opens a month grid for the next 30 days; the
+time is typed as HH:MM, H:MM or HHMM, or stepped by 5 minutes with Up, Down or the wheel;
+Enter starts), Wait for download (in-progress files in Downloads) and Wait for process
+(apps with open windows).
+Hyper+Shift+c toggles 1h or off. A command the CLI refuses, like a time it cannot read,
+shows a notification with the reason. A download wait ends when the file is renamed or
+deleted, which is what a browser does when it finishes, or after 60 s without a write,
+and the end notification says which. `vekrona-caffeine` CLI (start, check status, end a
+session): runs a transient systemd user unit wrapping `systemd-inhibit --what=sleep`
+(blocks a manual suspend and logind's idle suspend alike; swayidle keeps locking and
+switching the screen off, which an `idle` inhibitor would stop;
+`etc/polkit-1/rules.d/50-vekrona-caffeine.rules` lets the unit hold it without a
+password), and sends a desktop notification on start and end; also bound to
+Hyper+Shift+c.
 
 ```
-vekrona-caffeine 30m
-vekrona-caffeine 1h
-vekrona-caffeine 2h
+vekrona-caffeine for 1h                    # a span: 1h, 90min
+vekrona-caffeine until 14:30               # the next 14:30, today or else tomorrow
+vekrona-caffeine until "2026-10-20 08:00"  # a date and time
+vekrona-caffeine file ~/Downloads/x.iso.part       # until it is renamed or deleted, or 60 s without a write
+vekrona-caffeine file ~/Downloads/x.iso.part x.iso # the same, with the name to show
+vekrona-caffeine pid 1234                  # until the process exits, shown by its command name
+vekrona-caffeine pid 1234 firefox          # the same, with the name to show
 vekrona-caffeine status
 vekrona-caffeine off
-vekrona-caffeine        # no argument: stops it if running, else starts it for 1h
+vekrona-caffeine toggle                    # stops it if running, else starts it for 1h
 ```
 
 Screenshot and recording:
 
 ```
 vekrona-screenshot screen       # focused monitor
-vekrona-screenshot area         # drag a rectangle or click a window (default)
+vekrona-screenshot area         # drag a rectangle or click a window
 vekrona-screenshot window       # click a window only
 vekrona-screenshot --clipboard screen   # copy to clipboard, no file
 vekrona-screenshot --clipboard area     # copy to clipboard, no file
 vekrona-screenshot --clipboard window   # copy to clipboard, no file
-vekrona-record                  # slurp region select, systemd-run transient user unit toggle, saved to ~/Videos/Recordings
+vekrona-record toggle           # slurp region select, systemd-run transient user unit toggle, saved to ~/Videos/Recordings
 ```
 
 Super+Shift+3/4/5 work like Cmd+Shift+3/4/5 on macOS, and adding Ctrl copies to the clipboard without saving a file. In area mode, click a window or drag a rectangle. Saved shots are also copied to the clipboard, and the notification has Edit (opens swappy) and Delete (moves the shot to the trash) buttons.
@@ -225,7 +270,7 @@ anything passed to `--skip`), so a bare `./install.sh 70` re-verifies
 everything without re-running any stage.
 
 Steam launch option, wraps a game with ScopeBuddy using
-`config/scopebuddy/scb.conf` (`-f -W 3840 -H 2160 -r 240`):
+`config/scopebuddy/scb.conf` (`-f`, plus the width, height and refresh rate of the focused output, read from Sway at launch):
 
 ```
 scb -- %command%

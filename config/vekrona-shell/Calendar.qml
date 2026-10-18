@@ -1,24 +1,19 @@
-import QtCore
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
-import Quickshell.Io
 import "Vekrona"
 
 Row {
     id: root
 
     required property var bar
-    readonly property string calendarPath: StandardPaths.writableLocation(StandardPaths.GenericStateLocation) + "/vekrona/calendar.json"
+    // How old the agenda may be when the popout opens before it is synced again, in milliseconds.
+    readonly property int refreshAgeMs: 10 * 60 * 1000
     readonly property int labelMaxChars: 24
     readonly property int agendaMaxHeight: VekronaTheme.sizeTarget * 8
-    property var calendar: null
-    property int monthOffset: 0
+    readonly property var calendar: file.value
     readonly property var events: calendar?.events ?? []
     readonly property date today: new Date(clock.date.getFullYear(), clock.date.getMonth(), clock.date.getDate())
-    readonly property date shownMonth: new Date(today.getFullYear(), today.getMonth() + monthOffset, 1)
-    readonly property int leadingBlanks: (shownMonth.getDay() + 6) % 7
-    readonly property int daysInMonth: new Date(shownMonth.getFullYear(), shownMonth.getMonth() + 1, 0).getDate()
     readonly property var upcoming: nextEvent(events, clock.date)
 
     function parse(stamp: string): date {
@@ -47,10 +42,6 @@ Row {
         return days;
     }
 
-    function isToday(day: int): bool {
-        return monthOffset === 0 && day === today.getDate();
-    }
-
     BarPill {
         visible: root.upcoming !== null
         value: root.upcoming ? root.elide(root.upcoming.start.slice(11) + " " + root.upcoming.title) : ""
@@ -71,16 +62,9 @@ Row {
         precision: SystemClock.Minutes
     }
 
-    FileView {
-        path: root.calendarPath
-        watchChanges: true
-        onLoaded: root.calendar = JSON.parse(text())
-        onLoadFailed: error => {
-            root.calendar = null;
-            if (error !== FileViewError.FileNotFound)
-                console.error("cannot read " + root.calendarPath + ": " + error);
-        }
-        onFileChanged: reload()
+    StateFile {
+        id: file
+        path: StateDir.path + "/calendar.json"
     }
 
     Popout {
@@ -88,75 +72,18 @@ Row {
         anchorItem: dateTime
         open: root.bar.openPopout === popout
         onDismissed: root.bar.openPopout = null
-        onOpenChanged: if (!open)
-            root.monthOffset = 0
-
-        RowLayout {
-            Layout.preferredWidth: VekronaTheme.sizeTarget * 10
-            spacing: VekronaTheme.space2
-
-            BarPill {
-                icon: "chevron_left"
-                ariaName: "Previous month"
-                onClicked: root.monthOffset--
-            }
-
-            Label {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-                style: VekronaTheme.type.title
-                text: Qt.locale().monthName(root.shownMonth.getMonth(), Locale.LongFormat) + " " + root.shownMonth.getFullYear()
-            }
-
-            BarPill {
-                icon: "chevron_right"
-                ariaName: "Next month"
-                onClicked: root.monthOffset++
-            }
+        onOpenChanged: {
+            if (open)
+                Exec.refreshService("vekrona-calendar.service", root.refreshAgeMs);
+            else
+                month.monthOffset = 0;
         }
 
-        GridLayout {
-            Layout.alignment: Qt.AlignHCenter
-            columns: 7
-            columnSpacing: 0
-            rowSpacing: 0
-
-            Repeater {
-                model: 7
-
-                Label {
-                    required property int index
-
-                    Layout.preferredWidth: VekronaTheme.sizeTarget
-                    horizontalAlignment: Text.AlignHCenter
-                    color: VekronaTheme.c.inkMuted
-                    style: VekronaTheme.type.caption
-                    text: Qt.locale().dayName((index + 1) % 7, Locale.NarrowFormat)
-                }
-            }
-
-            Repeater {
-                model: root.leadingBlanks + root.daysInMonth
-
-                Item {
-                    required property int index
-                    readonly property int day: index - root.leadingBlanks + 1
-
-                    Layout.preferredWidth: VekronaTheme.sizeTarget
-                    Layout.preferredHeight: VekronaTheme.sizeTarget
-
-                    Selection {
-                        shown: root.isToday(parent.day)
-                    }
-
-                    Label {
-                        anchors.centerIn: parent
-                        visible: parent.day >= 1
-                        style: root.isToday(parent.day) ? VekronaTheme.type.bodyStrong : VekronaTheme.type.body
-                        text: parent.day
-                    }
-                }
-            }
+        MonthGrid {
+            id: month
+            Layout.preferredWidth: VekronaTheme.sizeTarget * 10
+            today: root.today
+            highlighted: root.today
         }
 
         Label {
