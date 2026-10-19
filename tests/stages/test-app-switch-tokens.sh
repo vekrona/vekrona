@@ -24,7 +24,7 @@ styles = set(re.findall(r'\btypeStyle\("([^"]+)"\)', qml))
 fallbacks = set(re.findall(r'^\s+"([a-z0-9-]+)":', qml, re.M))
 assert looked_up and styles, "no token lookups found; the grep convention broke"
 
-defined = {t["name"] for group in ("color", "spacing", "border", "size", "opacity") for t in design[group]["tokens"]}
+defined = {t["name"] for group in ("color", "spacing", "border", "size") for t in design[group]["tokens"]}
 styles_defined = {s["name"] for g in design["type"]["groups"] for s in g["styles"]}
 
 problems = []

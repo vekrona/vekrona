@@ -37,10 +37,9 @@ Singleton {
         readonly property color onSuccess: tokens.onSuccess
         readonly property color info: tokens.info
         readonly property color onInfo: tokens.onInfo
-        readonly property color scrim: tokens.scrim
     }
 
-    readonly property string path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/vekrona/active-theme.json"
+    readonly property string path: StateDir.path + "/active-theme.json"
 
     // Fallback used only when active-theme.json cannot be loaded: one
     // monochrome palette (the only literals in this module) and plain metrics.
@@ -52,7 +51,7 @@ Singleton {
             accent: "white", onAccent: "black", accentInk: "white", focus: "white", focusInner: "white", selected: "black",
             danger: "white", onDanger: "black", dangerInk: "white",
             warning: "white", onWarning: "black", success: "white", onSuccess: "black",
-            info: "white", onInfo: "black", scrim: "black"
+            info: "white", onInfo: "black"
         };
         const style = (size, line, weight) => ({ size: size, line: line, weight: weight, tracking: 0 });
         return {
@@ -61,7 +60,6 @@ Singleton {
                 spacing: { space1: 4, space2: 8, space3: 12, space4: 16, space6: 24, space8: 32 },
                 border: { hair: 1, control: 1, focus: 1 },
                 size: { target: 32, bar: 36, iconS: 18, iconM: 24, iconL: 48, iconXl: 72 },
-                opacity: { scrim: 0.6 },
                 motion: { fast: 120, popover: 200 },
                 font: { sans: ["sans-serif"], mono: ["monospace"], icon: "Material Symbols Rounded" },
                 type: {
@@ -146,7 +144,6 @@ Singleton {
     readonly property int iconL: doc.metrics.size.iconL
     readonly property int iconXl: doc.metrics.size.iconXl
 
-    readonly property real scrimOpacity: doc.metrics.opacity.scrim
     readonly property int motionFast: doc.metrics.motion.fast
     readonly property int motionPopover: doc.metrics.motion.popover
 

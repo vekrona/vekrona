@@ -28,7 +28,6 @@ ShellRoot {
     // The switcher must still work without tokens, so anything unreadable or missing falls back to
     // the monochrome set below, the only literals in this file.
     readonly property var fallbacks: ({
-            "scrim": "black",
             "surface-1": "black",
             "line": "white",
             "ink": "white",
@@ -37,8 +36,7 @@ ShellRoot {
             "space-2": 8,
             "space-4": 16,
             "size-icon-xl": 72,
-            "border-hair": 1,
-            "opacity-scrim": 0.6
+            "border-hair": 1
         })
     readonly property var fallbackStyle: ({
             family: "sans-serif",
@@ -91,12 +89,12 @@ ShellRoot {
         onLoadFailed: error => console.error("vekrona-app-switch: cannot read the theme mode file:", error)
     }
 
-    // The named token's value: a color for the current mode, or a number for spacing, border, size and opacity.
+    // The named token's value: a color for the current mode, or a number for spacing, border and size.
     function resolve(name) {
         const color = tokens.color.tokens.find(t => t.name === name);
         if (color)
             return color.value[mode];
-        for (const group of ["spacing", "border", "size", "opacity"]) {
+        for (const group of ["spacing", "border", "size"]) {
             const found = tokens[group].tokens.find(t => t.name === name);
             if (found)
                 return parseFloat(found.value);
@@ -269,19 +267,14 @@ ShellRoot {
 
     PanelWindow {
         visible: root.shown
-        color: "transparent"
+        // The window is the panel and nothing else: opaque, and centred by the compositor because it has no anchors.
+        color: root.token("surface-1")
         exclusionMode: ExclusionMode.Ignore
-        anchors { top: true; bottom: true; left: true; right: true }
-        // Only the panel takes pointer input; clicks on the scrim reach the windows below, as before.
-        mask: Region { item: panel }
+        implicitWidth: row.width + 2 * root.space4
+        implicitHeight: row.height + 2 * root.space4
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "vekrona-app-switch"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-
-        Rectangle {
-            anchors.fill: parent
-            color: Qt.alpha(root.token("scrim"), root.token("opacity-scrim"))
-        }
 
         Item {
             id: keys
@@ -301,12 +294,9 @@ ShellRoot {
         }
 
         Rectangle {
-            id: panel
-            anchors.centerIn: parent
-            width: row.width + 2 * root.space4
-            height: row.height + 2 * root.space4
+            anchors.fill: parent
             radius: 0
-            color: root.token("surface-1")
+            color: "transparent"
             border.color: root.token("line")
             border.width: root.token("border-hair")
 
@@ -353,6 +343,7 @@ ShellRoot {
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
+                            textFormat: Text.PlainText
                             text: root.nameFor(tile.modelData.app)
                             color: tile.current ? root.token("ink") : root.token("ink-muted")
                             font.family: root.labelStyle.family

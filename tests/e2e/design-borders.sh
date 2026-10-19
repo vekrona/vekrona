@@ -13,11 +13,6 @@ focused_terminal() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq '[.. | obj
 terminal_is_focused() { [[ -n "$(focused_terminal)" ]]; }
 export -f focused_terminal terminal_is_focused
 
-kill_guest() {
-  local status=0
-  vekrona-dev run pkill "$@" || status=$?
-  ((status <= 1)) || warn "could not stop in the guest: pkill $* (exit $status)"
-}
 trap 'kill_guest -x ghostty' EXIT
 
 vekrona-dev session
