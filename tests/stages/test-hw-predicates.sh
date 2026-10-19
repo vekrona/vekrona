@@ -5,9 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 FIXTURES="$ROOT/tests/fixtures"
 
-PLAIN_STAGES="00-repos 20-snapper 30-packages 40-system 45-auth 50-user 55-agents 60-gaming 65-login-manager 70-verify"
-MAC_STAGES="00-repos 20-snapper 15-mac 30-packages 40-system 45-auth 50-user 55-agents 60-gaming 65-login-manager 70-verify"
-NVIDIA_STAGES="00-repos 20-snapper 10-nvidia 30-packages 40-system 45-auth 50-user 55-agents 60-gaming 65-login-manager 70-verify"
+PLAIN_STAGES="00-repos 20-snapper 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify"
+MAC_STAGES="00-repos 20-snapper 15-mac 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify"
+NVIDIA_STAGES="00-repos 20-snapper 10-nvidia 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify"
 
 on_hardware() {
   local fixture="$1"; shift
@@ -37,7 +37,7 @@ expect_stages() {
 expect_predicates() {
   local fixture="$1" \
     nvidia_gpu="$2" apple="$3" broadcom_wl="$4" brcmfmac_43602="$5" facetime="$6" gmux="$7" laptop="$8" \
-    nvidia_stage="$9" mac_stage="${10}" usb_autosuspend="${11}" mbp12_1="${12}"
+    nvidia_stage="$9" mac_stage="${10}" mbp12_1="${11}"
   expect "$fixture" "$nvidia_gpu" has_nvidia_gpu
   expect "$fixture" "$apple" is_apple_mac
   expect "$fixture" "$broadcom_wl" has_broadcom_wl_wifi
@@ -50,22 +50,27 @@ expect_predicates() {
   expect "$fixture" "$nvidia_stage" stage_applies 10-nvidia
   expect "$fixture" "$mac_stage" stage_applies 15-mac
   expect "$fixture" true stage_applies 30-packages
-  expect "$fixture" "$usb_autosuspend" wants_usb_autosuspend_dropin
   log "ok: $fixture predicates"
 }
 
-#                  fixture          nvidia apple  wl     43602  camera gmux   laptop nv-st  mac-st usb-as mbp12,1
-expect_predicates macbookpro11-1    false  true   true   false  true   false  true   false  true   false  false
-expect_predicates macbookpro11-3    true   true   true   false  true   true   true   false  true   false  false
-expect_predicates macbookpro12-1    false  true   false  true   true   false  true   false  true   false  true
-expect_predicates desktop-nvidia    true   false  false  false  false  false  false  true   false  true   false
-expect_predicates laptop-generic    false  false  false  false  false  false  true   false  false  false  false
-expect_predicates desktop-pascal    true   false  false  false  false  false  false  false  false  true   false
-expect_predicates laptop-optimus-pascal true false false false false false true  false  false  false  false
-expect_predicates laptop-optimus-turing true false false false false false true  true   false  false  false
-expect_predicates desktop-volta     true   false  false  false  false  false  false  false  false  true   false
-expect_predicates desktop-blackwell true   false  false  false  false  false  false  false  false  true   false
-expect_predicates desktop-mixed     true   false  false  false  false  false  false  false  false  true   false
+#                  fixture                 nvidia apple  wl     43602  camera gmux   laptop nv-st  mac-st mbp12,1
+expect_predicates macbookpro11-1          false  true   true   false  true   false  true   false  true   false
+expect_predicates macbookpro11-3          true   true   true   false  true   true   true   false  true   false
+expect_predicates macbookpro12-1          false  true   false  true   true   false  true   false  true   true
+expect_predicates desktop-nvidia          true   false  false  false  false  false  false  true   false  false
+expect_predicates laptop-generic          false  false  false  false  false  false  true   false  false  false
+expect_predicates desktop-pascal          true   false  false  false  false  false  false  false  false  false
+expect_predicates laptop-optimus-pascal   true   false  false  false  false  false  true   false  false  false
+expect_predicates laptop-optimus-turing   true   false  false  false  false  false  true   true   false  false
+expect_predicates desktop-volta           true   false  false  false  false  false  false  false  false  false
+expect_predicates desktop-blackwell       true   false  false  false  false  false  false  false  false  false
+expect_predicates desktop-mixed           true   false  false  false  false  false  false  false  false  false
+
+# irqbalance runs on desktops only (a laptop on battery gains nothing from balanced interrupts).
+expect desktop-nvidia true irqbalance_wanted
+expect laptop-generic false irqbalance_wanted
+expect macbookpro12-1 false irqbalance_wanted
+log "ok: irqbalance_wanted follows is_laptop"
 
 expect macbookpro11-3 true pci_has_id 10de:0fe9
 expect macbookpro11-3 false pci_has_id 10de:ffff
@@ -140,6 +145,17 @@ expect_unsupported "" "empty ID fails closed"
 expect_unsupported 0x1e0 "truncated ID fails closed"
 log "ok: only Turing..Ada NVIDIA IDs are supported"
 
+# --- Stage gating: Apple SMBIOS wins over a supported NVIDIA GPU ---
+
+apple_nvidia="$work/apple-nvidia"
+cp -r "$FIXTURES/desktop-nvidia" "$apple_nvidia"
+printf 'Apple Inc.\n' > "$apple_nvidia/sys/class/dmi/id/sys_vendor"
+VEKRONA_SYSFS_ROOT="$apple_nvidia" stage_applies 15-mac || die "a Mac with a supported NVIDIA GPU must run 15-mac"
+! VEKRONA_SYSFS_ROOT="$apple_nvidia" stage_applies 10-nvidia || die "a Mac with a supported NVIDIA GPU must skip 10-nvidia"
+[[ "$(VEKRONA_SYSFS_ROOT="$apple_nvidia" "$ROOT/install.sh" --list | paste -sd' ')" == "$MAC_STAGES" ]] \
+  || die "a Mac with a supported NVIDIA GPU must list the Mac stages"
+log "ok: Apple SMBIOS picks 15-mac and skips 10-nvidia even with a supported NVIDIA GPU"
+
 # --- NVIDIA stage gating: Secure Boot ---
 
 sb_root="$work/secure-boot"
@@ -177,6 +193,21 @@ MOK_SB="SecureBoot enabled" MOK_KEY="$AKMODS_PUBLIC_KEY is not enrolled" MOK_KEY
   expect_sb_problem "Secure Boot on, akmods key not enrolled" "akmods key $AKMODS_PUBLIC_KEY is not enrolled"
 MOK_SB="SecureBoot enabled" MOK_KEY="$AKMODS_PUBLIC_KEY is already enrolled" \
   expect_sb_fine "Secure Boot on, akmods key enrolled"
+
+# Stage 15 builds wl and facetimehd, so it refuses through the same check, and its reason must not name one stage.
+expect_akmods_build_refused() { # expect_akmods_build_refused <what> <substring of the reason>
+  local out
+  ! out="$(with_mokutil die_if_secure_boot_blocks_akmods 2>&1)" || die "$1: akmods builds were not refused"
+  [[ "$out" == *"$2"* && "$out" != *nvidia* ]] || die "$1: refusal printed '$out', expected it to contain '$2' and not name nvidia"
+}
+expect_akmods_build_allowed() { # expect_akmods_build_allowed <what>
+  with_mokutil die_if_secure_boot_blocks_akmods || die "$1: akmods builds were refused"
+}
+MOK_SB="SecureBoot enabled" MOK_KEY="is not enrolled" MOK_KEY_STATUS=1 \
+  expect_akmods_build_refused "Secure Boot on, akmods key not enrolled" "disable Secure Boot or enroll the key"
+MOK_SB="gibberish" expect_akmods_build_refused "unverifiable Secure Boot state" "cannot verify Secure Boot"
+MOK_SB="SecureBoot enabled" MOK_KEY="is already enrolled" expect_akmods_build_allowed "Secure Boot on, akmods key enrolled"
+MOK_SB="SecureBoot disabled" expect_akmods_build_allowed "Secure Boot off"
 MOK_SB="SecureBoot disabled" MOK_KEY="is not enrolled" expect_sb_fine "Secure Boot off"
 MOK_SB="$(printf 'SecureBoot disabled\nPlatform is in Setup Mode')" expect_sb_fine "Secure Boot off in Setup Mode (real RTX 4090 machine output)"
 MOK_SB="This system doesn't support Secure Boot" MOK_SB_STATUS=1 expect_sb_fine "firmware without Secure Boot support"
@@ -217,16 +248,42 @@ log "ok: wants_nvidia_stage follows Secure Boot"
 
 # --- install.sh reports a refused NVIDIA stage once ---
 
+# A regression that lets install.sh run the real stage would call sudo, dnf and akmods on this machine. These stand in for them
+# on the PATH of every install.sh call below, refuse, and leave a line in STAGE_TOOL_LOG, which each call must leave empty.
+STAGE_TOOL_STUBS="$work/stage-tool-stubs"
+STAGE_TOOL_LOG="$work/stage-tool-calls"
+mkdir "$STAGE_TOOL_STUBS"
+: > "$STAGE_TOOL_LOG"
+for tool in sudo dnf dnf5 akmods dracut modprobe; do
+  write_fake "$STAGE_TOOL_STUBS/$tool" <<'FAKE'
+#!/usr/bin/env bash
+echo "${0##*/} $*" >> "$STAGE_TOOL_LOG"
+echo "the real ${0##*/} must not run in this test" >&2
+exit 99
+FAKE
+done
+export STAGE_TOOL_LOG
+install_sh() { # install_sh <fixture> <install.sh args...>; stdout is dropped, stderr is printed, the status is returned
+  local fixture="$1"
+  shift
+  local status=0
+  # shellcheck disable=SC2069 # the warnings on stderr are wanted, the stage list on stdout is not
+  PATH="$STAGE_TOOL_STUBS:$PATH" VEKRONA_SYSFS_ROOT="$FIXTURES/$fixture" "$ROOT/install.sh" "$@" 2>&1 >/dev/null || status=$?
+  [[ ! -s "$STAGE_TOOL_LOG" ]] || die "$fixture: install.sh $* ran a stage: $(<"$STAGE_TOOL_LOG")"
+  return "$status"
+}
+
 expect_refusal_warning() { # expect_refusal_warning <fixture> <substring>; naming the refused stage dies before any stage runs
-  local warnings
-  warnings="$(VEKRONA_SYSFS_ROOT="$FIXTURES/$1" "$ROOT/install.sh" 10-nvidia 2>&1 >/dev/null || true)"
+  local warnings status=0
+  warnings="$(install_sh "$1" 10-nvidia)" || status=$?
+  [[ "$status" -eq 1 ]] || die "$1: install.sh 10-nvidia must die (exit 1) for a refused stage, but exited $status: $warnings"
   [[ "$(grep -c 'keeping nouveau' <<<"$warnings")" == 1 && "$warnings" == *"$2"* ]] \
     || die "$1: install.sh warned '$warnings', expected one 'keeping nouveau' warning containing '$2'"
 }
 
 expect_no_warning() {
   local warnings
-  warnings="$(VEKRONA_SYSFS_ROOT="$FIXTURES/$1" "$ROOT/install.sh" --list 2>&1 >/dev/null)"
+  warnings="$(install_sh "$1" --list)"
   [[ -z "$warnings" ]] || die "$1: install.sh warned '$warnings', expected nothing"
 }
 
@@ -235,10 +292,13 @@ expect_refusal_warning laptop-optimus-pascal 10de:1c8c
 expect_refusal_warning desktop-volta 10de:1db4
 expect_refusal_warning desktop-blackwell 10de:2b85
 expect_refusal_warning desktop-mixed 10de:1b80
-for listing in "--list" "--list 10-nvidia" "--list 30-packages"; do
+# Listing the refused stage by name is refused (exit 1, "does not apply"), without the warning that running it prints.
+for listing in "--list:0" "--list 10-nvidia:1" "--list 30-packages:0"; do
+  status=0
   # shellcheck disable=SC2086
-  [[ "$(VEKRONA_SYSFS_ROOT="$FIXTURES/desktop-pascal" "$ROOT/install.sh" $listing 2>&1 >/dev/null || true)" != *"keeping nouveau"* ]] \
-    || die "install.sh $listing must not warn about a refused NVIDIA stage"
+  listed="$(install_sh desktop-pascal ${listing%:*})" || status=$?
+  [[ "$status" -eq "${listing##*:}" ]] || die "install.sh ${listing%:*} exited $status, expected ${listing##*:}: $listed"
+  [[ "$listed" != *"keeping nouveau"* ]] || die "install.sh ${listing%:*} must not warn about a refused NVIDIA stage"
 done
 expect_no_warning desktop-nvidia
 expect_no_warning laptop-optimus-turing

@@ -84,40 +84,18 @@ Singleton {
             switched();
     }
 
+    // Records why the last query or switch failed, for the menu. The caller has already logged it.
     function fail(reason: string): void {
         error = reason;
-        console.error("Keyboard: " + reason);
-    }
-
-    function query(): void {
-        const argv = ["swaymsg", "-t", "get_inputs", "--raw"];
-        Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0) {
-                available = false;
-                fail(Exec.failure(argv, code, stderr));
-                return;
-            }
-            let inputs;
-            try {
-                inputs = JSON.parse(stdout);
-            } catch (e) {
-                available = false;
-                fail("swaymsg -t get_inputs printed invalid JSON: " + e);
-                return;
-            }
-            apply(inputs);
-        });
     }
 
     // `layout` is an index or "next"; Sway's input event then refreshes `activeIndex`.
     function switchTo(layout: string): void {
         const argv = ["swaymsg", "input", "type:keyboard", "xkb_switch_layout", layout];
         quiet = true;
-        Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0) {
-                quiet = false;
-                fail(Exec.failure(argv, code, stderr));
-            }
+        Exec.runOr(argv, stdout => {}, reason => {
+            quiet = false;
+            fail(reason);
         });
     }
 
@@ -131,10 +109,16 @@ Singleton {
         switchTo("next");
     }
 
-    Component.onCompleted: query()
+    SwayQuery {
+        id: inputs
+        argv: ["swaymsg", "-t", "get_inputs", "--raw"]
+        onParsed: json => root.apply(json)
+        onUnavailable: root.available = false
+        onFailed: reason => root.fail(reason)
+    }
 
     I3IpcListener {
         subscriptions: ["input"]
-        onIpcEvent: root.query()
+        onIpcEvent: inputs.run()
     }
 }
