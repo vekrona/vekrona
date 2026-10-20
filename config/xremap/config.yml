@@ -1,4 +1,15 @@
 modmap:
+  # The app switcher has to know when Super is let go (wait-super-release.py), and the user cannot read the keyboards.
+  # The key still reaches everything else as it is.
+  - name: super-state
+    remap:
+      Super_L:
+        press: [{launch: ["/usr/local/lib/vekrona/libexec/vekrona-super-state", "L", "down"]}]
+        release: [{launch: ["/usr/local/lib/vekrona/libexec/vekrona-super-state", "L", "up"]}]
+      Super_R:
+        press: [{launch: ["/usr/local/lib/vekrona/libexec/vekrona-super-state", "R", "down"]}]
+        release: [{launch: ["/usr/local/lib/vekrona/libexec/vekrona-super-state", "R", "up"]}]
+
   - name: caps-hyper
     remap:
       CapsLock:
@@ -10,7 +21,7 @@ keymap:
   - name: cmd-layer
     exact_match: true
     application:
-      not: &terminals [com.mitchellh.ghostty, foot, org.wezfurlong.wezterm, vekrona.agent]
+      not: &terminals [com.mitchellh.ghostty, foot, org.wezfurlong.wezterm, vekrona.agent, vekrona.perf]
     remap:
       Super-a: C-a
       Super-c: C-c

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# A shutdown stops the login session's scope and the user manager at once, so Sway dies while the session's apps still
+# run, and every Wayland client among them fails on the broken display. Holding a delay lock keeps logind from starting
+# the shutdown until this has stopped the session's units while Sway still serves them.
+# A bare call is refused, like in every vekrona tool that acts: the unit runs `run`, which re-executes itself as `run --holding-lock`.
+case "$*" in
+  run)
+    exec systemd-inhibit --what=shutdown --mode=delay --who=vekrona \
+      --why="Stop the desktop apps while Sway still runs" "$0" run --holding-lock
+    ;;
+  "run --holding-lock") ;;
+  *)
+    echo "usage: vekrona-session-teardown run" >&2
+    exit 2
+    ;;
+esac
+
+while IFS= read -r line; do
+  [[ "$line" == *".PrepareForShutdown (true,)" ]] || continue
+  exec systemctl --user start --job-mode=replace-irreversibly sway-session-shutdown.target
+done < <(gdbus monitor --system --dest org.freedesktop.login1 --object-path /org/freedesktop/login1)
+echo "vekrona-session-teardown: the logind signal monitor ended before a shutdown" >&2
+exit 1

@@ -1,0 +1,10 @@
+[Unit]
+Description=Stop the desktop apps before a shutdown takes Sway away
+After=sway-session.target
+
+[Service]
+ExecStart=%h/.local/bin/vekrona-session-teardown run
+Restart=on-failure
+
+[Install]
+WantedBy=sway-session.target

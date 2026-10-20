@@ -1,9 +1,11 @@
 [Unit]
 Description=Refresh the Vekrona calendar
+PartOf=sway-session.target
 
 [Timer]
 OnActiveSec=30s
-OnUnitActiveSec=15min
+OnUnitActiveSec=1h
+AccuracySec=5min
 
 [Install]
-WantedBy=timers.target
+WantedBy=sway-session.target

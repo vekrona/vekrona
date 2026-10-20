@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Peers on the tailnet reach sshd and nothing else: the target is the default (reject), not trusted.
+     The zone is bound by source as well as by interface: NetworkManager keeps its own idea of which zone tailscale0
+     is in, but a source match takes precedence over an interface, and NetworkManager does not touch sources.
+     The ranges are Tailscale's CGNAT range (what Headscale hands out) and its IPv6 ULA. -->
+<zone>
+  <short>Tailnet</short>
+  <description>Traffic arriving over Tailscale. Only ssh is open; everything else is rejected.</description>
+  <service name="ssh"/>
+  <interface name="tailscale0"/>
+  <source address="100.64.0.0/10"/>
+  <source address="fd7a:115c:a1e0::/48"/>
+</zone>

@@ -1,11 +1,16 @@
 [Unit]
 Description=Tailscale tray icon
 PartOf=sway-session.target
-After=sway-session.target
+After=sway-session.target vekrona-shell.service
 
 [Service]
+ExecStartPre=/usr/bin/gdbus wait --session --timeout 30 org.kde.StatusNotifierWatcher
 ExecStart=/usr/bin/tailscale systray
-Restart=on-failure
+# tailscale 1.98 exits 1 on every SIGTERM: it logs "exiting", then its own cancelled IPN bus watch fails ("context canceled").
+# That makes exit 1 a clean stop, so any exit before a stop is a failure only if it repeats: Restart=always restarts it, and the
+# default start limit fails the unit (and the error pipeline records it) when it dies again at once.
+SuccessExitStatus=1
+Restart=always
 
 [Install]
 WantedBy=sway-session.target

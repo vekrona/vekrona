@@ -3,13 +3,21 @@ Description=Vekrona shell (bar, notifications, launcher)
 PartOf=sway-session.target
 After=sway-session.target
 ConditionEnvironment=XDG_CURRENT_DESKTOP=sway
+# The session is unusable without the bar, so never give up restarting. The delay between restarts grows from 1 s to 60 s, so a crash loop
+# does not spin; every failed exit still logs "Failed with result", which the error pipeline records.
+StartLimitIntervalSec=0
 
 [Service]
 Type=dbus
 BusName=org.freedesktop.Notifications
+# The '-' keeps a failure from stopping the shell: no bar is worse. The subcommand reports the failure to the journal itself.
+ExecStartPre=-%h/.local/bin/vekrona-error refresh-unread
 ExecStart=/usr/bin/qs -c vekrona-shell
 SyslogIdentifier=vekrona-shell
 Restart=always
+RestartSec=1
+RestartSteps=6
+RestartMaxDelaySec=60
 
 [Install]
 WantedBy=sway-session.target

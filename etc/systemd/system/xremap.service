@@ -1,0 +1,27 @@
+[Unit]
+Description=xremap key remapper
+
+[Service]
+# Reads the keyboards through the input group and writes /dev/uinput; nothing else on the system is open to it. The
+# session user is not in that group. xremap.path starts it when a Wayland socket exists, and the +-prefixed step gives
+# this user access to that one socket (per-app mappings ask the compositor which window has the focus).
+User=xremap
+Group=xremap
+RuntimeDirectory=xremap
+RuntimeDirectoryMode=0755
+EnvironmentFile=-/run/xremap/wayland.env
+ExecStartPre=+/usr/local/lib/vekrona/libexec/vekrona-xremap-access
+ExecStart=/usr/bin/xremap-wlroots --watch=config,device /etc/xremap/config.yml
+Restart=on-failure
+RestartSec=1
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+DevicePolicy=closed
+DeviceAllow=char-input rw
+DeviceAllow=/dev/uinput rw

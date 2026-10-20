@@ -1,0 +1,11 @@
+[Unit]
+Description=Start xremap when a Wayland session starts
+
+[Path]
+# A compositor's socket in the runtime directory of the user vekrona is installed for: wayland-1, wayland-2, ... (not the
+# wayland-N.lock files). @UID@ is that uid (stage 40 fills it in): systemd cannot watch a glob in the directory part,
+# so /run/user/*/ would never see a socket created after the directory. xremap.service takes it from there.
+PathExistsGlob=/run/user/@UID@/wayland-[0-9]
+
+[Install]
+WantedBy=multi-user.target

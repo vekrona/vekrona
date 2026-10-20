@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Runs as root before xremap.service starts (ExecStartPre=+). Finds the running Sway's Wayland socket, lets the xremap
+# user reach it (an ACL on the socket and on its owner's runtime directory, both gone with the session) and writes the
+# environment xremap needs to find it: /run/xremap/wayland.env.
+set -euo pipefail
+
+REMAPPER=xremap
+ENV_FILE="${VEKRONA_XREMAP_ENV_FILE:-/run/xremap/wayland.env}" # the variable is for the test
+
+fail() {
+  echo "vekrona-xremap-access: $*" >&2
+  exit 1
+}
+
+[[ $EUID -eq 0 ]] || fail "must run as root"
+command -v setfacl >/dev/null || fail "setfacl (package acl) is missing"
+
+# Sockets that a sway process listens on, as "path" lines.
+sockets="$(ss -xlpH | awk '/\/run\/user\/[0-9]+\/wayland-[0-9]+ / && /users:\(\("sway"/ { for (i = 1; i <= NF; i++) if ($i ~ /^\/run\/user\//) print $i }')"
+[[ -n "$sockets" ]] || fail "no Sway Wayland socket is listening"
+[[ "$(wc -l <<<"$sockets")" -eq 1 ]] || fail "more than one Sway Wayland socket, cannot tell which to remap for: $(tr '\n' ' ' <<<"$sockets")"
+
+runtime_dir="$(dirname "$sockets")"
+display="$(basename "$sockets")"
+setfacl -m "u:$REMAPPER:x" "$runtime_dir"
+setfacl -m "u:$REMAPPER:rw" "$sockets"
+printf 'XDG_RUNTIME_DIR=%s\nWAYLAND_DISPLAY=%s\n' "$runtime_dir" "$display" >"$ENV_FILE"

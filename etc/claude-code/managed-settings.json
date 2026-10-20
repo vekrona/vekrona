@@ -1,7 +1,29 @@
 {
   "forceLoginMethod": "claudeai",
-  "env": {
-    "DISABLE_AUTOUPDATER": "1",
-    "DISABLE_UPDATES": "1"
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.local/share/keyrings/**)",
+      "Read(~/.config/vdirsyncer/config)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.codex/auth.json)",
+      "Read(~/.local/share/opencode/auth.json)",
+      "Read(~/.local/state/syncthing/config.xml)",
+      "Read(~/.local/state/syncthing/*.pem)",
+      "Read(~/.config/syncthing/**)",
+      "Read(~/.local/state/vekrona/syncthing-gui-password)",
+      "Read(~/.config/mozilla/**/logins.json)",
+      "Read(~/.config/mozilla/**/key4.db)",
+      "Read(~/.config/mozilla/**/cookies.sqlite)",
+      "Read(~/.mozilla/firefox/**/logins.json)",
+      "Read(~/.mozilla/firefox/**/key4.db)",
+      "Read(~/.mozilla/firefox/**/cookies.sqlite)",
+      "Read(~/.config/gh/hosts.yml)",
+      "Read(~/.config/1Password/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.netrc)"
+    ]
   }
 }

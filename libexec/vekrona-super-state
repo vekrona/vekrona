@@ -1,0 +1,15 @@
+#!/bin/sh
+# Run by xremap (config/xremap/config.yml) when a Super key goes down or up: usage vekrona-super-state L|R down|up.
+# The app switcher (wait-super-release.py) needs to know when Super is let go, and reading the keyboards for that would
+# put the user in the input group. xremap sees every key, so it writes the answer where the user can read it.
+set -eu
+case "$1" in
+  L | R) ;;
+  *) echo "usage: vekrona-super-state L|R down|up" >&2; exit 2 ;;
+esac
+case "$2" in
+  down) state=1 ;;
+  up) state=0 ;;
+  *) echo "usage: vekrona-super-state L|R down|up" >&2; exit 2 ;;
+esac
+printf %s "$state" >"${VEKRONA_SUPER_STATE_DIR:-/run/xremap}/super-$1" # the variable is for the test

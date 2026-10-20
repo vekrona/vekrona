@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/display-scale.sh"
 
+# First: a user unit linked below runs its ~/.local/bin tool as soon as any daemon-reload (an RPM scriptlet, say) sees it.
+ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
 ensure_symlink_tree "$VEKRONA_ROOT/config/sway" "$HOME/.config/sway"
 mkdir -p "$HOME/.config/sway/config.d" # where personal settings (monitor outputs) go; config/sway/config includes it last
 ensure_internal_panel_scale
@@ -29,27 +31,13 @@ fi
 ensure_symlink "$VEKRONA_ROOT/config/xremap/config.yml" "$HOME/.config/xremap/config.yml"
 # Wayland session: `nvidia-settings -l` loads X11 settings and fails at every login when no NVIDIA driver is loaded.
 ensure_symlink "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" "$HOME/.config/autostart/nvidia-settings-user.desktop"
+ensure_symlink "$VEKRONA_ROOT/config/autostart/sealertauto.desktop" "$HOME/.config/autostart/sealertauto.desktop"
 
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/xremap.service" "$HOME/.config/systemd/user/xremap.service"
+ensure_symlink_tree "$VEKRONA_ROOT/config/systemd-user" "$HOME/.config/systemd/user"
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-app-switch" "$HOME/.config/quickshell/vekrona-app-switch"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-app-switch.service" "$HOME/.config/systemd/user/vekrona-app-switch.service"
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-shell" "$HOME/.config/quickshell/vekrona-shell"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-shell.service" "$HOME/.config/systemd/user/vekrona-shell.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-cliphist.service" "$HOME/.config/systemd/user/vekrona-cliphist.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-idle.service" "$HOME/.config/systemd/user/vekrona-idle.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-night.service" "$HOME/.config/systemd/user/vekrona-night.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-weather.service" "$HOME/.config/systemd/user/vekrona-weather.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-weather.timer" "$HOME/.config/systemd/user/vekrona-weather.timer"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-calendar.service" "$HOME/.config/systemd/user/vekrona-calendar.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-calendar.timer" "$HOME/.config/systemd/user/vekrona-calendar.timer"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-lock.service" "$HOME/.config/systemd/user/vekrona-lock.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-update-notify.service" "$HOME/.config/systemd/user/vekrona-update-notify.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-update-notify.path" "$HOME/.config/systemd/user/vekrona-update-notify.path"
 ensure_symlink "$VEKRONA_ROOT/config/khal/config" "$HOME/.config/khal/config"
 ensure_symlink "$VEKRONA_ROOT/config/vdirsyncer/config.example" "$HOME/.config/vdirsyncer/config.example"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/tailscale-systray.service" "$HOME/.config/systemd/user/tailscale-systray.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors.service" "$HOME/.config/systemd/user/vekrona-errors.service"
-ensure_symlink "$VEKRONA_ROOT/config/systemd-user/vekrona-errors-failed.service" "$HOME/.config/systemd/user/vekrona-errors-failed.service"
 
 # The theme mode and the rendered theme come before any unit restart: the app switcher and the shell read active-theme.json on start.
 theme_state_dir="$(vekrona_state_dir)"
@@ -65,7 +53,7 @@ elif [[ "$(cat "$theme_name_file")" != dark && "$(cat "$theme_name_file")" != li
 else
   log "theme mode already present: $theme_name_file"
 fi
-"$VEKRONA_ROOT/bin/vekrona-render-theme"
+"$VEKRONA_ROOT/bin/vekrona-render-theme" all
 
 ensure_user_unit_stopped dms.service
 
@@ -73,21 +61,33 @@ for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/sk
   ensure_symlink "$VEKRONA_ROOT/config/agents/skills/vekrona-diagnose" "$skills_dir/vekrona-diagnose"
 done
 
-for retired in "$HOME/.config/systemd/user/sway-session.target.wants/dms.service" \
+# A path an earlier vekrona left behind: $1 is why it is retired, the rest are the paths.
+remove_retired() {
+  local reason="$1" retired
+  shift
+  for retired in "$@"; do
+    if [[ -e "$retired" || -L "$retired" ]]; then
+      log "removing: $retired ($reason)"
+      if [[ -d "$retired" && ! -L "$retired" ]]; then chmod -R u+w "$retired"; fi
+      rm -rf "$retired"
+      [[ ! -e "$retired" && ! -L "$retired" ]] || die "failed to remove $retired"
+    else
+      log "absent: $retired"
+    fi
+  done
+}
+
+remove_retired "left by DankMaterialShell, which vekrona-shell replaced" \
+  "$HOME/.config/systemd/user/sway-session.target.wants/dms.service" \
   "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service" \
   "$HOME/.config/systemd/user/dms.service.d" \
   "$HOME/.config/DankMaterialShell" "$HOME/.local/state/DankMaterialShell" "$HOME/.cache/DankMaterialShell" \
   "$HOME/.config/gtk-3.0/dank-colors.css" "$HOME/.config/gtk-4.0/dank-colors.css" \
-  "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell"; do
-  if [[ -e "$retired" || -L "$retired" ]]; then
-    log "removing: $retired (left by DankMaterialShell, which vekrona-shell replaced)"
-    if [[ -d "$retired" && ! -L "$retired" ]]; then chmod -R u+w "$retired"; fi
-    rm -rf "$retired"
-    [[ ! -e "$retired" && ! -L "$retired" ]] || die "failed to remove $retired"
-  else
-    log "absent: $retired"
-  fi
-done
+  "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell"
+# The timers ran from timers.target, so under linger they polled while nobody was logged in; they now belong to the session.
+remove_retired "the weather and calendar timers now start with the sway session" \
+  "$HOME/.config/systemd/user/timers.target.wants/vekrona-weather.timer" \
+  "$HOME/.config/systemd/user/timers.target.wants/vekrona-calendar.timer"
 
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
@@ -121,7 +121,7 @@ ensure_flatpak_override() {
   local app_id="$1" flag shown missing=()
   shift
   flatpak_installed "$app_id" || { log "flatpak not installed, skipping override: $app_id"; return 0; }
-  shown="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
+  shown="$(flatpak override --user --show "$app_id")" || die "cannot read the flatpak override of $app_id"
   for flag in "$@"; do
     flatpak_override_has "$flag" "$shown" || missing+=("$flag")
   done
@@ -131,7 +131,7 @@ ensure_flatpak_override() {
   fi
   log "setting flatpak override: $app_id ${missing[*]}"
   flatpak override --user "${missing[@]}" "$app_id"
-  shown="$(flatpak override --user --show "$app_id")"
+  shown="$(flatpak override --user --show "$app_id")" || die "cannot read the flatpak override of $app_id"
   for flag in "${missing[@]}"; do
     flatpak_override_has "$flag" "$shown" || die "flatpak override not applied: $app_id $flag"
   done
@@ -143,7 +143,7 @@ ensure_flatpak_override_dropped() {
   local entries=()
   shift
   flatpak_installed "$app_id" || { log "flatpak not installed, skipping override cleanup: $app_id"; return 0; }
-  shown="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
+  shown="$(flatpak override --user --show "$app_id")" || die "cannot read the flatpak override of $app_id"
   for flag in "$@"; do
     case "$flag" in
       --socket=*) entry="${flag#--socket=}" ;;
@@ -190,7 +190,7 @@ for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
     firefox --headless -CreateProfile "$profile $profiledir"
     grep -q "Name=$profile$" "$firefox_root/profiles.ini" || die "firefox profile not created: $profile"
   fi
-  ensure_symlink "$appdir/user.js" "$profiledir/user.js"
+  ensure_webapp_user_js "$appdir" "$profiledir/user.js"
   ensure_symlink "$appdir/app.desktop" "$HOME/.local/share/applications/$profile.desktop"
   ensure_symlink "$appdir/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/$profile.svg"
 done
@@ -206,8 +206,6 @@ done < <(vekrona_webapp_profile_dirs)
 # The renderer themes the default profile and every vekrona-* profile, so the new ones get their userChrome.css now.
 "$VEKRONA_ROOT/bin/vekrona-render-theme" firefox
 
-ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
-
 # vekrona-lock.service starts it as `qs -c vekrona-lock`, which looks under ~/.config/quickshell.
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-lock" "$HOME/.config/quickshell/vekrona-lock"
 
@@ -215,6 +213,8 @@ ensure_default_browser
 
 ensure_symlink "$VEKRONA_ROOT/config/scopebuddy/scb.conf" "$HOME/.config/scopebuddy/scb.conf"
 ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/MangoHud/MangoHud.conf"
+ensure_symlink_tree "$VEKRONA_ROOT/config/wireplumber" "$HOME/.config/wireplumber"
+ensure_symlink_tree "$VEKRONA_ROOT/config/pipewire" "$HOME/.config/pipewire"
 
 mapfile -t link_dirs < <(vekrona_link_dirs)
 prune_vekrona_links "${link_dirs[@]}"
@@ -222,24 +222,30 @@ prune_vekrona_links "${link_dirs[@]}"
 # Everything these units read when they start is linked or generated above this line; add new files before it.
 prune_dead_quickshell_instances "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell"
 systemctl --user daemon-reload
-ensure_user_unit_enabled xremap.service vekrona-app-switch.service vekrona-shell.service tailscale-systray.service vekrona-errors.service vekrona-cliphist.service vekrona-idle.service vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path vekrona-update-notify.service syncthing.service
-# The syncthing webapp talks to this daemon, so it must not wait for the next login.
+# The units the sway session runs, in restart order, and the timers and watcher that trigger the others.
+session_services=(vekrona-lid tailscale-systray vekrona-app-switch vekrona-idle vekrona-session-teardown vekrona-cliphist vekrona-shell vekrona-errors vekrona-audio-watchdog)
+session_triggers=(vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path)
+ensure_user_unit_enabled "${session_services[@]/%/.service}" "${session_triggers[@]}" vekrona-update-notify.service syncthing.service
+# The syncthing webapp talks to this daemon, so it must not wait for the next login. A GUI login goes in while the daemon is stopped.
+ensure_syncthing_gui_auth
 systemctl --user start syncthing.service || die "syncthing.service failed to start"
 # Enabling only wires a unit into the next login; a live session needs it running now, on the files linked above.
 if [[ -n "$(sway_socket)" ]]; then
-  for unit in xremap tailscale-systray vekrona-app-switch vekrona-idle vekrona-cliphist vekrona-shell vekrona-errors; do
+  for unit in pipewire wireplumber "${session_services[@]}"; do
     log "restarting $unit.service for the running sway session"
     systemctl --user restart "$unit.service" || die "$unit.service failed to start"
   done
-  log "starting the weather and calendar timers and the update watcher for the running sway session"
-  systemctl --user start vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path || die "the weather and calendar timers and the update watcher failed to start"
+  log "starting the triggers (${session_triggers[*]}) for the running sway session"
+  systemctl --user start "${session_triggers[@]}" || die "the triggers (${session_triggers[*]}) failed to start"
 fi
 
+# A floating nixpkgs#devbox would install whatever the registry resolves to that day. To update devbox, bump this to a nixpkgs commit that has the version you want.
+DEVBOX_NIXPKGS_REV=b6c8664de9b6cc07fe5666a29f91884ba81197c4 # devbox 0.17.5
 require_cmd nix
 if nix profile list --json | jq -e '.elements | has("devbox")' >/dev/null; then
   log "devbox already installed via nix profile"
 else
-  log "installing devbox via nix profile"
-  nix profile install nixpkgs#devbox
+  log "installing devbox via nix profile (nixpkgs $DEVBOX_NIXPKGS_REV)"
+  nix profile install "github:NixOS/nixpkgs/$DEVBOX_NIXPKGS_REV#devbox"
 fi
 assert "devbox runs" "$HOME/.nix-profile/bin/devbox" version

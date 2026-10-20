@@ -1,0 +1,6 @@
+# sudo authenticates and opens its session through vekrona's own PAM service, which is the stock "sudo" one except that
+# pam_systemd registers no logind session for it (etc/pam.d/vekrona-sudo). With the stock service every short sudo
+# left a root session in state "closing" in logind (276 piled up; github.com/systemd/systemd issue 43745, open: a
+# ReleaseSession that arrives after the session's scope stopped). pam_limits and pam_keyinit still run. `sudo -i` keeps
+# its own service (pam_login_service) and its logind session.
+Defaults pam_service=vekrona-sudo

@@ -1,0 +1,3 @@
+# The kernel manages the NVMe queue interrupts itself (their smp_affinity is read-only), and irqbalance 1.9.5 cannot
+# tell: it logs "Cannot change IRQ N affinity: Permission denied" for each queue on every start and resume. Ban the driver.
+IRQBALANCE_ARGS="--banmod=nvme"

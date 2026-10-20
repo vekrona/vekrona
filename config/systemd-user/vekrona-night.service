@@ -4,4 +4,5 @@ PartOf=sway-session.target
 After=sway-session.target
 
 [Service]
+# A manual toggle for a constant warm tint: wlsunset needs a location, and 0/0 with day 4100 K against night 4000 K makes the sunrise and sunset ramp invisible.
 ExecStart=/usr/bin/wlsunset -t 4000 -T 4100 -l 0 -L 0

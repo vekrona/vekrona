@@ -1,0 +1,3 @@
+# xremap's rule (00-xremap-input.rules) tags /dev/uinput uaccess, which gives whoever sits at the seat write access: any
+# process of that user could inject key presses. Only the input group (the xremap user) may open it.
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", TAG-="uaccess"

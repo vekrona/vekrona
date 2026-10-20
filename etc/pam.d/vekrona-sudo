@@ -1,0 +1,11 @@
+#%PAM-1.0
+# The stock /etc/pam.d/sudo, plus one line: XDG_SESSION_CLASS=none (etc/vekrona/sudo-session.env) in the PAM environment
+# makes pam_systemd (inside the system-auth include) skip registering a logind session. sudoers selects this service
+# (etc/sudoers.d/50-vekrona-sudo-pam-service).
+auth       include      system-auth
+account    include      system-auth
+password   include      system-auth
+session    optional     pam_keyinit.so revoke
+session    required     pam_limits.so
+session    required     pam_env.so conffile=/dev/null envfile=/etc/vekrona/sudo-session.env
+session    include      system-auth
