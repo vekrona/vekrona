@@ -1,10 +1,13 @@
 module Vekrona
 singleton VekronaTheme 1.0 VekronaTheme.qml
+singleton StateDir 1.0 StateDir.qml
+StateFile 1.0 StateFile.qml
 Label 1.0 Label.qml
 FixedWidthLabel 1.0 FixedWidthLabel.qml
 Pictogram 1.0 Pictogram.qml
 BarPill 1.0 BarPill.qml
 Badge 1.0 Badge.qml
+Pulse 1.0 Pulse.qml
 Separator 1.0 Separator.qml
 Rule 1.0 Rule.qml
 Popout 1.0 Popout.qml
@@ -12,3 +15,5 @@ Slider 1.0 Slider.qml
 FocusRing 1.0 FocusRing.qml
 Selection 1.0 Selection.qml
 TextField 1.0 TextField.qml
+SelectableLabel 1.0 SelectableLabel.qml
+WheelSteps 1.0 WheelSteps.qml

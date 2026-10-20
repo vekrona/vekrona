@@ -4,9 +4,19 @@ Every key binding and remap vekrona sets up.
 
 Caps Lock becomes Hyper (Ctrl+Alt+Super) when held, and a plain Caps Lock
 when tapped alone within 300 ms. This comes from the `caps-hyper` modmap in
-`config/xremap/config.yml`, run by xremap-wlroots as a user systemd service
-(`config/systemd-user/xremap.service`). It requires the user to be in the
-`input` group so xremap-wlroots can read raw keyboard events (see [Known issues](known-issues.md)).
+`config/xremap/config.yml`, run by xremap-wlroots as a system service (`xremap.service`) under its own user, `xremap`.
+That user is in the `input` group and reads the keyboards and writes `/dev/uinput`; **your user is not in the `input`
+group**, so no program you run can log raw key events, and `/dev/uinput` is closed to the seat's user as well
+(`etc/udev/rules.d/70-vekrona-uinput.rules`). xremap's config is root's copy, `/etc/xremap/config.yml`, installed from
+`config/xremap/config.yml` by `./install.sh 40`: edit the checkout, run the stage, and the service restarts. (A config the user
+could write would run commands as the xremap user.) `~/.config/xremap/config.yml` stays a link to the checkout for
+`vekrona-keybindings` and the validation.
+
+`xremap.path` starts the service when a Wayland socket (`/run/user/UID/wayland-N`) appears. Before it starts, a root step
+(`libexec/vekrona-xremap-access`) finds the socket Sway listens on, gives the xremap user an ACL on the socket and on the
+runtime directory (both disappear with the session) and writes `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY` to
+`/run/xremap/wayland.env`: the per-app remaps (terminals against everything else) ask the compositor which window has the
+focus. `journalctl -u xremap` shows the service; `sudo systemctl restart xremap` restarts it.
 
 There are two layers in Sway (`config/sway/config`): Cmd (Super) for the
 everyday window keys, and Hyper for launching things, panels and moving
@@ -25,6 +35,7 @@ Cmd (plain `Mod4`):
 | Cmd+- | open the launcher; the app opens below the focused window |
 | Cmd+Return | toggle fullscreen |
 | Cmd+q | kill the focused window |
+| Cmd+Ctrl+q | `vekrona-lock start` (the macOS shortcut for the same thing as Hyper+Escape) |
 | Cmd+Tab, Cmd+Shift+Tab | app switcher (see below) |
 | Cmd+Shift+3 | `vekrona-screenshot screen` |
 | Cmd+Shift+4 | `vekrona-screenshot area` |
@@ -38,23 +49,23 @@ Sway defines `$hyper` as `Mod4+Ctrl+Mod1` and binds the rest on it:
 | Binding | Action |
 |---|---|
 | Hyper+Return | launch ghostty |
-| Hyper+v | `qs -c vekrona-shell ipc call launcher open clip` (the launcher in its clipboard history mode) |
+| Hyper+v | `qs -c vekrona-shell ipc call launcher toggleMode clip` (the launcher in its clipboard history mode) |
 | Hyper+n | `qs -c vekrona-shell ipc call notifications toggle` |
-| Hyper+Escape | `vekrona-lock` |
-| Hyper+BackSpace | `qs -c vekrona-shell ipc call launcher open power` (the launcher in its power mode) |
-| Hyper+slash | show the keybindings help panel (`vekrona-keybindings`) |
+| Hyper+Escape | `vekrona-lock start` |
+| Hyper+BackSpace | `qs -c vekrona-shell ipc call launcher toggleMode power` (the launcher in its power mode) |
+| Hyper+slash | show the keybindings help panel (`vekrona-keybindings menu`) |
 | Hyper+a | open the coding agent (`vekrona-agent --pick`) |
-| Hyper+Shift+a | pick a recorded error and open the agent on it (`vekrona-error pick`) |
+| Hyper+Shift+a | `qs -c vekrona-shell ipc call launcher toggleMode agent` (toggle the robot's error list, the launcher in its `/agent` mode) |
 | Hyper+Space | switch to the next keyboard layout and show it on screen (no backward key; the bar item's menu picks one directly) |
 | Hyper+1..9, Hyper+0 | move the focused container to workspace 1 through 10 |
 | Hyper+r | enter resize mode (h/j/k/l or arrows resize, Return or Escape exits) |
 | Hyper+t | toggle floating |
 | Hyper+e | toggle split layout |
-| Hyper+= | go to a new workspace (the first empty one, `vekrona-workspace-new`) |
+| Hyper+= | go to a new workspace (the first empty one, `vekrona-workspace-new open`) |
 | Hyper+Shift+= | move the focused window to a new workspace and follow it |
-| Hyper+Print | `vekrona-screenshot` |
-| Hyper+Shift+Print | `vekrona-record` |
-| Hyper+Shift+c | `vekrona-caffeine` |
+| Hyper+Print | `vekrona-screenshot area` |
+| Hyper+Shift+Print | `vekrona-record toggle` |
+| Hyper+Shift+c | `vekrona-caffeine toggle` (keep-awake: 1h, or off when on) |
 | Hyper+Shift+n | `vekrona-night toggle` |
 | Hyper+Shift+t | `vekrona-theme next` |
 | XF86AudioRaiseVolume/LowerVolume/Mute, XF86MonBrightness* | `qs -c vekrona-shell ipc call audio ...` / `qs -c vekrona-shell ipc call brightness ...` |
@@ -81,24 +92,35 @@ Typing `/` lists the modes; `/calc ` (keyword and a space) enters one, shown
 as a badge before the query. The modes are `/apps`, `/calc`, `/search`,
 `/agent`, `/settings`, `/power` and `/clip`. Hyper+v and Hyper+BackSpace open
 it straight in `/clip` and `/power`, and pressing them again closes it.
-Under the search field a strip of widgets (power commands, settings
-toggles) is one Tab away.
+Under the search field a row of mode tabs shows the mode you are in: `Apps`,
+`Calculator`, `Search` and `Clipboard`, then `Settings` and `Power`. Each tab
+is an icon with its name under it, and the lit one has the selection fill. A
+click switches to that mode, and so does Enter or Space on a focused tab.
+`Apps` is the default mode (`/apps` lights it too), so clicking a lit tab does
+nothing, except inside a sub-view, where it returns to the mode's list. Typing
+`/calc `, `/search `, `/clip `, `/settings ` or `/power ` lights the matching
+tab. The tabs run no command: the toggles (theme, night light, caffeine, Wi-Fi,
+Bluetooth, audio) are rows in `/settings`, and lock, sleep, log out, restart
+and shut down are rows in `/power`. `/agent` has no tab because the bar's robot
+button opens it.
 
 | Key | Action |
 |---|---|
 | Up, Down, Ctrl+N, Ctrl+P | move the selection (PageUp and PageDown by a page) |
 | Enter, Ctrl+Enter | run the first and the second action of the selected row |
 | Ctrl+K | list every action of the selected row; Enter runs one, Escape closes the list |
-| Tab, Shift+Tab | go to the widgets under the search field (Tab moves on to the next widget and back to the search field; in a mode suggestion, Tab enters the mode) |
-| Left, Right, Enter or Space on a widget | move between its buttons and press one |
+| Tab, Shift+Tab | go to the mode tabs under the search field, which are one Tab stop (in a mode suggestion, Tab enters the mode) |
+| Left, Right on a tab | move between the tabs |
+| Enter or Space on a tab | switch to the focused one (when the key is released) |
+| Tab, Shift+Tab, Escape on a tab | back to the search field |
 | Backspace on an empty query | leave the mode (or the sub-view) |
 | Escape | disarm a confirmation, then leave the sub-view, the mode, clear the query, close |
 
-A destructive action (log out, restart, shut down, also from the Power
-widget; deleting a clipboard entry) asks you to press Enter twice to confirm; Escape cancels. What you
-open often moves up: results are ranked with a frecency score kept in
-`$XDG_STATE_HOME/vekrona/launcher-frecency.json` that halves every seven
-days, and the empty launcher lists the six most recent.
+A destructive action (log out, restart, shut down; deleting a clipboard entry)
+asks you to press Enter twice to confirm; Escape cancels. What you open often
+moves up: results are ranked with a frecency score kept in
+`$XDG_STATE_HOME/vekrona/launcher-frecency.json` that halves every seven days,
+and the empty launcher lists the six most recent.
 
 ## App switcher
 
@@ -135,10 +157,9 @@ the overlay's IPC.
 Neither Sway nor the overlay sees Super go up reliably: a `bindsym --release
 Super_L` in a mode never fires after Super+Tab, and Qt gets no key event for
 it. So opening the overlay also starts `wait-super-release.py`, which asks the
-kernel for the key state (`EVIOCGKEY`) of every `/dev/input/event*` device,
-xremap's virtual keyboard included (the `input` group membership already
-allows it), and re-checks whenever any device reports an event. When no Super
-key is down it exits and the overlay commits.
+the files `/run/xremap/super-L` and `/run/xremap/super-R`: xremap runs `vekrona-super-state` on every Super press and
+release (the `super-state` modmap in its config) and that writes 1 or 0 there, because your user cannot read the
+keyboards. It watches the directory with inotify and, when no Super key is down, exits and the overlay commits.
 
 `tests/e2e/app-switch-latency.sh` guards the speed with real key presses: the
 overlay must be on screen within 200 ms of Cmd+Tab and focus must change within
@@ -150,7 +171,7 @@ and turned the next Super+Tab into an Alt+Tab Sway does not bind.
 
 ## Keybindings help panel
 
-`bin/vekrona-keybindings`, bound to Hyper+slash, is an Omarchy-style help
+`vekrona-keybindings menu`, bound to Hyper+slash, is an Omarchy-style help
 panel: it reads `~/.config/sway/config` and its `include`s directly (Sway
 itself doesn't expand includes in `swaymsg -t get_config`), pairs every
 `bindsym` with the `#: <description>` comment line placed directly above it
@@ -217,7 +238,7 @@ xkb_switch_layout next`). A system with no X11 keymap gets `us`, silently.
 If the tool is missing or the file is unreadable or malformed, the session
 still starts, with `us` and `shift:both_capslock_cancel`, and the cause is
 logged at priority `err` (`journalctl -t vekrona-xkb-env`); the error watcher
-(see [Errors](errors.md)) records it and shows a toast once the session is
+(see [Errors](errors.md)) records it and lights the robot's dot once the session is
 up, and `./install.sh 70` fails until the keymap is fixed.
 
 To change layouts later, run `localectl set-x11-keymap us,ua` (variants and

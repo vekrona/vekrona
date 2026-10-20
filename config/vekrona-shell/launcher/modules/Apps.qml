@@ -1,3 +1,4 @@
+import QtQuick
 import Quickshell
 import ".."
 import "../.." as Shell
@@ -12,10 +13,13 @@ LauncherModule {
     function row(entry): var {
         const launch = argv => entry.runInTerminal ? Shell.Exec.inTerminal(argv) : argv;
         const command = launch(Array.from(entry.command));
+        // The Path key of the .desktop file, for the application and for its actions.
+        const directory = entry.workingDirectory || Shell.Exec.home;
         const desktopActions = Array.from(entry.actions).map(action => ({
                     id: "action:" + action.id,
                     label: action.name,
-                    exec: launch(Array.from(action.command))
+                    exec: launch(Array.from(action.command)),
+                    directory: directory
                 }));
         return {
             id: "apps:" + entry.id,
@@ -28,7 +32,8 @@ LauncherModule {
                 {
                     id: "open",
                     label: "Open",
-                    exec: command
+                    exec: command,
+                    directory: directory
                 }
             ].concat(desktopActions, [
                 {
@@ -40,10 +45,17 @@ LauncherModule {
         };
     }
 
-    // Rebuilt whenever the application list or a property read by row() changes.
-    readonly property var rows: DesktopEntries.applications.values.filter(entry => !entry.noDisplay).map(row)
+    // Built by the first query after the application list changed or the launcher opened, not while it is closed: the list is
+    // rescanned whenever a .desktop file changes, which an installer or a browser profile does by the hundred.
+    property var rows: null
+
+    function opened() {
+        rows = null;
+    }
 
     function query(text: string, reqId: int): var {
+        if (rows === null)
+            rows = DesktopEntries.applications.values.filter(entry => !entry.noDisplay).map(row);
         return rows;
     }
 
@@ -51,5 +63,14 @@ LauncherModule {
     title: "Applications"
     glyph: "apps"
     slash: "apps"
-    onRowsChanged: changed()
+
+    // The launcher asks again only if it is open; it rebuilds the rows then.
+    Connections {
+        target: DesktopEntries.applications
+
+        function onValuesChanged(): void {
+            root.rows = null;
+            root.changed();
+        }
+    }
 }

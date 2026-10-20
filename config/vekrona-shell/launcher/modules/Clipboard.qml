@@ -42,12 +42,7 @@ LauncherModule {
     // Deletes the entry, then has the host query again. Returns false: the launcher stays open on the shorter list.
     function deleteEntry(item: var): bool {
         const argv = ["bash", "-c", "set -eo pipefail; printf '%s\\n' \"$1\" | cliphist delete", "_", item.line];
-        Shell.Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0)
-                launcher.toast("Couldn’t delete: " + Shell.Exec.failure(argv, code, stderr));
-            else
-                root.changed();
-        });
+        Shell.Exec.runOr(argv, stdout => root.changed(), reason => launcher.toast("Couldn’t delete: " + reason));
         return false;
     }
 

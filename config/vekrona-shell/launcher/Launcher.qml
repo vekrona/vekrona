@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.I3
 import Quickshell.Io
 import Quickshell.Wayland
 import "../Vekrona"
@@ -9,7 +10,7 @@ import "."
 import "Ranker.js" as Ranker
 
 // The one launcher: apps, commands, settings, calculator, clipboard history and the power commands,
-// each a module (modules/*.qml). Opened by Super+Space and by `ipc call launcher open <mode>`.
+// each a module (modules/*.qml). Opened by Super+Space and by `ipc call launcher toggleMode <mode>`.
 PanelWindow {
     id: root
 
@@ -18,6 +19,9 @@ PanelWindow {
     readonly property int toastMs: 3000
 
     property bool shown: false
+    // The output the launcher is on: the focused one as it opened. Sway moves the focus with the pointer, so it is not
+    // followed while the launcher is open.
+    property var openScreen: null
     // The module whose mode is active (/calc), or null in root mode.
     property var modeModule: null
     // Pushed sub-views, innermost last: {title, viewId, module, savedQuery}.
@@ -35,12 +39,15 @@ PanelWindow {
     property int selected: -1
     property int requestId: 0
     // By moduleId: the modules asked for the current request, those that have not answered it yet, and their
-    // latest results. A module that has not answered keeps the results of the request before until it does.
+    // latest results. A module that has not answered keeps the results of the request before until it does, if that request
+    // asked the same question (a module that announces a change of its static results).
     property var queried: ({})
     property var awaiting: ({})
     property var collected: ({})
-    // What kind of request `collected` answers (the mode and the sub-view), so results are never kept across kinds.
+    // What `collected` answers: the kind of request (the mode and the sub-view) and the query text. Results are kept for a module
+    // that has not answered yet only while both are the same, since a row that answered another question must not be activated.
     property string collectedContext: ""
+    property string collectedText: ""
 
     readonly property string activeSlash: modeModule === null ? "" : modeModule.slash
     readonly property var moduleList: modules.all
@@ -61,9 +68,13 @@ PanelWindow {
     readonly property string breadcrumb: viewStack.length === 0 ? "" : [viewStack[0].module.title].concat(viewStack.map(frame => frame.title)).join(" › ")
     readonly property real listContentHeight: rows.reduce((sum, entry) => sum + LauncherMetrics.heightOf(entry), 0)
     // The search field's middle sits on the screen's middle; the list takes the room below it.
-    readonly property real panelTop: Math.round(height / 2 - VekronaTheme.borderHair - LauncherMetrics.searchHeight / 2)
+    readonly property real screenWidth: openScreen?.width ?? 0
+    readonly property real screenHeight: openScreen?.height ?? 0
+    readonly property real panelTop: Math.round(screenHeight / 2 - VekronaTheme.borderHair - LauncherMetrics.searchHeight / 2)
+    // The compositor centres the window across the output, so this is where its left edge lands.
+    readonly property real panelLeft: Math.round((screenWidth - width) / 2)
     readonly property real chromeHeight: LauncherMetrics.searchHeight + strip.implicitHeight + crumb.implicitHeight + LauncherMetrics.footerHeight + 2 * VekronaTheme.borderHair
-    readonly property real listLimit: Math.max(LauncherMetrics.minRows * LauncherMetrics.rowHeight, Math.min(LauncherMetrics.maxRows * LauncherMetrics.rowHeight, height - panelTop - chromeHeight - VekronaTheme.space6))
+    readonly property real listLimit: Math.max(LauncherMetrics.minRows * LauncherMetrics.rowHeight, Math.min(LauncherMetrics.maxRows * LauncherMetrics.rowHeight, screenHeight - panelTop - chromeHeight - VekronaTheme.space6))
 
     function toggle(): void {
         if (shown)
@@ -72,8 +83,41 @@ PanelWindow {
             openMode("");
     }
 
+    // Opens the launcher in settings mode and pushes the settings subview `viewId`. The bar and the IPC both come through here.
+    function openSettings(viewId: string): void {
+        const settingsModule = moduleList.find(candidate => candidate.moduleId === "settings");
+        if (settingsModule === undefined) {
+            console.error("launcher: settings module not found");
+            return;
+        }
+        if (!Object.prototype.hasOwnProperty.call(settingsModule.views, viewId)) {
+            console.error("launcher: unknown settings view '" + viewId + "'");
+            return;
+        }
+        openMode("settings");
+        pushView(settingsModule, settingsModule.views[viewId]);
+    }
+
+    // Closes when the mode of the slash keyword `slash` ("" is the root search) is already open, else opens in it. A key
+    // binding and a click on a bar button both reach the closing branch: the click catcher starts below the bar, so the
+    // bar stays clickable and the click reaches its button, not the catcher.
+    function toggleMode(slash: string): void {
+        if (shown && activeSlash === slash)
+            closeLauncher();
+        else
+            openMode(slash);
+    }
+
+    // The output Sway has focused, else the first one.
+    function focusedScreen(): var {
+        const name = I3.focusedMonitor?.name;
+        return Quickshell.screens.find(output => output.name === name) ?? Quickshell.screens[0] ?? null;
+    }
+
     // Opens in root mode, or in the mode of the slash keyword `slash`.
     function openMode(slash: string): void {
+        if (!shown)
+            openScreen = focusedScreen();
         modeModule = null;
         viewStack = [];
         armed = null;
@@ -98,15 +142,19 @@ PanelWindow {
         toastTimer.stop();
     }
 
-    // Takes the toast back, unless it has been replaced by another text since.
-    function clearToast(text: string): void {
-        if (toastText === text)
-            dismissToast();
+    // The module whose mode is the slash keyword `slash`, or null.
+    function moduleBySlash(slash: string): var {
+        return moduleList.find(module => module.slash === slash) ?? null;
     }
 
     function moduleOf(resultId: string): var {
         const owner = resultId.slice(0, resultId.indexOf(":"));
         return moduleList.find(module => module.moduleId === owner) ?? null;
+    }
+
+    // Types text into the search field at the cursor, for the parts of the launcher that do not hold the focus.
+    function typeText(text: string): void {
+        search.insert(search.cursorPosition, text);
     }
 
     // Sets the search field; its change handler then queries.
@@ -129,8 +177,8 @@ PanelWindow {
     }
 
     function enterMode(slash: string): bool {
-        const module = moduleList.find(candidate => candidate.slash === slash);
-        if (module === undefined) {
+        const module = moduleBySlash(slash);
+        if (module === null) {
             console.error("launcher: no module has the mode /" + slash);
             showToast("There is no /" + slash + " mode");
             return false;
@@ -180,8 +228,8 @@ PanelWindow {
         armed = null;
         if (modeModule === null && viewStack.length === 0) {
             const typed = /^\/(\S+)\s([\s\S]*)$/.exec(search.text);
-            const module = typed === null ? undefined : moduleList.find(candidate => candidate.slash === typed[1]);
-            if (module !== undefined) {
+            const module = typed === null ? null : moduleBySlash(typed[1]);
+            if (module !== null) {
                 enterModule(module, typed[2]);
                 return;
             }
@@ -265,11 +313,12 @@ PanelWindow {
     function refresh(keepSelection: bool): void {
         const reqId = ++requestId;
         const context = contextKey();
-        const previous = context === collectedContext ? collected : {};
+        const previous = context === collectedContext && search.text === collectedText ? collected : {};
         queried = {};
         awaiting = {};
         collected = {};
         collectedContext = context;
+        collectedText = search.text;
         if (!keepSelection)
             pendingActivation = -1;
         for (const module of targets()) {
@@ -541,18 +590,26 @@ PanelWindow {
         requestAction(entry, action);
     }
 
+    // Opens a web address in the default browser. Only http and https addresses: xdg-open would open a file, run a handler of
+    // any scheme, or read an address that starts with "-" as an option, and the addresses come from the user's history.
+    function openUrl(url: string): void {
+        if (!/^https?:\/\//.test(url))
+            throw new Error("only http and https addresses are opened, not " + JSON.stringify(url));
+        Exec.detached(["xdg-open", url], Exec.home);
+    }
+
     function perform(entry: var, action: var): void {
         if (!entry.synthetic)
             frecency.record(entry.result.id);
         try {
             if (action.exec !== undefined) {
-                Exec.detached(action.exec);
+                Exec.detached(action.exec, action.directory ?? Exec.home);
                 closeLauncher();
             } else if (action.copy !== undefined) {
-                Exec.detached(["wl-copy", "--", action.copy]);
+                Exec.copy(action.copy);
                 closeLauncher();
             } else if (action.url !== undefined) {
-                Exec.detached(["xdg-open", action.url]);
+                openUrl(action.url);
                 closeLauncher();
             } else if (action.push !== undefined) {
                 pushView(entry.module, action.push);
@@ -600,8 +657,8 @@ PanelWindow {
     function handleTab(backwards: bool): void {
         if (!backwards && modeSuggestions().length > 0)
             activateSelected(0);
-        else if (strip.populated)
-            strip.enter(backwards);
+        else
+            strip.enter();
     }
 
     function handleKey(event): void {
@@ -672,11 +729,15 @@ PanelWindow {
     }
 
     visible: shown
-    color: "transparent"
+    // The window is the panel and nothing else: opaque, hung from the top edge at panelTop, and centred across by the
+    // compositor because it has no left or right anchor. A click elsewhere is caught by the Catcher below, which closes
+    // the launcher; Escape and the toggle shortcut close it too.
+    screen: openScreen
+    color: VekronaTheme.c.surface1
     anchors.top: true
-    anchors.bottom: true
-    anchors.left: true
-    anchors.right: true
+    margins.top: panelTop
+    implicitWidth: LauncherMetrics.panelWidth
+    implicitHeight: column.implicitHeight + 2 * VekronaTheme.borderHair
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "vekrona-launcher"
@@ -687,6 +748,7 @@ PanelWindow {
     }
     onShownChanged: {
         if (shown) {
+            KeyboardSurface.claim(root);
             search.forceActiveFocus();
             notifyOpened();
         } else {
@@ -696,6 +758,7 @@ PanelWindow {
             pendingActivation = -1;
             collected = {};
             collectedContext = "";
+            collectedText = "";
             notifyClosed();
         }
     }
@@ -716,30 +779,19 @@ PanelWindow {
         }
 
         // Opens in the mode of the slash keyword `mode` ("" is the root search); asked again while that mode is open, it closes.
-        function open(mode: string): void {
-            if (root.shown && root.activeSlash === mode)
-                root.closeLauncher();
-            else
-                root.openMode(mode);
+        function toggleMode(mode: string): void {
+            root.toggleMode(mode);
         }
 
         // Opens the launcher in settings mode and pushes the settings subview with the given viewId.
         function settings(viewId: string): void {
-            const settingsModule = root.moduleList.find(candidate => candidate.moduleId === "settings");
-            if (settingsModule === undefined) {
-                console.error("launcher: settings module not found");
-                return;
-            }
-            root.openMode("settings");
-            const push = settingsModule.views[viewId];
-            if (push === undefined) {
-                console.error("launcher: unknown settings view '" + viewId + "'");
-                return;
-            }
-            root.pushView(settingsModule, push);
+            root.openSettings(viewId);
         }
 
-        // The launcher's state as compact JSON, for tests: {open, mode, query, view, selectedId, armed, actionsOpen, rows, empty}.
+        // The launcher's state as compact JSON. This is a seam for the tests (tests/lib.sh reads it), and it hands the typed
+        // query to any process of the user that asks over IPC: {open, mode, query, view, selectedId, armed, actionsOpen, rows, empty,
+        // tabs}. A tab is {slash, active, x, y}: its mode, whether it is lit, and the centre of its square in screen pixels.
+        // The window is only the panel, so the tabs' window coordinates are moved by where the panel sits on the output.
         function state(): string {
             return JSON.stringify({
                 open: root.shown,
@@ -750,25 +802,17 @@ PanelWindow {
                 armed: root.armed !== null,
                 actionsOpen: root.actionsOpen,
                 rows: root.rows.filter(entry => entry.type === "row").length,
-                empty: root.rows.some(entry => entry.type === "empty")
+                empty: root.rows.some(entry => entry.type === "empty"),
+                tabs: strip.placement().map(tab => Object.assign({}, tab, {
+                    x: tab.x + root.panelLeft,
+                    y: tab.y + root.panelTop
+                }))
             });
         }
     }
 
     QtObject {
         id: api
-
-        function close(): void {
-            root.closeLauncher();
-        }
-
-        function setQuery(text: string): void {
-            root.setRootQuery(text);
-        }
-
-        function enterMode(slash: string): void {
-            root.enterMode(slash);
-        }
 
         function pushView(moduleId: string, push: var): void {
             const module = root.moduleList.find(candidate => candidate.moduleId === moduleId);
@@ -779,10 +823,6 @@ PanelWindow {
 
         function toast(text: string): void {
             root.showToast(text);
-        }
-
-        function clearToast(text: string): void {
-            root.clearToast(text);
         }
     }
 
@@ -824,30 +864,32 @@ PanelWindow {
         onTriggered: root.dismissToast()
     }
 
-    Rectangle {
-        anchors.fill: parent
-        color: VekronaTheme.c.scrim
-        opacity: VekronaTheme.scrimOpacity
+    // Closes the launcher on a click anywhere below the bar, which stays clickable.
+    Catcher {
+        targetScreen: root.openScreen
+        active: root.shown
+        onDismissed: root.closeLauncher()
     }
 
-    MouseArea {
-        anchors.fill: parent
-        onClicked: root.closeLauncher()
+    // Another surface that grabs the keyboard, the notification centre or a popout, would fight with this one over it.
+    Connections {
+        target: KeyboardSurface
+
+        function onClaimed(owner: var): void {
+            if (owner !== root)
+                root.closeLauncher();
+        }
     }
 
+    // The window takes a new size only after a round trip to the compositor, and the list changes the size with every
+    // keystroke. Everything inside is therefore sized from the implicit size, not from the window: a layout that filled
+    // the old window would recenter its shrunken content in it.
     Rectangle {
-        id: panel
-        x: Math.round((root.width - width) / 2)
-        y: root.panelTop
-        width: LauncherMetrics.panelWidth
-        height: column.implicitHeight + 2 * VekronaTheme.borderHair
-        color: VekronaTheme.c.surface1
+        width: root.implicitWidth
+        height: root.implicitHeight
+        color: "transparent"
         border.width: VekronaTheme.borderHair
         border.color: VekronaTheme.c.line
-
-        MouseArea {
-            anchors.fill: parent
-        }
 
         FocusScope {
             id: scope
@@ -919,11 +961,10 @@ PanelWindow {
                     }
                 }
 
-                WidgetStrip {
+                ModeTabs {
                     id: strip
                     Layout.fillWidth: true
-                    launcher: api
-                    modules: root.moduleList
+                    launcher: root
                     onLeave: search.forceActiveFocus()
                 }
 

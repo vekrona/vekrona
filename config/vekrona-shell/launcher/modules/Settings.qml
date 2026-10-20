@@ -9,25 +9,9 @@ LauncherModule {
 
     // The state the shell cannot read live: set by refresh() from the status commands.
     property bool nightOn: false
-    // The duration caffeine was started for ("30m", "1h", "2h"), "" when it is off.
-    property string caffeine: ""
     // The Wi-Fi network a connect was started on, until it connects or fails.
     property var attempt: null
 
-    readonly property var caffeineSteps: [
-        {
-            value: "30m",
-            label: "30 minutes"
-        },
-        {
-            value: "1h",
-            label: "1 hour"
-        },
-        {
-            value: "2h",
-            label: "2 hours"
-        }
-    ]
     readonly property var audioView: ({
             title: "Audio output",
             viewId: "audio"
@@ -100,28 +84,28 @@ LauncherModule {
                 ]
             })
         ];
-        for (const step of caffeineSteps) {
-            rows.push(setting("caffeine:" + step.value, "Keep awake for " + step.label, "coffee", {
+        for (const step of Shell.Caffeine.presets) {
+            rows.push(setting("caffeine:" + step, "Keep awake for " + step, "local_cafe", {
                 keywords: ["caffeine", "coffee", "awake", "sleep", "suspend", "inhibit"],
                 aliases: ["caffeine", "coffee"],
-                checked: caffeine === step.value,
+                checked: Shell.Caffeine.kind === "for" && Shell.Caffeine.preset === step,
                 actions: [
                     {
                         id: "start",
-                        label: "Keep awake for " + step.label,
-                        exec: ["vekrona-caffeine", step.value]
+                        label: "Keep awake for " + step,
+                        run: () => root.startCaffeine(["for", step])
                     }
                 ]
             }));
         }
-        rows.push(setting("caffeine:off", "Stop keeping awake", "coffee", {
+        rows.push(setting("caffeine:off", "Stop keeping awake", "local_cafe", {
             keywords: ["caffeine", "coffee", "awake", "sleep", "suspend", "inhibit", "off"],
             aliases: ["caffeine", "coffee"],
             actions: [
                 {
                     id: "stop",
                     label: "Stop keeping awake",
-                    exec: ["vekrona-caffeine", "off"]
+                    run: () => root.stopCaffeine()
                 }
             ]
         }));
@@ -231,7 +215,7 @@ LauncherModule {
                 {
                     id: "show",
                     label: "Show keybindings",
-                    exec: ["vekrona-keybindings"]
+                    exec: ["vekrona-keybindings", "menu"]
                 }
             ]
         }));
@@ -242,7 +226,7 @@ LauncherModule {
                 {
                     id: "run",
                     label: "Update in a terminal",
-                    exec: Shell.Exec.inTerminal(["bash", "-c", 'vekrona-update; status=$?; read -rp "vekrona-update exited with $status. Press Enter to close. "; exit "$status"'])
+                    exec: Shell.Exec.inTerminal(["bash", "-c", 'vekrona-update now; status=$?; read -rp "vekrona-update exited with $status. Press Enter to close. "; exit "$status"'])
                 }
             ]
         }));
@@ -450,44 +434,20 @@ LauncherModule {
         return !connecting;
     }
 
-    function parseCaffeine(output: string): string {
-        const status = output.trim();
-        if (status === "caffeine: off")
-            return "";
-        const match = /^caffeine: on \(caffeine (30m|1h|2h)\)$/.exec(status);
-        if (!match) {
-            console.error("Settings: cannot read the output of `vekrona-caffeine status`: " + status);
-            return "";
-        }
-        return match[1];
-    }
-
-    // Runs a status command and applies its output. A failure is logged and leaves the state as it was.
-    function readStatus(argv: list<string>, apply): void {
-        Shell.Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0)
-                Shell.Exec.failure(argv, code, stderr);
-            else
-                apply(stdout);
-        });
-    }
-
+    // Reads whether night light is on. A failure is logged, which records it, and leaves the state as it was.
     function refresh(): void {
-        readStatus(["systemctl", "--user", "show", "vekrona-night.service", "--property=ActiveState", "--value"], output => {
+        Shell.Exec.runChecked(["systemctl", "--user", "show", "vekrona-night.service", "--property=ActiveState", "--value"], output => {
             nightOn = output.trim() === "active";
         });
-        readStatus(["vekrona-caffeine", "status"], output => {
-            caffeine = parseCaffeine(output);
-        });
     }
 
-    // Runs a status-changing command in a transient unit like Exec.detached, waits for it, then reads the state again.
-    function runAndRefresh(argv: list<string>): void {
-        Shell.Exec.run(Shell.Exec.unit(argv, true), (code, stdout, stderr) => {
-            if (code !== 0)
-                launcher.toast("Couldn’t run " + argv[0] + ": " + Shell.Exec.failure(argv, code, stderr));
-            root.refresh();
-        });
+    // Starts or ends a keep-awake session, and toasts why the command refused (like a time span it cannot read).
+    function startCaffeine(args: list<string>): void {
+        Shell.Caffeine.start(args, reason => launcher.toast(reason));
+    }
+
+    function stopCaffeine(): void {
+        Shell.Caffeine.stop(reason => launcher.toast(reason));
     }
 
     function opened(): void {
@@ -542,163 +502,6 @@ LauncherModule {
         function onConnectionFailed(reason): void {
             root.launcher.toast(Shell.Wireless.failureText(root.attempt, reason));
             root.attempt = null;
-        }
-    }
-
-    // A square 32 px button with its glyph and a short label below; the selected fill marks it on.
-    component Toggle: Item {
-        id: toggle
-
-        required property string glyph
-        required property string label
-        property bool active: false
-        property bool checkable: true
-        property bool focused: false
-
-        signal activated
-
-        implicitWidth: Math.max(VekronaTheme.sizeTarget, caption.implicitWidth)
-        implicitHeight: VekronaTheme.sizeTarget + VekronaTheme.space1 + caption.implicitHeight
-
-        Accessible.role: Accessible.Button
-        Accessible.name: label
-        Accessible.checkable: checkable
-        Accessible.checked: active
-
-        Rectangle {
-            id: square
-
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: VekronaTheme.sizeTarget
-            height: VekronaTheme.sizeTarget
-            color: mouse.pressed ? VekronaTheme.c.surface3 : mouse.containsMouse ? VekronaTheme.c.surface2 : "transparent"
-            border.width: VekronaTheme.borderControl
-            border.color: VekronaTheme.c.line
-
-            Selection {
-                shown: toggle.active
-            }
-
-            Pictogram {
-                anchors.centerIn: parent
-                name: toggle.glyph
-                filled: toggle.active
-            }
-
-            FocusRing {
-                shown: toggle.focused
-            }
-        }
-
-        Label {
-            id: caption
-
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.top: square.bottom
-            anchors.topMargin: VekronaTheme.space1
-            style: VekronaTheme.type.caption
-            text: toggle.label
-        }
-
-        MouseArea {
-            id: mouse
-
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: toggle.activated()
-        }
-    }
-
-    widget: Component {
-        FocusScope {
-            id: strip
-
-            property var launcher: root.launcher
-            property var module: root
-            readonly property var toggles: [theme, night, caffeineToggle, wifi, bluetooth, audio]
-            property Item current: theme
-
-            function step(delta: int): void {
-                const shown = toggles.filter(toggle => toggle.visible);
-                const index = shown.indexOf(current);
-                current = shown[Math.max(0, Math.min(shown.length - 1, index < 0 ? 0 : index + delta))];
-            }
-
-            implicitWidth: row.implicitWidth
-            implicitHeight: row.implicitHeight
-            Keys.onLeftPressed: step(-1)
-            Keys.onRightPressed: step(1)
-            Keys.onReturnPressed: current.activated()
-            Keys.onEnterPressed: current.activated()
-            Keys.onSpacePressed: current.activated()
-
-            Row {
-                id: row
-
-                spacing: VekronaTheme.space2
-
-                Toggle {
-                    id: theme
-
-                    glyph: VekronaTheme.mode === "light" ? "light_mode" : "dark_mode"
-                    label: "Theme"
-                    active: VekronaTheme.mode !== "light"
-                    focused: strip.activeFocus && strip.current === theme
-                    onActivated: Shell.Exec.detached(["vekrona-theme", VekronaTheme.mode === "light" ? "dark" : "light"])
-                }
-
-                Toggle {
-                    id: night
-
-                    glyph: "nightlight"
-                    label: "Night"
-                    active: root.nightOn
-                    focused: strip.activeFocus && strip.current === night
-                    onActivated: root.runAndRefresh(["vekrona-night", "toggle"])
-                }
-
-                Toggle {
-                    id: caffeineToggle
-
-                    glyph: "coffee"
-                    label: "Caffeine"
-                    active: root.caffeine !== ""
-                    focused: strip.activeFocus && strip.current === caffeineToggle
-                    onActivated: root.runAndRefresh(["vekrona-caffeine", root.caffeine === "" ? "1h" : "off"])
-                }
-
-                Toggle {
-                    id: wifi
-
-                    glyph: Shell.Wireless.wifiEnabled ? "wifi" : "wifi_off"
-                    label: "Wi-Fi"
-                    active: Shell.Wireless.wifiEnabled
-                    focused: strip.activeFocus && strip.current === wifi
-                    onActivated: root.switchWifi()
-                }
-
-                Toggle {
-                    id: bluetooth
-
-                    visible: Shell.Wireless.adapter !== null
-                    glyph: Shell.Wireless.bluetoothEnabled ? "bluetooth" : "bluetooth_disabled"
-                    label: "Bluetooth"
-                    active: Shell.Wireless.bluetoothEnabled
-                    focused: strip.activeFocus && strip.current === bluetooth
-                    onActivated: root.switchBluetooth()
-                }
-
-                Toggle {
-                    id: audio
-
-                    glyph: Shell.Audio.glyph
-                    label: "Audio"
-                    checkable: false
-                    focused: strip.activeFocus && strip.current === audio
-                    onActivated: strip.launcher.pushView(root.moduleId, root.audioView)
-                }
-            }
         }
     }
 }

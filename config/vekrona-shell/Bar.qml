@@ -15,6 +15,11 @@ PanelWindow {
         openPopout = openPopout === popout ? null : popout;
     }
 
+    onOpenPopoutChanged: {
+        if (openPopout !== null)
+            KeyboardSurface.claim(root);
+    }
+
     screen: modelData
     anchors.top: true
     anchors.left: true
@@ -53,6 +58,10 @@ PanelWindow {
         height: parent.height
         spacing: 0
 
+        CaffeinePill {
+            bar: root
+        }
+
         Tray {}
 
         Weather {
@@ -75,12 +84,24 @@ PanelWindow {
 
         Battery {}
 
-        Agent {}
+        Agent {
+            launcher: root.launcher
+        }
 
         NotificationsButton {}
 
         Calendar {
             bar: root
+        }
+    }
+
+    // The launcher, the notification centre or a popout of another bar came up and holds the keyboard now.
+    Connections {
+        target: KeyboardSurface
+
+        function onClaimed(owner: var): void {
+            if (owner !== root)
+                root.openPopout = null;
         }
     }
 

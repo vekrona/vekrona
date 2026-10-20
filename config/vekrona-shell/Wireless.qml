@@ -10,10 +10,12 @@ Singleton {
     id: root
 
     readonly property var devices: Networking.devices.values
+    // Strongest first. A signal moves the order of the list on every reading, so a view of it must follow by object (a
+    // ScriptModel), which moves the rows of the networks instead of building them again; equal signals keep a stable order.
     readonly property var wifiNetworks: devices
         .filter(device => device.type === DeviceType.Wifi)
         .reduce((all, device) => all.concat(device.networks.values), [])
-        .sort((a, b) => b.signalStrength - a.signalStrength)
+        .sort((a, b) => b.signalStrength - a.signalStrength || a.name.localeCompare(b.name))
     readonly property bool wired: devices.some(device => device.type === DeviceType.Wired && device.connected)
     readonly property var connectedWifi: wifiNetworks.find(network => network.connected) ?? null
     readonly property var adapter: Bluetooth.defaultAdapter
@@ -25,7 +27,7 @@ Singleton {
     // Bluetooth is switched off by rfkill: toggleBluetooth lifts that before it powers the adapter.
     readonly property bool bluetoothBlocked: adapter?.state === BluetoothAdapterState.Blocked
     readonly property bool scanning: adapter?.discovering ?? false
-    // Set once rfkill is unblocked, until BlueZ reports the adapter unblocked and it can be powered.
+    // Set once rfkill is unblocked, until BlueZ reports the adapter unblocked and it can be powered, or the adapter is gone.
     property bool enableOnUnblock: false
 
     function wifiGlyph(strength: real): string {
@@ -68,23 +70,21 @@ Singleton {
             return;
         }
         if (!bluetoothBlocked) {
+            enableOnUnblock = false;
             adapter.enabled = !adapter.enabled;
             return;
         }
-        const argv = ["rfkill", "unblock", "bluetooth"];
-        Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0) {
-                fail("Cannot unblock Bluetooth: " + Exec.failure(argv, code, stderr));
-                return;
-            }
+        Exec.runOr(["rfkill", "unblock", "bluetooth"], stdout => {
             enableOnUnblock = true;
             enableUnblocked();
-        });
+        }, reason => fail("Cannot unblock Bluetooth: " + reason));
     }
 
     // BlueZ learns of the unblock after rfkill has exited, and the adapter refuses to power while it is blocked.
     function enableUnblocked(): void {
-        if (!enableOnUnblock || !adapter || bluetoothBlocked)
+        if (!adapter)
+            enableOnUnblock = false;
+        if (!enableOnUnblock || bluetoothBlocked)
             return;
         enableOnUnblock = false;
         adapter.enabled = true;
@@ -95,16 +95,37 @@ Singleton {
             adapter.discovering = on;
     }
 
+    // The pairings under way, one per device: {device, deviceName, fail}. A pairing that never reports an end (BlueZ refusing it
+    // outright) is replaced by the next try on that device, and dropped once its device is gone.
+    property var pairings: []
+
     // Pairs without a PIN, then trusts the device and connects it. Calls fail(reason) when pairing does not end paired.
     function pairDevice(device, fail): void {
         if (device.pairing)
             return;
-        pairAttempt.createObject(root, {
-            device: device,
-            deviceName: device.name,
-            fail: fail
-        });
+        pairings = pairings.filter(pairing => pairing.device && pairing.device !== device).concat([
+            {
+                device: device,
+                deviceName: device.name,
+                fail: fail
+            }
+        ]);
         device.pair();
+    }
+
+    // BlueZ sets paired before it ends a pairing, so a pairing that ended unpaired failed. Quickshell logs why
+    // but exposes no reason, and it registers no agent, so a device that asks for a PIN fails here.
+    function settlePairing(pairing: var): void {
+        const device = pairing.device;
+        if (device.pairing)
+            return;
+        pairings = pairings.filter(other => other !== pairing);
+        if (device.paired) {
+            device.trusted = true;
+            device.connect();
+        } else {
+            pairing.fail(pairingFailure(pairing.deviceName));
+        }
     }
 
     function forgetDevice(device): void {
@@ -123,30 +144,18 @@ Singleton {
         }
     }
 
-    // BlueZ sets paired before it ends a pairing, so a pairing that ended unpaired failed. Quickshell logs why
-    // but exposes no reason, and it registers no agent, so a device that asks for a PIN fails here.
-    Component {
-        id: pairAttempt
+    onAdapterChanged: enableUnblocked()
 
-        Connections {
-            id: attempt
+    Instantiator {
+        model: root.pairings
 
-            required property var device
-            required property string deviceName
-            required property var fail
+        delegate: Connections {
+            required property var modelData
 
-            target: device
+            target: modelData.device
 
             function onPairingChanged(): void {
-                if (device.pairing)
-                    return;
-                if (device.paired) {
-                    device.trusted = true;
-                    device.connect();
-                } else {
-                    fail(root.pairingFailure(deviceName));
-                }
-                attempt.destroy();
+                root.settlePairing(modelData);
             }
         }
     }

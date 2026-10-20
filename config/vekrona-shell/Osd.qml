@@ -16,12 +16,25 @@ PanelWindow {
     readonly property real layoutsMinWidth: 240 - 2 * VekronaTheme.space4
     property string glyph
     property real fraction: 0
+    property string label
 
     function show(glyphName: string, level: real): void {
+        showLabelled(glyphName, level, Math.round(100 * level) + " %");
+    }
+
+    function showLabelled(glyphName: string, level: real, text: string): void {
         mode = "volume";
         glyph = glyphName;
         fraction = level;
+        label = text;
         restartTimer();
+    }
+
+    function showAudio(): void {
+        if (Audio.hasOutput)
+            show(Audio.glyph, Audio.volume);
+        else
+            showLabelled("volume_off", 0, "No output");
     }
 
     function showLayouts(): void {
@@ -36,25 +49,42 @@ PanelWindow {
 
     function stepVolume(delta: real): void {
         Audio.setVolume(Audio.volume + delta);
-        show(Audio.glyph, Audio.volume);
+        showAudio();
     }
 
+    // brightnessctl's machine-readable line is "<device>,<class>,<current>,<percent>%,<max>". Throws on any other.
+    function brightnessFraction(line: string): real {
+        const match = /^[^,]*,[^,]*,\d+,(\d+)%,\d+\s*$/.exec(line);
+        if (match === null)
+            throw new Error("unreadable brightnessctl output " + JSON.stringify(line));
+        return Number(match[1]) / 100;
+    }
+
+    // Changes the brightness by `step` percent, up or down by `sign` ("+" or "-"). A step that is not a positive whole number
+    // would be read by brightnessctl as an option or as no change at all.
     function stepBrightness(step: int, sign: string): void {
-        const argv = ["brightnessctl", "--machine-readable", "set", step + "%" + sign];
-        Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0)
-                Exec.failure(argv, code, stderr);
-            else
-                show("brightness_medium", parseInt(stdout.split(",")[3]) / 100);
+        if (!(step > 0)) {
+            console.error("brightness: the step must be a positive number of percent, not " + step);
+            return;
+        }
+        Exec.runChecked(["brightnessctl", "--machine-readable", "set", step + "%" + sign], stdout => {
+            let level;
+            try {
+                level = brightnessFraction(stdout);
+            } catch (e) {
+                console.error("brightness: " + e);
+                return;
+            }
+            show("brightness_medium", level);
         });
     }
 
     visible: hide.running
-    color: "transparent"
+    color: VekronaTheme.c.surface1
     anchors.bottom: true
     margins.bottom: 2 * VekronaTheme.sizeTarget
     // The surface fits every mode and keeps that size: resizing a layer surface as it shows let Sway present a mismatched
-    // buffer, which tore the panel. Only the panel inside it changes with the mode; the rest is transparent and takes no input.
+    // buffer, which tore the panel. Content changes with the mode; the whole surface is opaque and takes no input.
     implicitWidth: Math.max(volumeRow.width, layoutsColumn.width) + 2 * VekronaTheme.space4
     implicitHeight: Math.max(volumeRow.height, layoutsColumn.height) + 2 * VekronaTheme.space4
     exclusionMode: ExclusionMode.Ignore
@@ -68,12 +98,8 @@ PanelWindow {
     }
 
     Rectangle {
-        id: panel
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        width: content.width + 2 * VekronaTheme.space4
-        height: content.height + 2 * VekronaTheme.space4
-        color: VekronaTheme.c.surface1
+        anchors.fill: parent
+        color: "transparent"
         border.width: VekronaTheme.borderHair
         border.color: VekronaTheme.c.line
 
@@ -110,7 +136,7 @@ PanelWindow {
                 Label {
                     anchors.verticalCenter: parent.verticalCenter
                     style: VekronaTheme.type.label
-                    text: Math.round(100 * root.fraction) + " %"
+                    text: root.label
                 }
             }
 
@@ -148,7 +174,7 @@ PanelWindow {
 
         function mute(): void {
             Audio.toggleMute();
-            root.show(Audio.glyph, Audio.volume);
+            root.showAudio();
         }
     }
 

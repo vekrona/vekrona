@@ -1,15 +1,14 @@
-import QtCore
 import QtQuick
 import QtQuick.Layouts
-import Quickshell.Io
 import "Vekrona"
 
 BarPill {
     id: root
 
     required property var bar
-    readonly property string weatherPath: StandardPaths.writableLocation(StandardPaths.GenericStateLocation) + "/vekrona/weather.json"
-    property var report: null
+    // How old the forecast may be when the popout opens before it is fetched again, in milliseconds.
+    readonly property int refreshAgeMs: 10 * 60 * 1000
+    readonly property var report: file.value
     readonly property var current: report?.current ?? null
     readonly property var today: report?.daily?.[0] ?? null
 
@@ -28,7 +27,7 @@ BarPill {
     }
 
     function degrees(value: real): string {
-        return Math.round(value) + " °C";
+        return Math.round(value) + "°C";
     }
 
     function range(day): string {
@@ -41,22 +40,14 @@ BarPill {
     }
 
     visible: report !== null
-    icon: current && !report.error ? glyph(current.weather_code, current.is_day) : "cloud_off"
-    value: current ? degrees(current.temperature) : ""
-    widestValue: "-88 °C"
+    value: current && !report.error ? degrees(current.temperature) : "--°C"
+    widestValue: "-88°C"
     ariaName: "Weather"
     onClicked: bar.togglePopout(popout)
 
-    FileView {
-        path: root.weatherPath
-        watchChanges: true
-        onLoaded: root.report = JSON.parse(text())
-        onLoadFailed: error => {
-            root.report = null;
-            if (error !== FileViewError.FileNotFound)
-                console.error("cannot read " + root.weatherPath + ": " + error);
-        }
-        onFileChanged: reload()
+    StateFile {
+        id: file
+        path: StateDir.path + "/weather.json"
     }
 
     Popout {
@@ -64,6 +55,10 @@ BarPill {
         anchorItem: root
         open: root.bar.openPopout === popout
         onDismissed: root.bar.openPopout = null
+        onOpenChanged: {
+            if (open)
+                Exec.refreshService("vekrona-weather.service", root.refreshAgeMs);
+        }
 
         Label {
             style: VekronaTheme.type.title

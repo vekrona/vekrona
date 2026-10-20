@@ -8,13 +8,13 @@ import ".." as Shell
 // score?, card?: "calc", checked?, actions: [action]}. A result with a `score` (0..1) skips fuzzy matching
 // and frecency. The first action runs on Enter, the second on Ctrl+Enter, all are in the Ctrl+K panel.
 //
-// An action is {id, label, key?, destructive?, confirm?} plus exactly one of exec: [argv], copy: string,
-// url: string, push: {title, viewId}, setQuery: string, run: function() (the launcher closes unless it
-// returns false). A `destructive` action always needs a confirming second activation: the first one only
-// arms the row and shows `confirm`, which defaults to "Press Enter again to <label in lower case>".
+// An action is {id, label, key?, destructive?, confirm?} plus exactly one of exec: [argv] (with directory?: the
+// folder to run it in, the home folder otherwise), copy: string, url: string (an http or https address, nothing else
+// is opened), push: {title, viewId}, setQuery: string, run: function() (the launcher closes unless it returns false).
+// A `destructive` action always needs a confirming second activation: the first one only arms the row and shows
+// `confirm`, which defaults to "Press Enter again to <label in lower case>".
 Item {
-    // The host API: close(), setQuery(text), enterMode(slash), pushView(moduleId, {title, viewId}),
-    // toast(text), clearToast(text) (takes the toast back, only while it still shows `text`).
+    // The host API: pushView(moduleId, {title, viewId}) and toast(text).
     property var launcher
     property string moduleId
     property string title
@@ -26,8 +26,6 @@ Item {
     property bool global: true
     // Multiplies the score of every result of this module.
     property real weight: 1.0
-    // An always-visible control in the launcher's widget strip.
-    property Component widget: null
     // Set by the host: true while this module's mode (/keyword) is the active one, e.g. to evaluate strictly.
     property bool inMode: false
 

@@ -83,9 +83,10 @@ LauncherModule {
         };
     }
 
-    // One JSON object per line.
+    // One JSON object per line. Only web pages are rows: the launcher opens http and https addresses and nothing else, and
+    // Firefox also keeps place: queries, javascript: bookmarklets and file: addresses.
     function parsePlaces(output: string): var {
-        return output.split("\n").filter(line => line !== "").map(line => placeRow(JSON.parse(line)));
+        return output.split("\n").filter(line => line !== "").map(line => JSON.parse(line)).filter(place => /^https?:\/\//.test(place.url)).map(placeRow);
     }
 
     function placesRows(argv: list<string>, code: int, stdout: string, stderr: string): var {
@@ -116,7 +117,8 @@ LauncherModule {
         const head = inMode ? [searchRow(term)] : [];
         if (term.length < minPlacesChars)
             return head;
-        const argv = ["vekrona-firefox", "places", term, "--limit", String(placesPerKind)];
+        // "--" ends the options, so a term like "-v" is a term.
+        const argv = ["vekrona-firefox", "places", "--limit", String(placesPerKind), "--", term];
         current = answerFrom(reqId, argv, (code, stdout, stderr) => head.concat(placesRows(argv, code, stdout, stderr)));
         return head.length > 0 ? head : null;
     }
@@ -127,18 +129,12 @@ LauncherModule {
     }
 
     Component.onCompleted: {
-        const argv = ["vekrona-firefox", "engine-name"];
-        Shell.Exec.run(argv, (code, stdout, stderr) => {
-            if (code !== 0)
-                Shell.Exec.failure(argv, code, stderr);
-            else
-                root.engineName = stdout.trim();
-        });
+        Shell.Exec.runChecked(["vekrona-firefox", "engine-name"], stdout => root.engineName = stdout.trim());
     }
     onEngineNameChanged: changed()
 
     moduleId: "web"
-    title: "Web"
+    title: "Search"
     glyph: "travel_explore"
     slash: "search"
     weight: 0.8

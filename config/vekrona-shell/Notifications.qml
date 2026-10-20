@@ -19,33 +19,55 @@ Singleton {
     property int seenUpTo: 0
     readonly property int unseenCount: centerOpen ? 0 : server.trackedNotifications.values.filter(notification => notification.id > seenUpTo).length
     // Ids of the notifications that are off the screen as toasts (timed out or pushed off by newer ones) but still in the centre.
-    property var expired: ({})
-    readonly property var visibleToasts: server.trackedNotifications.values.filter(notification => !expired[notification.id])
+    // Changed in place, so a flood of notifications does not copy it for each; `expiredRevision` tells the bindings that it changed.
+    readonly property var expired: ({})
+    property int expiredRevision: 0
+    readonly property var visibleToasts: unexpired(expiredRevision)
     readonly property bool toasting: !centerOpen && visibleToasts.length > 0
 
+    // The notifications that are not in `expired`. The revision is a parameter only so that a binding that calls this follows it.
+    function unexpired(revision: int): var {
+        return server.trackedNotifications.values.filter(notification => !expired[notification.id]);
+    }
+
+    function expireAll(notifications: var): void {
+        if (notifications.length === 0)
+            return;
+        for (const notification of notifications)
+            expired[notification.id] = true;
+        expiredRevision++;
+    }
+
     function expire(notification: Notification): void {
-        expired = Object.assign({}, expired, {
-            [notification.id]: true
-        });
+        expireAll([notification]);
     }
 
     function forget(notification: Notification): void {
-        const next = Object.assign({}, expired);
-        delete next[notification.id];
-        expired = next;
+        if (!(notification.id in expired))
+            return;
+        delete expired[notification.id];
+        expiredRevision++;
     }
 
     // A toast that left the screen never comes back because another one was dismissed, so only the newest maxToasts stay.
     function trimToasts(): void {
-        const overflow = server.trackedNotifications.values.filter(notification => !expired[notification.id]).slice(0, -maxToasts);
-        if (overflow.length > 0)
-            expired = Object.assign({}, expired, ...overflow.map(notification => ({
-                        [notification.id]: true
-                    })));
+        const tracked = server.trackedNotifications.values;
+        const stale = [];
+        let shown = 0;
+        for (let i = tracked.length - 1; i >= 0; i--) {
+            if (!expired[tracked[i].id] && ++shown > maxToasts)
+                stale.push(tracked[i]);
+        }
+        expireAll(stale);
     }
 
+    // A new or changed notification toasts again, unless the centre is open: it lists everything already, and a toast
+    // hidden behind it would pop up when the centre closes.
     function reshow(notification: Notification): void {
-        forget(notification);
+        if (centerOpen)
+            expire(notification);
+        else
+            forget(notification);
         trimToasts();
     }
 
@@ -59,6 +81,10 @@ Singleton {
 
     function setCenterOpen(open: bool): void {
         centerOpen = open;
+        if (open) {
+            KeyboardSurface.claim(root);
+            expireAll(server.trackedNotifications.values);
+        }
         markSeen();
     }
 
@@ -77,9 +103,20 @@ Singleton {
         bodyHyperlinksSupported: false
         onNotification: notification => {
             notification.tracked = true;
+            root.reshow(notification);
             notification.summaryChanged.connect(() => root.reshow(notification));
             notification.bodyChanged.connect(() => root.reshow(notification));
             notification.closed.connect(() => root.forget(notification));
+        }
+    }
+
+    // The launcher or a popout came up and holds the keyboard now.
+    Connections {
+        target: KeyboardSurface
+
+        function onClaimed(owner: var): void {
+            if (owner !== root && root.centerOpen)
+                root.setCenterOpen(false);
         }
     }
 
@@ -109,7 +146,8 @@ Singleton {
 
     PanelWindow {
         visible: root.toasting
-        color: "transparent"
+        // Opaque, so the gaps between the cards are the card colour, not the desktop.
+        color: VekronaTheme.c.surface1
         anchors.top: true
         anchors.right: true
         margins.top: VekronaTheme.sizeBar + VekronaTheme.space2
@@ -156,7 +194,7 @@ Singleton {
 
     PanelWindow {
         visible: root.centerOpen
-        color: "transparent"
+        color: VekronaTheme.c.surface1
         anchors.top: true
         anchors.right: true
         anchors.bottom: true
@@ -169,7 +207,7 @@ Singleton {
 
         Rectangle {
             anchors.fill: parent
-            color: VekronaTheme.c.surface1
+            color: "transparent"
             border.width: VekronaTheme.borderHair
             border.color: VekronaTheme.c.line
         }
@@ -208,11 +246,15 @@ Singleton {
                     text: "No notifications"
                 }
 
+                // A ListView, so a flood of notifications builds only the cards in view. It drops the card of a dismissed
+                // notification when it next lays out, by which time the notification is destroyed: the card reads it through
+                // properties that are empty then.
                 ListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
                     spacing: VekronaTheme.space2
+                    boundsBehavior: Flickable.StopAtBounds
                     model: ScriptModel {
                         values: root.newestFirst
                     }
@@ -222,7 +264,7 @@ Singleton {
 
                         width: ListView.view.width
                         notification: modelData
-                        bodyLines: 10
+                        selectable: true
                     }
                 }
             }

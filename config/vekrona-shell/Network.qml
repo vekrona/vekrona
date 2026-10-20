@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Networking
 import "Vekrona"
 import "."
@@ -51,7 +52,9 @@ BarPill {
         }
 
         Repeater {
-            model: Wireless.wifiNetworks
+            model: ScriptModel {
+                values: Wireless.wifiNetworks
+            }
 
             BarPill {
                 required property var modelData

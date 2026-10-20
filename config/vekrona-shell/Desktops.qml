@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell.I3
-import Quickshell.Io
 import "Vekrona"
 
 Row {
@@ -9,9 +8,6 @@ Row {
     readonly property int lowestAlwaysShown: 1
     readonly property int highestAlwaysShown: 5
     readonly property int highestWorkspace: 10
-
-    property var occupiedNumbers: []
-    property bool treeStale: false
 
     function swayWorkspaces() {
         return I3.workspaces?.values ?? [];
@@ -30,30 +26,6 @@ Row {
         return numbers;
     }
 
-    function collectOccupiedWorkspaces(node) {
-        const occupied = [];
-        function walk(n) {
-            if (!n)
-                return;
-            if (n.type === "workspace" && typeof n.num === "number" && n.num !== -1) {
-                const hasContent = (n.nodes && n.nodes.length > 0) || (n.floating_nodes && n.floating_nodes.length > 0);
-                if (hasContent)
-                    occupied.push(n.num);
-            }
-            (n.nodes || []).concat(n.floating_nodes || []).forEach(walk);
-        }
-        walk(node);
-        return occupied;
-    }
-
-    function refreshOccupied() {
-        if (tree.running) {
-            treeStale = true;
-            return;
-        }
-        tree.running = true;
-    }
-
     function switchTo(number) {
         I3.dispatch(`workspace number ${number}`);
     }
@@ -67,36 +39,25 @@ Row {
             switchTo(numbers[nextIndex]);
     }
 
+    // A scroll step moves one desktop; a trackpad's small deltas add up to steps.
+    function scroll(delta: real): void {
+        const steps = notches.steps(delta);
+        if (steps !== 0)
+            switchByOffset(-steps);
+    }
+
     function labelColor(focused, occupied, urgent) {
         if (urgent)
             return VekronaTheme.c.dangerInk;
         return focused || occupied ? VekronaTheme.c.ink : VekronaTheme.c.inkMuted;
     }
 
-    Process {
-        id: tree
-        command: ["swaymsg", "-t", "get_tree"]
-        stdout: StdioCollector {
-            onStreamFinished: root.occupiedNumbers = root.collectOccupiedWorkspaces(JSON.parse(text))
-        }
-        onExited: exitCode => {
-            if (exitCode !== 0)
-                console.error("vekrona-shell: swaymsg -t get_tree exited with", exitCode);
-            if (root.treeStale) {
-                root.treeStale = false;
-                running = true;
-            }
-        }
-    }
-
-    I3IpcListener {
-        subscriptions: ["window", "workspace"]
-        onIpcEvent: root.refreshOccupied()
-        Component.onCompleted: root.refreshOccupied()
+    WheelSteps {
+        id: notches
     }
 
     WheelHandler {
-        onWheel: event => root.switchByOffset(event.angleDelta.y < 0 ? 1 : -1)
+        onWheel: event => root.scroll(event.angleDelta.y)
     }
 
     Repeater {
@@ -128,7 +89,7 @@ Row {
                 style: VekronaTheme.type.body
                 font.weight: desktop.focused ? Font.DemiBold : Font.Normal
                 text: desktop.modelData
-                color: root.labelColor(desktop.focused, root.occupiedNumbers.includes(desktop.modelData), desktop.workspace?.urgent ?? false)
+                color: root.labelColor(desktop.focused, Windows.occupiedNumbers.includes(desktop.modelData), desktop.workspace?.urgent ?? false)
             }
 
             MouseArea {

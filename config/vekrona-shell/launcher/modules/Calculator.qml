@@ -10,6 +10,12 @@ LauncherModule {
     readonly property int exitRefused: 1
     // The handle of the running qalc, if any.
     property var current: null
+    // Every keystroke goes to qalc, and qalc can write and read files and run programs from an expression: export(), load(),
+    // plot() and command() take a file name or a command, even without quotes. Only text of the characters of a calculation
+    // reaches it (no quotes, backslashes or non-Latin letters), and not those functions, whose names qalc also knows in
+    // Swedish and Dutch.
+    readonly property var calculationCharacters: /^[A-Za-z0-9\s.,+\-*\/^%()\[\]=<>!&|~:;_$°µμΩ€£¥₴²³×÷√π]+$/
+    readonly property var forbiddenFunctions: ["export", "exportera", "exporteren", "load", "ladda", "lees", "plot", "command", "kommando"]
 
     function looksLikeExpression(text: string): bool {
         return /\d/.test(text) && (expressionStart.test(text) || expressionWord.test(text));
@@ -18,6 +24,14 @@ LauncherModule {
     // qalc reads "of" as a unit, so "12.5% of 1840" is meant as the product it stands for.
     function percentOf(text: string): string {
         return text.replace(/%\s*of\b/gi, "% *");
+    }
+
+    // Why qalc must not get the text, or "" when it may.
+    function refusal(text: string): string {
+        if (!calculationCharacters.test(text))
+            return "only digits, letters, operators and brackets can be calculated";
+        const forbidden = (text.match(/[A-Za-z]+/g) ?? []).find(word => forbiddenFunctions.includes(word.toLowerCase()));
+        return forbidden === undefined ? "" : forbidden + " reads or writes files, so it is not calculated";
     }
 
     function squash(text: string): string {
@@ -37,6 +51,9 @@ LauncherModule {
         if (text === "" || (!inMode && !looksLikeExpression(text)))
             return [];
         const strict = inMode;
+        const refused = refusal(text);
+        if (refused !== "")
+            return strict ? [errorRow("evaluate", refused)] : [];
         const options = strict ? ["-t"] : ["-t", "-s", "unknowns off"];
         const argv = ["env", "LC_ALL=C.UTF-8", "qalc"].concat(options, ["--", percentOf(text)]);
         current = answerFrom(reqId, argv, (code, stdout, stderr) => outcome(strict, text, argv, code, stdout, stderr));
