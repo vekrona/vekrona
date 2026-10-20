@@ -16,7 +16,7 @@ cat >"$work/check" <<'F'
 echo "check" >>"$FAKE_LOG"
 [[ ! -e "$FAKE_WORLD/check.fails" ]] || exit 1
 if [[ -e "$FAKE_WORLD/pending" ]]; then
-  echo '{"pending": true, "groups": [{"name": "Agents", "items": [{}, {}]}, {"name": "Flatpak", "items": [{}]}]}'
+  echo '{"pending": true, "groups": [{"name": "System packages", "items": [{}, {}]}, {"name": "Flatpak", "items": [{}]}]}'
 else
   echo '{"pending": false, "groups": []}'
 fi >"$VEKRONA_STATE_DIR/updates.json"
@@ -71,7 +71,7 @@ log "ok: timeout, skip and a closed notification skip the night"
 scenario; touch "$work/pending"; add_session 1; echo install >"$work/answer"
 night
 ran '^apply --offline$' || die "the answer 'install' did not start the offline install"
-ran 'vekrona-update-ask --timeout 600 --title .* --body Agents 2, Flatpak 1 --action skip=Skip tonight --action install=Install and reboot' \
+ran 'vekrona-update-ask --timeout 600 --title .* --body System packages 2, Flatpak 1 --action skip=Skip tonight --action install=Install and reboot' \
   || die "the question lacks its default timeout, summary or buttons, or the harmless skip is not first (a click on the toast body runs the first): $(grep runuser "$FAKE_LOG")"
 log "ok: install installs offline; the question carries the summary and a 600 s default timeout"
 

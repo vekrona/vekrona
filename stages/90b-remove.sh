@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
+source "$ROOT/lib/cuda-repo.sh"
 
 session_is_sway || die "current session is not Sway (XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset})"
 session_started_by_gdm && die "gdm is still active; reboot into the greetd-started Sway session first"
@@ -39,38 +40,15 @@ expand_installed() {
   done | sort -u
 }
 
-review_assumeno() {
-  local out rc=0
-  out="$(root dnf "$@" --assumeno --setopt=protected_packages="$PROTECTED" 2>&1)" || rc=$?
-  printf '%s\n' "$out"
-  if [[ $rc -eq 0 ]]; then
-    [[ "$out" == *"Nothing to do."* ]] && return 1
-    return 0
-  fi
-  if [[ "$out" == *"protected packages"* ]]; then
-    die "dnf $* refused: would remove protected packages ($(grep -o 'protected packages:.*' <<<"$out" | tr '\n' ' '))"
-  fi
-  [[ $rc -eq 1 && "$out" == *"Operation aborted"* ]] && return 0
-  die "dnf $* --assumeno failed unexpectedly (exit $rc)"
-}
-
-confirm() {
-  local prompt="$1"
-  [[ "${VEKRONA_YES:-0}" == "1" ]] && return 0
-  local reply
-  read -r -p "vekrona: $prompt [type yes] " reply < /dev/tty
-  [[ "$reply" == "yes" ]]
-}
+STORE_ROOT="$(root mktemp -d)"
+trap 'root rm -rf "$STORE_ROOT"' EXIT
 
 FEDORA_PROTECTED_CONF=/etc/dnf/protected.d/fedora-workstation.conf
 
 if pkg_installed fedora-release-identity-workstation; then
   log "reviewing identity swap: fedora-release-identity-workstation -> fedora-release-identity-basic"
-  review_assumeno "do" --action=remove fedora-release-identity-workstation --action=install fedora-release-identity-basic
-
-  confirm "proceed with the identity swap reviewed above?" || die "identity swap not confirmed"
-
-  root dnf "do" -y --setopt=protected_packages="$PROTECTED" --action=remove fedora-release-identity-workstation --action=install fedora-release-identity-basic
+  run_reviewed "$STORE_ROOT" "$PROTECTED" "the identity swap" "do" --action=remove fedora-release-identity-workstation --action=install fedora-release-identity-basic \
+    || die "dnf has nothing to do for the identity swap"
   pkg_installed fedora-release-identity-workstation && die "fedora-release-identity-workstation still installed after swap"
   pkg_installed fedora-release-identity-basic || die "fedora-release-identity-basic not installed after swap"
 else
@@ -86,9 +64,7 @@ mapfile -t to_remove < <(expand_installed "${REMOVE_GLOBS[@]}")
 
 if [[ ${#to_remove[@]} -gt 0 ]]; then
   log "reviewing removal of: ${to_remove[*]}"
-  if review_assumeno remove "${to_remove[@]}"; then
-    confirm "proceed with the removal reviewed above?" || die "removal not confirmed"
-    root dnf remove -y --setopt=protected_packages="$PROTECTED" "${to_remove[@]}"
+  if run_reviewed "$STORE_ROOT" "$PROTECTED" "the removal" remove "${to_remove[@]}"; then
     for p in "${to_remove[@]}"; do
       pkg_installed "$p" && die "package still installed after removal: $p"
     done
@@ -99,19 +75,10 @@ fi
 
 ensure_copr_absent agaspar/omedora-4 alternateved/keyd wezfurlong/wezterm-nightly phracek/PyCharm
 
-if [[ -f /etc/yum.repos.d/cuda-fedora43.repo ]]; then
-  log "removing stale repo file: /etc/yum.repos.d/cuda-fedora43.repo"
-  root rm -f /etc/yum.repos.d/cuda-fedora43.repo
-  [[ -f /etc/yum.repos.d/cuda-fedora43.repo ]] && die "cuda-fedora43.repo still present after removal"
-fi
+ensure_stale_cuda_repo_absent
 
 log "reviewing autoremove"
-if review_assumeno autoremove; then
-  confirm "proceed with the autoremove reviewed above?" || die "autoremove not confirmed"
-  root dnf autoremove -y --setopt=protected_packages="$PROTECTED"
-else
-  log "nothing to autoremove"
-fi
+run_reviewed "$STORE_ROOT" "$PROTECTED" "the autoremove" autoremove || log "nothing to autoremove"
 
 for p in "${desktop_pkgs[@]}"; do
   assert "package present: $p" pkg_installed "$p"
@@ -125,7 +92,7 @@ fi
 
 assert "AtkynsonMono Nerd Font installed" bash -c "fc-list | grep -q 'AtkynsonMono Nerd'"
 
-for f in /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/logind.conf.d/vekrona-idle.conf /etc/systemd/sleep.conf.d/vekrona.conf /etc/systemd/oomd.conf.d/vekrona.conf /etc/modprobe.d/vekrona-usb-autosuspend.conf; do
+for f in /etc/systemd/logind.conf.d/vekrona-inhibit-delay.conf /etc/systemd/logind.conf.d/vekrona-idle.conf /etc/systemd/sleep.conf.d/vekrona.conf /etc/systemd/oomd.conf.d/vekrona.conf /etc/systemd/coredump.conf.d/50-vekrona.conf /etc/sudoers.d/50-vekrona-sudo-pam-service; do
   assert "override still present: $f" test -f "$f"
 done
 

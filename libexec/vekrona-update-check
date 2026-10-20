@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Looks for updates in dnf, the Proton repo, Flatpak and mise, and rewrites /var/lib/vekrona/updates.json. Runs as root
+# Looks for updates in dnf, the Proton repo and Flatpak, and rewrites /var/lib/vekrona/updates.json. Runs as root
 # from vekrona-update-check.service, under the update lock.
 set -euo pipefail
 

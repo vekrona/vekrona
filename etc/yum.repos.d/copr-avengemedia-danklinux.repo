@@ -1,0 +1,10 @@
+[copr:copr.fedorainfracloud.org:avengemedia:danklinux]
+name=Copr repo for danklinux owned by avengemedia
+baseurl=https://download.copr.fedorainfracloud.org/results/avengemedia/danklinux/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-copr-avengemedia-danklinux
+repo_gpgcheck=0
+enabled=1
+includepkgs=quickshell cliphist cpptrace

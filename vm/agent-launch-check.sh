@@ -21,6 +21,26 @@ PREV_DEFAULT=""
 
 STUB_DIR="$(mktemp -d)"
 
+# vekrona installs no harness and runs whichever is on PATH, so the script supplies stubs for all five. The stub writes
+# its argv and environment where the launch check below reads them, then stays alive like a real harness session.
+HARNESS_TOOLS=(claude codex pi opencode cursor-agent)
+HARNESS_BIN="$STUB_DIR/harness-bin"
+STUB_ARGV_FILE="$STUB_DIR/stub.argv"
+STUB_ENV_FILE="$STUB_DIR/stub.env"
+mkdir -p "$HARNESS_BIN"
+for t in "${HARNESS_TOOLS[@]}"; do
+  cat > "$HARNESS_BIN/$t" <<STUB
+#!/usr/bin/env bash
+printf '%s\0' "\$@" > "$STUB_ARGV_FILE.tmp"
+env -0 > "$STUB_ENV_FILE.tmp"
+mv "$STUB_ENV_FILE.tmp" "$STUB_ENV_FILE"
+mv "$STUB_ARGV_FILE.tmp" "$STUB_ARGV_FILE"
+exec tail -f /dev/null
+STUB
+  chmod +x "$HARNESS_BIN/$t"
+done
+export PATH="$HARNESS_BIN:$PATH"
+
 SCRIPT_ENV_VARS=(
   ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL OPENAI_API_KEY CODEX_API_KEY
   AZURE_OPENAI_API_KEY GROQ_API_KEY XAI_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY
@@ -74,18 +94,6 @@ open_watch() {
   fail "inotifywait never established its watch: $*"
 }
 
-assert_policy_file() {
-  local file="$1" needle="$2"
-  [[ -f "$file" ]] || fail "policy file missing: $file (stage 55-agents must install it)"
-  [[ "$(stat -c %U "$file")" == "root" ]] || fail "policy file not owned by root: $file"
-  grep -q -F -- "$needle" "$file" || fail "policy file $file does not contain: $needle"
-}
-assert_policy_file /etc/claude-code/managed-settings.json '"forceLoginMethod": "claudeai"'
-assert_policy_file /etc/claude-code/managed-settings.json '"DISABLE_UPDATES"'
-assert_policy_file /etc/codex/requirements.toml 'allowed_login_methods = ["chatgpt"]'
-assert_policy_file /etc/codex/managed_config.toml 'check_for_update_on_startup = false'
-assert_policy_file /etc/opencode/opencode.json '"autoupdate": false'
-
 vekrona-agent set claude || fail "vekrona-agent set claude failed"
 [[ "$(vekrona-agent get)" == "claude" ]] || fail "vekrona-agent get did not return claude after set claude"
 
@@ -99,8 +107,6 @@ for v in "${SCRIPT_ENV_VARS[@]}"; do
   grep -qx -- "$v=leak" <<<"$manager_env" || fail "test setup: $v is not in the user manager environment"
 done
 
-MANAGED_CLAUDE=/usr/bin/claude
-SHIMS_DIR=/usr/local/share/mise/shims
 AWKWARD_PROMPT=$'it\'s a "quoted" $(touch '"$STUB_DIR"$'/pwned) `touch '"$STUB_DIR"$'/pwned2` \\n\nsecond line; --flag *'
 
 mapfile -d '' -t argv < <(vekrona-agent --prompt "$AWKWARD_PROMPT" --dry-run)
@@ -109,21 +115,18 @@ n=${#argv[@]}
 [[ "${argv[0]}" == "systemd-run" && "${argv[1]}" == "--user" ]] || fail "dry-run argv does not start with systemd-run --user: ${argv[0]} ${argv[1]}"
 ghostty_at="$(argv_index_of ghostty "${argv[@]}")" || fail "dry-run argv missing ghostty"
 [[ "${argv[ghostty_at + 1]}" == "--class=vekrona.agent" ]] || fail "ghostty is not followed by --class=vekrona.agent"
-[[ "${argv[n - 3]}" == "$MANAGED_CLAUDE" ]] || fail "harness is not the absolute managed path $MANAGED_CLAUDE: ${argv[n - 3]}"
+[[ "${argv[n - 3]}" == "$HARNESS_BIN/claude" ]] || fail "harness is not the absolute path of the claude on PATH, $HARNESS_BIN/claude: ${argv[n - 3]}"
 [[ "${argv[n - 2]}" == "--" ]] || fail "expected -- before the prompt, got: ${argv[n - 2]}"
 [[ "${argv[n - 1]}" == "$AWKWARD_PROMPT" ]] || fail "the awkward prompt did not arrive as one unmodified argv element: ${argv[n - 1]}"
 for v in "${SCRIPT_ENV_VARS[@]}"; do
   assert_unset_pair "$v" "${argv[@]}" || fail "dry-run argv has no 'env -u $v' although it is in the user manager environment"
 done
 if assert_unset_pair "$KEPT_ENV_VAR" "${argv[@]}"; then fail "unrelated variable $KEPT_ENV_VAR was stripped"; fi
-path_line="$(printf '%s\n' "${argv[@]}" | grep '^--setenv=PATH=' || true)"
-[[ "$path_line" == *"$SHIMS_DIR"* ]] || fail "--setenv=PATH does not carry $SHIMS_DIR: $path_line"
 
 for tool_flag in "claude:--" "codex:--" "pi:--" "cursor-agent:--" "opencode:--prompt"; do
   t="${tool_flag%%:*}"
   expected_flag="${tool_flag##*:}"
-  expected_bin="$SHIMS_DIR/$t"
-  [[ "$t" == "claude" ]] && expected_bin="$MANAGED_CLAUDE"
+  expected_bin="$HARNESS_BIN/$t"
   vekrona-agent set "$t" || fail "vekrona-agent set $t failed"
   mapfile -d '' -t tool_argv < <(vekrona-agent --prompt "leading-dash-check" --dry-run)
   m=${#tool_argv[@]}
@@ -200,10 +203,8 @@ for pick_argv in "--pick" "choose"; do
   [[ ! -s "$NOTIFY_LOG" ]] || fail "cancelling the rofi picker (vekrona-agent $pick_argv) raised a notification: $(cat "$NOTIFY_LOG")"
   [[ ! -e "$AGENT_CONFIG_FILE" ]] || fail "cancelling the rofi picker (vekrona-agent $pick_argv) wrote a default harness"
   grep -q -- "-no-custom" "$ROFI_ARGS" || fail "the picker runs rofi without -no-custom: $(cat "$ROFI_ARGS")"
-  while IFS= read -r offered; do
-    [[ -x "$([[ "$offered" == claude ]] && echo "$MANAGED_CLAUDE" || echo "$SHIMS_DIR/$offered")" ]] \
-      || fail "the picker offers a harness that is not installed: $offered"
-  done < "$ROFI_STDIN"
+  [[ "$(sort "$ROFI_STDIN")" == "$(printf '%s\n' "${HARNESS_TOOLS[@]}" | sort)" ]] \
+    || fail "the picker does not offer exactly the harnesses on PATH (${HARNESS_TOOLS[*]}): $(cat "$ROFI_STDIN")"
 
   if STUB_ROFI_STATUS=2 with_picker vekrona-agent "$pick_argv" >/dev/null 2>"$STUB_DIR/crash.err"; then
     fail "a crashing rofi picker (vekrona-agent $pick_argv) unexpectedly succeeded"
@@ -219,9 +220,19 @@ fi
 
 printf 'not-a-harness\n' > "$AGENT_CONFIG_FILE"
 : > "$NOTIFY_LOG"
+open_watch STALE_FD -r -e close_write,moved_to --format '%w%f' "$ERROR_STORE_DIR"
 STUB_ROFI_STATUS=1 with_picker vekrona-agent --pick >/dev/null 2>&1 \
   || fail "a stale stored default must fall back to the picker (cancel exits 0)"
-grep -q "unknown or not installed" "$NOTIFY_LOG" || fail "a stale stored default fell back to the picker without a visible message"
+STALE_RECORDED=""
+while IFS= read -r -u "$STALE_FD" changed; do
+  if [[ "$changed" == */record.json ]] && grep -q -F -- "unknown or not installed; pick another" "$changed"; then
+    STALE_RECORDED=yes
+    break
+  fi
+done
+exec {STALE_FD}<&-
+[[ -n "$STALE_RECORDED" ]] || fail "a stale stored default fell back to the picker without an error record within 30s"
+[[ ! -s "$NOTIFY_LOG" ]] || fail "a stale stored default raised a notification besides its error record: $(cat "$NOTIFY_LOG")"
 [[ "$(cat "$AGENT_CONFIG_FILE")" == "not-a-harness" ]] || fail "cancelling the picker after a stale default changed the stored default"
 
 STUB_ROFI_STATUS=0 STUB_ROFI_CHOICE=codex with_picker vekrona-agent --pick --dry-run >/dev/null \
@@ -229,6 +240,25 @@ STUB_ROFI_STATUS=0 STUB_ROFI_CHOICE=codex with_picker vekrona-agent --pick --dry
 [[ "$(cat "$AGENT_CONFIG_FILE")" == "not-a-harness" ]] || fail "--dry-run persisted the picked harness"
 rm -f "$AGENT_CONFIG_FILE"
 vekrona-agent set claude || fail "vekrona-agent set claude (after picker checks) failed"
+
+# The VM may still have /usr/bin/claude from an earlier install, so this PATH is built from nothing but links to the
+# few tools vekrona-agent runs. `true` stands in for rofi, the theme renderer and the error reporter, which this path
+# never really needs.
+NO_HARNESS_BIN="$STUB_DIR/no-harness-bin"
+mkdir -p "$NO_HARNESS_BIN"
+for t in bash id dirname readlink timeout; do
+  ln -s "$(type -P "$t")" "$NO_HARNESS_BIN/$t"
+done
+for t in rofi vekrona-render-theme; do
+  ln -s "$(type -P true)" "$NO_HARNESS_BIN/$t"
+done
+if no_harness_err="$(PATH="$NO_HARNESS_BIN" VEKRONA_ERROR_REPORTER="$(type -P true)" "$(command -v vekrona-agent)" choose 2>&1 >/dev/null)"; then
+  fail "vekrona-agent choose with no harness on PATH unexpectedly succeeded"
+fi
+[[ "$no_harness_err" == *"no agent harness is installed"* ]] \
+  || fail "vekrona-agent choose with no harness on PATH did not say that no agent harness is installed: $no_harness_err"
+[[ "$no_harness_err" == *"$NO_HARNESS_BIN"* ]] \
+  || fail "the no-harness error does not name the PATH it searched: $no_harness_err"
 
 window_has_app_id() {
   swaymsg -t get_tree | python3 -c '
@@ -296,24 +326,7 @@ while True:
     print("EVENT", flush=True)
 PYEOF
 
-BIN_DIR="$STUB_DIR/bin"
-mkdir -p "$BIN_DIR"
-STUB_HARNESS="$BIN_DIR/claude"
-STUB_ARGV_FILE="$STUB_DIR/stub.argv"
-STUB_ENV_FILE="$STUB_DIR/stub.env"
-cat > "$STUB_HARNESS" <<STUB
-#!/usr/bin/env bash
-printf '%s\0' "\$@" > "$STUB_ARGV_FILE.tmp"
-env -0 > "$STUB_ENV_FILE.tmp"
-mv "$STUB_ENV_FILE.tmp" "$STUB_ENV_FILE"
-mv "$STUB_ARGV_FILE.tmp" "$STUB_ARGV_FILE"
-exec tail -f /dev/null
-STUB
-chmod +x "$STUB_HARNESS"
-
 mapfile -d '' -t launch_argv < <(vekrona-agent --prompt "$AWKWARD_PROMPT" --dry-run)
-harness_at="$(argv_index_of "$MANAGED_CLAUDE" "${launch_argv[@]}")" || fail "dry-run argv does not contain $MANAGED_CLAUDE"
-launch_argv[harness_at]="$STUB_HARNESS"
 
 coproc WIN_WATCH { timeout 30 python3 "$STUB_DIR/sway-window-watch.py" "$SWAYSOCK" 2>&1; }
 open_watch CAPTURE_FD -e moved_to --format '%f' "$STUB_DIR"
@@ -354,6 +367,11 @@ done
 stub_env_lines="$(printf '%s\n' "${stub_env[@]}")"
 grep -qx -- "$KEPT_ENV_VAR=keep" <<<"$stub_env_lines" || fail "unrelated variable $KEPT_ENV_VAR was stripped from the harness environment"
 
+# vekrona-agent closes the shell's notification center before it launches, and reports a failure when the shell does not
+# answer: right after an install the service can be active with no instance to talk to, so the launch below must wait for one.
+# While it loads, qs says it is not ready and still exits 0.
+shell_answers() { [[ "$(qs -c vekrona-shell ipc call launcher state 2>&1 | jq -r '.open' 2>/dev/null)" =~ ^(true|false)$ ]]; }
+session_wait_until 60 shell_answers || fail "vekrona-shell did not answer its IPC within 60s, so vekrona-agent cannot close the notification center"
 vekrona-agent --error "$REAL_ERROR_ID" >/dev/null || fail "vekrona-agent --error $REAL_ERROR_ID failed to launch the agent"
 assert_error_status launched "after a successful vekrona-agent --error launch"
 swaymsg -- '[app_id="vekrona.agent"] kill' >/dev/null || fail "could not close the real agent window"

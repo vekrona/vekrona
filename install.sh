@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$ROOT/lib/common.sh"
 
-ALL_STAGES=(00-repos 20-snapper 10-nvidia 15-mac 30-packages 40-system 45-auth 50-user 55-agents 60-gaming 65-login-manager 70-verify 90a-switch-dm 90b-remove)
+ALL_STAGES=(00-repos 20-snapper 10-nvidia 15-mac 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify 90a-switch-dm 90b-remove)
 
 array_has() {
   local needle="$1" item
@@ -88,7 +88,7 @@ if [[ ${#run[@]} -eq 1 && "${run[0]}" == "70-verify" ]]; then
 fi
 export VEKRONA_STAGES="${verify_scope[*]}"
 if [[ $list_only -eq 1 ]]; then printf '%s\n' "${run[@]}"; exit 0; fi
-[[ $EUID -eq 0 ]] && die "run as your user, not root; stages call sudo where needed"
+[[ $EUID -eq 0 ]] && refuse "run as your user, not root; stages call sudo where needed"
 if array_has 20-snapper "${verify_scope[@]}"; then require_btrfs_root; fi
 
 for stage in "${run[@]}"; do

@@ -1,0 +1,10 @@
+[copr:copr.fedorainfracloud.org:rossetnocpes:herdr]
+name=Copr repo for herdr owned by rossetnocpes
+baseurl=https://download.copr.fedorainfracloud.org/results/rossetnocpes/herdr/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-copr-rossetnocpes-herdr
+repo_gpgcheck=0
+enabled=1
+includepkgs=herdr

@@ -1,8 +1,8 @@
 # Calendar
 
 The bar's Calendar widget shows your next event today and opens a month grid with an agenda for the next 31 days.
-It reads `~/.local/state/vekrona/calendar.json`, which `vekrona-calendar` writes every 15 minutes
-(`vekrona-calendar.timer`). Vekrona syncs calendars with [vdirsyncer](https://vdirsyncer.pimutils.org/) into
+It reads `~/.local/state/vekrona/calendar.json`, which `vekrona-calendar` writes 30 seconds after login and then every hour
+(`vekrona-calendar.timer`, which runs only while your Sway session does, so a laptop on battery is not woken for it while you are logged out). Vekrona syncs calendars with [vdirsyncer](https://vdirsyncer.pimutils.org/) into
 `~/.local/share/vekrona-calendars/<provider>/` and reads them with [khal](https://khal.readthedocs.io/).
 All providers are read-only: Vekrona shows events, it does not create or change them.
 

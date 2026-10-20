@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Started by the libdnf5 actions plugin around every dnf transaction (etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions):
+#   vekrona-snapper-snapshot pre  DNF_PID               takes the pre snapshot and prints tmp.snapper_pre_number=N
+#   vekrona-snapper-snapshot post DNF_PID PRE_NUMBER    takes the matching post snapshot (nothing when PRE_NUMBER is empty)
+# The snapshot is described by the command line of the dnf process. That text is typed by whoever runs dnf, so it reaches
+# snapper only as one argument and never passes through a shell. A failing snapper does not stop the transaction: it is
+# reported on stderr and in the journal, and the transaction runs without a snapshot.
+# Standalone on purpose (no lib/common.sh): it runs inside every dnf transaction.
+set -euo pipefail
+
+fail() {
+  echo "vekrona-snapper-snapshot: $*" >&2
+  exit 1
+}
+
+usage() {
+  echo "usage: vekrona-snapper-snapshot pre DNF_PID | post DNF_PID PRE_NUMBER" >&2
+  exit 2
+}
+
+# Prints the number of the snapshot snapper takes for SNAPPER_ARGS... described by the command line of dnf process PID,
+# or nothing when snapper fails.
+take_snapshot() {
+  local pid="$1" description number
+  shift
+  description="$(ps -o command= -p "$pid")" || fail "cannot read the command line of dnf process $pid"
+  if ! number="$(snapper create -c number -p -d "$description" "$@")"; then
+    logger --priority user.err --tag vekrona-snapper "snapper could not take a snapshot for: $description"
+    echo "vekrona-snapper-snapshot: snapper could not take a snapshot for: $description" >&2
+    return 0
+  fi
+  printf '%s' "$number"
+}
+
+[[ $# -ge 2 ]] || usage
+mode="$1" pid="$2"
+[[ "$pid" =~ ^[0-9]+$ ]] || fail "not a process id: $pid"
+case "$mode" in
+  pre)
+    [[ $# -eq 2 ]] || usage
+    number="$(take_snapshot "$pid" -t pre)"
+    printf 'tmp.snapper_pre_number=%s\n' "$number"
+    ;;
+  post)
+    [[ $# -eq 3 ]] || usage
+    pre_number="$3"
+    if [[ -z "$pre_number" ]]; then
+      echo "vekrona-snapper-snapshot: no pre snapshot for this transaction, so no post snapshot" >&2
+      exit 0
+    fi
+    [[ "$pre_number" =~ ^[0-9]+$ ]] || fail "not a snapshot number: $pre_number"
+    take_snapshot "$pid" -t post --pre-number "$pre_number" >/dev/null
+    ;;
+  *) usage ;;
+esac

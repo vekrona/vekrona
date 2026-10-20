@@ -34,17 +34,20 @@ cd ~/wrk/vekrona
 ```
 
 With no arguments, `install.sh` runs the default stage list in this order:
-`00-repos 20-snapper 10-nvidia 15-mac 30-packages 40-system 45-auth 50-user 55-agents 60-gaming 65-login-manager 70-verify`
-(on a Mac, `10-nvidia` is skipped; on non-Mac hardware without NVIDIA, both `10-nvidia` and `15-mac` are skipped; `55-agents` runs everywhere).
+`00-repos 20-snapper 10-nvidia 15-mac 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify`
+(on a Mac, `10-nvidia` is skipped; on non-Mac hardware without NVIDIA, both `10-nvidia` and `15-mac` are skipped).
 `10-nvidia` also runs only when the proprietary 615 driver can drive every NVIDIA GPU, which means Turing to Ada (PCI device IDs `0x1e00` up to but excluding `0x2900`), and only when Secure Boot does not block the module (Secure Boot enabled and the akmods key `/etc/pki/akmods/certs/public_key.der` not enrolled; or Secure Boot state that `mokutil` cannot tell, on a UEFI boot). Pascal and older, and Blackwell, keep nouveau: `install.sh` warns once with the device IDs or the reason and "keeping nouveau", and skips the stage. Stage 10 sets `pcie_aspm=off` on desktops only, not on laptops.
+`15-mac` stops with the same Secure Boot reason before it builds `wl` or `facetimehd`, because a module that would not load still leaves the stage reporting success.
 Snapper runs before NVIDIA so a snapshot exists before stage `10-nvidia` touches
 the driver. Stage `65-login-manager` runs last, after everything that
 installs and configures greetd (`30-packages`, `40-system`) and right before
 verify: on a fresh install nothing owns `display-manager.service` yet, so it
 enables greetd and switches the default target to `graphical.target`. See
-[New default stage: 65-login-manager](#new-default-stage-65-login-manager) for the exact condition. Stage
-`55-agents` installs the coding-agent harnesses (Claude Code, Codex, OpenCode,
-Pi, Cursor); see [Agents: delivery and updates](agents.md#agents-delivery-and-updates).
+[New default stage: 65-login-manager](#new-default-stage-65-login-manager) for the exact condition. vekrona
+installs no coding agent; install one yourself, e.g. Claude Code with
+`curl -fsSL https://claude.ai/install.sh | bash` (see
+[Installing a harness](agents.md#installing-a-harness)). On a machine installed by an earlier version, stage
+`30-packages` removes the leftovers of the old mise-based agent install.
 
 Reboot, then log in through the greeter (tuigreet, running `start-sway`).
 

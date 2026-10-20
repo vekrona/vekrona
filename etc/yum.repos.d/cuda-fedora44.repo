@@ -1,0 +1,10 @@
+# NVIDIA's CUDA toolkit. Its driver packages stay out: the driver is RPM Fusion's akmod-nvidia (stage 10), so the repo
+# offers only the toolkit's own packages, every one of them named <name>-<major>-<minor>, plus the few unversioned
+# metapackages. A newer toolkit component whose name this list does not cover fails the install; add its pattern then.
+[cuda-fedora44-x86_64]
+name=cuda-fedora44-x86_64
+baseurl=https://developer.download.nvidia.com/compute/cuda/repos/fedora44/x86_64
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-cuda-fedora-44
+includepkgs=cuda cuda-toolkit* cuda-[0-9]* cuda-*-[0-9]*-[0-9]* cccl-[0-9]*-[0-9]* gds-tools-[0-9]*-[0-9]* libcu*-[0-9]*-[0-9]* libnpp*-[0-9]*-[0-9]* libnvfatbin*-[0-9]*-[0-9]* libnvjitlink*-[0-9]*-[0-9]* libnvjpeg*-[0-9]*-[0-9]* libnvptxcompiler-[0-9]*-[0-9]* libnvvm-[0-9]*-[0-9]* nsight-compute-* nsight-systems-*

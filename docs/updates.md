@@ -10,7 +10,7 @@ failure never depends on a terminal.
 
 ```
 09:00 (and 5 min after boot)    vekrona-update-check.timer -> vekrona-update-check.service
-        dnf, Proton repo, Flatpak and mise are queried; /var/lib/vekrona/updates.json is rewritten
+        dnf, Proton repo and Flatpak are queried; /var/lib/vekrona/updates.json is rewritten
         something pending and not skipped today -> vekrona-update-night.timer is armed
 login or updates.json changes   vekrona-update-notify (user): "updates are ready" [Install now] [Not tonight]
 00:00, waking the machine       vekrona-update-night.timer -> vekrona-update-night.service
@@ -22,12 +22,15 @@ next boot                       vekrona-update-post.service: report the result, 
 ```
 
 - **The check** (`libexec/vekrona-update-check`, root, under the lock `/run/vekrona-update.lock`) runs `vekrona-proton
-  stage`, `dnf5 check-upgrade --refresh --json`, `flatpak remote-ls --updates --system` and `mise outdated --json`. It
-  writes `/var/lib/vekrona/updates.json` in one rename: `checked`, `pending`, `night_armed` and `groups`. The groups are
-  System packages, Agents (`claude-code` from dnf, plus codex, pi, opencode and cursor-agent from mise), Flatpak and
-  Proton, and a group with nothing in it is left out. It arms `vekrona-update-night.timer` when something is pending
+  stage`, `dnf5 check-upgrade --refresh --json`, `dnf5 upgrade --assumeno`, `flatpak remote-ls --updates --system`.
+  check-upgrade lists every newer package, including those `dnf5 upgrade` skips for conflicts
+  or broken dependencies (RPM Fusion's `mesa-va-drivers-freeworld` lags behind Fedora's mesa); the declined
+  `upgrade` names the skipped ones, they are left out of the groups and logged. It writes `/var/lib/vekrona/updates.json` in one rename: `checked`, `pending`, `night_armed` and `groups`. The groups are
+  System packages (a dnf-installed `claude-code` shows up here), Flatpak and Proton, and a group with nothing in it is left out. It arms `vekrona-update-night.timer` when something is pending
   and `/var/lib/vekrona/update-skip` does not hold today's date, and disarms it otherwise. The timer fires at 09:00 and
   not at midnight, so the check never races the night run.
+  Before the first check, stage 40 runs `libexec/vekrona-update-seed`, which writes the same file with `pending:
+  false` and no groups, so the launcher's Power view always has a file (and a directory) to watch.
 - **The notification** is the user side (`bin/vekrona-update-notify`, started by a path unit on `updates.json` and at
   login, once per distinct content). [Install now] starts `vekrona-update-now.service`; [Not tonight] starts
   `vekrona-update-skip.service`, which writes today's date to `update-skip`, disarms the night timer and marks
@@ -44,48 +47,64 @@ next boot                       vekrona-update-post.service: report the result, 
   forcing a reboot over it.
 - **Update and restart / Update and shut down** in the launcher power menu start `vekrona-update-reboot.service` and
   `vekrona-update-poweroff.service`, which run the same offline install now.
-- **The offline install** (`libexec/vekrona-update-apply --offline [--poweroff]`) stages the Proton RPMs, then, inside a
-  snapper pre/post pair, runs `flatpak update` and the mise steps online, stores dnf's transaction with `dnf5 upgrade
+- **The offline install** (`libexec/vekrona-update-apply --offline [--poweroff]`) stages the Proton RPMs, takes the snapper
+  pre snapshot, runs `flatpak update` online, stores dnf's transaction with `dnf5 upgrade
   --offline`, writes the marker `/var/lib/vekrona/offline-pending` and runs `dnf5 offline reboot` (with `--poweroff`
   when asked). dnf then applies the transaction in `system-update.target`, where nothing else is running, and reboots
-  again. When dnf has nothing to install, only Flatpak and mise ran and the machine does not reboot.
+  again. The transaction has not run when the script ends, so the post snapshot is not taken there: the marker's second
+  line (`pre=N`) hands the pre snapshot to `vekrona-update-post`, which closes the pair after the transaction. When dnf has
+  nothing to install, only Flatpak ran, the pair is closed at once and the machine does not reboot. The midnight run
+  (`vekrona-update-night.service`) has `ConditionACPower=true`: on battery it is skipped and the update waits for the next night.
+- **The online install** (`vekrona-update-apply --online`) ends the same way: after the dnf transaction it builds what the
+  newest kernel is missing and makes it the GRUB default, or fails the run.
 - **After the reboot**, `vekrona-update-post.service` runs because the marker exists. It repairs the 1Password repo file
-  (the RPM's `%post` disables `repo_gpgcheck`), runs the check again so `updates.json` says `pending: false`, and shows
-  a "System updated" notification. dnf keeps a transaction that did not finish stored, so a transaction that
+  (the RPM's `%post` disables `repo_gpgcheck`), closes the snapshot pair, makes the newest kernel the GRUB default,
+  shows a "System updated" notification and only then runs the check again (it needs the network; a failing check fails the
+  unit but no longer stands between the kernel and the GRUB default) so `updates.json` says `pending: false`. On an NVIDIA machine the promotion first builds the new kernel's nvidia module (the offline
+  transaction skips akmods), regenerates its initramfs and only then makes that kernel the GRUB default, because
+  `UPDATEDEFAULT=no` keeps kernel-install from doing it; when that fails, the previous kernel stays the default and the
+  unit fails, keeping the marker so the next boot retries. dnf keeps a transaction that did not finish stored, so a transaction that
   `dnf5 offline status` still reports makes the unit fail, with the status and the tail of `dnf5 offline log` in its
   message. After a night install the greeter is on screen and nobody is logged in; logind's `IdleAction=suspend` (25
   minutes, see [Sleep](development.md)) puts the machine back to sleep.
-- **Failures** need no unit of their own. A failed root unit is a "unit failed" record in the system journal, which
-  `vekrona-error`'s watcher turns into an entry in the error store (with a toast while you are logged in, and at your
-  next login otherwise); the unit's journal, `journalctl -u vekrona-update-night.service`, holds the detail.
+- **At every boot** on an NVIDIA machine, `akmods.service` runs the drop-in `vekrona-nvidia-initramfs` after its build.
+  The drop-in compares file times only: it regenerates the running kernel's initramfs (and then verifies it) when the
+  image is missing or older than the nvidia module, `99-nvidia-dracut.conf` or `vekrona-nvidia.conf`, and otherwise
+  exits without opening the 360 MB image, because reading it costs seconds of disk and CPU on every battery boot. It
+  takes the same kernel lock as `vekrona-kernel-ready` and an update (waiting at most 600 s, then failing the unit).
+- **Failures** need no unit of their own. A failed root unit is a "unit failed" record in the system journal, and the
+  `die()` message that ended it is a second record of its own (the scripts report to `vekrona-error` as root, whose
+  entries the watcher accepts from uid 0); the watcher turns both into entries in the error store (shown by the robot's red
+  dot while you are logged in, and at your next login otherwise). The unit's journal, `journalctl -u
+  vekrona-update-night.service`, holds the detail. A Proton feed that cannot be read is not such a failure: the check and
+  the update go on without new Proton packages, and the problem is one record of its own.
 
 ### Updating by hand
 
-`vekrona-update` is the one command for "update the whole computer, now":
+`vekrona-update now` is the one command for "update the whole computer, now" (a bare `vekrona-update` is refused):
 
 ```
-vekrona-update
+vekrona-update now
 ```
 
-It starts `vekrona-update-now.service` (no `sudo`) and shows the unit's journal until it ends; its exit status is the
-unit's. The unit runs `vekrona-update-apply --online`: `vekrona-proton stage`, a pre-update snapper snapshot, `dnf upgrade
---refresh`, the 1Password repo repair, `flatpak update`, the `mise` (system-wide) upgrade, prune of superseded tool
-versions and reshim, the matching post-update snapshot, and a check that rewrites `updates.json`. Each tool's own output
-is shown, and the pre-snapshot number comes with a `vekrona-rollback <N>` hint at the end.
+It starts `vekrona-update-now.service` (no `sudo`) and shows the unit's journal until it ends; it exits 0 when the update
+succeeded and 1 when it failed or was stopped. It learns the end from the journal, where systemd logs "Finished",
+"Failed with result ..." or "Stopped" for the unit, and not from `systemctl start --wait`: the `dnf upgrade` can upgrade
+systemd, whose scriptlets re-execute PID 1 in the middle of the run, and that drops the D-Bus signal `--wait` waits for,
+so `systemctl` never returned for a run that had finished. Started while the unit already runs, the command follows that
+run to its end. The unit runs `vekrona-update-apply --online`: `vekrona-proton stage`, a pre-update snapper snapshot, `dnf upgrade
+--refresh`, the 1Password repo repair, `flatpak update`, the matching post-update snapshot, and a check that rewrites
+`updates.json`. Each tool's own output is shown, and the pre-snapshot number comes with a `vekrona-rollback <N>` hint at
+the end.
 
-Every step is non-interactive: `dnf upgrade -y`, `flatpak update --system -y --noninteractive`, and
-`mise upgrade` need no confirmation flag. `flatpak update` runs
+Every step is non-interactive: `dnf upgrade -y` and `flatpak update --system -y --noninteractive` need no
+confirmation. `flatpak update` runs
 `--system -y --noninteractive` because stage `30-packages` only adds the
 flathub remote system-wide (`ensure_flatpak_remote_system`), not per-user; a
-plain user-scope update failed on the appstream refresh. A `mise upgrade
---dry-run` runs first, and `minimum_release_age` may hold some releases back;
-whether the dry run reports each held-back release is not verified, so do not
-rely on its output to explain a run that changes less than expected. Both mise
-upgrade steps run through `mise_system_strict`, which fails on the
-`minimum_release_age is set for` warning. `mise outdated` (the check) is not known to apply the cooldown, so a
-release the cooldown holds back may show as pending until it ages. `mise_system_strict` also fails when mise warns that it could not look up the latest versions (a DNS error or timeout), because mise still exits 0 and prints "All tools are up to date" then. After the upgrade, `mise prune
---tools --yes` removes superseded tool versions, so old installs do not pile
-up under `/usr/local/share/mise/installs`.
+plain user-scope update failed on the appstream refresh.
+
+Coding agents are not part of this pipeline: vekrona installs none (see [Coding agents](agents.md)), so a harness
+installed per user updates itself, and a dnf-installed `claude-code` moves with `dnf upgrade`.
 
 The post-update snapshot is attempted exactly once. On success it is taken
 at the end of the run; if a step fails first, an `EXIT` trap takes it, so a
@@ -156,15 +175,11 @@ repo for them, and its apps do not update themselves on Linux. So `bin/vekrona-p
 
 Trust model: Proton signs none of these RPMs (no GPG signature, no `repo_gpgcheck`), so the repo has `gpgcheck=0`.
 What protects a download is TLS to `proton.me` plus the SHA512 from the feed on the same origin, and every RPM URL
-in a feed must start with `https://proton.me/download/`. That catches a corrupted or truncated download and a feed
+in a feed must start with `https://proton.me/download/` and continue with plain path characters (no `..`, `%`, `?` or
+glob characters); a feed version must look like a version, because it becomes part of a file name. That catches a corrupted or truncated download and a feed
 entry that points elsewhere, but not a compromise of proton.me itself: whoever controls the feed controls the
 checksum too. The repo directory is root-owned and only `vekrona-proton stage` writes to it. The downloaded RPM's
 name and version must match the feed's before it enters the repo.
-
-To change the `minimum_release_age` cooldown, edit the one line in
-`etc/mise/config.toml` and re-run `./install.sh 55`, which reinstalls the
-file and re-runs `mise_system install`/`reshim` against the new setting; the
-same file also controls which tool versions mise tracks (`[tools]`).
 
 Release upgrade procedure:
 

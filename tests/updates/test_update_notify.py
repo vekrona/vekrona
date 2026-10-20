@@ -25,9 +25,13 @@ sys.exit(int(os.environ.get("FAKE_START_STATUS", "0")))
 
 FAKE_NOTIFY_SEND = RECORDING_STUB
 
+FAKE_ERROR_REPORTER = RECORDING_STUB + """
+sys.exit(int(os.environ.get("FAKE_REPORT_STATUS", "0")))
+"""
+
 FLATPAK = {"name": "Flatpak", "items": [{"name": "org.signal.Signal", "from": "", "to": ""}]}
-AGENTS = {"name": "Agents", "items": [{"name": "claude-code", "from": "2.1.0", "to": "2.1.3"},
-                                      {"name": "pi", "from": "0.9.1", "to": "0.9.4"}]}
+SYSTEM = {"name": "System packages", "items": [{"name": "kernel-core", "from": "2.1.0", "to": "2.1.3"},
+                                              {"name": "curl", "from": "0.9.1", "to": "0.9.4"}]}
 
 
 def numbered(count):
@@ -52,6 +56,7 @@ class UpdateNotifyTestCase(unittest.TestCase):
         write_executable(os.path.join(bin_dir, "vekrona-update-ask"), FAKE_ASK)
         write_executable(os.path.join(bin_dir, "vekrona-update-start"), FAKE_START)
         write_executable(os.path.join(bin_dir, "notify-send"), FAKE_NOTIFY_SEND)
+        write_executable(os.path.join(bin_dir, "vekrona-error"), FAKE_ERROR_REPORTER)
         self.tool = os.path.join(bin_dir, "vekrona-update-notify")
         self.updates = os.path.join(self.root, "updates.json")
         self.state_home = os.path.join(self.root, "state")
@@ -67,7 +72,7 @@ class UpdateNotifyTestCase(unittest.TestCase):
         env = {"PATH": f"{os.path.dirname(self.tool)}:/usr/bin:/bin", "HOME": self.root,
                "XDG_STATE_HOME": self.state_home, "VEKRONA_UPDATES_FILE": self.updates,
                "FAKE_LOG": self.log, "FAKE_ASK_ANSWER": answer, "PYTHONDONTWRITEBYTECODE": "1", **extra_env}
-        return subprocess.run([sys.executable, "-B", self.tool], env=env, capture_output=True, text=True,
+        return subprocess.run([sys.executable, "-B", self.tool, "run"], env=env, capture_output=True, text=True,
                               timeout=60)
 
     def calls(self):
@@ -92,7 +97,7 @@ class UpdateNotifyTestCase(unittest.TestCase):
 
 class ToastTest(UpdateNotifyTestCase):
     def test_the_toast_offers_install_now_and_not_tonight(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         result = self.run_notify()
         self.assertEqual(result.returncode, 0, result.stderr)
         asked = self.ask_args()
@@ -100,19 +105,19 @@ class ToastTest(UpdateNotifyTestCase):
         self.assertEqual(sorted(asked["actions"]), ["install=Install now", "skip=Not tonight"])
 
     def test_the_first_action_is_the_harmless_one_because_a_click_on_the_toast_body_runs_it(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         self.assertEqual(self.run_notify().returncode, 0)
         self.assertEqual(self.ask_args()["actions"][0], "skip=Not tonight")
 
     def test_the_toast_stays_until_midnight_at_the_latest(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         self.run_notify()
         self.assertTrue(1 <= self.ask_args()["timeout"] <= 24 * 60 * 60)
 
     def test_each_group_is_a_line_with_its_versions(self):
         self.assertEqual(
-            self.body([AGENTS, FLATPAK]),
-            "Agents: claude-code 2.1.0 → 2.1.3, pi 0.9.1 → 0.9.4\nFlatpak: org.signal.Signal")
+            self.body([SYSTEM, FLATPAK]),
+            "System packages: kernel-core 2.1.0 → 2.1.3, curl 0.9.1 → 0.9.4\nFlatpak: org.signal.Signal")
 
     def test_an_item_with_only_one_known_version_is_listed_by_name(self):
         group = {"name": "Proton", "items": [{"name": "a", "from": "1", "to": ""}, {"name": "b", "from": "", "to": "2"}]}
@@ -149,7 +154,7 @@ class NothingToTellTest(UpdateNotifyTestCase):
         self.assert_silent_success()
 
     def test_nothing_pending_wins_over_leftover_groups(self):
-        self.write_updates(state([AGENTS], pending=False))
+        self.write_updates(state([SYSTEM], pending=False))
         self.assert_silent_success()
 
     def test_pending_with_only_empty_groups_is_not_announced(self):
@@ -165,15 +170,15 @@ class MalformedFileTest(UpdateNotifyTestCase):
             "truncated": '{"pending": true, "groups": [',
             "not an object": "[]",
             "null": "null",
-            "no pending": state([AGENTS]) | {"pending": None},
-            "pending as a word": state([AGENTS], pending="yes"),
+            "no pending": state([SYSTEM]) | {"pending": None},
+            "pending as a word": state([SYSTEM], pending="yes"),
             "no groups": {"pending": True},
-            "groups not a list": {"pending": True, "groups": "Agents"},
+            "groups not a list": {"pending": True, "groups": "System packages"},
             "group without a name": state([{"items": [{"name": "a", "from": "", "to": ""}]}]),
-            "group without items": state([{"name": "Agents"}]),
-            "item without a name": state([{"name": "Agents", "items": [{"from": "1", "to": "2"}]}]),
-            "item without versions": state([{"name": "Agents", "items": [{"name": "pi"}]}]),
-            "item that is a word": state([{"name": "Agents", "items": ["pi"]}]),
+            "group without items": state([{"name": "System packages"}]),
+            "item without a name": state([{"name": "System packages", "items": [{"from": "1", "to": "2"}]}]),
+            "item without versions": state([{"name": "System packages", "items": [{"name": "curl"}]}]),
+            "item that is a word": state([{"name": "System packages", "items": ["curl"]}]),
         }
         for name, content in malformed.items():
             with self.subTest(name):
@@ -182,54 +187,62 @@ class MalformedFileTest(UpdateNotifyTestCase):
                 result = self.run_notify()
                 self.assertEqual(result.returncode, 1, result.stdout)
                 self.assertIn("vekrona-update-notify:", result.stderr)
-                self.assertEqual([call[0] for call in self.calls()], ["notify-send"])
+                self.assertEqual([call[0] for call in self.calls()], ["vekrona-error"])
                 self.assertFalse(os.path.exists(self.notified))
 
-    def test_the_failure_is_shown_as_a_critical_notification(self):
+    def test_the_failure_is_reported_once_and_not_toasted_a_second_time(self):
         self.write_updates("lizard")
         self.run_notify()
         (call,) = self.calls()
-        self.assertEqual(call[1:3], ["-u", "critical"])
+        self.assertEqual(call[:2], ["vekrona-error", "report"])
+        self.assertIn("vekrona-update-notify: cannot read", call[3])
+
+    def test_a_failure_that_cannot_be_reported_is_toasted_as_critical(self):
+        self.write_updates("lizard")
+        self.run_notify(FAKE_REPORT_STATUS="1")
+        report, toast = self.calls()
+        self.assertEqual(report[:2], ["vekrona-error", "report"])
+        self.assertEqual(toast[:3], ["notify-send", "-u", "critical"])
 
 
 class DedupeTest(UpdateNotifyTestCase):
     def test_the_same_updates_are_announced_once(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         self.run_notify()
         self.run_notify()
         self.assertEqual(len(self.asks()), 1)
 
     def test_a_different_set_of_updates_is_announced_again(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         self.run_notify()
-        self.write_updates(state([AGENTS, FLATPAK]))
+        self.write_updates(state([SYSTEM, FLATPAK]))
         self.run_notify()
         self.assertEqual(len(self.asks()), 2)
 
     def test_a_newer_version_of_a_listed_package_is_announced_again(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         self.run_notify()
-        newer = json.loads(json.dumps(AGENTS))
+        newer = json.loads(json.dumps(SYSTEM))
         newer["items"][1]["to"] = "0.9.5"
         self.write_updates(state([newer]))
         self.run_notify()
         self.assertEqual(len(self.asks()), 2)
 
     def test_a_new_check_with_the_same_updates_is_not_announced_again(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         self.run_notify()
-        self.write_updates(state([AGENTS], checked="2026-10-10T09:00:00+02:00", night_armed=False))
+        self.write_updates(state([SYSTEM], checked="2026-10-10T09:00:00+02:00", night_armed=False))
         self.run_notify()
         self.assertEqual(len(self.asks()), 1)
 
     def test_a_toast_nobody_answered_still_counts_as_shown(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         for answer in ("timeout", "closed"):
             self.run_notify(answer)
         self.assertEqual(len(self.asks()), 1)
 
     def test_a_failed_ask_is_tried_again_next_time(self):
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
         self.assertEqual(self.run_notify(FAKE_ASK_STATUS="1").returncode, 1)
         self.assertFalse(os.path.exists(self.notified))
         self.assertEqual(self.run_notify().returncode, 0)
@@ -239,7 +252,7 @@ class DedupeTest(UpdateNotifyTestCase):
 class AnswerTest(UpdateNotifyTestCase):
     def setUp(self):
         super().setUp()
-        self.write_updates(state([AGENTS]))
+        self.write_updates(state([SYSTEM]))
 
     def starts(self):
         return [call[1:] for call in self.calls() if call[0] == "vekrona-update-start"]

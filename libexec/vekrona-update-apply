@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Installs updates as root, under the update lock. Started by the vekrona-update-{now,reboot,poweroff} units and by
 # vekrona-update-night.
-#   --online                 dnf, Flatpak and mise run now
-#   --offline [--poweroff]   Flatpak and mise run now; dnf's transaction is stored and runs in the next boot's
+#   --online                 dnf and Flatpak run now
+#   --offline [--poweroff]   Flatpak runs now; dnf's transaction is stored and runs in the next boot's
 #                            system-update.target, after which the machine reboots (or powers off with --poweroff)
 set -euo pipefail
 
@@ -54,35 +54,23 @@ on_exit() {
 }
 trap on_exit EXIT
 
-update_flatpak_and_mise() {
+update_flatpak() {
   log "=== flatpak update ==="
   flatpak update --system -y --noninteractive
-
-  log "=== mise system: checking for upgrades (minimum_release_age may hold some back) ==="
-  mise_system_strict upgrade --dry-run
-
-  log "=== mise system: upgrading ==="
-  mise_system_strict upgrade
-
-  log "=== mise system: pruning superseded tool versions ==="
-  mise_system prune --tools --yes
-
-  log "=== mise system: reshim ==="
-  mise_system reshim
 }
 
 update_online() {
   log "=== dnf upgrade ==="
   dnf5 upgrade --refresh -y
   update_postflight
-  update_flatpak_and_mise
-  update_ensure_nvidia_boots
+  update_flatpak
+  update_promote_newest_kernel
 }
 
 # Sets stored=1 when dnf has a transaction waiting for the offline boot.
 update_offline() {
   local status=0
-  update_flatpak_and_mise
+  update_flatpak
 
   log "=== dnf upgrade: storing the offline transaction ==="
   dnf5 check-upgrade --refresh >/dev/null || status=$?
@@ -103,7 +91,7 @@ update_offline() {
 }
 
 stored=0
-"$VEKRONA_PROTON" stage
+update_stage_proton
 
 pre_number="$(snapper -c root create -p -c number -d "vekrona-update pre")"
 [[ -n "$pre_number" ]] || die "failed to create pre-update snapshot"
@@ -111,13 +99,20 @@ log "pre-update snapshot: $pre_number"
 
 "update_$mode"
 
-create_post_snapshot || die "failed to create post-update snapshot; pre-update snapshot $pre_number has no matching post snapshot"
-
 if [[ $stored -eq 1 ]]; then
-  date -Iseconds >"$VEKRONA_OFFLINE_MARKER"
+  # dnf runs the stored transaction in the next boot, so the changes this snapshot pair is meant to bracket have not
+  # happened yet: the marker hands the pre snapshot to vekrona-update-post, which closes the pair after them.
+  post_attempted=1
+  { date -Iseconds; echo "$OFFLINE_MARKER_PRE_KEY$pre_number"; } >"$VEKRONA_OFFLINE_MARKER"
+  log "post-update snapshot: taken by vekrona-update-post after the offline transaction"
   log "=== rebooting into the offline update${poweroff:+, then powering off} ==="
-  dnf5 offline reboot -y ${poweroff:+"$poweroff"} || { rm -f "$VEKRONA_OFFLINE_MARKER"; die "dnf5 offline reboot failed"; }
+  if ! dnf5 offline reboot -y ${poweroff:+"$poweroff"}; then
+    rm -f "$VEKRONA_OFFLINE_MARKER"
+    post_attempted=0 # nothing was applied: close the pair now, as on every other failure
+    die "dnf5 offline reboot failed"
+  fi
 else
+  create_post_snapshot || die "failed to create post-update snapshot; pre-update snapshot $pre_number has no matching post snapshot"
   update_check
   log "done: system updated"
 fi

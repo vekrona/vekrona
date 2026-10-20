@@ -53,6 +53,11 @@ printf '\x00' | dd of="$tampered" bs=1 seek=$(( $(stat -c %s "$tampered") - 1 ))
 expect_die "a release RPM modified after signing is rejected" "is not validly signed by the pinned key" \
   assert_rpm_signed_by_pinned_key rpmfusion-free-fedora-44 "$tampered"
 
+# An RPM with no signature at all passes rpm's default verification level (its digests are fine): the check must still refuse it.
+UNSIGNED_RPM="$ROOT/tests/fixtures/unsigned/vekrona-unsigned-fixture-1-1.noarch.rpm"
+expect_die "an RPM that carries no signature is rejected" "is not validly signed by the pinned key" \
+  assert_rpm_signed_by_pinned_key rpmfusion-free-fedora-44 "$UNSIGNED_RPM"
+
 PROTON_RPM="$ROOT/tests/fixtures/protonvpn/proton-vpn-gnome-desktop-0.11.0-1.fc44.noarch.rpm"
 assert_rpm_signed_by_pinned_key protonvpn-fedora-44 "$PROTON_RPM"
 log "ok: a Proton VPN RPM verifies against the pinned Proton key"

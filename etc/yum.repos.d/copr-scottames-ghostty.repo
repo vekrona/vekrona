@@ -1,0 +1,10 @@
+[copr:copr.fedorainfracloud.org:scottames:ghostty]
+name=Copr repo for ghostty owned by scottames
+baseurl=https://download.copr.fedorainfracloud.org/results/scottames/ghostty/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-copr-scottames-ghostty
+repo_gpgcheck=0
+enabled=1
+includepkgs=ghostty gtk4-layer-shell

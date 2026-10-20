@@ -1,0 +1,10 @@
+[copr:copr.fedorainfracloud.org:blakegardner:xremap]
+name=Copr repo for xremap owned by blakegardner
+baseurl=https://download.copr.fedorainfracloud.org/results/blakegardner/xremap/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-copr-blakegardner-xremap
+repo_gpgcheck=0
+enabled=1
+includepkgs=xremap-wlroots

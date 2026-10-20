@@ -3,35 +3,14 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
+source "$ROOT/lib/cuda-repo.sh"
 
 require_cmd rpm dnf5 grubby modinfo
 
 target_kver="$(uname -r)"
 ensure_target_kernel_devel
 
-CUDA_REPO_ID="cuda-fedora44-x86_64"
-CUDA_REPOFILE_URL="https://developer.download.nvidia.com/compute/cuda/repos/fedora44/x86_64/cuda-fedora44.repo"
-CUDA_EXCLUDE='nvidia-driver*,cuda-drivers*,nvidia-modprobe,nvidia-persistenced,nvidia-settings,nvidia-libXNVCtrl*,nvidia-xconfig,nvidia-open,nvidia-imex,nvidia-kmod-common,libnvidia-fbc,kmod-nvidia-*-dkms,nvidia-fs*,nvidia-gds*,xorg-x11-nvidia*'
-OLD_CUDA_REPOFILE="/etc/yum.repos.d/cuda-fedora43.repo"
-
-if repo_enabled "$CUDA_REPO_ID"; then
-  log "repo enabled: $CUDA_REPO_ID"
-else
-  log "adding repo: $CUDA_REPO_ID"
-  root dnf5 config-manager addrepo --from-repofile="$CUDA_REPOFILE_URL"
-  repo_enabled "$CUDA_REPO_ID" || die "repo not enabled: $CUDA_REPO_ID"
-fi
-
-root dnf5 config-manager setopt "$CUDA_REPO_ID.excludepkgs=$CUDA_EXCLUDE"
-grep -rqE '^excludepkgs[[:space:]]*=.*nvidia-driver' /etc/dnf/repos.override.d /etc/yum.repos.d 2>/dev/null \
-  || die "excludepkgs for $CUDA_REPO_ID not persisted under /etc/dnf/repos.override.d or /etc/yum.repos.d"
-log "ok: $CUDA_REPO_ID excludes cuda-repo driver packages"
-
-if [[ -f "$OLD_CUDA_REPOFILE" ]]; then
-  log "removing: $OLD_CUDA_REPOFILE"
-  root rm -f "$OLD_CUDA_REPOFILE"
-  [[ -f "$OLD_CUDA_REPOFILE" ]] && die "failed to remove $OLD_CUDA_REPOFILE"
-fi
+ensure_cuda_repo
 
 cuda_driver_installed() {
   if pkg_installed cuda-drivers; then return 0; fi
@@ -42,7 +21,9 @@ cuda_driver_installed() {
 # RPM Fusion's akmod builds the Open module for Turing+ GPUs unless this macro turns its detection off.
 ensure_root_file "$ROOT/etc/rpm/macros.nvidia-kmod" /etc/rpm/macros.nvidia-kmod
 
-REMOVE_GLOBS=(cuda-drivers 'nvidia-driver*' kmod-nvidia-latest-dkms nvidia-kmod-common 'libnvidia-*' nvidia-libXNVCtrl nvidia-modprobe nvidia-persistenced nvidia-settings)
+# libnvidia-fbc is the only driver package named libnvidia-* in the CUDA repo (libnvidia-ml is a provide of nvidia-driver-cuda-libs,
+# libnvidia-nscq belongs to the fabric manager); other repos ship unrelated ones such as libnvidia-container.
+REMOVE_GLOBS=(cuda-drivers 'nvidia-driver*' kmod-nvidia-latest-dkms nvidia-kmod-common libnvidia-fbc nvidia-libXNVCtrl nvidia-modprobe nvidia-persistenced nvidia-settings)
 INSTALL_PKGS=(akmod-nvidia xorg-x11-drv-nvidia-cuda)
 
 if cuda_driver_installed; then
@@ -80,10 +61,20 @@ log "ok: nvidia module version $nvidia_version"
 # RPM Fusion's dracut config omits nvidia from the initramfs; without it the LUKS prompt and the greeter have no display.
 ensure_root_file "$ROOT/etc/dracut.conf.d/99-nvidia-dracut.conf" "$DRACUT_NVIDIA_CONF"
 
-# New kernels get their initramfs from kernel-install before the asynchronous akmods@<kver> build exists.
+# New kernels get their initramfs from kernel-install before the asynchronous akmods@<kver> build exists, and
+# akmods.service builds for the running kernel at boot. The drop-ins run scripts from the root-owned copy, which stage 40
+# would install only later.
+ensure_system_copy
 ensure_root_file "$ROOT/etc/systemd/system/akmods@.service.d/vekrona-dracut.conf" /etc/systemd/system/akmods@.service.d/vekrona-dracut.conf
+ensure_root_file "$ROOT/etc/systemd/system/akmods.service.d/vekrona-dracut.conf" /etc/systemd/system/akmods.service.d/vekrona-dracut.conf
 root systemctl daemon-reload
-akmods_dropin_active "$target_kver" || die "akmods@$target_kver.service does not regenerate the initramfs after its build"
+for akmods_unit in "akmods@$target_kver.service" akmods.service; do
+  akmods_dropin_active "$akmods_unit" || die "$akmods_unit does not run its initramfs step after its build"
+done
+
+# A new kernel without nvidia in its initramfs is a black screen, so kernel-install must not make it the GRUB default;
+# vekrona-kernel-ready and the update scripts promote it once it can show the display.
+ensure_new_kernels_not_default
 
 # The proprietary module defaults NVreg_UseKernelSuspendNotifiers to 1 but only the open modules honour it; the
 # nvidia-suspend/resume units skip themselves unless it is 0, so video memory preservation then fails with -EIO.
@@ -91,6 +82,7 @@ akmods_dropin_active "$target_kver" || die "akmods@$target_kver.service does not
 ensure_root_file "$ROOT/etc/modprobe.d/vekrona-nvidia.conf" "$NVIDIA_MODPROBE_CONF"
 
 ensure_nvidia_initramfs "$target_kver"
+promote_kernel_if_nvidia_ready "$target_kver"
 
 mapfile -t kernel_args < <(nvidia_kernel_args)
 ensure_kernel_arg "${kernel_args[@]}"
@@ -109,9 +101,11 @@ pkg_installed akmod-nvidia && lock_pkgs+=(akmod-nvidia)
 while IFS= read -r p; do [[ -n "$p" ]] && lock_pkgs+=("$p"); done < <(rpm -qa --qf '%{NAME}\n' 'xorg-x11-drv-nvidia*' | sort -u)
 [[ ${#lock_pkgs[@]} -gt 0 ]] && versionlock_installed "${lock_pkgs[@]}"
 
-for kernel in $(installed_kvers); do
+# An assignment, not "for kernel in $(installed_kvers)": a failing installed_kvers would leave the loop with nothing to check.
+installed="$(installed_kvers)"
+while IFS= read -r kernel; do
   problem="$(nvidia_module_problem "$kernel")"
   [[ -z "$problem" ]] || warn "$problem"
-done
+done <<<"$installed"
 
 warn "reboot required: nvidia driver, kernel args, and modprobe options only take effect after reboot"

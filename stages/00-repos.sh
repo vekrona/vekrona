@@ -9,6 +9,16 @@ require_cmd rpm dnf5 curl
 download_dir="$(mktemp -d)"
 trap 'rm -rf "$download_dir"' EXIT
 
+# Installs the release RPM from a root-owned copy: root installs exactly the bytes the signature check saw, which a process
+# of the user could not swap in the download directory between the two.
+install_verified_rpm() {
+  local key_repo="$1" rpm_file="$2" root_dir="$3" copy
+  copy="$(root_owned_copy "$rpm_file" "$root_dir")"
+  assert_rpm_signed_by_pinned_key "$key_repo" "$copy"
+  log "installing: ${copy##*/} (signature verified against pinned key $key_repo)"
+  root dnf install -y "$copy"
+}
+
 ensure_rpmfusion_release() {
   local section="$1" pkg="rpmfusion-$1-release" key_repo url rpm_file
   key_repo="$(rpmfusion_key_repo "$section")"
@@ -21,9 +31,7 @@ ensure_rpmfusion_release() {
   else
     log "downloading: $url"
     download_file "$url" "$rpm_file"
-    assert_rpm_signed_by_pinned_key "$key_repo" "$rpm_file"
-    log "installing: $pkg (signature verified against pinned key $key_repo)"
-    root dnf install -y "$rpm_file"
+    with_root_scratch_dir install_verified_rpm "$key_repo" "$rpm_file"
     pkg_installed "$pkg" || die "package did not install: $pkg"
   fi
   assert_repo_key_trusted "$key_repo"
