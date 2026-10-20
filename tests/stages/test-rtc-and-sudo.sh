@@ -48,7 +48,7 @@ log "ok: an RTC that stays local is an error"
 
 # --- sudo_refresh ---
 
-[[ $EUID -ne 0 ]] || { log "skip: sudo_refresh is a no-op as root"; exit 0; }
+skip_as_root "sudo_refresh is a no-op as root"
 
 : > "$STUB_LOG"
 (SUDO_CACHED=1 sudo_refresh </dev/null) 2>/dev/null

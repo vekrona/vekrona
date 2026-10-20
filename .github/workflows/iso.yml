@@ -23,16 +23,39 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: fedora:44
+      # The tests stand in for root with `unshare -r` and run the error watcher under `unshare --user --time`: both need user
+      # namespaces, which Docker's default seccomp profile and the runner's AppArmor refuse inside a container.
+      options: --security-opt seccomp=unconfined --security-opt apparmor=unconfined
     timeout-minutes: 15
+    env:
+      TEST_USER: vekrona-tester
     steps:
       - name: Install test dependencies
-        run: dnf install -y python3 python3-gobject dbus-daemon python3-dasbus python3-fido2 anaconda-core khal jq
+        run: dnf install -y python3 python3-gobject dbus-daemon python3-dasbus python3-fido2 anaconda-core khal jq sudo procps-ng util-linux
 
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Root reads every file and may do what the tests expect a regular user to be refused (a locked directory, an
+      # unreadable keymap), so the suites run as a regular user with passwordless sudo, as in the vekrona-dev guest.
+      - name: Create the unprivileged test user
+        run: |
+          useradd --create-home "$TEST_USER"
+          echo "$TEST_USER ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/$TEST_USER"
+          chmod 440 "/etc/sudoers.d/$TEST_USER"
+          chown -R "$TEST_USER:$TEST_USER" "$GITHUB_WORKSPACE"
+
       - name: Run all headless test suites (error pipeline, stage helpers, Anaconda add-ons)
-        run: bash tests/run.sh
+        run: runuser -u "$TEST_USER" -- env HOME="/home/$TEST_USER" GITHUB_ACTIONS=true VEKRONA_TEST_LOG_DIR="/home/$TEST_USER/test-logs" bash "$GITHUB_WORKSPACE/tests/run.sh"
+
+      - name: Upload the full test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-logs
+          path: /home/${{ env.TEST_USER }}/test-logs
+          if-no-files-found: ignore
+          retention-days: 7
 
   build:
     needs: unit-tests

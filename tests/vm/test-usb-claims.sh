@@ -2,7 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$(mktemp -d)}"
+# shellcheck source=../require-vm.sh
+source "$ROOT/tests/require-vm.sh"
+require_vm "${BASH_SOURCE[0]}"
+XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$(mktemp -d)}"
+export XDG_RUNTIME_DIR
 source "$ROOT/iso/lib-vm.sh"
 
 work="$(mktemp -d)"

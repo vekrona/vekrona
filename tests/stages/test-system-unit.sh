@@ -25,7 +25,9 @@ fi
 case "$verb" in
   is-enabled)
     [[ -e "$f.enabled" ]] || { echo not-found; exit 4; }
-    cat "$f.enabled"; [[ "$(cat "$f.enabled")" == enabled ]] || exit 1 ;;
+    # Like the real one: the states that count as enabled or as always on exit 0, disabled and masked exit 1.
+    state="$(cat "$f.enabled")"; echo "$state"
+    case "$state" in enabled | enabled-runtime | static | alias | indirect | generated | transient) ;; *) exit 1 ;; esac ;;
   is-active)  if [[ -e "$f.active" ]]; then echo active; else echo inactive; exit 3; fi ;;
   enable)  [[ -n "${STUCK-}" ]] || echo enabled > "$f.enabled"; [[ -z "$now" ]] || touch "$f.active" ;;
   disable) [[ -n "${STUCK-}" ]] || echo disabled > "$f.enabled"; [[ -z "$now" ]] || rm -f "$f.active" ;;
@@ -43,7 +45,7 @@ export PATH="$work/bin:$PATH" STUB_LOG="$work/log" UNITS="$work/units"
 
 # unit <name> <is-enabled answer> [active]
 unit() { echo "$2" > "$UNITS/$1.enabled"; rm -f "$UNITS/$1.active"; [[ -z "${3-}" ]] || touch "$UNITS/$1.active"; : > "$STUB_LOG"; }
-mutating_calls() { grep -cE '^systemctl (enable|disable|start|stop) ' "$STUB_LOG" || true; }
+mutating_calls() { grep -cE '^systemctl (enable|disable|start|stop) ' "$STUB_LOG" || [[ $? -eq 1 ]]; }
 
 unit a disabled
 (ensure_system_unit enabled a) 2>/dev/null

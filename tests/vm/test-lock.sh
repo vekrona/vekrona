@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../require-vm.sh
+source "$ROOT/tests/require-vm.sh"
+require_vm "${BASH_SOURCE[0]}"
 export XDG_RUNTIME_DIR
 XDG_RUNTIME_DIR="$(mktemp -d)"
 trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT

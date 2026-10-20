@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
+skip_as_root "an unreadable keymap file is still read by root"
 tool="$ROOT/bin/vekrona-xkb-env"
 
 scratch="$(mktemp -d)"
@@ -66,15 +67,11 @@ XKB_DEFAULT_MODEL=''
 XKB_DEFAULT_OPTIONS='shift:both_capslock_cancel'"
 [[ ! -s "$scratch/stderr" ]] || die "a keymap file without XkbLayout must stay silent: $(cat "$scratch/stderr")"
 
-if [[ $EUID == 0 ]]; then
-  echo "NOT RUN: unreadable keymap file (root reads everything)" >&2
-else
-  chmod 000 "$scratch/00-keyboard.conf"
-  if run_tool >/dev/null; then die "an unreadable keymap file must fail"; fi
-  grep -q "cannot read" "$scratch/stderr" || die "unreadable keymap not reported: $(cat "$scratch/stderr")"
-  chmod 600 "$scratch/00-keyboard.conf"
-  log "ok: unreadable keymap is a failure"
-fi
+chmod 000 "$scratch/00-keyboard.conf"
+if run_tool >/dev/null; then die "an unreadable keymap file must fail"; fi
+grep -q "cannot read" "$scratch/stderr" || die "unreadable keymap not reported: $(cat "$scratch/stderr")"
+chmod 600 "$scratch/00-keyboard.conf"
+log "ok: unreadable keymap is a failure"
 
 write_conf "" "" ""
 if run_tool >/dev/null; then die "an empty XkbLayout must be rejected"; fi
@@ -104,7 +101,7 @@ printf '#!/bin/sh\necho none\n' > "$stubs/systemd-detect-virt"
 printf '#!/bin/sh\n' > "$stubs/vekrona-gpu-env"
 chmod +x "$stubs/logger" "$stubs/systemd-detect-virt" "$stubs/vekrona-gpu-env"
 # The session file may reach only these host tools (resolved now, so hosts without /usr/bin and /bin work too).
-for tool_name in sh bash env cat mktemp rm grep sed tail; do
+for tool_name in sh bash env cat mktemp rm grep sed tail id dirname readlink; do
   ln -s "$(command -v "$tool_name")" "$stubs/$tool_name"
 done
 

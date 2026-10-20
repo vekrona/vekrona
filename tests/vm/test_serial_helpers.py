@@ -6,6 +6,11 @@ import threading
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from require_vm import require_vm  # noqa: E402
+
+require_vm()
+
 QMP_PY = Path(__file__).resolve().parents[2] / "iso" / "lib" / "qmp.py"
 PROMPT = "Please enter passphrase"
 WAIT_TIMEOUT_SEC = "20"

@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import _paths  # noqa: F401 (refuses to run outside the vekrona-dev VM)
+
 KICKSTART_DIR = Path(__file__).resolve().parent.parent.parent / "kickstart"
 STATE_DIR = "/usr/lib/sysimage/libdnf5"
 SWAY_ENVIRONMENT = 'version = "1.0"\n[environments.sway-desktop-environment]\ngroups = ["swaywm"]\n'

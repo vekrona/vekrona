@@ -15,7 +15,9 @@ cat > "$work/bin/rpm" <<'F'
 case "$*" in
   "-q --requires sway")   echo "libwlroots-0.19.so()(64bit)" ;;
   "-q --whatprovides "*)  echo wlroots0.19 ;;
-  *)                      [[ "$1" == -q && -e "$FAKE_RPMDB/$2" ]] ;;
+  # Like the real rpm: an installed package is named on stdout, a missing one is reported there too, and exits 1.
+  "-q "*)                 if [[ -e "$FAKE_RPMDB/$2" ]]; then echo "$2-1.0-1.fc44.x86_64"; else echo "package $2 is not installed"; exit 1; fi ;;
+  *)                      echo "the fake rpm cannot answer: $*" >&2; exit 2 ;;
 esac
 F
 cat > "$work/bin/systemctl" <<'F'

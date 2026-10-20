@@ -89,9 +89,13 @@ fake_bin="$scratch/bin"
 mkdir -p "$fake_bin"
 # vdirsyncer's own line names the pair to discover; the sync must pass it on once and add no hint of its own that
 # names a bare (placeholder-failing) `vdirsyncer discover`.
-discover_line='critical: Please run `vdirsyncer discover icloud`  before synchronization.'
-printf '#!/usr/bin/env bash\necho "Metasyncing proton"\necho "%s" >&2\nexit 1\n' "$discover_line" >"$fake_bin/vdirsyncer"
-chmod +x "$fake_bin/vdirsyncer"
+export discover_line='critical: Please run `vdirsyncer discover icloud`  before synchronization.'
+write_fake "$fake_bin/vdirsyncer" <<'F'
+#!/usr/bin/env bash
+echo "Metasyncing proton"
+echo "$discover_line" >&2
+exit 1
+F
 rm "$output"
 if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then
   die "a failing vdirsyncer must fail the sync"
@@ -102,8 +106,12 @@ grep -qF "$discover_line" "$scratch/sync.err" || die "vdirsyncer's failure line 
 [[ -f "$output" ]] || die "a failing sync must still render the calendar"
 log "ok: a failing sync reports vdirsyncer's line once, still renders and fails the unit"
 
-secret_url='https://calendar.example.com/ical/user%40example.com/private-s3cr3t/basic.ics?token=s3cr3t'
-printf '#!/usr/bin/env bash\necho "Error: pair x: storage y: %s: 500 Server Error" >&2\nexit 1\n' "$secret_url" >"$fake_bin/vdirsyncer"
+export secret_url='https://calendar.example.com/ical/user%40example.com/private-s3cr3t/basic.ics?token=s3cr3t'
+write_fake "$fake_bin/vdirsyncer" <<'F'
+#!/usr/bin/env bash
+echo "Error: pair x: storage y: $secret_url: 500 Server Error" >&2
+exit 1
+F
 PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err" || true
 grep -q 's3cr3t' "$scratch/sync.err" && die "a vdirsyncer error must not print a private calendar URL: $(cat "$scratch/sync.err")"
 grep -q 'https://calendar.example.com' "$scratch/sync.err" || die "the redacted URL must keep its host: $(cat "$scratch/sync.err")"
@@ -113,30 +121,34 @@ log "ok: a URL in a sync error is cut to its host"
 # The shipped template holds one pair per provider. Filling in one provider must be enough: the sync runs for that
 # pair alone and the placeholder pairs are skipped without a word.
 cp "$ROOT/config/vdirsyncer/config.example" "$vdirsyncer_config"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\n' "$scratch/vdirsyncer.calls" >"$fake_bin/vdirsyncer"
-rm -f "$output" "$scratch/vdirsyncer.calls"
+export vdirsyncer_calls="$scratch/vdirsyncer.calls"
+write_fake "$fake_bin/vdirsyncer" <<'F'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$vdirsyncer_calls"
+F
+rm -f "$output" "$vdirsyncer_calls"
 if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then
   die "a config whose pairs are all placeholders must fail a sync run by hand"
 fi
 grep -q 'no pair' "$scratch/sync.err" || die "the error must say that no pair is filled in: $(cat "$scratch/sync.err")"
-[[ ! -e "$scratch/vdirsyncer.calls" ]] || die "vdirsyncer must not run while every pair is a placeholder"
+[[ ! -e "$vdirsyncer_calls" ]] || die "vdirsyncer must not run while every pair is a placeholder"
 assert_json '.configured == false' "a config of placeholder pairs must render as not configured"
 log "ok: a sync by hand with only placeholder pairs fails before vdirsyncer runs"
 
 sed -i 's#/url/PLACEHOLDER/calendar.ics?CacheKey=PLACEHOLDER&PassphraseKey=PLACEHOLDER#/url/id/calendar.ics?CacheKey=k\&PassphraseKey=p#' "$vdirsyncer_config"
 rm -f "$output"
 PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err" || die "a filled-in pair must sync: $(cat "$scratch/sync.err")"
-[[ "$(cat "$scratch/vdirsyncer.calls")" == $'-v WARNING metasync proton\n-v WARNING sync proton' ]] \
-  || die "only the filled-in pair may be synced: $(cat "$scratch/vdirsyncer.calls")"
+[[ "$(cat "$vdirsyncer_calls")" == $'-v WARNING metasync proton\n-v WARNING sync proton' ]] \
+  || die "only the filled-in pair may be synced: $(cat "$vdirsyncer_calls")"
 assert_json '.configured == true' "one filled-in pair among placeholder pairs must render as configured"
 log "ok: with one provider filled in, only its pair is synced and the placeholder pairs are skipped"
 
 # A commented-out line does not count: not a PLACEHOLDER in a comment, and not a storage definition either.
 sed -i 's/^url = "https:\/\/calendar.google.com.*/url = "https:\/\/google.example.com\/ical"\n# url = "PLACEHOLDER"/' "$vdirsyncer_config"
-rm -f "$scratch/vdirsyncer.calls"
+rm -f "$vdirsyncer_calls"
 PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err" || die "a commented-out PLACEHOLDER must not block a pair: $(cat "$scratch/sync.err")"
-[[ "$(cat "$scratch/vdirsyncer.calls")" == $'-v WARNING metasync proton google\n-v WARNING sync proton google' ]] \
-  || die "a pair with a commented-out PLACEHOLDER must be synced: $(cat "$scratch/vdirsyncer.calls")"
+[[ "$(cat "$vdirsyncer_calls")" == $'-v WARNING metasync proton google\n-v WARNING sync proton google' ]] \
+  || die "a pair with a commented-out PLACEHOLDER must be synced: $(cat "$vdirsyncer_calls")"
 sed -i 's/^\[storage proton_local\]/# [storage proton_local]/' "$vdirsyncer_config"
 rm -f "$output"
 if PATH="$fake_bin:$PATH" "$ROOT/bin/vekrona-calendar" sync 2>"$scratch/sync.err"; then

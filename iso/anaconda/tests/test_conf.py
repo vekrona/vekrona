@@ -2,6 +2,8 @@ import configparser
 import unittest
 from pathlib import Path
 
+import _paths  # noqa: F401 (refuses to run outside the vekrona-dev VM)
+
 CONF = Path(__file__).resolve().parent.parent / "updates/etc/anaconda/conf.d/90-vekrona.conf"
 
 
