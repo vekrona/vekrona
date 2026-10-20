@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Sets logind's idle hint on the user's graphical session: `vekrona-idlehint yes|no`. swayidle's own `idlehint` asks
+# logind for the session of swayidle's process, which for a service of the user manager is the user's Display session,
+# and after a text or ssh login that is another session, which logind refuses the hint.
+set -euo pipefail
+
+PROG="vekrona-idlehint"
+
+case "$#:${1-}" in
+  1:yes) hint=true ;;
+  1:no) hint=false ;;
+  *) echo "usage: $PROG yes|no" >&2; exit 2 ;;
+esac
+
+exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/vekrona-with-session" bash -c '
+set -euo pipefail
+# logind names a session object by its id with every character but letters, and digits after the first, as _hex.
+label=
+for ((i = 0; i < ${#XDG_SESSION_ID}; i++)); do
+  char="${XDG_SESSION_ID:i:1}"
+  if [[ "$char" == [A-Za-z] || ($i -gt 0 && "$char" == [0-9]) ]]; then label+="$char"; else printf -v escaped "_%02x" "\"$char"; label+="$escaped"; fi
+done
+exec busctl --system call org.freedesktop.login1 "/org/freedesktop/login1/session/$label" org.freedesktop.login1.Session SetIdleHint b "$1"
+' _ "$hint"

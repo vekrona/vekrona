@@ -16,8 +16,6 @@ LAST_INSIDE_FILE="$(mktemp)"
 trap 'rm -f "$LAST_INSIDE_FILE"' EXIT
 export FIELD_INK FRAME_HEX INK_HEX MIN_FRAME_WIDTH_PX LAST_INSIDE_FILE
 
-lock_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-lock; }
-lock_inactive() { ! lock_active; }
 # "inside outside" bullet pixel counts of a fresh screenshot; fails when the frame is not on the screen.
 field_ink() { python3 "$FIELD_INK" "$(vekrona-dev shot)" "$FRAME_HEX" "$INK_HEX" "$MIN_FRAME_WIDTH_PX"; }
 frame_shown() { field_ink >/dev/null; }
@@ -29,11 +27,11 @@ bullets_settled() {
   printf '%s' "$inside" >"$LAST_INSIDE_FILE"
   ((inside > 0)) && [[ "$inside" == "$previous" ]]
 }
-export -f lock_active lock_inactive field_ink frame_shown bullets_settled
+export -f field_ink frame_shown bullets_settled
 
 command -v python3 >/dev/null || die "the e2e scenario needs python3 to read the screenshot"
 vekrona-dev session
-vekrona-dev sh vekrona-lock
+vekrona-dev sh vekrona-lock start
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- lock_active
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- frame_shown
 

@@ -3,8 +3,6 @@
 CRYPTTAB=/etc/crypttab
 LUKS_FIDO2_OPTIONS=(fido2-device=auto token-timeout=10s)
 
-initramfs_path_for() { printf '/boot/initramfs-%s.img' "$1"; }
-
 read_crypttab() {
   [[ -e "$CRYPTTAB" ]] || return 0
   root cat "$CRYPTTAB" || die "cannot read $CRYPTTAB"
@@ -14,7 +12,7 @@ kvers_with_initramfs() {
   local all kver
   all="$(installed_kvers)" || die "cannot list installed kernels"
   while IFS= read -r kver; do
-    if [[ -n "$kver" && -f "$(initramfs_path_for "$kver")" ]]; then
+    if [[ -n "$kver" && -f "$(initramfs_path "$kver")" ]]; then
       printf '%s\n' "$kver"
     fi
   done <<<"$all"
@@ -106,13 +104,13 @@ crypttab_line_has_fido2() {
 
 initramfs_has_fido2() {
   local listing
-  listing="$(root lsinitrd "$(initramfs_path_for "$1")")" || die "lsinitrd failed for kernel $1"
+  listing="$(root lsinitrd "$(initramfs_path "$1")")" || die "lsinitrd failed for kernel $1"
   [[ "$listing" == *fido2* ]]
 }
 
 initramfs_crypttab_has_fido2() {
   local content
-  content="$(root lsinitrd -f etc/crypttab "$(initramfs_path_for "$1")")" || die "lsinitrd failed for kernel $1"
+  content="$(root lsinitrd -f etc/crypttab "$(initramfs_path "$1")")" || die "lsinitrd failed for kernel $1"
   [[ "$content" == *fido2-device=* ]]
 }
 

@@ -5,6 +5,8 @@
 # a failure for the reader.
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/fido-lib.sh"
+
 # logind grants the user an ACL on a new hidraw node a few milliseconds after
 # udev announces it, without a udev event. pam_u2f started before that fails
 # at once, so a key counts only when its node is accessible. Until then wait
@@ -18,21 +20,33 @@ wait_accessible() {
 }
 
 count_keys() {
-  local path props n=0
-  for path in /sys/class/hidraw/*; do
-    [[ -e "$path" ]] || continue
-    if props="$(udevadm info -q property -p "$path")" && grep -qx 'ID_FIDO_TOKEN=1' <<<"$props" && wait_accessible "/dev/${path##*/}"; then
+  local path n=0
+  while read -r path; do
+    if wait_accessible "/dev/${path##*/}"; then
       n=$((n + 1))
     fi
-  done
+  done < <(fido_hidraws)
   printf '%d\n' "$n"
 }
 
 # The monitor prints "UDEV - the event ..." as its header once it is attached,
-# and "UDEV [time] action path" for each event. Counting on both means a device
-# that appears between the first count and the attach cannot be missed.
-stdbuf -oL udevadm monitor --udev --subsystem-match=hidraw | while read -r line; do
-  if [[ "$line" == UDEV* ]]; then
-    count_keys
-  fi
+# and "UDEV [time] action path" for each event, followed by the event's properties
+# (--property) up to an empty line. Counting on the header means a device that
+# appears between the first count and the attach cannot be missed. An event
+# counts only when its properties tag a FIDO token: any other hidraw device (a
+# capture card's, a KVM's) coming and going cannot change the number of keys,
+# and a removed key still carries its tag, which sysfs no longer could say.
+fido_event=0
+stdbuf -oL udevadm monitor --udev --property --subsystem-match=hidraw | while IFS= read -r line; do
+  case "$line" in
+    "UDEV - "*) count_keys ;;
+    UDEV*) fido_event=0 ;;
+    ID_FIDO_TOKEN=1) fido_event=1 ;;
+    "")
+      if ((fido_event)); then
+        fido_event=0
+        count_keys
+      fi
+      ;;
+  esac
 done

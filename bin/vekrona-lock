@@ -7,14 +7,67 @@
 # so this returns only when the screen is locked (swayidle's before-sleep waits
 # for that) and fails when it cannot be. Starting is idempotent: a concurrent
 # caller joins the start in progress, so no check precedes it.
+#
+# The machine must not suspend while the screen is unlocked and cannot be
+# locked. logind cannot cancel a suspend that has begun, and swayidle's
+# before-sleep inhibitor is only a delay lock, so this holds a block lock on
+# sleep (vekrona-lock-guard.service) from before the lock attempt until the
+# screen is locked: a failed lock leaves it held, and the machine stays awake
+# until a later lock succeeds. vekrona-lock.service releases it too when it
+# reaches READY, which covers a locker that systemd restarts on its own.
+# vekrona-suspend locks through this before it asks logind to suspend.
+#
+# A bare call is refused, like in every vekrona tool that acts: `start` locks.
+#
+# --before-sleep is swayidle's safety net for suspends that did not come from
+# vekrona-suspend. It retries within logind's InhibitDelayMaxSec (15 s,
+# etc/systemd/logind.conf.d).
 set -euo pipefail
 shopt -s inherit_errexit
 
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+
 PROG="vekrona-lock"
 UNIT="vekrona-lock.service"
+GUARD="vekrona-lock-guard.service"
+BEFORE_SLEEP_ATTEMPTS=3
+ATTEMPT_TIMEOUT_SEC=4 # a locker that never says READY fails its start after 8 s (TimeoutStartSec): too long to retry within the inhibitor
 
-if ! err="$(systemctl --user start "$UNIT" 2>&1)"; then
-  printf '%s: %s\n' "$PROG" "$err" >&2
-  notify-send -u critical -a vekrona "$PROG" "Cannot start the lock screen: $err" || printf '%s: notify-send failed\n' "$PROG" >&2
-  exit 1
-fi
+hold_suspend() {
+  systemctl --user start "$GUARD" || die "$PROG: cannot block suspend while the screen is unlocked: $GUARD did not start"
+}
+
+release_suspend() {
+  systemctl --user stop "$GUARD" || die "$PROG: the screen is locked, but $GUARD would not stop, so suspend stays blocked"
+}
+
+lock_once() {
+  local err
+  hold_suspend
+  if ! err="$(systemctl --user start "$UNIT" 2>&1)"; then
+    die "$PROG: cannot start the lock screen: $err; suspend stays blocked until the screen is locked"
+  fi
+  release_suspend
+}
+
+lock_before_sleep() {
+  local attempt err=""
+  hold_suspend
+  for ((attempt = 1; attempt <= BEFORE_SLEEP_ATTEMPTS; attempt++)); do
+    if err="$(timeout "$ATTEMPT_TIMEOUT_SEC" systemctl --user start "$UNIT" 2>&1)"; then
+      release_suspend
+      return 0
+    fi
+  done
+  die "$PROG: cannot lock the screen before suspend (${err:-no answer within $ATTEMPT_TIMEOUT_SEC s}); this suspend is already under way, later ones stay blocked until the screen is locked"
+}
+
+usage() { refuse "usage: $PROG start | --before-sleep"; }
+
+[[ $# -eq 1 ]] || usage
+case "$1" in
+  start) lock_once ;;
+  --before-sleep) lock_before_sleep ;;
+  *) usage ;;
+esac

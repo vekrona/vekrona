@@ -1,5 +1,6 @@
 #%PAM-1.0
-auth     required  pam_u2f.so cue pinverification=0 userpresence=1 origin=pam://vekrona appid=pam://vekrona
+# Same pam_u2f arguments as system-auth (lib/authselect-vekrona.sh): PIN and touch, the registration from /etc/u2f_mappings.
+auth     required  pam_u2f.so cue pinverification=1 origin=pam://vekrona appid=pam://vekrona authfile=/etc/u2f_mappings
 account  required  pam_permit.so
 password required  pam_deny.so
 session  required  pam_permit.so

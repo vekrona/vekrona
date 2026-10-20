@@ -1,0 +1,13 @@
+// vekrona-lid.service holds the inhibitors that keep logind from handling the lid switch and the sleep key itself while the Sway
+// session runs (Sway locks the screen first, then suspends). It is a systemd user unit, which runs outside every login session,
+// so polkit treats it as remote and inactive and refuses these two inhibitors ("Access denied"). Allow a wheel user's processes
+// in that user's service manager (user@UID.service stands for its units) to hold them, and nothing else. A login session of the
+// same user, a remote ssh one included, gets no free pass.
+polkit.addRule(function(action, subject) {
+  var inUserManager = /^user@[0-9]+\.service$/.test(subject.system_unit);
+  var held = action.id == "org.freedesktop.login1.inhibit-handle-lid-switch" ||
+             action.id == "org.freedesktop.login1.inhibit-handle-suspend-key";
+  if (held && inUserManager && subject.isInGroup("wheel")) {
+    return polkit.Result.YES;
+  }
+});

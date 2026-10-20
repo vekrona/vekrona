@@ -7,9 +7,10 @@ source "$ROOT/tests/lib.sh"
 STEP_TIMEOUT_SEC=60
 
 idle_active() { [[ "$(vekrona-dev sh systemctl --user is-active vekrona-idle.service)" == active ]]; }
-locked() { [[ "$(vekrona-dev run loginctl show-session "$SESSION_ID" -p LockedHint --value)" == yes ]]; }
-unlocked() { ! locked; }
-export -f idle_active locked unlocked
+locked_hint() { vekrona-dev run loginctl show-session "$SESSION_ID" -p LockedHint --value; }
+locked() { [[ "$(locked_hint)" == yes ]]; }
+unlocked() { [[ "$(locked_hint)" == no ]]; }
+export -f idle_active locked_hint locked unlocked
 
 vekrona-dev session
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- idle_active

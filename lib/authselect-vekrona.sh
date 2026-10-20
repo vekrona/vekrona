@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 PAM_U2F_STOCK='pam_u2f.so cue'
-PAM_U2F_VEKRONA='pam_u2f.so cue pinverification=1 origin=pam://vekrona appid=pam://vekrona'
+# authfile: see lib/pam-u2f.sh. etc/pam.d/vekrona-lock-u2f carries the same arguments.
+PAM_U2F_VEKRONA='pam_u2f.so cue pinverification=1 origin=pam://vekrona appid=pam://vekrona authfile=/etc/u2f_mappings'
 AUTHSELECT_PAM_FILES=(system-auth password-auth)
 
 authselect_base_dir() {

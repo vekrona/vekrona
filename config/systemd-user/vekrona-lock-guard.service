@@ -1,0 +1,8 @@
+[Unit]
+Description=Keep the machine awake until the screen is locked
+
+# Started by bin/vekrona-lock before every lock attempt and stopped once the screen is locked (and by vekrona-lock.service at
+# READY), so a lock that fails leaves it held. A block lock on sleep makes logind refuse idle suspends, lid suspends and
+# `systemctl suspend`; it wakes nothing up while it waits.
+[Service]
+ExecStart=/usr/bin/systemd-inhibit --what=sleep --mode=block --who=vekrona --why="The screen is not locked: suspending now would leave the session open" /usr/bin/sleep infinity

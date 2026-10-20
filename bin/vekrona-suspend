@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Suspends the machine with the screen locked: vekrona-lock first, then `systemctl suspend`. When the screen cannot be
+# locked, vekrona-lock has reported it and holds a block on sleep (see bin/vekrona-lock), so nothing suspends and the
+# session stays up. The power menu runs this; --lid is Sway's lid switch (vekrona-lid.service keeps logind from
+# suspending on a closed lid first). A bare call is refused, like in every vekrona tool that acts.
+#   vekrona-suspend now      suspend now
+#   vekrona-suspend --lid    the lid closed: suspend unless an external display is connected (logind's "docked" rule)
+set -euo pipefail
+shopt -s inherit_errexit
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+
+PROG="vekrona-suspend"
+
+# How many outputs sway lists: every connected one, enabled or not.
+output_count() {
+  local outputs
+  outputs="$(swaymsg -t get_outputs --raw)" || die "$PROG: cannot ask sway for its outputs"
+  jq length <<<"$outputs" || die "$PROG: sway's output list is not JSON"
+}
+
+suspend() {
+  vekrona-lock start
+  systemctl suspend || die "$PROG: systemctl suspend failed"
+}
+
+usage() { refuse "usage: $PROG now | --lid"; }
+
+[[ $# -eq 1 ]] || usage
+case "$1" in
+  now) suspend ;;
+  --lid)
+    outputs="$(output_count)"
+    if ((outputs > 1)); then
+      echo "$PROG: lid closed with an external display connected, not suspending" >&2
+    else
+      suspend
+    fi
+    ;;
+  *) usage ;;
+esac

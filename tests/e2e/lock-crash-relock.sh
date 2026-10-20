@@ -8,10 +8,7 @@ STEP_TIMEOUT_SEC=60
 GUEST_PASSWORD=vekrona
 CRASHES=8
 
-lock_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-lock; }
-lock_inactive() { ! lock_active; }
 locker_pid() { vekrona-dev sh systemctl --user show vekrona-lock -p MainPID --value; }
-export -f lock_active lock_inactive
 
 # SIGKILL the locker, then wait for systemd to start the next one (a new MainPID).
 crash_locker() {
@@ -22,7 +19,7 @@ crash_locker() {
 }
 
 lock_screen() {
-  vekrona-dev sh vekrona-lock
+  vekrona-dev sh vekrona-lock start
   lock_active || die "vekrona-lock returned before the locker confirmed the lock, so suspend would not wait for the screen to be locked"
 }
 
@@ -42,7 +39,12 @@ log "ok: a locker that crashes $CRASHES times in a row is restarted every time"
 
 status=0
 vekrona-dev sh timeout "$STEP_TIMEOUT_SEC" qs -c vekrona-lock >/dev/null 2>&1 || status=$?
-((status != 124)) || die "a second locker started while the session is locked sat idle instead of exiting for a restart"
+# 124 is timeout's, a locker that sat idle; 255 is ssh's, a guest that could not be asked.
+case "$status" in
+  0) die "a second locker started while the session is locked exited 0, but must fail so that systemd restarts it" ;;
+  124) die "a second locker started while the session is locked sat idle instead of exiting for a restart" ;;
+  255) die "could not ask the guest to start a second locker" ;;
+esac
 log "ok: a locker the compositor refuses exits non-zero (status $status) instead of idling unlocked"
 
 unlock_with_password

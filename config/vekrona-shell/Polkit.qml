@@ -12,7 +12,16 @@ PanelWindow {
     readonly property int panelWidth: 12 * VekronaTheme.sizeTarget
     readonly property string currentUser: Quickshell.env("USER")
     readonly property bool currentUserListed: (flow?.identities ?? []).some(identity => !identity.isGroup && identity.string === currentUser)
-    readonly property string identityNote: !flow?.selectedIdentity ? "" : (currentUserListed ? "" : currentUser + " may not authenticate this request. ") + "Password for " + flow.selectedIdentity.string
+    readonly property string identityNote: !flow?.selectedIdentity ? "" : (currentUserListed ? "" : currentUser + " may not authenticate this request. ") + "Account: " + flow.selectedIdentity.string
+    readonly property string waitingNote: "Waiting for the system to ask for your password. A security key or fingerprint check may come first."
+    readonly property string statusText: {
+        if (!flow || flow.isCompleted)
+            return "";
+        if (flow.isResponseRequired)
+            return flow.inputPrompt.trim() || "Password:";
+        const info = flow.supplementaryIsError ? "" : flow.supplementaryMessage;
+        return info || waitingNote;
+    }
     property bool attempted: false
 
     function selectCurrentUser(): void {
@@ -37,11 +46,11 @@ PanelWindow {
     }
 
     visible: agent.isActive
-    color: "transparent"
-    anchors.top: true
-    anchors.bottom: true
-    anchors.left: true
-    anchors.right: true
+    // The window is the dialog and nothing else: opaque, and centred by the compositor because it has no anchors.
+    // The keyboard stays grabbed (Exclusive) until Escape or Cancel: losing focus must not cancel a password prompt.
+    color: VekronaTheme.c.surface1
+    implicitWidth: panelWidth
+    implicitHeight: column.implicitHeight + 2 * VekronaTheme.space4
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "vekrona-polkit"
@@ -69,15 +78,7 @@ PanelWindow {
 
     Rectangle {
         anchors.fill: parent
-        color: VekronaTheme.c.scrim
-        opacity: VekronaTheme.scrimOpacity
-    }
-
-    Rectangle {
-        anchors.centerIn: parent
-        width: root.panelWidth
-        height: column.implicitHeight + 2 * VekronaTheme.space4
-        color: VekronaTheme.c.surface1
+        color: "transparent"
         border.width: VekronaTheme.borderHair
         border.color: VekronaTheme.c.line
 
@@ -101,7 +102,6 @@ PanelWindow {
                 Label {
                     Layout.fillWidth: true
                     style: VekronaTheme.type.body
-                    textFormat: Text.PlainText
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     text: root.flow?.message ?? ""
                 }
@@ -115,14 +115,20 @@ PanelWindow {
                     text: root.identityNote
                 }
 
+                Label {
+                    Layout.fillWidth: true
+                    style: VekronaTheme.type.body
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    text: root.statusText
+                }
+
                 TextField {
                     id: password
                     Layout.fillWidth: true
                     echoMode: TextInput.Password
                     enabled: root.flow?.isResponseRequired ?? false
                     focus: true
-                    accessibleName: "Password"
-                    placeholder: root.flow?.inputPrompt ?? ""
+                    accessibleName: root.statusText
                     onAccepted: root.submit()
                 }
 

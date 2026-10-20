@@ -2,10 +2,15 @@
 Description=Vekrona idle handling (lock, screen off, logind idle hint)
 PartOf=sway-session.target
 After=sway-session.target
+# swayidle is the auto-lock: never give up restarting it (the delay grows from 1 s to 60 s).
+StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/bin/swayidle -w timeout 300 vekrona-lock timeout 600 'swaymsg "output * dpms off"' resume 'swaymsg "output * dpms on"' idlehint 300 before-sleep vekrona-lock lock vekrona-lock
+ExecStart=/usr/bin/swayidle -w timeout 300 'vekrona-lock start' timeout 600 'swaymsg "output * dpms off"' resume 'swaymsg "output * dpms on"' timeout 300 'vekrona-idlehint yes' resume 'vekrona-idlehint no' before-sleep 'vekrona-lock --before-sleep' lock 'vekrona-lock start'
 Restart=on-failure
+RestartSec=1
+RestartSteps=6
+RestartMaxDelaySec=60
 
 [Install]
 WantedBy=sway-session.target

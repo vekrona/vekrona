@@ -17,7 +17,6 @@ IDLE_ACTION_SEC=5
 NO_SUSPEND_WINDOW_SEC=45
 
 LOGIND_DROPIN_DIR=/run/systemd/logind.conf.d
-IDLE_UNIT_DROPIN_SUBDIR=systemd/user/vekrona-idle.service.d
 MONITOR_PREFIX=/tmp/vekrona-idle-suspend
 NEGATIVE_OUT="$MONITOR_PREFIX-negative.out"
 NEGATIVE_STATUS="$MONITOR_PREFIX-negative.status"
@@ -29,13 +28,12 @@ monitor_command() {
     "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'"
 }
 
+remove_test_files() { vekrona-dev run sudo rm -rf "$LOGIND_DROPIN_DIR/zz-test.conf" "$NEGATIVE_OUT" "$NEGATIVE_STATUS" "$POSITIVE_OUT"; }
+
+# The pam_env line of sshd goes first, whatever else fails: left behind, it refuses every ssh login once its file is gone.
 cleanup() {
-  vekrona-dev sh vekrona-caffeine off >/dev/null
-  vekrona-dev run sudo rm -rf "$LOGIND_DROPIN_DIR/zz-test.conf" "$NEGATIVE_OUT" "$NEGATIVE_STATUS" "$POSITIVE_OUT"
-  real_suspend
-  vekrona-dev run sudo systemctl restart systemd-logind
-  vekrona-dev sh bash -c 'rm -rf "$XDG_RUNTIME_DIR/$1" && systemctl --user daemon-reload && systemctl --user restart vekrona-idle.service' _ "$IDLE_UNIT_DROPIN_SUBDIR"
-  ssh_sessions_restore
+  run_cleanups ssh_sessions_unconfigure 'vekrona-dev sh vekrona-caffeine off >/dev/null' remove_test_files real_suspend \
+    'vekrona-dev run sudo systemctl restart systemd-logind' restore_idlehint ssh_sessions_relogin
 }
 
 unit_active() { [[ "$(vekrona-dev sh systemctl --user is-active "$1")" == active ]]; }
@@ -59,23 +57,14 @@ vekrona-dev run sudo install -d "$LOGIND_DROPIN_DIR"
 vekrona-dev run sudo bash -c 'printf "[Login]\nIdleActionSec=%ss\n" "$2" >"$1/zz-test.conf"' _ "$LOGIND_DROPIN_DIR" "$IDLE_ACTION_SEC"
 vekrona-dev run sudo systemctl restart systemd-logind
 
-# The unit's own ExecStart with only the idle hint shortened, so the scenario fails when the unit has no idlehint.
-vekrona-dev sh bash -c '
-  set -euo pipefail
-  dir="$XDG_RUNTIME_DIR/$1"
-  exec_start="$(systemctl --user cat vekrona-idle.service | grep "^ExecStart=")"
-  shortened="${exec_start/idlehint 300/idlehint $2}"
-  [[ "$shortened" != "$exec_start" ]] || { echo "vekrona-idle.service has no idlehint 300" >&2; exit 1; }
-  mkdir -p "$dir"
-  printf "[Service]\nExecStart=\n%s\n" "$shortened" >"$dir/zz-test.conf"
-' _ "$IDLE_UNIT_DROPIN_SUBDIR" "$IDLEHINT_SEC"
+shorten_idlehint "$IDLEHINT_SEC"
 
 # Both monitors run before anything can go idle, so no signal is missed. The negative one is the deadline for
 # "no suspend while caffeine is held"; the positive one outlives it and catches the suspend after caffeine ends.
 vekrona-dev spawn --root "$NEGATIVE_OUT" -- bash -c "$(monitor_command "$NO_SUSPEND_WINDOW_SEC"); echo \$? >$NEGATIVE_STATUS"
 vekrona-dev spawn --root "$POSITIVE_OUT" -- bash -c "$(monitor_command "$((NO_SUSPEND_WINDOW_SEC + STEP_TIMEOUT_SEC))")"
 
-vekrona-dev sh vekrona-caffeine 1h
+vekrona-dev sh vekrona-caffeine for 1h
 vekrona-dev sh systemctl --user daemon-reload
 vekrona-dev sh systemctl --user restart vekrona-idle.service
 

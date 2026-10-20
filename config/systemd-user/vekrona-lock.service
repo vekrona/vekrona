@@ -6,6 +6,8 @@ StartLimitIntervalSec=0
 Type=notify
 NotifyAccess=all
 ExecStart=/usr/bin/qs -c vekrona-lock
+# READY means locked: release the suspend block that bin/vekrona-lock holds, also when systemd restarted the locker on its own.
+ExecStartPost=/usr/bin/systemctl --user stop vekrona-lock-guard.service
 SyslogIdentifier=vekrona-lock
 Restart=on-failure
 RestartSec=250ms

@@ -1,0 +1,13 @@
+[Unit]
+Description=Let Sway handle the lid switch and the sleep key (lock, then suspend)
+PartOf=sway-session.target
+After=sway-session.target
+
+# While this session runs, logind leaves the lid and the sleep key to Sway (`bindswitch lid:on` runs vekrona-suspend --lid,
+# `bindsym XF86Sleep` runs vekrona-suspend). Without a session (at the greeter) logind handles them itself.
+[Service]
+ExecStart=/usr/bin/systemd-inhibit --what=handle-lid-switch:handle-suspend-key --mode=block --who=vekrona --why="Sway locks the screen before it suspends on a closed lid or the sleep key" /usr/bin/sleep infinity
+Restart=on-failure
+
+[Install]
+WantedBy=sway-session.target

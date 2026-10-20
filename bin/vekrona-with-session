@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Runs a command with XDG_SESSION_ID set to the user's graphical session on seat0. A service of the user manager has no
+# XDG_SESSION_ID, so swayidle asks logind for the session of its own process, which is the user's Display session: after
+# a text or ssh login that is the wrong one, and logind refuses it the idle hint.
+set -euo pipefail
+shopt -s inherit_errexit
+
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh"
+
+[[ $# -gt 0 ]] || refuse "usage: vekrona-with-session COMMAND [ARGUMENT...]"
+
+ids="$(loginctl show-user "$(id -u)" -p Sessions --value)" || die "loginctl cannot list the sessions of user $(id -un)"
+graphical=()
+declare -A session
+for id in $ids; do
+  props="$(loginctl show-session "$id" -p Type -p Seat -p Class -p State)" || die "loginctl cannot show session $id"
+  session=()
+  while IFS='=' read -r key value; do session[$key]=$value; done <<<"$props"
+  [[ "${session[Seat]-}" == seat0 && "${session[Class]-}" == user && "${session[State]-}" != closing ]] || continue
+  [[ "${session[Type]-}" =~ ^(wayland|x11|mir)$ ]] || continue
+  graphical+=("$id")
+done
+
+case ${#graphical[@]} in
+  1) ;;
+  0) die "user $(id -un) has no graphical session on seat0 (sessions: ${ids:-none})" ;;
+  *) die "user $(id -un) has several graphical sessions on seat0: ${graphical[*]}" ;;
+esac
+
+XDG_SESSION_ID="${graphical[0]}" exec "$@"
