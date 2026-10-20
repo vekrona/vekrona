@@ -14,12 +14,15 @@ LONG_ASK_TIMEOUT_SEC=120
 STEP_TIMEOUT_SEC=120
 export RESULT=/tmp/vekrona-update-night-active
 
-trap 'close_notification_centre; cleanup_test_update; vekrona-dev run sudo rm -f "$RESULT.out" "$RESULT.status"' EXIT
+trap 'run_cleanups cleanup_test_update close_notification_centre "vekrona-dev run sudo rm -f \"\$RESULT.out\" \"\$RESULT.status\""' EXIT
 
 result_written() { vekrona-dev run test -s "$RESULT.status"; }
 export -f result_written
 
 vekrona-dev session
+install_build_tools
+publish_decoy_update
+use_only_the_test_repo
 publish_test_update
 run_check_expecting_only_the_test_update
 
@@ -36,6 +39,8 @@ night_env "VEKRONA_UPDATE_ASK_TIMEOUT=$LONG_ASK_TIMEOUT_SEC" DNF_SYSTEM_UPGRADE_
 # the centre keeps it.
 open_notification_centre
 vekrona-dev spawn --root "$RESULT.out" -- bash -c "systemctl start --wait $NIGHT_UNIT; echo \$? >$RESULT.status"
+# The pointer rests where the last click was, which is on the button's word, and the screenshot draws the pointer over it.
+vekrona-dev move 600 500
 vekrona-dev click-text '^reboot$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- result_written
 [[ "$(vekrona-dev run cat "$RESULT.status")" == 0 ]] || die "the night run failed after Install and reboot"

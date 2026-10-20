@@ -1,41 +1,47 @@
 #!/usr/bin/env bash
-# Updates the whole computer now: starts vekrona-update-now.service, which runs libexec/vekrona-update-apply --online as
-# root (polkit lets a local wheel user start it, so there is no sudo), and shows its output until it ends. Exits with the
-# unit's result.
+# vekrona-update now: updates the whole computer now. A bare call is refused, like in every vekrona tool that acts.
+# Starts vekrona-update-now.service, which runs libexec/vekrona-update-apply --online as
+# root (polkit lets a local wheel user start it, so there is no sudo), and shows its output until it ends. Exits 0 when
+# the update succeeded and 1 when it failed or was stopped.
+#
+# The end of the run is read from the journal, where systemd logs how the unit ended, and not from systemctl --wait:
+# upgrading systemd re-executes PID 1 in the middle of the run, which drops the D-Bus signal that --wait waits for, so
+# systemctl would never return for a run that had long finished.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
-[[ $EUID -ne 0 ]] || die "run as your user, not root"
+[[ $# -eq 1 && "$1" == now ]] || refuse "usage: vekrona-update now"
+[[ $EUID -ne 0 ]] || refuse "run as your user, not root"
 
 unit=vekrona-update-now.service
-sentinel="finished $$ $RANDOM $RANDOM"
-status_file="$(mktemp)"
+# The MESSAGE_IDs of systemd's catalog for PID 1's records about the unit that end the run: "Finished" (the start job is
+# done, after "Deactivated successfully."), "Failed with result ..." (also for a killed run) and "Stopped" (somebody
+# stopped the run, which logs "Deactivated successfully." too when the update exits 0 on SIGTERM, so only the missing
+# "Finished" tells it apart).
+unit_finished=39f53479d3a045ac8e11786248231fbf
+unit_failed=d9b373ed55a64feb8242e02dbe79a49c
+unit_stopped=9d1aaa27d60140bd96365438aad20286
 
-# The journal follower stops at the sentinel, which this script logs after the unit ended, so the unit's last lines
-# are shown before it does.
-exec {follow}< <(exec journalctl --follow --since now --output cat _SYSTEMD_UNIT="$unit" + SYSLOG_IDENTIFIER=vekrona-update-client)
+# Everything the journal gets after this point belongs to the run, also when the unit is already running for somebody else.
+cursor="$(journalctl --lines 1 --output json --output-fields MESSAGE | jq -er .__CURSOR)"
+systemctl start --no-block "$unit"
+
+exec {follow}< <(exec journalctl --follow --after-cursor "$cursor" --output json \
+  --output-fields MESSAGE,MESSAGE_ID,UNIT,_SYSTEMD_UNIT,_PID "_SYSTEMD_UNIT=$unit" + "UNIT=$unit" _PID=1)
 follower=$!
-cleanup() {
-  kill "$follower" 2>/dev/null || true
-  rm -f "$status_file"
-}
-trap cleanup EXIT
+trap 'kill "$follower" 2>/dev/null || true' EXIT
 
-(
-  status=0
-  systemctl start --wait "$unit" || status=$?
-  echo "$status" >"$status_file"
-  logger --tag vekrona-update-client -- "$sentinel"
-) &
-starter=$!
-
-seen=0
-while IFS= read -r line <&"$follow"; do
-  if [[ "$line" == "$sentinel" ]]; then seen=1; break; fi
-  printf '%s\n' "$line"
-done
-wait "$starter"
-[[ $seen -eq 1 ]] || die "the journal follower ended before $unit finished"
-exit "$(<"$status_file")"
+# journalctl prints a message with control characters as an array of its bytes, which @urid turns back into text.
+jq --raw-output --null-input --unbuffered --arg unit "$unit" --arg finished "$unit_finished" \
+  --arg failed "$unit_failed" --arg stopped "$unit_stopped" '
+  def hex: "0123456789abcdef" as $digits | $digits[. / 16 | floor : . / 16 | floor + 1] + $digits[. % 16 : . % 16 + 1];
+  def text: if type == "array" then map("%" + hex) | join("") | @urid else . end;
+  (inputs
+   | if ._SYSTEMD_UNIT == $unit then .MESSAGE | text
+     elif .MESSAGE_ID == $finished then halt
+     elif .MESSAGE_ID == $failed or .MESSAGE_ID == $stopped then "\(.MESSAGE | text)\n" | halt_error(1)
+     else empty end),
+  ("the journal ended before \($unit) finished\n" | halt_error(2))
+' <&"$follow"

@@ -8,14 +8,16 @@ source "$REPO/tests/stages/update-fakes.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 make_world "$work"
+cp "$work/assumeno.out" "$work/assumeno.default.out"
 JSON="$VEKRONA_STATE_DIR/updates.json"
 
 check() { run_as_root "$REPO/libexec/vekrona-update-check" 2>"$work/err"; }
 reset() {
-  rm -f "$JSON" "$VEKRONA_STATE_DIR/update-skip" "$work"/units/*
+  rm -f "$JSON" "$VEKRONA_STATE_DIR/update-skip" "$work"/units/* "$work/proton.fails" "$work/reported"
   echo '{}' >"$work/dnf.json"; echo 0 >"$work/dnf.rc"
-  : >"$work/flatpak.tsv"; echo '{}' >"$work/mise.json"; : >"$work/installed.tsv"
+  : >"$work/flatpak.tsv"; : >"$work/installed.tsv"
   : >"$FAKE_LOG"
+  cp "$work/assumeno.default.out" "$work/assumeno.out"; echo 1 >"$work/assumeno.rc"
 }
 field() { jq -c "$1" "$JSON"; }
 night_timer_active() { [[ -e "$work/units/vekrona-update-night.timer.active" ]]; }
@@ -35,22 +37,15 @@ F
   printf '%s\t%s\n' kernel.x86_64 6.17.1-200.fc44 kernel.x86_64 6.17.0-200.fc44 SDL3.x86_64 3.4.17-1.fc44 \
     claude-code.x86_64 2.1.0-1 proton-mail.x86_64 1.14.0-1 tzdata.noarch 1:2026a-1.fc44 >"$work/installed.tsv"
   printf 'org.signal.Signal\t7.1\ndev.zed.Zed\t\n' >"$work/flatpak.tsv"
-  cat >"$work/mise.json" <<'F'
-{"npm:@openai/codex": {"name": "npm:@openai/codex", "current": "0.159.3", "latest": "0.162.0"},
- "npm:@earendil-works/pi-coding-agent": {"name": "npm:@earendil-works/pi-coding-agent", "current": "0.99.2", "latest": "1.1.0"},
- "aqua:anomalyco/opencode": {"name": "aqua:anomalyco/opencode", "current": "1.18.34", "latest": "1.18.35"},
- "cursor-agent": {"name": "cursor-agent", "current": "2026.1", "latest": "2026.2"}}
-F
 }
 
 reset; updates
 check
-want='[{"name":"System packages","items":[{"name":"SDL3","from":"3.4.17-1.fc44","to":"3.4.18-1.fc44"},{"name":"kernel","from":"6.17.1-200.fc44","to":"6.17.2-200.fc44"},{"name":"tzdata","from":"1:2026a-1.fc44","to":"1:2026b-1.fc44"}]},
-{"name":"Agents","items":[{"name":"claude-code","from":"2.1.0-1","to":"2.1.3-1"},{"name":"opencode","from":"1.18.34","to":"1.18.35"},{"name":"cursor-agent","from":"2026.1","to":"2026.2"},{"name":"pi","from":"0.99.2","to":"1.1.0"},{"name":"codex","from":"0.159.3","to":"0.162.0"}]},
+want='[{"name":"System packages","items":[{"name":"SDL3","from":"3.4.17-1.fc44","to":"3.4.18-1.fc44"},{"name":"claude-code","from":"2.1.0-1","to":"2.1.3-1"},{"name":"kernel","from":"6.17.1-200.fc44","to":"6.17.2-200.fc44"},{"name":"tzdata","from":"1:2026a-1.fc44","to":"1:2026b-1.fc44"}]},
 {"name":"Flatpak","items":[{"name":"org.signal.Signal","from":"","to":"7.1"},{"name":"dev.zed.Zed","from":"","to":""}]},
 {"name":"Proton","items":[{"name":"proton-mail","from":"1.14.0-1","to":"1.15.0-1"}]}]'
 [[ "$(field .groups)" == "$(jq -c . <<<"$want")" ]] || die "wrong groups: $(field .groups)"
-log "ok: updates.json groups dnf, agents, Flatpak and Proton updates, claude-code with the agents, newest installed version as 'from'"
+log "ok: updates.json groups dnf, Flatpak and Proton updates, newest installed version as 'from'"
 
 [[ "$(field '{pending, night_armed}')" == '{"pending":true,"night_armed":true}' ]] || die "wrong flags: $(field .)"
 [[ "$(field '.checked | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+[+-][0-9:]+$")')" == true ]] || die "checked is not an ISO timestamp: $(field .checked)"
@@ -59,6 +54,16 @@ log "ok: updates.json groups dnf, agents, Flatpak and Proton updates, claude-cod
 night_timer_active || die "pending updates did not arm the night timer"
 [[ "$(sed -n 1p "$FAKE_LOG")" == "vekrona-proton stage" ]] || die "the Proton repo was not staged first: $(cat "$FAKE_LOG")"
 log "ok: pending is true, the night timer is armed, the file is world-readable, whole, and Proton was staged first"
+
+# A Proton feed that cannot be read must not stop the check for everything else, and must still be told to the user.
+printf '#!/bin/sh\necho "$*" >> "%s/reported"\n' "$work" > "$work/reporter"
+chmod +x "$work/reporter"
+reset; updates; touch "$work/proton.fails"
+VEKRONA_ERROR_REPORTER="$work/reporter" check || die "a failing Proton stage stopped the check: $(cat "$work/err")"
+[[ "$(field '.groups | map(.name) | join(",")')" == '"System packages,Flatpak,Proton"' ]] || die "the other groups are missing: $(field .groups)"
+[[ "$(wc -l < "$work/reported")" == 1 ]] || die "the Proton failure must be reported once: $(cat "$work/reported" 2>&1)"
+grep -q 'Proton packages were not updated.*cannot read Proton feed' "$work/reported" || die "the report lacks the cause: $(cat "$work/reported")"
+log "ok: a Proton stage that fails is reported once, with its cause, and the check goes on"
 
 reset
 check
@@ -90,7 +95,50 @@ grep -q "dnf5 check-upgrade failed with exit status 1" "$work/err" || die "dnf f
 cmp -s "$JSON" "$work/before.json" || die "a failed check changed updates.json"
 log "ok: a failed dnf query fails the check and leaves updates.json alone"
 
-reset; updates; echo 'not json' >"$work/mise.json"
-if check; then die "unreadable mise output was accepted"; fi
-[[ ! -e "$JSON" ]] || die "a failed check wrote updates.json"
-log "ok: unreadable mise output fails the check"
+# dnf5 upgrade --assumeno, as it prints when it leaves updates out (seen 2026-10-17: RPM Fusion's NVIDIA 615.78.08 against
+# the installed 615.71.09, and Fedora's qt6-qtbase-gui without its qt6-qtbase): "name arch" rows, the section, the ending.
+assumeno_skipping() {
+  local section="$1" ending="$2" spec
+  shift 2
+  {
+    printf 'Updating and loading repositories:\nRepositories loaded.\nProblem 1: package qt6-qtbase-gui requires qt6-qtbase, but none of the providers can be installed\n\n'
+    printf 'Package Arch Version Repository Size\n%s:\n' "$section"
+    for spec in "$@"; do printf ' %s %s 1-1.fc44 updates 76.0   B\n' "${spec%.*}" "${spec##*.}"; done
+    printf '\n%s\n' "$ending"
+  } >"$work/assumeno.out"
+}
+aborted=$'Transaction Summary:\n Upgrading: 1 package\n\nOperation aborted by the user.'
+
+reset; updates; assumeno_skipping "Skipping packages with conflicts" "$aborted" tzdata.noarch SDL3.x86_64 SDL3.i686
+check
+[[ "$(field '.groups[0].items | map(.name)')" == '["claude-code","kernel"]' ]] || die "skipped updates were listed: $(field .groups)"
+log "ok: updates dnf5 upgrade skips for a conflict are not listed, whatever their architecture"
+
+reset; updates; assumeno_skipping "Skipping packages with broken dependencies" "$aborted" tzdata.noarch
+check
+[[ "$(field '.groups[0].items | map(.name)')" == '["SDL3","claude-code","kernel"]' ]] || die "skipped updates were listed: $(field .groups)"
+log "ok: updates dnf5 upgrade skips for broken dependencies are not listed"
+
+reset
+echo '{"upgrades": [{"name": "tzdata", "arch": "noarch", "evr": "1:2026b-1.fc44", "repository": "updates"}]}' >"$work/dnf.json"
+assumeno_skipping "Skipping packages with broken dependencies" "Nothing to do." tzdata.noarch
+echo 0 >"$work/assumeno.rc"
+check
+[[ "$(field '{pending, night_armed}')" == '{"pending":false,"night_armed":false}' ]] || die "an update dnf skips kept the check pending: $(field .)"
+night_timer_active && die "the night timer was armed for an update dnf skips"
+grep -q 'tzdata.noarch' "$work/err" || die "the skipped update must be named in the log: $(cat "$work/err")"
+log "ok: when dnf skips every listed update nothing is pending, the night timer stays off and the log names what was skipped"
+
+reset; updates; check; cp "$JSON" "$work/before.json"
+echo 2 >"$work/assumeno.rc"
+if check; then die "a failing dnf5 upgrade --assumeno was accepted"; fi
+grep -q "dnf5 upgrade --assumeno failed with exit status 2" "$work/err" || die "dnf failure not reported: $(cat "$work/err")"
+cmp -s "$JSON" "$work/before.json" || die "a failed check changed updates.json"
+log "ok: a failed dnf5 upgrade --assumeno fails the check and leaves updates.json alone"
+
+echo 1 >"$work/assumeno.rc"
+printf 'Error: Failed to download metadata\n' >"$work/assumeno.out"
+if check; then die "an exit status 1 that is no declined transaction was accepted"; fi
+grep -q "dnf5 upgrade --assumeno failed with exit status 1: Error: Failed to download metadata" "$work/err" || die "dnf failure not reported: $(cat "$work/err")"
+cmp -s "$JSON" "$work/before.json" || die "a failed check changed updates.json"
+log "ok: exit status 1 without the declined-transaction line is a failure"
