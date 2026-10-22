@@ -3,10 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
+source "$ROOT/tests/e2e/lib/bar-widget.sh"
 
 STEP_TIMEOUT_SEC=60
-# The Perf widget's CPU and RAM values stay below 100 in an idle VM, so only the sound pill matches. OCR reads the slashed zero as O or drops the space before the percent sign.
-FULL_VOLUME_REGEX="1[0O][0O] ?%"
 PLAYER_BUS_NAME=org.mpris.MediaPlayer2.vekronatest
 # The windows are foot terminals: Ghostty's GL renderer crashes on the guest's llvmpipe while the popout covers it.
 PLAYER_APP_ID=vekrona-media-player
@@ -28,15 +27,12 @@ PARK_Y=18
 PLAYER_PROCESS_REGEX="^[^ ]*python3 [^ ]*fake-mpris\\.py"
 export PLAYER_APP_ID OTHER_APP_ID TRACK_REGEX ARTIST_REGEX IDENTITY_REGEX ART_HEX MIN_ART_PIXELS SINK_NAME PLAYER_BUS_NAME
 
-window_open() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -e '[recurse(.nodes[]?, .floating_nodes[]?) | select(.app_id? == \"$1\")] | length > 0' >/dev/null"; }
-focused_app_id() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -r '[recurse(.nodes[]?, .floating_nodes[]?) | select(.focused)][0].app_id'"; }
-focused_is() { [[ "$(focused_app_id)" == "$1" ]]; }
 player_on_bus() { vekrona-dev sh busctl --user status "$PLAYER_BUS_NAME" >/dev/null 2>&1; }
-player_off_bus() { ! player_on_bus; }
-track_shown() { vekrona-dev see text "$TRACK_REGEX"; }
-track_hidden() { ! track_shown; }
-sink_listed() { vekrona-dev see text "$SINK_NAME"; }
-sink_hidden() { ! sink_listed; }
+player_off_bus() { absent player_on_bus; }
+track_shown() { text_shown "$TRACK_REGEX"; }
+track_hidden() { absent track_shown; }
+sink_listed() { text_shown "$SINK_NAME"; }
+sink_hidden() { absent sink_listed; }
 art_shown() {
   local shot pixels
   shot="$(vekrona-dev shot)"
@@ -44,18 +40,12 @@ art_shown() {
   rm -f "$shot"
   ((pixels >= MIN_ART_PIXELS))
 }
-export -f window_open focused_app_id focused_is player_on_bus player_off_bus track_shown track_hidden sink_listed sink_hidden art_shown
+export -f player_on_bus player_off_bus track_shown track_hidden sink_listed sink_hidden art_shown
 
 await() {
   local failure="$1"
   shift
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- "$@" || die "$failure"
-}
-
-kill_guest() {
-  local status=0
-  vekrona-dev run pkill "$@" || status=$?
-  ((status <= 1)) || warn "could not stop in the guest: pkill $* (exit $status)"
 }
 
 start_terminal() {
@@ -80,9 +70,9 @@ vekrona-dev run mkdir -p "$GUEST_DIR"
 vekrona-dev run bash -c 'cat >"$1"' _ "$GUEST_PLAYER" <"$ROOT/tests/e2e/fake-mpris.py"
 
 vekrona-dev sh wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0
-await "the bar never showed the sink volume of 100 %" vekrona-dev see text "$FULL_VOLUME_REGEX"
-read -r pill_x pill_y <<<"$(vekrona-dev see find "$FULL_VOLUME_REGEX")"
-[[ -n "${pill_x:-}" && -n "${pill_y:-}" ]] || die "the bar must show the volume, but OCR found no '100 %' to locate the sound pill"
+await "the bar never showed the sound icon" bar_widget center sound
+read -r pill_x pill_y <<<"$(bar_widget center sound)"
+[[ -n "${pill_x:-}" && -n "${pill_y:-}" ]] || die "the bar must show the sound icon, but found none to click"
 log "ok: the sound pill is at $pill_x,$pill_y"
 
 # The player runs in its own terminal, so the window that owns it is an ancestor of the process that owns the bus name.

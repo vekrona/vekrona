@@ -6,11 +6,22 @@ source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=90
 
-window_open() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -e --arg c '$1' '[.. | objects | select((.app_id? == \$c) or (.window_properties?.class? == \$c))] | length > 0' >/dev/null"; }
-syncthing_gui_answers() { vekrona-dev run curl -fsS http://127.0.0.1:8384/ | grep -q Syncthing; }
-export -f window_open syncthing_gui_answers
+# The GUI has a login (stage 50), so the request signs in with the stored password.
+syncthing_gui_answers() { vekrona-dev run bash -c 'curl -fsS -u "vekrona:$(<"$HOME/.local/state/vekrona/syncthing-gui-password")" http://127.0.0.1:8384/ | grep -q Syncthing'; }
+export -f syncthing_gui_answers
+
+obsidian_stopped() { flatpak_stopped md.obsidian.Obsidian; }
+export -f obsidian_stopped
+# The windows this scenario opens go again, so the next scenario starts on an empty desktop.
+close_windows() {
+  if ! window_closed vekrona-syncthing; then vekrona-dev sh swaymsg '[app_id="vekrona-syncthing"] kill' >/dev/null; fi
+  obsidian_stopped || vekrona-dev run flatpak kill md.obsidian.Obsidian
+  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- window_closed vekrona-syncthing
+  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- obsidian_stopped
+}
 
 vekrona-dev session
+trap close_windows EXIT
 
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- syncthing_gui_answers
 log "ok: the Syncthing daemon serves its GUI on 127.0.0.1:8384"

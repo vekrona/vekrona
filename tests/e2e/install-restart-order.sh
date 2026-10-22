@@ -11,10 +11,8 @@ LOCK_CHORD=super-ctrl-alt-esc
 
 shell_property() { vekrona-dev sh systemctl --user show vekrona-shell -p "$1" --value; }
 shell_active() { [[ "$(shell_property ActiveState)" == active ]]; }
-lock_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-lock; }
-lock_inactive() { ! lock_active; }
 locked_hint() { [[ "$(vekrona-dev sh loginctl show-session auto -p LockedHint --value)" == yes ]]; }
-export -f shell_property shell_active lock_active lock_inactive locked_hint
+export -f shell_property shell_active locked_hint
 
 vekrona-dev session
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shell_active
@@ -26,7 +24,7 @@ vekrona-dev sh bash -c 'test ! -e "$HOME/.local/bin/vekrona-firefox" && test ! -
 
 install_log="$(mktemp)"
 trap 'rm -f "$install_log"' EXIT
-vekrona-dev sh timeout "$INSTALL_TIMEOUT_SEC" bash -c 'cd "$HOME/.local/share/vekrona" && ./install.sh 50-user' >"$install_log" 2>&1 \
+vekrona-dev sh timeout "$INSTALL_TIMEOUT_SEC" bash -c 'cd "$HOME/$1" && ./install.sh 50-user' _ "$GUEST_CHECKOUT_SUBPATH" >"$install_log" 2>&1 \
   || die "stage 50 failed inside the live session:
 $(<"$install_log")"
 log "ok: stage 50 ran inside the live session"

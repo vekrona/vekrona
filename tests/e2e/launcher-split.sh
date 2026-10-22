@@ -5,11 +5,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-APP_ID_REGEX=ghostty
+APP_ID_REGEX=foot
 
 terminals_are() { [[ "$(window_rects "$APP_ID_REGEX" | wc -l)" == "$1" ]]; }
 close_terminals() { vekrona-dev sh pkill -x "$APP_ID_REGEX" || [[ $? -eq 1 ]]; }
-open_terminal() { vekrona-dev sh swaymsg exec ghostty >/dev/null; }
+open_terminal() { vekrona-dev sh swaymsg exec foot >/dev/null; }
 export -f terminals_are
 export APP_ID_REGEX
 
@@ -24,7 +24,7 @@ launch_beside() {
   read -r old_id _ < <(window_rects "$APP_ID_REGEX")
   vekrona-dev key "$key"
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- launcher_open
-  vekrona-dev type GHOSTTY
+  vekrona-dev type FOOT
   vekrona-dev key ret
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- terminals_are 2
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- launcher_closed

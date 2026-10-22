@@ -6,19 +6,17 @@ source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
 
-window_count() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq '[.. | objects | select((.type? == \"con\" or .type? == \"floating_con\") and .pid? != null)] | length'"; }
 suggestion_shown() { launcher_is '.query == "/calc" and .mode == "" and .selectedId == "mode:calc"'; }
 mode_entered() { launcher_is '.mode == "calc" and .query == "" and .rows == 0'; }
 mode_left() { launcher_is '.open and .mode == "" and .query == ""'; }
 actions_shown() { launcher_is '.actionsOpen'; }
 actions_hidden() { launcher_is '.open and (.actionsOpen | not)'; }
 leave_hint_shown() { vekrona-dev see text 'Leave mode'; }
-app_listed() { vekrona-dev see text 'Ghostty'; }
+app_listed() { vekrona-dev see text 'Foot'; }
 percent_answered() { vekrona-dev see text '\b230\b'; }
 refusal_shown() { vekrona-dev see text 'Couldn.t evaluate'; }
 export -f percent_answered refusal_shown suggestion_shown mode_entered mode_left actions_shown actions_hidden leave_hint_shown app_listed
 
-export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"
 
 vekrona-dev session
 vekrona-dev move 600 500
@@ -57,7 +55,7 @@ vekrona-dev key backspace
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- mode_left
 log "ok: Enter with nothing listed keeps the launcher open, and Backspace on an empty query leaves the mode"
 
-vekrona-dev type ghostty
+vekrona-dev type foot
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- app_listed
 vekrona-dev key ctrl-k
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- actions_shown

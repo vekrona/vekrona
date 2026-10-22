@@ -6,20 +6,14 @@ source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
 
-shown() { vekrona-dev see text "$1"; }
-export -f shown
-
 cleanup() {
-  updates_restore
-  updates_forget
-  close_notification_centre
-  clear_notifications
+  run_cleanups updates_restore updates_forget close_notification_centre clear_notifications
 }
 
 # The root check can finish before anybody has logged in, so the file is already there when the session starts.
 vekrona-dev session
-updates_stash
 trap cleanup EXIT
+updates_stash
 logout_sway
 log "ok: logged out"
 
@@ -30,6 +24,6 @@ vekrona-dev session
 vekrona-dev move 100 500
 # The toast may be gone by the time the session is unlocked and looked at; the centre still holds it.
 open_notification_centre
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Updates available'
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shown 'Not tonight'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Updates available'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Not tonight'
 log "ok: updates found before the login are announced when the session starts"

@@ -22,9 +22,8 @@ desktop_is() { [[ "$(python3 "$COLORS" center "$(vekrona-dev shot)")" == "$1" ]]
 bar_is_tall() { [[ "$(python3 "$COLORS" bar-height "$(vekrona-dev shot)" "$1")" == "$BAR_PX" ]]; }
 # $1 is the panel color. The bar height is already asserted, so the rows counted start below it; the open windows keep
 # the top edge from being measured again.
-panel_shown() { (($(python3 "$COLORS" count "$(vekrona-dev shot)" "$1" "$BAR_PX") >= PANEL_MIN_PIXELS)); }
-focused_is() { [[ "$(vekrona-dev sh bash -c "swaymsg -t get_tree | jq -r '[recurse(.nodes[]?, .floating_nodes[]?) | select(.focused)][0].app_id'")" == "$1" ]]; }
-export -f desktop_is bar_is_tall panel_shown focused_is
+color_panel_shown() { (($(python3 "$COLORS" count "$(vekrona-dev shot)" "$1" "$BAR_PX") >= PANEL_MIN_PIXELS)); }
+export -f desktop_is bar_is_tall color_panel_shown
 
 guest_gtk_window_bg() { vekrona-dev sh bash -c "sed -n 's/^@define-color window_bg_color \(#[0-9a-fA-F]*\);.*/\1/p' \"\$HOME/.config/gtk-4.0/gtk.css\""; }
 guest_color_scheme() { vekrona-dev sh gsettings get org.gnome.desktop.interface color-scheme; }
@@ -44,12 +43,8 @@ assert_mode() {
   log "ok: $mode mode gives a bg desktop, a surface-1 GTK window, color-scheme $scheme and an accent focused border"
 }
 
-kill_guest() {
-  local status=0
-  vekrona-dev run pkill "$@" || status=$?
-  ((status <= 1)) || warn "could not stop in the guest: pkill $* (exit $status)"
-}
-trap 'kill_guest -x foot' EXIT
+# A failed run must not leave the guest in light mode: the dark theme goes back first.
+trap 'run_cleanups "vekrona-dev sh vekrona-theme dark" "kill_guest -x foot"' EXIT
 
 vekrona-dev session
 vekrona-dev move 600 500
@@ -73,7 +68,7 @@ for app in switch-first switch-second; do
 done
 vekrona-dev hold super-tab "$SWITCHER_HOLD_MS" &
 holding=$!
-vekrona-dev until --timeout "$SWITCHER_TIMEOUT_SEC" -- panel_shown "$(color surface-1 dark)" \
+vekrona-dev until --timeout "$SWITCHER_TIMEOUT_SEC" -- color_panel_shown "$(color surface-1 dark)" \
   || { wait "$holding"; die "holding Super+Tab with two windows must show a $(color surface-1 dark) (surface-1) panel, but fewer than $PANEL_MIN_PIXELS such pixels are below the bar"; }
 wait "$holding"
 log "ok: the app switcher shows a surface-1 panel"

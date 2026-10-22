@@ -7,7 +7,7 @@ source "$ROOT/tests/lib.sh"
 STEP_TIMEOUT_SEC=90
 
 obsidian_window() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -ce '[.. | objects | select(.pid? and ((.app_id // .window_properties.class // \"\") | test(\"obsidian\"; \"i\")))] | first // error(\"no Obsidian window\")'"; }
-stop_obsidian() { vekrona-dev run bash -c 'if flatpak ps --columns=application | grep -qx md.obsidian.Obsidian; then flatpak kill md.obsidian.Obsidian; fi'; }
+stop_obsidian() { if flatpak_running md.obsidian.Obsidian; then vekrona-dev run flatpak kill md.obsidian.Obsidian; fi; }
 export -f obsidian_window
 
 # Obsidian is single-instance: a copy left running would answer the launch with its old window.

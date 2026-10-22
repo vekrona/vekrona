@@ -3,17 +3,18 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
+source "$ROOT/tests/e2e/lib/bar-widget.sh"
 
 STEP_TIMEOUT_SEC=60
 MISSING_BINARY=vekrona-no-such-binary
 MISSING_ENTRY=VekronaMissingBinary
 QUICK_ENTRY=VekronaQuickExit
 APPLICATIONS_DIR='$HOME/.local/share/applications'
-PERF_REGEX='%'
 
-errors_after() { (($(shell_errors) > ERRORS_BEFORE)); }
-btop_open() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq -e '[.. | objects | select((.name? // \"\") == \"btop\")] | length > 0' >/dev/null"; }
-perf_position() { vekrona-dev see find "$PERF_REGEX" >"$POSITION_FILE"; }
+errors_after() { local now; now="$(shell_errors)" || abort "cannot count the shell errors"; ((now > ERRORS_BEFORE)); }
+# The performance pill opens btop in a window of its own class (Perf.qml, monitorClass).
+btop_open() { window_open vekrona.perf; }
+perf_position() { bar_widget center load >"$POSITION_FILE"; }
 quick_entry_ran() { vekrona-dev sh test -e "$QUICK_MARKER"; }
 close_terminals() { vekrona-dev sh pkill -x ghostty || [[ $? -eq 1 ]]; }
 cleanup() {
@@ -28,16 +29,14 @@ launch() {
   vekrona-dev key super-spc
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_shown
   vekrona-dev type "$1"
-  entry_listed() { vekrona-dev see text "$1"; }
+  entry_listed() { text_shown "$1"; }
   export -f entry_listed
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- entry_listed "$1"
   vekrona-dev key ret
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- panel_hidden
 }
 export -f btop_open perf_position quick_entry_ran errors_after
-export PERF_REGEX
 
-export PANEL_HEX="$(vekrona_token_get color surface-1 dark)"
 POSITION_FILE="$(mktemp)"
 QUICK_MARKER=/tmp/vekrona-quick-entry-ran
 export POSITION_FILE QUICK_MARKER

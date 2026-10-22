@@ -7,15 +7,12 @@ source "$ROOT/tests/lib.sh"
 
 BOOT_TIMEOUT_SEC=240
 GUEST_FAKE_AUTOSTART=/etc/xdg/autostart/nvidia-settings-user.desktop
-GUEST_ERROR_STORE='$HOME/.local/state/vekrona/errors'
 
-boot_id() { vekrona-dev run cat /proc/sys/kernel/random/boot_id; }
-booted_again() { [[ "$(boot_id 2>/dev/null)" != "$1" ]]; }
-error_store() { vekrona-dev run bash -c "vekrona-error list --all | awk 'NR > 1 { print \$1, \$4 }' | sort"; }
-greeter_up() { vekrona-dev run systemctl is-active --quiet greetd 2>/dev/null; }
-export -f boot_id booted_again greeter_up
+error_store() { vekrona-dev run bash -c "set -o pipefail; vekrona-error list --all | awk 'NR > 1 { print \$1, \$4 }' | sort"; }
 
 # The NVIDIA package ships this entry but the VM has no NVIDIA driver. The generator skips entries whose Exec is missing, so the stand-in runs a binary that exists.
+# It does not stay in the guest for the next scenario.
+trap 'vekrona-dev run sudo rm -f "$GUEST_FAKE_AUTOSTART"' EXIT
 vekrona-dev run sudo bash -c "printf '[Desktop Entry]\nType=Application\nName=nvidia-settings Update\nExec=/usr/bin/true\n' >$GUEST_FAKE_AUTOSTART"
 
 vekrona-dev session
@@ -41,6 +38,10 @@ store_after="$(error_store)"
 [[ "$store_after" == "$store_before" ]] || die "a fresh boot and login must leave the error store unchanged, but it changed: $(diff <(echo "$store_before") <(echo "$store_after"))"
 log "ok: the error store did not change"
 
-shell_errors="$(vekrona-dev sh journalctl --user -b SYSLOG_IDENTIFIER=vekrona-shell --no-pager | grep -E 'ReferenceError|TypeError|is not defined|ERROR' || true)"
-[[ -z "$shell_errors" ]] || die "vekrona-shell must log no QML errors, but logged: $shell_errors"
+# The log is read whole and must hold lines of the shell at all: a journalctl that fails, or one that finds nothing because the
+# shell logs under another identifier, would otherwise read as "no QML errors".
+shell_log_this_boot="$(vekrona-dev sh journalctl --user -b SYSLOG_IDENTIFIER=vekrona-shell --no-pager)"
+[[ -n "$shell_log_this_boot" ]] || die "the user journal holds no line of vekrona-shell for this boot, so it cannot show the shell is clean"
+qml_error_lines="$(grep -E "$QML_ERROR_REGEX" <<<"$shell_log_this_boot" || [[ $? -eq 1 ]])"
+[[ -z "$qml_error_lines" ]] || die "vekrona-shell must log no QML errors, but logged: $qml_error_lines"
 log "ok: vekrona-shell logs no QML errors"

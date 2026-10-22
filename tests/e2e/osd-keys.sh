@@ -18,7 +18,6 @@ volume_unmuted() { ! volume_muted; }
 accent_pixels() { python3 "$SCREEN_COLORS" count "$(vekrona-dev shot)" "$ACCENT_HEX" "$BAR_HEIGHT_PX"; }
 osd_shown() { (($(accent_pixels) >= OSD_MIN_PIXELS)); }
 osd_hidden() { (($(accent_pixels) == 0)); }
-shell_errors() { vekrona-dev sh journalctl --user --no-pager -o cat -t vekrona-shell | awk '/ReferenceError|TypeError|is not defined|ERROR/ { n++ } END { print n + 0 }'; }
 shell_volume() { vekrona-dev sh qs -c vekrona-shell ipc call audio "$@" >/dev/null; }
 export -f volume volume_is volume_muted volume_unmuted accent_pixels osd_shown osd_hidden
 export EXPECTED ACCENT_HEX BAR_HEIGHT_PX OSD_MIN_PIXELS
@@ -67,9 +66,9 @@ shell_volume mute
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- volume_unmuted
 log "ok: the mute key toggles mute"
 
-errors_before="$(shell_errors)"
+errors_before="$(qml_errors)"
 for key in playPause pause next previous; do
   vekrona-dev sh qs -c vekrona-shell ipc call mpris "$key" >/dev/null
 done
-[[ "$(shell_errors)" == "$errors_before" ]] || die "a media key without a player made vekrona-shell log an error"
+[[ "$(qml_errors)" == "$errors_before" ]] || die "a media key without a player made vekrona-shell log an error"
 log "ok: media keys without a player do nothing and log no error"

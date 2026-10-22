@@ -5,6 +5,10 @@ Run inside the sway session while the test presses and releases Super+Tab.
 Prints one JSON line, "ready", once every watcher runs, then one more with
 the milliseconds from the Tab binding until the screen centre changes (the
 overlay is up) and from the Super release until sway reports a focus change.
+That line also carries what one screen sample and one sway IPC round trip cost
+on this machine right now (poll_ms, ipc_ms): the overlay is noticed no sooner
+than the sample after it appears, and a focus change takes at least a round trip
+when the machine is busy, so a scenario judges the timings relative to these.
 """
 import atexit
 import glob
@@ -25,7 +29,10 @@ DEADLINE_SEC = 20
 POLL_PIXELS = "40x10"
 CHANGED_BY = 40
 
+SAMPLES = 5
+
 stamps = {}
+cost_ms = {}
 ready = {name: threading.Event() for name in ("sway", "keys", "screen")}
 done = threading.Event()
 
@@ -74,9 +81,20 @@ def centre_pixels():
     return lambda: subprocess.check_output(["grim", "-g", geometry, "-t", "ppm", "-"])
 
 
+def median_cost_ms(operation):
+    costs = []
+    for _ in range(SAMPLES):
+        started = time.monotonic()
+        operation()
+        costs.append((time.monotonic() - started) * 1000)
+    return round(sorted(costs)[SAMPLES // 2])
+
+
 def watch_screen():
     grab = centre_pixels()
     baseline = grab()
+    cost_ms["poll_ms"] = median_cost_ms(grab)
+    cost_ms["ipc_ms"] = median_cost_ms(lambda: subprocess.check_output(["swaymsg", "-t", "get_version"]))
     ready["screen"].set()
     while not done.is_set():
         now = grab()
@@ -100,7 +118,8 @@ def main():
         print(json.dumps({"error": f"never saw {missing}", "seen": sorted(stamps)}), flush=True)
         return 1
     print(json.dumps({"overlay_ms": round((stamps["overlay"] - stamps["tab"]) * 1000),
-                      "focus_ms": round((stamps["focus"] - stamps["release"]) * 1000)}), flush=True)
+                      "focus_ms": round((stamps["focus"] - stamps["release"]) * 1000),
+                      **cost_ms}), flush=True)
     return 0
 
 

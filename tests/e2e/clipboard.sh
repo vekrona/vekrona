@@ -11,14 +11,16 @@ OPEN_CHORD=super-ctrl-alt-v
 
 nothing_matches() { launcher_is '.query == "zzzzqqqq" and .rows == 0'; }
 copy() { vekrona-dev sh bash -c 'printf %s "$1" | base64 -d | wl-copy >/dev/null 2>&1' _ "$(printf %s "$1" | base64 -w0)"; }
-stored() { vekrona-dev sh bash -c 'cliphist list | grep -qF "$1"' _ "$1"; }
+# 0 when the history holds the text $1, 1 when it does not, 70 when cliphist could not list it (a pipe would hide that).
+stored() { vekrona-dev sh bash -c 'list="$(cliphist list)" || exit 70; grep -qF -- "$1" <<<"$list"' _ "$1"; }
 pasted() { [[ "$(vekrona-dev sh bash -c 'wl-paste --no-newline | base64 -w0')" == "$(printf %s "$EXPECTED" | base64 -w0)" ]]; }
-doomed_listed() { vekrona-dev see text 'vekrona-doomed'; }
-delete_armed() { launcher_is '.armed' && vekrona-dev see text 'Press Enter again to delete'; }
+doomed_listed() { text_shown 'vekrona-doomed'; }
+delete_armed() { launcher_is '.armed' && text_shown 'Press Enter again to delete'; }
 history_open() { launcher_is '.open and .mode == "clip"'; }
-doomed_gone() { ! stored vekrona-doomed; }
+doomed_gone() { absent stored vekrona-doomed; }
 export -f nothing_matches stored pasted doomed_listed delete_armed history_open doomed_gone
 
+trap close_launcher EXIT
 vekrona-dev session
 vekrona-dev move 600 500
 clear_notifications

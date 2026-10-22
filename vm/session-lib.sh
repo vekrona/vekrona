@@ -53,6 +53,12 @@ session_attach_existing() {
   [[ "$(systemctl --user is-active sway-session.target 2>/dev/null || true)" == active ]] || return 1
 }
 
+session_export_wayland_display() {
+  WAYLAND_DISPLAY="$(systemctl --user show-environment | sed -n 's/^WAYLAND_DISPLAY=//p')"
+  [[ -n "$WAYLAND_DISPLAY" ]] || { echo "session-lib: the sway session exported no WAYLAND_DISPLAY" >&2; return 1; }
+  export WAYLAND_DISPLAY
+}
+
 session_start_new() {
   systemctl --user reset-failed "$SESSION_SWAY_UNIT" >/dev/null 2>&1 || true
   find "$XDG_RUNTIME_DIR" -maxdepth 1 -regextype posix-extended \
