@@ -5,7 +5,7 @@ After=sway-session.target vekrona-shell.service
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/vekrona-update-notify
+ExecStart=%h/.local/bin/vekrona-update-notify run
 # It waits for an answer to the notification, until midnight at the latest.
 TimeoutStartSec=infinity
 

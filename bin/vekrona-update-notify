@@ -122,6 +122,7 @@ def start(unit):
 
 
 def main():
+    vekrona_cli.require_run_verb(PROG, __doc__)
     groups = load_groups(UPDATES_FILE)
     if groups is None:
         log(f"{UPDATES_FILE} does not exist yet: the update check has not run, nothing is pending")

@@ -21,6 +21,8 @@ DESIGN_KEYS = ("radius",)
 die = vekrona_cli.make_die(PROG, __file__)
 REPO = vekrona_cli.repo_root(__file__)
 
+# check_writable accepts an existing file only when its first line equals this marker, so changing the text would make every
+# file rendered before the change look foreign.
 MARKER_TEXT = ("vekrona-render-theme: generated from the active vekrona theme, do not edit "
                "(run vekrona-theme or vekrona-render-theme)")
 COMMENT_STYLES = {"css": ("/* ", " */"), "hash": ("# ", ""), "slash": ("// ", "")}
@@ -695,7 +697,7 @@ def main():
                     "of the 'theme' state file into the shell theme file, GTK, Qt, Firefox and Sway config. "
                     "'all' is shell, gtk, qt, firefox, sway; 'rofi' prints a theme string to stdout and "
                     "writes nothing. Running apps keep old looks until restarted.")
-    parser.add_argument("target", nargs="?", default="all", choices=("all",) + ALL_TARGETS)
+    parser.add_argument("target", choices=("all",) + ALL_TARGETS)
     target = parser.parse_args().target
 
     mode = load_mode()

@@ -2,14 +2,15 @@
 set -euo pipefail
 
 usage() {
-  printf 'usage: %s [--move | --games]\n' "$(basename "$0")" >&2
-  exit 1
+  printf 'usage: %s open | --move | --games\n' "$(basename "$0")" >&2
+  exit 2
 }
 
 move=0
 games=0
-case "${1:-}" in
-  "") ;;
+[[ $# -eq 1 ]] || usage
+case "$1" in
+  open) ;;
   --move) move=1 ;;
   --games) games=1 ;;
   *) usage ;;

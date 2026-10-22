@@ -30,21 +30,25 @@ focus_follows_mouse yes
 #: Open terminal
 bindsym --no-repeat $hyper+Return exec $term
 #: Open the clipboard history
-bindsym --no-repeat --to-code $hyper+v exec qs -c vekrona-shell ipc call launcher open clip
+bindsym --no-repeat --to-code $hyper+v exec qs -c vekrona-shell ipc call launcher toggleMode clip
 #: Toggle notification center
 bindsym --no-repeat --to-code $hyper+n exec qs -c vekrona-shell ipc call notifications toggle
 #: Lock screen
-bindsym --no-repeat $hyper+Escape exec vekrona-lock
-#: Lock screen
-bindsym --no-repeat --to-code Mod4+Ctrl+q exec vekrona-lock
+bindsym --no-repeat $hyper+Escape exec vekrona-lock start
+#: Lock screen, as on a Mac
+bindsym --no-repeat --to-code Mod4+Ctrl+q exec vekrona-lock start
+# The lid switch and the sleep key: vekrona-lid.service keeps logind from suspending on them, so the lock comes first.
+bindswitch --locked lid:on exec vekrona-suspend --lid
+#: Lock, then suspend
+bindsym --no-repeat --locked XF86Sleep exec vekrona-suspend now
 #: Open the power commands
-bindsym --no-repeat $hyper+BackSpace exec qs -c vekrona-shell ipc call launcher open power
+bindsym --no-repeat $hyper+BackSpace exec qs -c vekrona-shell ipc call launcher toggleMode power
 #: Show keybindings help
-bindsym --no-repeat $hyper+slash exec vekrona-keybindings
+bindsym --no-repeat $hyper+slash exec vekrona-keybindings menu
 #: Open the coding agent
 bindsym --no-repeat --to-code $hyper+a exec vekrona-agent --pick
-#: Pick a recorded error and open the agent on it
-bindsym --no-repeat --to-code $hyper+Shift+a exec vekrona-error pick
+#: Toggle the list of recorded errors
+bindsym --no-repeat --to-code $hyper+Shift+a exec qs -c vekrona-shell ipc call launcher toggleMode agent
 
 #: Toggle launcher
 bindsym --no-repeat Mod4+Space exec qs -c vekrona-shell ipc call launcher toggle
@@ -133,12 +137,12 @@ bindsym --no-repeat --to-code Mod4+minus splitv, exec qs -c vekrona-shell ipc ca
 bindsym --no-repeat --to-code Mod4+backslash splith, exec qs -c vekrona-shell ipc call launcher toggle
 
 #: Go to a new (first empty) workspace
-bindsym --no-repeat --to-code $hyper+equal exec vekrona-workspace-new
+bindsym --no-repeat --to-code $hyper+equal exec vekrona-workspace-new open
 #: Move window to a new (first empty) workspace
 bindsym --no-repeat --to-code $hyper+Shift+equal exec vekrona-workspace-new --move
 
 #: Take a screenshot
-bindsym --no-repeat $hyper+Print exec vekrona-screenshot
+bindsym --no-repeat $hyper+Print exec vekrona-screenshot area
 #: Screenshot the focused screen
 bindsym --no-repeat Mod4+Shift+3 exec vekrona-screenshot screen
 #: Screenshot an area or click a window
@@ -152,9 +156,9 @@ bindsym --no-repeat Mod4+Ctrl+Shift+4 exec vekrona-screenshot --clipboard area
 #: Copy screenshot of a window
 bindsym --no-repeat Mod4+Ctrl+Shift+5 exec vekrona-screenshot --clipboard window
 #: Record the screen
-bindsym --no-repeat $hyper+Shift+Print exec vekrona-record
+bindsym --no-repeat $hyper+Shift+Print exec vekrona-record toggle
 #: Toggle caffeine (prevent sleep)
-bindsym --no-repeat --to-code $hyper+Shift+c exec vekrona-caffeine
+bindsym --no-repeat --to-code $hyper+Shift+c exec vekrona-caffeine toggle
 #: Toggle night light
 bindsym --no-repeat --to-code $hyper+Shift+n exec vekrona-night toggle
 #: Switch to the next theme

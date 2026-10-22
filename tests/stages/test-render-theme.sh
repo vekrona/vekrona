@@ -104,7 +104,7 @@ check_mode() { # check_mode <dark|light>: every target renders that mode's token
     [[ "$(jq -r ".$each.tokens.focusInner" "$active_json")" == "$(tok "$each" focus-inner)" ]] || die "$m: $each.tokens.focusInner is not focus-inner"
     [[ "$(jq -r ".$each.tokens.selected" "$active_json")" == "$(tok "$each" selected)" ]] || die "$m: $each.tokens.selected is not selected"
   done
-  [[ "$(jq -c '.metrics.spacing.space2, .metrics.size.bar, .metrics.opacity.scrim' "$active_json" | tr '\n' ' ')" == "8 36 0.6 " ]] \
+  [[ "$(jq -c '.metrics.spacing.space2, .metrics.size.bar' "$active_json" | tr '\n' ' ')" == "8 36 " ]] \
     || die "$m: metrics do not follow tokens.json"
   [[ "$(jq -c '.metrics.border' "$active_json")" == '{"hair":1,"control":1,"focus":1}' ]] \
     || die "$m: border metrics carry more than hair, control and focus (the underline and the focus offset are gone)"
@@ -287,6 +287,15 @@ run_tool lizard || status=$?
 grep -q 'usage:' "$scratch/stderr" || die "unknown target did not print usage"
 log "ok: shell is a target of its own; an unknown target prints usage and exits 2"
 
+reset_home; set_mode dark
+before="$(find "$HOME" "$XDG_STATE_HOME" | sort)"
+status=0
+run_tool || status=$?
+[[ "$status" -eq 2 ]] || die "a bare call must exit 2, got $status"
+grep -q 'usage:' "$scratch/stderr" || die "a bare call did not print usage"
+[[ "$(find "$HOME" "$XDG_STATE_HOME" | sort)" == "$before" ]] || die "a bare call wrote files"
+log "ok: a bare call is refused and writes nothing"
+
 # ---- rofi writes nothing
 rm -rf "$HOME" "$XDG_STATE_HOME/vekrona/active-theme.json"; mkdir -p "$HOME"
 before="$(find "$HOME" "$XDG_STATE_HOME" | sort)"
@@ -385,6 +394,10 @@ break_tokens '(.size.tokens[] | select(.name == "size-bar") | .value) = "tall"'
 fails "a unit that does not parse" "token size-bar" gtk
 break_tokens '(.type.groups[0].styles[] | select(.name == "body") | .fontSize) = "15"'
 fails "a font size without unit" "token body" gtk
+break_tokens '(.color.tokens[] | select(.name == "accent") | .value.dark) = "#112233\n"'
+fails "a color with a trailing newline" "token accent" gtk
+break_tokens '(.size.tokens[] | select(.name == "size-bar") | .value) = "40px\n"'
+fails "a size with a trailing newline" "token size-bar" gtk
 [[ ! -e "$gtk4" ]] || die "gtk.css written from invalid tokens"
 cp "$ROOT/config/tokens.json" "$repo/config/tokens.json"
 

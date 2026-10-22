@@ -40,7 +40,7 @@ installed: the Omarchy, omedora, and Hyprland packages that the real machine
 carries, and the `fedora-release-identity-workstation` to
 `fedora-release-identity-basic` identity swap that only runs when
 `fedora-release-identity-workstation` is installed. Before running
-`90b-remove` for real: take a snapshot first (`vekrona-snapshot`), and read
+`90b-remove` for real: take a snapshot first (`vekrona-snapshot "before 90b-remove"`), and read
 the reviewed removal and autoremove lists it prints before typing `yes`.
 
 Separately, the two-step review-confirm-execute flow itself (explicit

@@ -5,7 +5,7 @@ UNIT=vekrona-night.service
 
 usage() {
   printf 'usage: %s toggle\n' "$(basename "$0")" >&2
-  exit 1
+  exit 2
 }
 
 [[ $# -eq 1 && "$1" == toggle ]] || usage

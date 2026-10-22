@@ -145,6 +145,7 @@ def write_atomically(path, data):
 
 
 def main():
+    vekrona_cli.require_run_verb(PROG, __doc__)
     output_path = os.path.join(vekrona_cli.vekrona_state_dir(), "weather.json")
     override_path = os.path.join(vekrona_cli.vekrona_config_dir(), "weather.json")
     previous = previous_output(output_path)
