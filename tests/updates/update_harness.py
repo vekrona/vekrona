@@ -32,10 +32,10 @@ def read_line(stream, deadline=EVENT_DEADLINE_SEC):
 class FakeDaemon:
     """The fake notification daemon (fake_notification_daemon.py) on a private session bus."""
 
-    def __init__(self, bus_address, capabilities="actions,body"):
+    def __init__(self, bus_address):
         self.process = subprocess.Popen(
             [sys.executable, "-B", "-W", "ignore::DeprecationWarning",
-             os.path.join(HERE, "fake_notification_daemon.py"), capabilities],
+             os.path.join(HERE, "fake_notification_daemon.py")],
             env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": bus_address, "PYTHONDONTWRITEBYTECODE": "1"},
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         self.expect("ready")
@@ -61,7 +61,6 @@ class FakeDaemon:
 
 
 class UpdateAskTestCase(unittest.TestCase):
-    CAPABILITIES = "actions,body"
 
     @classmethod
     def setUpClass(cls):
@@ -83,7 +82,7 @@ class UpdateAskTestCase(unittest.TestCase):
         }
 
     def start_daemon(self):
-        daemon = FakeDaemon(self.bus.address, self.CAPABILITIES)
+        daemon = FakeDaemon(self.bus.address)
         self.addCleanup(daemon.close)
         return daemon
 

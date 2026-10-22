@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Gives /var/lib/vekrona/updates.json its "nothing checked yet" state when the first update check has not written it.
+# The install (stage 40) runs it as root.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/update.sh"
+
+require_root
+update_lock
+update_seed_json

@@ -9,19 +9,30 @@ source "$ROOT/lib/update.sh"
 
 require_root
 [[ -e "$VEKRONA_OFFLINE_MARKER" ]] || die "no offline update is pending: $VEKRONA_OFFLINE_MARKER does not exist"
-trap 'rm -f "$VEKRONA_OFFLINE_MARKER"' EXIT
+# The marker goes with the first run, except while the newest kernel is not ready: then the next boot tries again.
+keep_marker=0
+trap '[[ $keep_marker -eq 1 ]] || rm -f "$VEKRONA_OFFLINE_MARKER"' EXIT
 update_lock
 
 # dnf clears its stored transaction when it ran to the end; a transaction that is still stored did not.
 offline_status="$(dnf5 offline status 2>&1)"
 update_postflight
-update_check
+update_close_offline_snapshot_pair
 
 if [[ "$offline_status" == *"No offline transaction is stored."* ]]; then
   log "the offline update finished"
-  update_ensure_nvidia_boots
+  # Before anything that needs the network: the kernel decides whether the machine boots, and a failing check must not
+  # stand between it and the GRUB default. A kernel that cannot be made bootable keeps the marker (the unit fails each time).
+  keep_marker=1
+  update_promote_newest_kernel
+  keep_marker=0
   notify_user -u normal "System updated" "The updates were installed." \
     || log "nobody is logged in to read it"
+  # The check refreshes updates.json and needs the network; its failure fails the unit, after the user was told.
+  update_check
 else
-  die "the offline update did not finish: $offline_status $(dnf5 offline log --number=-1 2>&1 | tail -n 20)"
+  # The failure is recorded first: a failing check would otherwise end the unit with its own message instead.
+  report_failure "the offline update did not finish: $offline_status $(dnf5 offline log --number=-1 2>&1 | tail -n 20)"
+  update_check
+  exit 1
 fi

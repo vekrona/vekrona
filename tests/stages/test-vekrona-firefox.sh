@@ -109,6 +109,8 @@ elif command == "engines":
     write_engines(*sys.argv[2:5])
 elif command == "raw-mozlz4":
     write_mozlz4(sys.argv[2], os.fsencode(sys.argv[3]), int(sys.argv[4]))
+elif command == "raw-mozlz4-hex":  # for a block with a NUL byte, which no argument can carry
+    write_mozlz4(sys.argv[2], bytes.fromhex(sys.argv[3]), int(sys.argv[4]))
 elif command == "hold-lock":
     db = sqlite3.connect(sys.argv[2], isolation_level=None)
     db.execute("BEGIN EXCLUSIVE")
@@ -242,6 +244,15 @@ fails "match reaching before the start" "points before the start" engine-name
 
 fixture raw-mozlz4 "$main/search.json.mozlz4" $'\x30not' 3
 fails "bytes that are no JSON" "could not decode" engine-name
+
+fixture raw-mozlz4 "$main/search.json.mozlz4" $'\x30not' 2
+fails "literals past the size the header says" "more than the 2 bytes" engine-name
+
+fixture raw-mozlz4-hex "$main/search.json.mozlz4" 10610100 3
+fails "match past the size the header says" "more than the 3 bytes" engine-name
+
+fixture raw-mozlz4 "$main/search.json.mozlz4" $'\x30not' 4000000000
+fails "a size no block of that length expands to" "cannot expand to" engine-name
 
 # ---------------------------------------------------------------- profiles
 

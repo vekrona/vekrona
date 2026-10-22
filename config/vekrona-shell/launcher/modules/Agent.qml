@@ -1,19 +1,24 @@
-import QtCore
-import Quickshell.Io
+import QtQuick
 import ".."
 import "../.." as Shell
 
 LauncherModule {
     id: root
 
-    readonly property string unreadPath: StandardPaths.writableLocation(StandardPaths.GenericStateLocation) + "/vekrona/errors/unread"
     readonly property var listLine: /^(\d{8}T\d{6}-[0-9a-f]{8})\s+(\S+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(.*)$/
     // "" when none is set, or when reading it failed (toolFailed): those are different states.
     property string defaultTool: ""
     property bool toolFailed: false
-    property var latestError: null
+    // The recorded errors, newest first: null until the first `vekrona-error list` answers or when it failed (errorsFailure).
+    property var errors: null
+    property string errorsFailure: ""
     property bool toolInFlight: false
     property bool errorsInFlight: false
+    // Something changed the errors while `vekrona-error list` was running, so its answer may be out of date.
+    property bool errorsStale: false
+    property bool launcherOpen: false
+    // The error list is on screen: the launcher is open in /agent. It keeps its mode while closed.
+    readonly property bool listShown: launcherOpen && inMode
 
     function refreshTool(): void {
         if (toolInFlight)
@@ -35,52 +40,81 @@ LauncherModule {
     }
 
     // `vekrona-error list` prints "no errors recorded", or a header and one fixed-width line per error, newest first:
-    //   ID  SOURCE  STATUS  COUNT  AGE  TITLE
+    //   ID  SOURCE  STATUS  COUNT  AGE  TITLE (STATUS is "new" until the error is seen)
+    // Throws on output it does not recognise, so the failure is shown instead of a list with rows missing.
     function parseErrors(stdout: string): var {
         const lines = stdout.split("\n").filter(line => line.trim() !== "");
         if (lines.length === 0 || lines[0].trim() === "no errors recorded")
             return [];
         if (!lines[0].startsWith("ID "))
-            console.error("agent: unexpected vekrona-error list header: " + lines[0]);
-        const records = [];
-        for (const line of lines.slice(1)) {
+            throw new Error("unexpected vekrona-error list header: " + lines[0]);
+        return lines.slice(1).map(line => {
             const match = listLine.exec(line);
-            if (!match) {
-                console.error("agent: unrecognised vekrona-error list line: " + line);
-                continue;
-            }
-            records.push({
+            if (!match)
+                throw new Error("unrecognised vekrona-error list line: " + line);
+            return {
                 id: match[1],
+                source: match[2],
                 status: match[3],
                 count: parseInt(match[4], 10),
                 age: match[5],
                 title: match[6].trim()
-            });
-        }
-        return records;
+            };
+        });
     }
 
-    function describeError(record: var): string {
-        const count = record.count > 1 ? " ×" + record.count : "";
-        const age = record.age === "?" ? "" : " — " + record.age + " ago";
-        return record.title + count + age;
+    // Runs `vekrona-error ARGS`. A failure is toasted as "Couldn’t <what>: <reason>", a success calls onSuccess.
+    function runErrorTool(args: var, what: string, onSuccess: var): void {
+        Shell.Exec.runOr(["vekrona-error"].concat(args), stdout => onSuccess(), reason => launcher.toast("Couldn’t " + what + ": " + reason));
+    }
+
+    // Showing the error list sees the errors it shows, as opening the notification centre sees every notification: the
+    // robot's dot clears. Exactly those ids, so an error recorded after the list was read stays unread until it is shown.
+    function markSeen(ids: var): void {
+        runErrorTool(["ack"].concat(ids), "mark the errors as seen", () => {});
+    }
+
+    // Mutes the error, then lists again. Returns false: the launcher stays open on the shorter list.
+    function muteError(id: string): bool {
+        runErrorTool(["mute", id], "mute", refreshErrors);
+        return false;
     }
 
     function refreshErrors(): void {
-        if (errorsInFlight)
+        if (errorsInFlight) {
+            errorsStale = true;
             return;
+        }
         errorsInFlight = true;
         const argv = ["vekrona-error", "list"];
         Shell.Exec.run(argv, (code, stdout, stderr) => {
             errorsInFlight = false;
-            let next = null;
-            if (code !== 0)
-                Shell.Exec.failure(argv, code, stderr);
-            else
-                next = parseErrors(stdout).find(record => record.status === "new") ?? null;
-            if (JSON.stringify(next) === JSON.stringify(latestError))
+            if (errorsStale) {
+                errorsStale = false;
+                refreshErrors();
                 return;
-            latestError = next;
+            }
+            let next = null;
+            let failure = "";
+            if (code !== 0) {
+                failure = Shell.Exec.failure(argv, code, stderr);
+            } else {
+                try {
+                    next = parseErrors(stdout);
+                } catch (e) {
+                    console.error("agent: " + e.message);
+                    failure = e.message;
+                }
+            }
+            if (listShown && next !== null) {
+                const unseen = next.filter(record => record.status === "new").map(record => record.id);
+                if (unseen.length > 0)
+                    markSeen(unseen);
+            }
+            if (failure === errorsFailure && JSON.stringify(next) === JSON.stringify(errors))
+                return;
+            errors = next;
+            errorsFailure = failure;
             changed();
         });
     }
@@ -108,44 +142,56 @@ LauncherModule {
         };
     }
 
-    function commandRows(): var {
-        const rows = [];
-        if (latestError) {
-            rows.push({
-                id: "agent:fix-error",
-                title: "Fix latest error",
-                subtitle: describeError(latestError),
-                glyph: "build",
-                kind: "Command",
-                keywords: ["agent", "error", "diagnose", "fix"],
-                actions: [
-                    {
-                        id: "fix",
-                        label: "Fix with agent",
-                        exec: ["vekrona-agent", "--pick", "--error", latestError.id]
-                    },
-                    {
-                        id: "fix-choose",
-                        label: "Choose agent and fix",
-                        exec: ["vekrona-agent", "--choose", "--error", latestError.id]
-                    }
-                ]
-            });
-        }
-        rows.push({
-            id: "agent:error-list",
-            title: "Open error list",
+    function recordRow(record: var): var {
+        return {
+            id: "agent:error:" + record.id,
+            title: record.title,
+            subtitle: record.source + (record.count > 1 ? " ×" + record.count : ""),
             glyph: "error",
-            kind: "Command",
-            keywords: ["agent", "errors", "vekrona-error"],
+            kind: record.age === "?" ? "" : record.age + " ago",
             actions: [
                 {
-                    id: "open",
-                    label: "Open",
-                    exec: ["vekrona-error", "pick"]
+                    id: "fix",
+                    label: "Fix with agent",
+                    key: "↵",
+                    exec: ["vekrona-agent", "--pick", "--error", record.id]
+                },
+                {
+                    id: "fix-choose",
+                    label: "Choose agent and fix",
+                    key: "Ctrl ↵",
+                    exec: ["vekrona-agent", "--choose", "--error", record.id]
+                },
+                {
+                    id: "mute",
+                    label: "Mute",
+                    run: () => root.muteError(record.id)
                 }
             ]
-        }, {
+        };
+    }
+
+    // One row per recorded error, or the one row that says why there are none to show.
+    function errorRows(): var {
+        if (errorsFailure !== "")
+            return [errorRow("list the recorded errors", errorsFailure)];
+        if (errors === null)
+            return [];
+        if (errors.length === 0) {
+            return [
+                {
+                    id: "agent:no-errors",
+                    title: "No recorded errors",
+                    glyph: "check",
+                    kind: "Errors"
+                }
+            ];
+        }
+        return errors.map(recordRow);
+    }
+
+    function launchRow(): var {
+        return {
             id: "agent:launch",
             title: "Launch agent",
             glyph: "smart_toy",
@@ -163,18 +209,28 @@ LauncherModule {
                     exec: ["vekrona-agent", "--choose"]
                 }
             ]
-        });
-        return rows;
+        };
     }
 
     function opened(): void {
+        launcherOpen = true;
         refreshTool();
-        refreshErrors();
     }
 
-    // In /agent, what is typed is a question for the agent, so asking it comes first.
+    // The recorded errors are listed in /agent only. There what is typed is also a question for the agent, so asking it comes first.
+    // Until the first listing has answered the list is awaited, not shown without errors: the launcher keeps a selected row
+    // selected, so a Launch agent row shown first would stay selected, with the newest error scrolled out of sight above it.
     function query(text: string, reqId: int): var {
-        return inMode && text.trim() !== "" ? [askRow(text.trim())].concat(commandRows()) : commandRows();
+        if (!inMode)
+            return [launchRow()];
+        if (errors === null && errorsFailure === "")
+            return null;
+        const ask = text.trim() !== "" ? [askRow(text.trim())] : [];
+        return ask.concat(errorRows(), [launchRow()]);
+    }
+
+    function closed(): void {
+        launcherOpen = false;
     }
 
     function fallbacks(text: string): var {
@@ -188,11 +244,19 @@ LauncherModule {
     global: true
     weight: 0.7
 
-    FileView {
-        path: root.unreadPath
-        watchChanges: true
-        onLoaded: root.refreshErrors()
-        onLoadFailed: root.refreshErrors()
-        onFileChanged: reload()
+    // However the list comes on screen (the launcher opens on it, /agent is typed, a click or the keyboard opens it over
+    // another mode), what it shows is read, and then seen. While it is not shown nothing is read: listing spawns a process.
+    onListShownChanged: {
+        if (listShown)
+            refreshErrors();
+    }
+
+    Connections {
+        target: Shell.Errors
+
+        function onRefreshed(): void {
+            if (root.listShown)
+                root.refreshErrors();
+        }
     }
 }

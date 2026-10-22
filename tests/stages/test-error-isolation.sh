@@ -5,7 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SELF="$ROOT/tests/stages/$(basename "${BASH_SOURCE[0]}")"
 
 # A test that sources lib/common.sh directly gets the default reporter, which writes the user's real error store.
-direct="$(grep -rlE 'source .*lib/common\.sh' "$ROOT/tests" --include='*.sh' | grep -vxe "$ROOT/tests/lib.sh" -e "$SELF" || true)"
+# test-die-reports-once.sh sources it only inside fresh shells that it hands its own stub reporter.
+direct="$(grep -rlE 'source .*lib/common\.sh' "$ROOT/tests" --include='*.sh' | grep -vxe "$ROOT/tests/lib.sh" -e "$SELF" -e "$ROOT/tests/stages/test-die-reports-once.sh" || true)"
 [[ -z "$direct" ]] || { echo "FAIL: source tests/lib.sh, not lib/common.sh, in: $direct" >&2; exit 1; }
 
 scratch="$(mktemp -d)"
@@ -30,6 +31,13 @@ bash -c 'source "$1/tests/lib.sh"; VEKRONA_ERROR_REPORTER="$2"; die "expected fa
 grep -q -- '--title expected failure' "$scratch/reported" || die "die() must report through \$VEKRONA_ERROR_REPORTER: $(cat "$scratch/reported" 2>&1)"
 log "ok: die() reports through the replaceable reporter"
 
+: > "$scratch/reported"
+status=0
+bash -c 'source "$1/tests/lib.sh"; VEKRONA_ERROR_REPORTER="$2"; refuse "run as your user"' _ "$ROOT" "$scratch/reporter" 2>/dev/null || status=$?
+[[ "$status" -eq 2 ]] || die "refuse() must exit 2, got $status"
+[[ ! -s "$scratch/reported" ]] || die "refuse() recorded an error for a refused invocation: $(cat "$scratch/reported")"
+log "ok: refuse() ends the command without recording an error"
+
 # A child process that sources lib/common.sh (a stage, a bin tool) inherits the stub, not the default.
 inherited="$(bash -c 'source "$1/lib/common.sh"; printf %s "$VEKRONA_ERROR_REPORTER"' _ "$ROOT")"
 [[ "$inherited" == "$VEKRONA_ERROR_REPORTER" && "$inherited" != "$ROOT/bin/vekrona-error" ]] \
@@ -43,11 +51,12 @@ status=0
 grep -q 'failed to write to the journal' "$scratch/report-err" || die "the failed report did not surface the connection error: $(cat "$scratch/report-err")"
 log "ok: a direct vekrona-error report cannot reach the real journal"
 
-# die() in a bin tool also shows a toast through notify-send. A failing direct report is such a die(), and it must never
-# reach the desktop's notification daemon: notify-send has to find the bus unreachable.
+# A bin tool's die() whose report fails (as every report does inside a test) falls back to a plain toast through
+# notify-send, and that must never reach the desktop's notification daemon: notify-send has to find the bus unreachable.
 printf '#!/bin/sh\necho "$DBUS_SESSION_BUS_ADDRESS" >> "%s/notify-bus"\n' "$scratch" > "$scratch/notify-send"
 chmod +x "$scratch/notify-send"
-PATH="$scratch:$PATH" "$ROOT/bin/vekrona-error" report --title "must not be shown" >/dev/null 2>&1 || true
-[[ -s "$scratch/notify-bus" ]] || die "the failed report did not try to show a notification, so this check proves nothing"
+printf '{' > "$scratch/malformed-updates.json"
+PATH="$scratch:$PATH" VEKRONA_UPDATES_FILE="$scratch/malformed-updates.json" "$ROOT/bin/vekrona-update-notify" run >/dev/null 2>&1 || true
+[[ -s "$scratch/notify-bus" ]] || die "the failed report did not fall back to a notification, so this check proves nothing"
 [[ "$(cat "$scratch/notify-bus")" != "$desktop_bus" ]] || die "a test's die() toast reached the desktop session bus"
 log "ok: a die() inside a test cannot show a toast on the desktop"

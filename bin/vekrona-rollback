@@ -6,13 +6,10 @@ source "$ROOT/lib/common.sh"
 
 usage() {
   echo "usage: $(basename "$0") [--yes] <snapshot-number>" >&2
-  exit 1
+  exit 2
 }
 
-[[ $EUID -eq 0 ]] || exec sudo "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
-
-require_cmd findmnt mount umount mountpoint mktemp btrfs
-
+# The arguments are checked before sudo is asked for anything: a call that is refused must not need root.
 confirm=1
 number=""
 for arg in "$@"; do
@@ -25,6 +22,10 @@ for arg in "$@"; do
 done
 [[ "$number" =~ ^[0-9]+$ ]] || usage
 
+[[ $EUID -eq 0 ]] || exec sudo "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
+
+require_cmd findmnt mount umount mountpoint mktemp btrfs
+
 has_tty() { : < /dev/tty; } 2>/dev/null
 
 if [[ $confirm -eq 1 ]] && ! has_tty; then
@@ -32,8 +33,13 @@ if [[ $confirm -eq 1 ]] && ! has_tty; then
 fi
 
 mountpoint_dir="$(mktemp -d)"
+new_root="$mountpoint_dir/root.vekrona-new"
+new_root_pending=0
 cleanup() {
   local umount_output
+  if [[ $new_root_pending -eq 1 ]]; then
+    btrfs subvolume delete "$new_root" >/dev/null || warn "failed to delete the unused snapshot $new_root; delete it before the next rollback"
+  fi
   if mountpoint -q "$mountpoint_dir" 2>/dev/null; then
     umount_output="$(umount "$mountpoint_dir" 2>&1)" || warn "failed to unmount $mountpoint_dir: $umount_output"
   fi
@@ -68,22 +74,38 @@ if [[ $confirm -eq 1 ]]; then
   [[ "$answer" == "y" || "$answer" == "Y" ]] || die "aborted"
 fi
 
-new_root="$mountpoint_dir/root.vekrona-new"
 log "creating writable snapshot $number at $new_root"
 btrfs subvolume snapshot "$snapshot_dir" "$new_root"
 [[ -d "$new_root" ]] || die "snapshot creation did not produce: $new_root"
+new_root_pending=1
+
+# The restored root takes over the .snapshots of the root it replaces, so its own copy must be an empty placeholder. This
+# is checked before the first rename: from there on there is a moment with no root.
+if [[ -d "$new_root/.snapshots" ]]; then
+  rmdir "$new_root/.snapshots" || die "snapshot $number holds its own .snapshots and it is not empty, resolve manually; nothing was changed"
+fi
 
 backup="root.old-$(date +%Y%m%d%H%M%S)"
+by_hand="mount the top-level subvolume (-o subvolid=5) and"
+
+# Puts the current root back, from whichever step failed; dies naming the manual repair when even that fails.
+restore_old_root() {
+  local reason="$1"
+  if [[ -d "$mountpoint_dir/root" ]]; then
+    mv "$mountpoint_dir/root" "$new_root" || die "$reason, and the promoted snapshot could not be moved aside: $by_hand rename root to root.vekrona-new and $backup to root"
+    new_root_pending=1
+  fi
+  mv "$mountpoint_dir/$backup" "$mountpoint_dir/root" || die "$reason, and the current root could not be put back: $by_hand rename $backup to root"
+  die "$reason; the current root is back in place"
+}
+
 log "renaming $mountpoint_dir/root -> $mountpoint_dir/$backup"
-mv "$mountpoint_dir/root" "$mountpoint_dir/$backup"
+mv "$mountpoint_dir/root" "$mountpoint_dir/$backup" || die "cannot rename the current root; nothing was changed"
 
 log "promoting snapshot $number to root"
-mv "$new_root" "$mountpoint_dir/root"
-
-if [[ -d "$mountpoint_dir/root/.snapshots" ]]; then
-  rmdir "$mountpoint_dir/root/.snapshots" || die "root/.snapshots exists and is not empty, resolve manually"
-fi
-mv "$mountpoint_dir/$backup/.snapshots" "$mountpoint_dir/root/.snapshots"
+mv "$new_root" "$mountpoint_dir/root" || restore_old_root "cannot promote snapshot $number"
+new_root_pending=0
+mv "$mountpoint_dir/$backup/.snapshots" "$mountpoint_dir/root/.snapshots" || restore_old_root "cannot move .snapshots to the promoted root"
 
 marker="$mountpoint_dir/root/.vekrona-rolled-back-from-$number"
 printf '%s\n' "$backup" > "$marker"

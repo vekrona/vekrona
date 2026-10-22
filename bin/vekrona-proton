@@ -72,7 +72,7 @@ stage_one() {
 
 cmd_stage() {
   local name
-  [[ $EUID -eq 0 ]] || die "vekrona-proton stage must run as root (sudo vekrona-proton stage)"
+  [[ $EUID -eq 0 ]] || refuse "vekrona-proton stage must run as root (sudo vekrona-proton stage)"
   require_cmd createrepo_c
   scratch="$(mktemp -d)"
   trap cleanup EXIT

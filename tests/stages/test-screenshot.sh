@@ -46,6 +46,8 @@ stub notify-send 'echo "$*" >> "$SCRATCH/logs/notify"
 [[ "${NOTIFY_FAIL:-}" != 1 ]] || exit 1
 printf "%s" "${NOTIFY_ACTION:-}"'
 stub swappy 'echo "$*" >> "$SCRATCH/logs/swappy"'
+stub reporter 'echo "$*" >> "$SCRATCH/logs/reported"'
+export VEKRONA_ERROR_REPORTER="$stubs/reporter"
 stub gio 'echo "$*" >> "$SCRATCH/logs/gio"
 [[ "${GIO_FAIL:-}" != 1 ]] || exit 1'
 
@@ -60,6 +62,12 @@ saved_file() { find "$shots" -name '*.png' -print -quit 2>/dev/null; }
 no_files() { [[ -z "$(saved_file)" ]]; }
 logged() { [[ -e "$logs/$1" ]]; }
 expect_rc() { [[ "$rc" == "$1" ]] || die "$2: expected exit $1, got $rc: $(cat "$scratch/stderr")"; }
+# A failure is reported once and not toasted: the robot shows the record.
+expect_reported() {
+  [[ "$(wc -l < "$logs/reported")" == 1 ]] || die "$1: expected exactly one report: $(cat "$logs/reported" 2>&1)"
+  grep -q -- "$2" "$logs/reported" || die "$1: the report must say '$2': $(cat "$logs/reported")"
+  ! logged notify || die "$1: a reported failure must not also be toasted: $(cat "$logs/notify")"
+}
 
 run_shot screen
 expect_rc 0 "screen"
@@ -109,8 +117,8 @@ log "ok: Esc cancels quietly"
 GRIM_FAIL=1 run_shot screen
 expect_rc 1 "grim failure"
 no_files || die "grim failure: a partial file must not remain"
-grep -q -- "-u critical" "$logs/notify" || die "grim failure: critical notification expected"
-log "ok: grim failure leaves no file and notifies critical"
+expect_reported "grim failure" "grim failed"
+log "ok: grim failure leaves no file and is reported once"
 
 NOTIFY_ACTION=edit run_shot screen
 expect_rc 0 "Edit"
@@ -126,12 +134,14 @@ expect_rc 2 "extra argument"
 logged grim && die "bad usage: nothing may be captured"
 run_shot --clipboard lizard
 expect_rc 2 "--clipboard lizard"
+run_shot --clipboard
+expect_rc 2 "--clipboard without a mode"
 log "ok: unknown mode exits 2"
 
 SLURP_ERR="compositor doesn't support wlr-layer-shell" run_shot area
 expect_rc 1 "slurp error"
 grep -q "wlr-layer-shell" "$scratch/stderr" || die "slurp error: must be reported on stderr"
-grep -q -- "-u critical" "$logs/notify" || die "slurp error: critical notification expected"
+expect_reported "slurp error" "wlr-layer-shell"
 logged grim && die "slurp error: nothing may be captured"
 log "ok: a slurp error other than cancel is reported"
 
@@ -161,20 +171,26 @@ log "ok: a slurp that crashed with a malformed geometry is reported"
 SLURP_SIGNAL=11 run_shot area
 expect_rc 1 "slurp crash"
 grep -q "slurp crashed (signal 11)" "$scratch/stderr" || die "slurp crash: the signal must be reported: $(cat "$scratch/stderr")"
-grep -q -- "-u critical" "$logs/notify" || die "slurp crash: critical notification expected"
+expect_reported "slurp crash" "slurp crashed"
 logged grim && die "slurp crash: nothing may be captured"
 log "ok: a crashed slurp is reported with its signal"
 
 WL_COPY_FAIL=1 run_shot screen
 expect_rc 1 "clipboard failure"
 [[ -n "$(saved_file)" ]] || die "clipboard failure: the saved file must be kept"
-grep -q -- "-u critical" "$logs/notify" || die "clipboard failure: critical notification expected"
+expect_reported "clipboard failure" "copying to clipboard failed"
 log "ok: a clipboard failure keeps the saved file"
 
 NOTIFY_FAIL=1 run_shot screen
-[[ "$rc" != 0 ]] || die "notification failure: must exit non-zero"
+expect_rc 1 "notification failure"
 [[ -n "$(saved_file)" ]] || die "notification failure: the saved file must be kept"
-log "ok: a notification failure keeps the saved file"
+grep -q "notify-send failed" "$logs/reported" || die "notification failure: must be reported, not silent: $(cat "$logs/reported" 2>&1)"
+log "ok: a notification failure keeps the saved file and is reported"
+
+NOTIFY_FAIL=1 run_shot --clipboard screen
+expect_rc 1 "clipboard notification failure"
+grep -q "notify-send failed" "$logs/reported" || die "clipboard notification failure: must be reported, not silent: $(cat "$logs/reported" 2>&1)"
+log "ok: a notification failure after a clipboard capture is reported"
 
 NOTIFY_ACTION="" run_shot screen
 expect_rc 0 "dismissed"
@@ -192,4 +208,5 @@ log "ok: Delete action moves the saved file to the trash"
 
 GIO_FAIL=1 NOTIFY_ACTION=delete run_shot screen
 expect_rc 1 "trash failure"
+grep -q "to the trash" "$logs/reported" || die "trash failure: must be reported, not silent: $(cat "$logs/reported" 2>&1)"
 log "ok: a trash failure is reported"

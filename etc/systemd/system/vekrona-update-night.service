@@ -1,5 +1,8 @@
 [Unit]
 Description=Install updates at midnight
+# A reboot into dnf's offline transaction on battery could drain it mid-transaction and cuts short whatever the laptop was
+# used for; a laptop that is not plugged in skips the night and tries the next one.
+ConditionACPower=true
 
 [Service]
 Type=oneshot

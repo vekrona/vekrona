@@ -35,6 +35,8 @@ ensure_snapper_setting NUMBER_LIMIT 10
 ensure_snapper_setting NUMBER_LIMIT_IMPORTANT 10
 ensure_snapper_setting TIMELINE_CREATE no
 
+# The actions file starts a script of the root-owned copy before and after every dnf transaction, so the copy comes first.
+ensure_system_copy
 ensure_root_file "$ROOT/etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions" /etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions
 
 assert_file_contains /etc/dnf/libdnf5-plugins/actions.conf 'enabled[[:space:]]*=[[:space:]]*1'
@@ -97,10 +99,10 @@ ensure_nix_subvolume() {
   top="$(mktemp -d)"
 
   cleanup_nix_top() {
-    if mountpoint -q "$top" 2>/dev/null; then
-      root umount "$top" || warn "failed to unmount $top"
+    if mountpoint -q "$top"; then
+      root umount "$top" || die "failed to unmount $top: the top-level btrfs volume stays mounted there"
     fi
-    rmdir "$top" 2>/dev/null || true
+    rmdir "$top" || die "cannot remove $top"
   }
   trap cleanup_nix_top EXIT
   mount_btrfs_top_level "$top"

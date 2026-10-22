@@ -103,7 +103,7 @@ PYEOF
 if [[ ! -f "$STEAM_CONFIG_VDF" ]]; then
   log "Steam never launched: launch Steam once, quit it, then run ./install.sh 60 to enable Steam Play for all titles"
 elif steam_is_running; then
-  die "Steam is running; quit it, then re-run ./install.sh 60 (Steam overwrites config.vdf on exit)"
+  refuse "Steam is running; quit it, then re-run ./install.sh 60 (Steam overwrites config.vdf on exit)"
 else
   ensure_steam_proton_for_all_titles "$STEAM_CONFIG_VDF"
 fi

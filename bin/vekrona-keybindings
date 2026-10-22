@@ -3,7 +3,6 @@ import argparse
 import glob
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -416,6 +415,7 @@ def rofi_theme_str():
     return result.stdout
 
 
+ROFI_CANCELLED = 1  # rofi -dmenu's exit status for Esc and for a menu closed without a choice
 HEADER_TEXT = "Cmd = Super · Hyper = Caps Lock held (or Super+Ctrl+Alt)"
 
 
@@ -494,27 +494,33 @@ def cmd_menu(sway_main_path, xremap_path):
     lines = render_rows(rows)
 
     result = subprocess.run(
-        ["rofi", "-dmenu", "-i", "-p", "Keybindings", "-mesg", HEADER_TEXT,
+        ["rofi", "-dmenu", "-i", "-no-custom", "-p", "Keybindings", "-mesg", HEADER_TEXT,
          "-format", "i", "-theme-str", rofi_theme_str()],
         input="\n".join(lines), capture_output=True, text=True,
     )
-    if result.returncode != 0 or not result.stdout.strip():
+    if result.returncode == ROFI_CANCELLED:
         return
-    index = int(result.stdout.strip())
-    row = rows[index]
+    if result.returncode != 0:
+        die(f"rofi exited with status {result.returncode}: {(result.stderr or result.stdout).strip()}")
+    answer = result.stdout.strip()
+    if not answer.isascii() or not answer.isdigit() or int(answer) >= len(rows):
+        die(f"rofi answered {answer!r}, which is not a row of the menu")
+    row = rows[int(answer)]
     if row.command:
         run = subprocess.run(["swaymsg", "--", row.command], capture_output=True, text=True)
         if run.returncode != 0:
             error = (run.stderr or run.stdout).strip()
-            subprocess.run(["notify-send", "-a", PROG, "Keybinding failed", f"{row.command}\n{error}"])
             die(f"swaymsg {row.command!r} failed: {error}")
 
 
 def main():
     parser = argparse.ArgumentParser(prog=PROG)
+    parser.add_argument("menu", nargs="?", choices=("menu",), help="show the keybindings in rofi and run the chosen one")
     parser.add_argument("--list", action="store_true", help="print keybindings to stdout instead of showing rofi")
     parser.add_argument("--check", action="store_true", help="validate that every bindsym has a description and none is shadowed by xremap")
     args = parser.parse_args()
+    if [args.menu is not None, args.list, args.check].count(True) != 1:
+        parser.error("give exactly one of: menu, --list, --check")
 
     home = os.path.expanduser("~")
     sway_main_path = os.path.join(home, ".config", "sway", "config")

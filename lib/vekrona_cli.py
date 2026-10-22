@@ -1,4 +1,4 @@
-import html
+import argparse
 import os
 import shutil
 import subprocess
@@ -51,7 +51,7 @@ def run_quietly(argv):
 
 
 def notify_send(prog, msg, urgency="critical"):
-    return run_quietly(["notify-send", "-u", urgency, "-a", "vekrona", "--", prog, html.escape(msg, quote=False)])
+    return run_quietly(["notify-send", "-u", urgency, "-a", "vekrona", "--", prog, msg])
 
 
 def report_to_vekrona_error(prog, msg, script_file):
@@ -61,16 +61,39 @@ def report_to_vekrona_error(prog, msg, script_file):
     return run_quietly([bin_path, "report", "--title", f"{prog}: {msg}", "--source", "vekrona"])
 
 
+def surface_failure(prog, msg, script_file, report=True):
+    """One failure, one record and no notification: the robot's dot and list show the record. A plain critical toast is
+    the last resort, sent only when the failure could not be recorded, or for the tool that is the recorder itself."""
+    if report:
+        report_failure = report_to_vekrona_error(prog, msg, script_file)
+        if report_failure is None:
+            return
+        print(f"{prog}: WARN: failed to report this error to vekrona-error: {report_failure}", file=sys.stderr)
+    notify_failure = notify_send(prog, msg)
+    if notify_failure:
+        print(f"{prog}: WARN: failed to show this error as a notification: {notify_failure}", file=sys.stderr)
+
+
+def print_failure(prog, msg):
+    print(f"{prog}: {msg}", file=sys.stderr)
+
+
+def exit_unrecorded(prog, msg):
+    """Ends the command with the failure on stderr only, for a tool whose caller records the failure or toasts it."""
+    print_failure(prog, msg)
+    sys.exit(1)
+
+
+def require_run_verb(prog, description):
+    """Refuses a bare call, with the usage and exit status 2: a tool that acts when it starts is started as `<prog> run`."""
+    parser = argparse.ArgumentParser(prog=prog, description=description)
+    parser.add_subparsers(dest="command", required=True).add_parser("run", help="do what the tool is for")
+    parser.parse_args()
+
+
 def make_die(prog, script_file, report=True):
     def die(msg):
-        print(f"{prog}: {msg}", file=sys.stderr)
-        notify_failure = notify_send(prog, msg)
-        if notify_failure:
-            print(f"{prog}: WARN: failed to show this error as a notification: {notify_failure}", file=sys.stderr)
-        if report:
-            report_failure = report_to_vekrona_error(prog, msg, script_file)
-            if report_failure:
-                print(f"{prog}: WARN: failed to report this error to vekrona-error: {report_failure}",
-                      file=sys.stderr)
+        print_failure(prog, msg)
+        surface_failure(prog, msg, script_file, report)
         sys.exit(1)
     return die

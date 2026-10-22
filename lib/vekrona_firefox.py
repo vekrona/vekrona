@@ -82,8 +82,13 @@ def default_profile():
 
 # ---------------------------------------------------------------- mozLz4
 
+LZ4_MAX_EXPANSION = 255  # a literal-free run of matches turns one byte into at most this many
+
+
 def lz4_block_decompress(data, size):
     """Decodes one LZ4 block (no frame header) that expands to exactly `size` bytes."""
+    if size > len(data) * LZ4_MAX_EXPANSION:
+        raise FirefoxError(f"LZ4 header says {size} bytes, which {len(data)} bytes cannot expand to")
     out = bytearray()
     i = 0
 
@@ -105,6 +110,8 @@ def lz4_block_decompress(data, size):
             literals = length(token >> 4)
             if i + literals > len(data):
                 raise FirefoxError("LZ4 block is truncated")
+            if len(out) + literals > size:
+                raise FirefoxError(f"LZ4 block decodes to more than the {size} bytes its header says")
             out += data[i:i + literals]
             i += literals
             if i >= len(data):
@@ -114,6 +121,8 @@ def lz4_block_decompress(data, size):
             match = length(token & 15) + 4
             if offset == 0 or offset > len(out):
                 raise FirefoxError(f"LZ4 match offset {offset} points before the start of the data")
+            if len(out) + match > size:
+                raise FirefoxError(f"LZ4 block decodes to more than the {size} bytes its header says")
             start = len(out) - offset
             for k in range(match):  # byte by byte: a match may overlap the bytes it produces
                 out.append(out[start + k])

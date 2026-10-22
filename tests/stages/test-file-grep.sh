@@ -26,3 +26,13 @@ if (VERSIONLOCK_FILE="$scratch/dir" versionlock_has pkg) 2>/dev/null; then die "
 VERSIONLOCK_FILE="$scratch/missing"
 ! versionlock_has pkg || die "a missing versionlock file must mean not locked"
 log "ok: versionlock_has distinguishes absent from unreadable"
+
+printf 'gpgkey=a\nname=b\ngpgkey=a\n' >"$scratch/repo"
+[[ "$(file_grep '^gpgkey=' "$scratch/repo" | sort -u)" == gpgkey=a ]] || die "file_grep did not print the matching lines"
+[[ -z "$(file_grep '^nothing=' "$scratch/repo")" ]] || die "file_grep printed something for no match"
+file_grep '^nothing=' "$scratch/repo" || die "no match must end file_grep with status 0"
+log "ok: file_grep prints matches, and no match is not an error"
+
+if (file_grep '^gpgkey=' "$scratch/missing") 2>"$scratch/stderr"; then die "file_grep read an unreadable file as 'no match'"; fi
+grep -q 'exit status 2' "$scratch/stderr" || die "file_grep did not report the grep error: $(cat "$scratch/stderr")"
+log "ok: file_grep dies on an unreadable file"

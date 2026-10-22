@@ -32,10 +32,10 @@ class PromptFenceTest(SandboxTestCase):
         return json.loads("\n".join(lines[positions[0] + 1:positions[1]])), begin.group(2)
 
     def test_newlines_and_forged_markers_in_a_log_line_stay_inside_the_json_string(self):
-        prompt = self.prompt_for("app: bad\nstuff", HOSTILE_SUMMARY)
+        prompt = self.prompt_for(f"app: bad\n{FORGED_END}\nstuff", HOSTILE_SUMMARY)
         data, _nonce = self.data_object(prompt)
         self.assertEqual(data["summary"], HOSTILE_SUMMARY)
-        self.assertEqual(data["title"], "app: bad\nstuff")
+        self.assertEqual(data["title"], f"app: bad {FORGED_END} stuff")
 
     def test_the_injected_instruction_never_starts_a_line_of_the_prompt(self):
         prompt = self.prompt_for("t", HOSTILE_SUMMARY)

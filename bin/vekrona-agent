@@ -12,7 +12,7 @@ CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 AGENT_CONFIG_DIR="$CONFIG_HOME/vekrona"
 AGENT_CONFIG_FILE="$AGENT_CONFIG_DIR/agent"
 
-AGENT_KNOWN_TOOLS=(claude "${VEKRONA_AGENT_TOOLS[@]}")
+AGENT_KNOWN_TOOLS=(claude codex pi opencode cursor-agent)
 
 STRIP_ENV_PATTERNS=('*_API_KEY' '*_API_TOKEN' '*_AUTH_TOKEN' '*_BASE_URL' 'CLAUDE_CODE_USE_*')
 STRIP_ENV_NAMES=(
@@ -22,17 +22,12 @@ STRIP_ENV_NAMES=(
 
 usage_error() {
   printf '%s: %s\n' "$PROG" "$*" >&2
-  exit 1
-}
-
-warn_visible() {
-  warn "$*"
-  notify-send -a vekrona "$PROG" "$*" >/dev/null || warn "notify-send failed; the warning above was not shown on the desktop"
+  exit 2
 }
 
 print_usage() {
   cat <<USAGE
-usage: $PROG [--pick] [--choose] [--prompt TEXT | --error ID] [--dry-run]
+usage: $PROG [--pick] [--choose] [--prompt TEXT | --error ID] [--dry-run]   (at least one option: a bare call is refused)
        $PROG set <tool>
        $PROG get                 (prints nothing when no default is set)
        $PROG list
@@ -50,8 +45,10 @@ is_known_tool() {
   return 1
 }
 
+harness_path() { command -v -- "$1"; }
+
 tool_installed() {
-  [[ -x "$(managed_binary "$1")" ]]
+  harness_path "$1" >/dev/null
 }
 
 tool_usable() {
@@ -65,32 +62,15 @@ installed_tools() {
   done
 }
 
-effective_path() {
-  local path="$PATH"
-  if [[ ":$path:" != *":$MISE_SYSTEM_SHIMS_DIR:"* ]]; then
-    path="$MISE_SYSTEM_SHIMS_DIR:$path"
-  fi
-  printf '%s' "$path"
-}
-
-warn_if_shadowed() {
-  local tool="$1" managed found
-  managed="$(readlink -f "$(managed_binary "$tool")")"
-  while IFS= read -r found; do
-    if [[ "$(readlink -f "$found")" != "$managed" ]]; then
-      warn_visible "$found shadows the managed $tool ($managed) on PATH; $PROG ignores it, remove it so it cannot self-update outside the snapshotted root"
-    fi
-  done < <(type -P -a "$tool" || true)
-}
-
+# Prints the default tool; prints nothing when none is set.
 read_default() {
-  [[ -f "$AGENT_CONFIG_FILE" ]] && cat "$AGENT_CONFIG_FILE"
+  [[ ! -f "$AGENT_CONFIG_FILE" ]] || cat "$AGENT_CONFIG_FILE"
 }
 
 write_default() {
   local tool="$1" tmp
   is_known_tool "$tool" || die "unknown agent tool: $tool (known: ${AGENT_KNOWN_TOOLS[*]})"
-  tool_installed "$tool" || die "agent harness '$tool' is not installed; run './install.sh 55-agents' or 'vekrona-update'"
+  tool_installed "$tool" || die "agent harness '$tool' is not on PATH (PATH is $PATH)"
   mkdir -p "$AGENT_CONFIG_DIR"
   tmp="$(mktemp "$AGENT_CONFIG_DIR/.agent.XXXXXX")"
   printf '%s\n' "$tool" > "$tmp"
@@ -100,7 +80,7 @@ write_default() {
 agent_build_argv() {
   local tool="$1" prompt="${2:-}"
   AGENT_ENV_ASSIGN=()
-  AGENT_ARGV=("$(managed_binary "$tool")")
+  AGENT_ARGV=("$(harness_path "$tool")")
   local prompt_flag="--"
   case "$tool" in
     claude|codex|cursor-agent) ;;
@@ -133,9 +113,9 @@ build_env_unset_argv() {
 pick_tool() {
   command -v rofi >/dev/null 2>&1 || die "rofi not found (install the 'rofi' package)"
   local theme_str tools
-  theme_str="$(vekrona-render-theme rofi)" || die "vekrona-render-theme rofi failed"
+  theme_str="$("$REPO_ROOT/bin/vekrona-render-theme" rofi)" || die "vekrona-render-theme rofi failed"
   tools="$(installed_tools)"
-  [[ -n "$tools" ]] || die "no agent harness is installed; run './install.sh 55-agents' or 'vekrona-update'"
+  [[ -n "$tools" ]] || die "no agent harness is installed; install one, e.g. Claude Code: curl -fsSL https://claude.ai/install.sh | bash (PATH is $PATH)"
 
   local chosen rofi_status=0
   chosen="$(rofi -dmenu -i -no-custom -p "Coding agent" -theme-str "$theme_str" <<<"$tools")" || rofi_status=$?
@@ -149,13 +129,12 @@ pick_tool() {
 }
 
 launch() {
-  local tool="$1" prompt="$2" dry_run="$3"
+  local tool="$1" prompt="$2" dry_run="$3" launch_output
 
-  tool_usable "$tool" || die "agent harness '$tool' is unknown or not installed; run './install.sh 55-agents' or 'vekrona-update'"
+  tool_usable "$tool" || die "agent harness '$tool' is unknown or not on PATH (known: ${AGENT_KNOWN_TOOLS[*]}; PATH is $PATH)"
   command -v ghostty >/dev/null 2>&1 || die "ghostty not found"
   command -v systemd-run >/dev/null 2>&1 || die "systemd-run not found"
 
-  warn_if_shadowed "$tool"
   agent_build_argv "$tool" "$prompt"
   build_env_unset_argv
 
@@ -164,7 +143,6 @@ launch() {
     systemd-run --user --collect
     "--unit=$unit"
     "--description=vekrona coding agent: $tool"
-    "--setenv=PATH=$(effective_path)"
     --
     ghostty "--class=vekrona.agent" "--working-directory=$REPO_ROOT" -e
     env "${ENV_UNSET_ARGV[@]}" "${AGENT_ENV_ASSIGN[@]}" "${AGENT_ARGV[@]}"
@@ -177,17 +155,17 @@ launch() {
 
   close_notification_center
 
-  "${systemd_run_argv[@]}" >/dev/null 2>&1 \
-    || die "failed to launch agent '$tool' (systemd-run --user --unit=$unit failed)"
+  launch_output="$("${systemd_run_argv[@]}" 2>&1)" \
+    || die "failed to launch agent '$tool' (systemd-run --user --unit=$unit failed): $launch_output"
 
   if [[ -n "$ERROR_ID" ]]; then
-    vekrona-error mark-launched "$ERROR_ID" >/dev/null || die "agent '$tool' started but 'vekrona-error mark-launched $ERROR_ID' failed"
+    "$REPO_ROOT/bin/vekrona-error" mark-launched "$ERROR_ID" >/dev/null || die "agent '$tool' started but 'vekrona-error mark-launched $ERROR_ID' failed"
   fi
 }
 
 close_notification_center() {
   qs -c vekrona-shell ipc call notifications close >/dev/null 2>&1 && return 0
-  warn_visible "could not close the notification center"
+  report_failure "could not close the notification center"
 }
 
 cmd_set() {
@@ -197,14 +175,9 @@ cmd_set() {
   echo "default agent: $tool"
 }
 
-cmd_get() {
-  [[ -f "$AGENT_CONFIG_FILE" ]] || return 0
-  cat "$AGENT_CONFIG_FILE"
-}
-
 cmd_list() {
   local current t installed default
-  current="$(read_default || true)"
+  current="$(read_default)"
   for t in "${AGENT_KNOWN_TOOLS[@]}"; do
     if tool_installed "$t"; then installed="installed"; else installed="not installed"; fi
     if [[ "$t" == "$current" ]]; then default="default"; else default="-"; fi
@@ -243,9 +216,13 @@ parse_flags() {
 }
 
 main() {
-  case "${1:-}" in
+  if [[ $# -eq 0 ]]; then
+    print_usage >&2
+    exit 2
+  fi
+  case "$1" in
     set) shift; cmd_set "${1:-}"; exit 0 ;;
-    get) cmd_get; exit 0 ;;
+    get) read_default; exit 0 ;;
     list) cmd_list; exit 0 ;;
     choose) shift; parse_flags "$@"; CHOOSE=1 ;;
     *) parse_flags "$@" ;;
@@ -253,7 +230,7 @@ main() {
 
   local prompt stored
   if [[ -n "$ERROR_ID" ]]; then
-    prompt="$(vekrona-error prompt "$ERROR_ID")" || die "vekrona-error prompt $ERROR_ID failed (unknown error id?)"
+    prompt="$("$REPO_ROOT/bin/vekrona-error" prompt "$ERROR_ID")" || die "vekrona-error prompt $ERROR_ID failed (unknown error id?)"
   else
     prompt="$PROMPT"
   fi
@@ -263,12 +240,12 @@ main() {
     return 0
   fi
 
-  stored="$(read_default || true)"
+  stored="$(read_default)"
   if tool_usable "$stored"; then
     launch "$stored" "$prompt" "$DRY_RUN"
   elif [[ "$PICK" == "1" ]]; then
     if [[ -n "$stored" ]]; then
-      warn_visible "default agent '$stored' is unknown or not installed; pick another"
+      report_failure "default agent '$stored' is unknown or not installed; pick another"
     fi
     pick_and_launch "$prompt" "$DRY_RUN"
   elif [[ -n "$stored" ]]; then

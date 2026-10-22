@@ -1,30 +1,11 @@
-import QtCore
-import Quickshell.Io
 import "Vekrona"
-import "."
 
 BarPill {
-    id: root
-
-    readonly property string unreadPath: StandardPaths.writableLocation(StandardPaths.GenericStateLocation) + "/vekrona/errors/unread"
-    property int unreadCount: 0
-
-    function parseUnread(raw) {
-        const n = parseInt(String(raw).trim(), 10);
-        return (Number.isFinite(n) && n > 0) ? n : 0;
-    }
+    required property var launcher
 
     icon: "smart_toy"
-    ariaName: "Open coding agent"
-    badgeCount: unreadCount
-    onClicked: Exec.detached(["vekrona-agent", "--pick"])
-    onRightClicked: Exec.detached(["vekrona-error", "pick"])
-
-    FileView {
-        path: root.unreadPath
-        watchChanges: true
-        onLoaded: root.unreadCount = root.parseUnread(text())
-        onLoadFailed: root.unreadCount = 0
-        onFileChanged: reload()
-    }
+    ariaName: "Toggle error list"
+    badgeCount: Errors.unreadCount
+    badgeDimmed: Errors.dim
+    onClicked: launcher.toggleMode("agent")
 }

@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() {
-  echo "usage: vekrona-screenshot [--clipboard] [screen|area|window]" >&2
-  exit 2
-}
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
 
-fail() {
-  echo "vekrona-screenshot: $1" >&2
-  notify-send -u critical -a vekrona "Screenshot failed" "$1"
-  exit 1
+usage() {
+  echo "usage: vekrona-screenshot [--clipboard] screen|area|window" >&2
+  exit 2
 }
 
 CLIPBOARD=0
@@ -17,21 +14,21 @@ if [[ "${1-}" == "--clipboard" ]]; then
   CLIPBOARD=1
   shift
 fi
-MODE="${1-area}"
-[[ $# -le 1 ]] || usage
+[[ $# -eq 1 ]] || usage
+MODE="$1"
 
 grim_args=()
 case "$MODE" in
   screen)
     output="$(swaymsg -t get_outputs | jq -r '.[] | select(.focused) | .name')" \
-      || fail "could not query the focused output"
-    [[ -n "$output" ]] || fail "no focused output"
+      || die "Screenshot failed: could not query the focused output"
+    [[ -n "$output" ]] || die "Screenshot failed: no focused output"
     grim_args=(-o "$output")
     ;;
   area | window)
-    tree="$(swaymsg -t get_tree)" || fail "swaymsg get_tree failed"
+    tree="$(swaymsg -t get_tree)" || die "Screenshot failed: swaymsg get_tree failed"
     boxes="$(jq -r '.. | select((.type? == "con" or .type? == "floating_con") and .visible? == true and .pid? != null) | .rect | "\(.x),\(.y) \(.width)x\(.height)"' <<<"$tree")" \
-      || fail "could not read window rects"
+      || die "Screenshot failed: could not read window rects"
     slurp_args=()
     [[ "$MODE" == "area" ]] || slurp_args=(-r)
 
@@ -39,22 +36,22 @@ case "$MODE" in
     flock_rc=0
     flock -n "$selecting" || flock_rc=$?
     ((flock_rc != 1)) || exit 0
-    ((flock_rc == 0)) || fail "could not lock the selection (flock exit $flock_rc)"
-    slurp_err="$(mktemp)"
+    ((flock_rc == 0)) || die "Screenshot failed: could not lock the selection (flock exit $flock_rc)"
+    slurp_err="$(mktemp)" || die "Screenshot failed: cannot create a temporary file"
     trap 'rm -f "$slurp_err"' EXIT
     slurp_rc=0
     geometry="$(slurp "${slurp_args[@]}" < <(printf '%s' "${boxes:+$boxes$'\n'}") 2>"$slurp_err")" || slurp_rc=$?
     # slurp 1.5.0 can segfault in its final roundtrip, after it has printed the geometry (TODO.md). The crash is still
     # recorded by systemd-coredump, so a well-formed geometry is used; without one the signal is reported.
     if ((slurp_rc > 128)) && [[ ! "$geometry" =~ ^-?[0-9]+,-?[0-9]+\ [0-9]+x[0-9]+$ ]]; then
-      fail "slurp crashed (signal $((slurp_rc - 128)))"
+      die "Screenshot failed: slurp crashed (signal $((slurp_rc - 128)))"
     fi
     if ((slurp_rc != 0 && slurp_rc <= 128)); then
       [[ "$(<"$slurp_err")" == "selection cancelled" ]] && exit 0
-      fail "slurp: $(<"$slurp_err")"
+      die "Screenshot failed: slurp: $(<"$slurp_err")"
     fi
     exec {selecting}>&-
-    [[ -n "$geometry" ]] || fail "slurp: empty selection"
+    [[ -n "$geometry" ]] || die "Screenshot failed: slurp: empty selection"
     grim_args=(-g "$geometry")
     ;;
   *)
@@ -63,27 +60,28 @@ case "$MODE" in
 esac
 
 if [[ "$CLIPBOARD" == 1 ]]; then
-  grim "${grim_args[@]}" - | wl-copy --type image/png || fail "capture or copy to clipboard failed"
-  notify-send -a vekrona "Screenshot" "Copied to clipboard"
+  grim "${grim_args[@]}" - | wl-copy --type image/png || die "Screenshot failed: capture or copy to clipboard failed"
+  notify-send -a vekrona "Screenshot" "Copied to clipboard" || die "Screenshot copied to the clipboard, but notify-send failed"
   exit 0
 fi
 
 DEST_DIR="$HOME/Pictures/Screenshots"
 FILE="$DEST_DIR/$(date +%Y%m%d-%H%M%S-%3N).png"
-mkdir -p "$DEST_DIR"
+mkdir -p "$DEST_DIR" || die "Screenshot failed: cannot create $DEST_DIR"
 
 if ! grim "${grim_args[@]}" "$FILE"; then
   rm -f "$FILE"
-  fail "grim failed"
+  die "Screenshot failed: grim failed"
 fi
-wl-copy --type image/png <"$FILE" || fail "saved $FILE, but copying to clipboard failed"
+wl-copy --type image/png <"$FILE" || die "Screenshot failed: saved $FILE, but copying to clipboard failed"
 
-action="$(notify-send -a vekrona -i "$FILE" -A edit=Edit -A delete=Delete "Screenshot" "Saved to $FILE and copied")"
+action="$(notify-send -a vekrona -i "$FILE" -A edit=Edit -A delete=Delete "Screenshot" "Saved to $FILE and copied")" \
+  || die "Screenshot saved to $FILE and copied, but notify-send failed"
 case "$action" in
   edit)
     exec swappy -f "$FILE"
     ;;
   delete)
-    gio trash "$FILE"
+    gio trash "$FILE" || die "Screenshot: cannot move $FILE to the trash"
     ;;
 esac

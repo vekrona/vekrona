@@ -9,17 +9,23 @@ usage() {
   exit 2
 }
 
+fail() {
+  printf 'vekrona-media-raise: %s\n' "$*" >&2
+  exit 1
+}
+
 [[ $# -eq 1 && -n "$1" ]] || usage
 name="$1"
 
-reply="$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetConnectionUnixProcessID s "$name")"
+reply="$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetConnectionUnixProcessID s "$name")" \
+  || fail "cannot ask the bus which process owns $name"
 owner="${reply#u }"
-[[ "$owner" =~ ^[0-9]+$ ]] || { printf 'vekrona-media-raise: unexpected reply for %s: %s\n' "$name" "$reply" >&2; exit 1; }
+[[ "$owner" =~ ^[0-9]+$ ]] || fail "unexpected reply for $name: $reply"
 
 # The parent of pid, read after the last ')' of /proc/<pid>/stat, because the command name may contain spaces and parentheses.
 parent_of() {
   local stat fields
-  stat="$(<"/proc/$1/stat")"
+  stat="$(<"/proc/$1/stat")" || return 1
   read -ra fields <<<"${stat##*) }"
   printf '%s\n' "${fields[1]}"
 }
@@ -29,9 +35,9 @@ while ((pid > 1)); do
   if out="$(swaymsg "[pid=$pid] focus" 2>&1)"; then
     exit 0
   fi
-  [[ "$out" == *"No matching node"* ]] || { printf 'vekrona-media-raise: swaymsg failed: %s\n' "$out" >&2; exit 1; }
-  pid="$(parent_of "$pid")"
+  [[ "$out" == *"No matching node"* ]] || fail "swaymsg failed: $out"
+  parent="$(parent_of "$pid")" || fail "cannot read the parent of process $pid"
+  pid="$parent"
 done
 
-printf 'vekrona-media-raise: no window belongs to %s (pid %s) or its ancestors\n' "$name" "$owner" >&2
-exit 1
+fail "no window belongs to $name (pid $owner) or its ancestors"

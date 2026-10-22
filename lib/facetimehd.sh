@@ -21,12 +21,15 @@ facetimehd_dkms_registered() {
   [[ -n "$(dkms status -m facetimehd -v "$FACETIMEHD_DKMS_VERSION")" ]]
 }
 
-install_facetimehd_source() {
-  local tmp="$1" unpacked dkms_version
-  fetch_verified "$FACETIMEHD_URL" sha256 "$FACETIMEHD_SHA256" "$tmp/src.tar.gz"
-  tar -xzf "$tmp/src.tar.gz" -C "$tmp"
-  unpacked="$tmp/facetimehd-$FACETIMEHD_VERSION"
-  dkms_version="$(sed -n 's/^PACKAGE_VERSION=//p' "$unpacked/dkms.conf")"
+# Unpacks and installs the source from root's own verified copy of the tarball: DKMS compiles /usr/src as root, so nothing
+# a user's process can still change may end up there.
+install_facetimehd_source_from() {
+  local tarball="$1" root_dir="$2" copy unpacked dkms_version
+  copy="$(root_owned_copy "$tarball" "$root_dir")"
+  assert_checksum sha256 "$FACETIMEHD_SHA256" "$copy"
+  root tar -xzf "$copy" -C "$root_dir" --no-same-owner
+  unpacked="$root_dir/facetimehd-$FACETIMEHD_VERSION"
+  dkms_version="$(root sed -n 's/^PACKAGE_VERSION=//p' "$unpacked/dkms.conf")"
   [[ "$dkms_version" == "$FACETIMEHD_DKMS_VERSION" ]] \
     || die "facetimehd $FACETIMEHD_VERSION declares dkms version '$dkms_version', expected $FACETIMEHD_DKMS_VERSION"
   if facetimehd_dkms_registered; then
@@ -37,6 +40,12 @@ install_facetimehd_source() {
   root cp -a "$unpacked" "$FACETIMEHD_SRC_DIR"
   printf '%s\n' "$FACETIMEHD_SHA256" | root tee "$FACETIMEHD_SRC_STAMP" >/dev/null
   facetimehd_source_is_current || die "facetimehd source stamp not written: $FACETIMEHD_SRC_STAMP"
+}
+
+install_facetimehd_source() {
+  local tmp="$1"
+  fetch_verified "$FACETIMEHD_URL" sha256 "$FACETIMEHD_SHA256" "$tmp/src.tar.gz"
+  with_root_scratch_dir install_facetimehd_source_from "$tmp/src.tar.gz"
 }
 
 ensure_facetimehd_source() {
@@ -68,17 +77,22 @@ facetimehd_firmware_is_current() {
     && [[ "$(sha256sum "$FACETIMEHD_FIRMWARE_BIN" | awk '{print $1}')" == "$FACETIMEHD_FIRMWARE_BIN_SHA256" ]]
 }
 
+# Installs firmware.bin from root's own verified copy; the Makefile and the user's build directory stay out of root's hands.
+install_facetimehd_firmware_bin() {
+  local bin="$1" root_dir="$2" copy
+  copy="$(root_owned_copy "$bin" "$root_dir")"
+  assert_checksum sha256 "$FACETIMEHD_FIRMWARE_BIN_SHA256" "$copy"
+  root install -D -m 0644 -o root -g root "$copy" "$FACETIMEHD_FIRMWARE_BIN"
+}
+
 install_facetimehd_firmware() {
-  local tmp="$1" built actual
+  local tmp="$1" built
   fetch_verified "$FACETIMEHD_FIRMWARE_URL" sha256 "$FACETIMEHD_FIRMWARE_SHA256" "$tmp/firmware.tar.gz"
   tar -xzf "$tmp/firmware.tar.gz" -C "$tmp"
   built="$tmp/facetimehd-firmware-$FACETIMEHD_FIRMWARE_COMMIT"
   log "extracting facetimehd firmware from Apple's macOS update (large download)"
   make -C "$built"
-  actual="$(sha256sum "$built/firmware.bin" | awk '{print $1}')"
-  [[ "$actual" == "$FACETIMEHD_FIRMWARE_BIN_SHA256" ]] \
-    || die "extracted firmware.bin sha256 mismatch (expected $FACETIMEHD_FIRMWARE_BIN_SHA256, got $actual)"
-  root make -C "$built" install
+  with_root_scratch_dir install_facetimehd_firmware_bin "$built/firmware.bin"
   facetimehd_firmware_is_current || die "firmware missing or wrong sha256 after install: $FACETIMEHD_FIRMWARE_BIN"
 }
 

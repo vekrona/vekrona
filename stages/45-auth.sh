@@ -12,8 +12,8 @@ PROFILE_ID="custom/$PROFILE_NAME"
 PROFILE_DIR="/etc/authselect/custom/$PROFILE_NAME"
 PROFILE_FEATURES=(with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f)
 
-ensure_pkg pam-u2f yubikey-manager pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam cryptsetup perl-interpreter
-require_cmd authselect cryptsetup dracut lsinitrd jq findfs perl
+ensure_pkg pam-u2f yubikey-manager pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam cryptsetup
+require_cmd authselect cryptsetup dracut lsinitrd jq findfs
 
 render_profile() {
   render_authselect_profile "$(authselect_base_dir)" "$1"
@@ -82,19 +82,27 @@ ensure_authselect_selection() {
     root authselect select "$PROFILE_ID" "${PROFILE_FEATURES[@]}"
     if [[ "$previous" == custom/yubikey ]]; then
       warn "pam_u2f origin changed from the hostname to pam://vekrona: re-register your key once with:"
-      warn "  mkdir -p ~/.config/Yubico && pamu2fcfg -o pam://vekrona -i pam://vekrona > ~/.config/Yubico/u2f_keys"
+      warn "  pamu2fcfg -o pam://vekrona -i pam://vekrona | sudo tee $U2F_MAPPINGS"
     fi
   fi
   [[ "$(current_authselect_selection)" == "$(wanted_authselect_selection)" ]] || die "authselect selection not applied: $PROFILE_ID"
   root authselect check || die "authselect check failed"
 }
 
-rebuild_initramfs() {
+# Images with a .bak next to them: the rollback if a rebuild fails; removed once every image is verified.
+initramfs_backups=()
+
+# Under the kernel lock, so akmods' own pass over the image does not run at the same time. A .bak left by an earlier,
+# failed run is the good image and stays as it is.
+rebuild_initramfs() { with_kernel_lock rebuild_initramfs_locked "$1"; }
+
+rebuild_initramfs_locked() {
   local kver="$1" img
-  img="$(initramfs_path_for "$kver")"
-  root cp -p "$img" "$img.bak"
+  img="$(initramfs_path "$kver")"
+  root test -e "$img.bak" || root cp -p "$img" "$img.bak"
+  initramfs_backups+=("$img.bak")
   log "rebuilding initramfs for $kver (rollback: sudo cp -p $img.bak $img)"
-  root dracut -f "$img" "$kver"
+  dracut_locked -f "$img" "$kver" || die "dracut failed for $kver; the previous image is $img.bak"
 }
 
 install_crypttab_from() {
@@ -155,10 +163,14 @@ ensure_luks_fido2_unlock() {
   while IFS= read -r kver; do
     assert "initramfs for $kver carries FIDO2 unlock" initramfs_carries_fido2 "$kver"
   done <<<"$kvers"
+  if [[ ${#initramfs_backups[@]} -gt 0 ]]; then
+    log "removing the initramfs backups: ${initramfs_backups[*]}"
+    root rm -f "${initramfs_backups[@]}"
+  fi
 }
 
 ensure_authselect_selection
-ensure_u2f_keys_without_pin_flag
+ensure_u2f_mappings
 ensure_luks_fido2_unlock
 for pam in vekrona-lock-password vekrona-lock-u2f vekrona-lock-fprint; do
   ensure_root_file "$ROOT/etc/pam.d/$pam" "/etc/pam.d/$pam"

@@ -2,8 +2,8 @@ import os
 import unittest
 
 from harness import (SandboxTestCase, coredump_entry, journal_entry, report_entry,
-                     system_unit_failed_entry, user_unit_failed_entry,
-                     MESSAGE_ID_UNIT_FAILED)
+                     system_unit_failed_entry, user_manager_fields, user_unit_failed_entry,
+                     MESSAGE_ID_KERNEL_OOM, MESSAGE_ID_OOMD_KILL, MESSAGE_ID_UNIT_FAILED, OOMD_EXE, SYSTEMD_EXE)
 
 ATTACKER = "-Hattacker.example"
 
@@ -77,6 +77,35 @@ class ForgedJournalEntriesTest(SandboxTestCase):
         names = ["systemd-cryptsetup@luks\\x2d248623e7.service", "dbus-:1.3-org.gnome.Settings@0.service"]
         self.sandbox.watch([system_unit_failed_entry(name) for name in names])
         self.assertEqual(self.sources_listed(), ["unit", "unit"])
+
+    def oom_entry(self, message_id, message="killed a process", **sender):
+        return journal_entry(MESSAGE_ID=message_id, PRIORITY="6", MESSAGE=message, PID="4321",
+                             **{"_PID": "31337", "_UID": str(os.getuid()), "_EXE": "/usr/bin/evil", **sender})
+
+    def test_an_oom_kill_from_a_process_that_is_not_the_system_is_not_recorded_as_one(self):
+        self.sandbox.watch([self.oom_entry(MESSAGE_ID_KERNEL_OOM), self.oom_entry(MESSAGE_ID_OOMD_KILL)])
+        self.assertEqual(self.sources_listed(), [])
+
+    def test_an_oom_kill_of_systemd_oomd_is_recorded_when_oomd_says_it(self):
+        self.sandbox.watch([self.oom_entry(MESSAGE_ID_OOMD_KILL, _UID="0", _EXE=OOMD_EXE)])
+        self.assertEqual(self.sources_listed(), ["oom"])
+
+    def test_an_oom_kill_of_the_kernel_is_recorded_when_a_manager_says_it(self):
+        self.sandbox.watch([self.oom_entry(MESSAGE_ID_KERNEL_OOM, "the system manager killed a process", _UID="0", _EXE=SYSTEMD_EXE, _PID="1"),
+                            self.oom_entry(MESSAGE_ID_KERNEL_OOM, "the user manager killed a process", **user_manager_fields())])
+        self.assertEqual(self.sources_listed(), ["oom", "oom"])
+
+    def test_a_report_from_another_user_is_not_recorded_as_a_report(self):
+        forged = report_entry("fake")
+        forged.update(_UID=str(os.getuid() + 1), PRIORITY="6")
+        self.sandbox.watch([forged])
+        self.assertEqual(self.sources_listed(), [])
+
+    def test_a_report_from_root_is_recorded(self):
+        entry = report_entry("from the update unit")
+        entry.update(_UID="0")
+        self.sandbox.watch([entry])
+        self.assertEqual(self.sources_listed(), ["manual"])
 
     def test_pids_and_identifiers_of_other_records_follow_a_double_dash(self):
         self.sandbox.watch([journal_entry(_PID="777", MESSAGE="boom")])

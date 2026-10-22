@@ -20,22 +20,19 @@ class DefaultMutesTest(SandboxTestCase):
     def watch_kernel(self, message, identifier="kernel"):
         self.sandbox.watch([journal_entry(SYSLOG_IDENTIFIER=identifier, MESSAGE=message)])
 
-    def test_a_muted_default_makes_no_record_and_no_toast(self):
+    def test_a_muted_default_makes_no_record(self):
         self.sandbox.install_default_mutes(TDX_MUTE)
         self.watch_kernel(TDX_MESSAGE)
         self.assertEqual(self.listed(), [])
-        self.assertEqual(self.sandbox.sent_notifications(), [])
 
-    def test_without_the_default_the_same_entry_is_recorded_and_toasted(self):
+    def test_without_the_default_the_same_entry_is_recorded(self):
         self.watch_kernel(TDX_MESSAGE)
         self.assertEqual(len(self.listed()), 1)
-        self.assertEqual(len(self.sandbox.sent_notifications()), 1)
 
     def test_another_error_from_the_same_identifier_still_surfaces(self):
         self.sandbox.install_default_mutes(TDX_MUTE)
         self.watch_kernel("EXT4-fs error (device vda3): unable to read inode")
         self.assertEqual(len(self.listed()), 1)
-        self.assertEqual(len(self.sandbox.sent_notifications()), 1)
 
     def test_a_longer_message_that_merely_contains_the_pattern_still_surfaces(self):
         self.sandbox.install_default_mutes(TDX_MUTE)
@@ -54,25 +51,29 @@ class DefaultMutesTest(SandboxTestCase):
         self.watch_kernel(TDX_MESSAGE, identifier="greetd")
         self.assertEqual(self.listed(), [])
 
-    def test_an_invalid_default_is_toasted_by_name_and_does_not_mute(self):
+    # The broken rule is itself recorded as an error, next to the kernel entry it failed to mute.
+    def assert_recorded_beside_the_unmuted_entry(self, detail):
+        listed = self.listed()
+        self.assertEqual(len(listed), 2, listed)
+        (broken,) = [line for line in listed if "invalid mute pattern" in line]
+        shown = self.sandbox.run("show", broken.split()[0]).stdout
+        self.assertIn(detail, shown)
+
+    def test_an_invalid_default_is_recorded_by_name_and_does_not_mute(self):
         self.sandbox.install_default_mutes('[[mute]]\nidentifier = "kernel"\nmessage = "("\nreason = "x"\n',
                                            name="10-broken.conf")
         self.watch_kernel(TDX_MESSAGE)
-        bodies = [n["body"] for n in self.sandbox.sent_notifications()]
-        self.assertTrue(any("10-broken.conf" in body and "invalid mute" in body for body in bodies), bodies)
-        self.assertEqual(len(self.listed()), 1)
+        self.assert_recorded_beside_the_unmuted_entry("10-broken.conf")
 
     def test_a_default_without_a_reason_is_rejected(self):
         self.sandbox.install_default_mutes('[[mute]]\nidentifier = "kernel"\nmessage = "x"\n')
         self.watch_kernel("x")
-        self.assertEqual(len(self.listed()), 1)
-        self.assertTrue(any("reason" in n["body"] for n in self.sandbox.sent_notifications()))
+        self.assert_recorded_beside_the_unmuted_entry("reason")
 
-    def test_a_syntax_error_in_a_default_file_is_toasted_and_does_not_mute(self):
+    def test_a_syntax_error_in_a_default_file_is_recorded_and_does_not_mute(self):
         self.sandbox.install_default_mutes("this is not toml", name="10-garbage.conf")
         self.watch_kernel(TDX_MESSAGE)
-        self.assertTrue(any("10-garbage.conf" in n["body"] for n in self.sandbox.sent_notifications()))
-        self.assertEqual(len(self.listed()), 1)
+        self.assert_recorded_beside_the_unmuted_entry("10-garbage.conf")
 
     def test_files_not_ending_in_conf_are_ignored(self):
         self.sandbox.install_default_mutes(TDX_MUTE, name="10-test.conf.disabled")
@@ -101,7 +102,6 @@ class ShippedDefaultMutesTest(SandboxTestCase):
         self.watch_journal_error("kernel", "virt/tdx: TDX not supported by the host platform")
         self.watch_journal_error("greetd", "gkr-pam: unable to locate daemon control file")
         self.assertEqual(self.recorded(), [])
-        self.assertEqual(self.sandbox.sent_notifications(), [])
 
     def test_other_greetd_and_kernel_errors_still_surface(self):
         self.watch_journal_error("greetd", "gkr-pam: couldn't unlock the login keyring")
@@ -111,7 +111,6 @@ class ShippedDefaultMutesTest(SandboxTestCase):
     def test_a_kernel_entry_with_an_empty_message_is_muted(self):
         self.watch_journal_error("kernel", "")
         self.assertEqual(self.recorded(), [])
-        self.assertEqual(self.sandbox.sent_notifications(), [])
 
     def test_the_hp_omen_acpi_firmware_bug_is_muted_but_another_acpi_error_is_not(self):
         self.watch_journal_error("kernel", "ACPI Error: Region SystemCMOS (ID=5) has no handler (20260408/exfldio-261)")

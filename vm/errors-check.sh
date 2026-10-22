@@ -207,38 +207,39 @@ wait_for_dbus_monitor_ready() {
   return 1
 }
 
-read_notify_for_marker_with_fix() {
-  local marker="$1" line in_notify=0 saw_marker=0
+# Reads the monitor until a Notify call carrying $1, and fails if an earlier one carried $2.
+sentinel_follows_no_notify_for() {
+  local sentinel="$1" marker="$2" line in_notify=0
   while IFS= read -r -u "$MONITOR_FD" line; do
     if [[ "$line" =~ ^(method\ call|method\ return|signal|error) ]]; then
       in_notify=0
-      saw_marker=0
       [[ "$line" == *"member=Notify"* ]] && in_notify=1
     elif (( in_notify )); then
-      [[ "$line" == *"$marker"* ]] && saw_marker=1
-      (( saw_marker )) && [[ "$line" == *'string "fix"'* ]] && return 0
+      [[ "$line" == *"$marker"* ]] && return 1
+      [[ "$line" == *"$sentinel"* ]] && return 0
     fi
   done
   return 1
 }
 
-check_notify_fix_action() {
-  local marker="vekrona-errors-check-notify-$RANDOM$RANDOM" id
-
-  systemctl --user restart vekrona-errors || fail "vekrona-errors.service did not restart"
+# A watcher that toasted would send its Notify call right after it stores the context, so a sentinel sent once the
+# context is there reaches the bus after any such call.
+check_recording_sends_no_notification() {
+  local marker="vekrona-errors-check-silent-$RANDOM$RANDOM" sentinel="vekrona-errors-check-sentinel-$RANDOM$RANDOM" id
 
   open_dbus_monitor
   wait_for_dbus_monitor_ready || { close_dbus_monitor; fail "dbus-monitor did not become ready to monitor"; }
 
   logger -p user.err "$marker"
-
-  read_notify_for_marker_with_fix "$marker" \
-    || { close_dbus_monitor; fail "dbus-monitor did not observe this error's own Notify call carrying a 'fix' action"; }
-  close_dbus_monitor
-
-  id="$(find_record_by_marker "$marker" 30)" || fail "a notify-test entry did not produce a record"
+  id="$(find_record_by_marker "$marker" 30)" || { close_dbus_monitor; fail "a silent-test entry did not produce a record"; }
   CREATED_IDS+=("$id")
-  echo "ok: this error's own Notify call with the fix action was observed on the session bus"
+  wait_until 30 test -f "$STORE_DIR/$id/context.txt" || { close_dbus_monitor; fail "the context of $id was never stored"; }
+  notify-send -- "$sentinel" || { close_dbus_monitor; fail "notify-send failed"; }
+
+  sentinel_follows_no_notify_for "$sentinel" "$marker" \
+    || { close_dbus_monitor; fail "dbus-monitor saw a Notify call for the recorded error $id, or never saw the sentinel"; }
+  close_dbus_monitor
+  echo "ok: recording $id sent no Notify call"
 }
 
 check_forged_journal_fields_are_inert() {
@@ -280,18 +281,9 @@ check_prompt_is_one_fenced_json_object() {
   echo "ok: the prompt is one fenced JSON object; only mark-launched changes the status -> $id"
 }
 
-check_no_notify_failures_logged() {
-  local log
-  log="$(journalctl --user -u vekrona-errors --since "$TEST_START" --no-pager 2>/dev/null)"
-  ! grep -q "failed to send a desktop notification" <<<"$log" \
-    || fail "the watcher logged a failed Notify call during this test run"
-  echo "ok: no failed Notify calls logged during this test run"
-}
-
 main() {
-  require_cmds inotifywait timeout jq vekrona-error coredumpctl dbus-monitor logger
+  require_cmds inotifywait timeout jq vekrona-error coredumpctl dbus-monitor logger notify-send
   setup_env
-  TEST_START="$(date -Iseconds)"
   session_attach_existing \
     || fail "no live sway session found (expected session-check.sh to have brought one up already)"
   wait_for_watcher_active
@@ -305,10 +297,9 @@ main() {
   check_unread_tracks
   check_ack_all_clears_unread
   check_cursor_resume
-  check_notify_fix_action
+  check_recording_sends_no_notification
   check_forged_journal_fields_are_inert
   check_prompt_is_one_fenced_json_object
-  check_no_notify_failures_logged
   echo "errors-check OK"
 }
 

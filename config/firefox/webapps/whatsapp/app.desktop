@@ -4,4 +4,4 @@ Exec=vekrona-webapp whatsapp
 StartupWMClass=vekrona-whatsapp
 Icon=vekrona-whatsapp
 Type=Application
-Categories=Network;
+Categories=Network;InstantMessaging;Chat;

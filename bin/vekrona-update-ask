@@ -12,7 +12,6 @@ import os
 import re
 import signal
 import sys
-import xml.sax.saxutils
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
@@ -35,7 +34,11 @@ URGENCY_NORMAL = 1
 KEY_RE = re.compile(r"[A-Za-z0-9_.-]+")
 ANSWERS_THAT_ARE_NOT_KEYS = ("timeout", "closed")
 
-die = vekrona_cli.make_die(PROG, __file__, report=False)
+
+def die(msg):
+    # The caller (vekrona-update-notify, or ask_user in lib/common.sh) records this failure, and the failure is
+    # usually a notification daemon that cannot show a toast anyway.
+    vekrona_cli.exit_unrecorded(PROG, msg)
 
 
 def parse_action(text):
@@ -79,15 +82,6 @@ def call_daemon(bus, method, parameters, reply_type):
     return result.unpack() if result is not None else None
 
 
-def daemon_renders_markup(bus):
-    try:
-        return "body-markup" in call_daemon(bus, "GetCapabilities", None, "(as)")[0]
-    except GLib.Error as exc:
-        print(f"{PROG}: cannot ask the notification daemon whether it renders markup, escaping the body: {exc}",
-              file=sys.stderr)
-        return True
-
-
 class Question:
     """One notification and the first thing that answers it. `answer` is None until then."""
 
@@ -111,8 +105,6 @@ class Question:
                                   self.on_name_owner_changed, None)
 
     def send(self, title, body, actions):
-        if daemon_renders_markup(self.bus):
-            body = xml.sax.saxutils.escape(body)
         flat_actions = [part for key, label in actions for part in (key, label)]
         parameters = GLib.Variant(
             "(susssasa{sv}i)",

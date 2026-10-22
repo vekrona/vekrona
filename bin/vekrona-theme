@@ -9,11 +9,21 @@ STATE_FILE="$(vekrona_theme_name_file)"
 ACTIVE_THEME_FILE="$(vekrona_active_theme_file)"
 
 usage() {
-  printf 'usage: %s dark|light|next|list\n' "$(basename "$0")" >&2
-  exit 1
+  refuse "usage: $(basename "$0") dark|light|next|list"
 }
 
 MODES=(dark light)
+
+THEME_LOCK="$STATE_DIR/theme.lock"
+THEME_LOCK_WAIT_SEC="${VEKRONA_THEME_LOCK_WAIT_SEC:-30}"
+
+# Two changes at once would interleave their backups, state writes and renders, and `next` would read the mode the other
+# one is about to replace. The lock lives until this process ends.
+lock_theme() {
+  mkdir -p "$STATE_DIR"
+  exec 9>"$THEME_LOCK"
+  flock -w "$THEME_LOCK_WAIT_SEC" 9 || die "another vekrona-theme is still running"
+}
 
 current_theme() {
   [[ -f "$STATE_FILE" ]] && cat "$STATE_FILE"
@@ -48,7 +58,8 @@ rollback() {
   else
     rm -f "$ACTIVE_THEME_FILE"
   fi
-  "$ROOT/bin/vekrona-render-theme" || echo "vekrona-theme: re-rendering '$previous' after the failure failed; run 'vekrona-theme $previous'" >&2
+  "$ROOT/bin/vekrona-render-theme" all \
+    || report_failure "vekrona-theme: re-rendering '$previous' after the failure failed; run 'vekrona-theme $previous'"
 }
 
 cleanup() {
@@ -76,7 +87,7 @@ apply_theme() {
   ROLLBACK_ON_EXIT=1
   printf '%s\n' "$mode" > "$STATE_FILE"
 
-  "$ROOT/bin/vekrona-render-theme"
+  "$ROOT/bin/vekrona-render-theme" all
 
   ROLLBACK_ON_EXIT=0
   echo "theme: $mode"
@@ -90,12 +101,14 @@ case "$cmd" in
     printf '%s\n' "${MODES[@]}"
     ;;
   next)
+    lock_theme
     case "$(current_theme || true)" in
       dark) apply_theme light ;;
       *) apply_theme dark ;;
     esac
     ;;
   dark | light)
+    lock_theme
     apply_theme "$cmd"
     ;;
   *)

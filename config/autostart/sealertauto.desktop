@@ -1,0 +1,8 @@
+# Hides the system's seapplet autostart entry of the same name. seapplet's tray icon is XEmbed-only: it needs Xwayland and a
+# tray that hosts XEmbed, which vekrona-shell is not, so it showed nothing and only cost an X server. Denials still surface:
+# setroubleshootd (not this applet) logs each one at error priority, which the error pipeline records.
+[Desktop Entry]
+Type=Application
+Name=SELinux Troubleshooter
+Exec=/usr/bin/seapplet
+Hidden=true

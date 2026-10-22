@@ -34,14 +34,12 @@ INTROSPECTION = """
       <arg type="u" direction="out"/>
     </method>
     <method name="CloseNotification"><arg type="u" direction="in"/></method>
-    <method name="GetCapabilities"><arg type="as" direction="out"/></method>
     <signal name="ActionInvoked"><arg type="u"/><arg type="s"/></signal>
     <signal name="NotificationClosed"><arg type="u"/><arg type="u"/></signal>
   </interface>
 </node>
 """
 
-capabilities = sys.argv[1].split(",")
 next_id = [1]
 daemon_connection = [None]
 owner_id = [None]
@@ -54,9 +52,7 @@ def emit(event, **fields):
 
 
 def on_method_call(connection, sender, path, interface, method, params, invocation):
-    if method == "GetCapabilities":
-        invocation.return_value(GLib.Variant("(as)", (capabilities,)))
-    elif method == "CloseNotification":
+    if method == "CloseNotification":
         emit("close", id=params.unpack()[0])
         if close_fails[0]:
             invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", "refusing to close")

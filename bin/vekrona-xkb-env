@@ -10,7 +10,7 @@ usage() {
 
 [[ $# -eq 0 ]] || { [[ "$1" != -h && "$1" != --help ]] || usage 0; usage; }
 
-die() { echo "vekrona-xkb-env: $*" >&2; exit 1; }
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh"
 
 conf="${VEKRONA_XKB_CONF:-/etc/X11/xorg.conf.d/00-keyboard.conf}"
 safe_value='^[A-Za-z0-9_:,.+()-]*$'

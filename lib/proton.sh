@@ -4,6 +4,11 @@
 
 VEKRONA_PROTON_REPO_DIR="${VEKRONA_PROTON_REPO_DIR:-/var/lib/vekrona/proton-repo}"
 VEKRONA_PROTON_URL_PREFIX=https://proton.me/download/
+# What the feed's Version may look like: it becomes part of a file name in the repo directory and is compared with rpm's.
+VEKRONA_PROTON_VERSION_RE='^[0-9][0-9A-Za-z.+~_-]*$'
+# What the rest of an rpm URL after the prefix may look like. No "%": nothing here is percent-encoded, and "%2e%2e" would
+# climb out of the prefix at the server. A ".." anywhere is refused below.
+VEKRONA_PROTON_URL_TAIL_RE='^[0-9A-Za-z._+~/-]+$'
 
 # RPM name -> feed URL
 declare -A VEKRONA_PROTON_FEEDS=(
@@ -25,13 +30,15 @@ proton_feed_pick() {
   version="$(jq -r "$PROTON_JQ_DEFS"' .Releases[] | select(everywhere) | .Version' "$feed" | sort -V | tail -n 1)" \
     || die "cannot read Proton feed $feed"
   [[ -n "$version" ]] || die "no Stable release rolled out to everyone in Proton feed $feed"
+  [[ "$version" =~ $VEKRONA_PROTON_VERSION_RE ]] || die "Proton release version in $feed is not a version: '$version'"
   picked="$(jq -r --arg version "$version" "$PROTON_JQ_DEFS"'
     first(.Releases[] | select(everywhere and .Version == $version))
     | first((.File // [])[] | select(.Identifier | startswith(".rpm")))
     | "\(.Url) \(.Sha512CheckSum)"' "$feed")" || die "cannot read Proton feed $feed"
   [[ -n "$picked" ]] || die "Proton release $version in $feed has no .rpm file"
   read -r url sum <<<"$picked"
-  [[ "$url" == "$VEKRONA_PROTON_URL_PREFIX"* ]] || die "Proton release $version in $feed points outside $VEKRONA_PROTON_URL_PREFIX: $url"
+  [[ "$url" == "$VEKRONA_PROTON_URL_PREFIX"* && "${url#"$VEKRONA_PROTON_URL_PREFIX"}" =~ $VEKRONA_PROTON_URL_TAIL_RE && "$url" != *..* ]] \
+    || die "Proton release $version in $feed points outside $VEKRONA_PROTON_URL_PREFIX: $url"
   [[ "$sum" =~ ^[0-9a-f]{128}$ ]] || die "Proton release $version in $feed has no valid sha512: '$sum'"
   printf '%s %s %s\n' "$version" "$url" "$sum"
 }

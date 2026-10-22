@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import enum
 import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
 import secrets
 import shutil
@@ -15,7 +17,7 @@ import sys
 import tempfile
 import time
 import tomllib
-import xml.sax.saxutils
+from collections import deque, namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -27,12 +29,15 @@ import vekrona_cli
 PROG = "vekrona-error"
 
 RETENTION = 500
-DEDUPE_WINDOW = 600
-BURST_LIMIT = 5
-BURST_WINDOW = 30
 CURSOR_FLUSH_EVERY = 50
 CAPTURE_WORKERS = 4
-INTERNAL_TOAST_RATE_LIMIT = 60
+LAST_RESORT_TOAST_RATE_LIMIT = 60
+URGENCY_CRITICAL = 2
+
+STATUS_NEW = "new"
+STATUS_SEEN = "seen"
+STATUS_LAUNCHED = "launched"
+STATUS_MUTED = "muted"
 
 MESSAGE_ID_COREDUMP = "fc2e22bc6ee647b6b90729ab34a250b1"
 MESSAGE_ID_UNIT_FAILED = "d9b373ed55a64feb8242e02dbe79a49c"
@@ -41,6 +46,7 @@ MESSAGE_ID_KERNEL_OOM = "fe6faa94e7774663a0da52717891d8ef"
 MESSAGE_ID_OOMD_KILL = "d989611b15e44c9dbf31e3c81256e4ed"
 
 SYSTEMD_EXE = "/usr/lib/systemd/systemd"
+OOMD_EXE = "/usr/lib/systemd/systemd-oomd"
 COREDUMP_EXE = "/usr/lib/systemd/systemd-coredump"
 UNIT_NAME_RE = re.compile(
     r"[A-Za-z0-9:_.\\@][A-Za-z0-9:_.\\@-]{0,254}"
@@ -65,10 +71,6 @@ def warn(msg):
 
 def repo_root():
     return vekrona_cli.repo_root(__file__)
-
-
-def resolve_tool(name):
-    return vekrona_cli.resolve_tool(__file__, name)
 
 
 def state_dir():
@@ -97,10 +99,6 @@ def cursor_file():
 
 def unread_file():
     return os.path.join(store_dir(), "unread")
-
-
-def notifications_file():
-    return os.path.join(store_dir(), "notifications.json")
 
 
 def lock_file():
@@ -197,14 +195,32 @@ def quarantine_record(error_id, exc, on_quarantine):
         on_quarantine(error_id, message)
 
 
+RECORD_TEXT_FIELDS = ("id", "source", "title", "fingerprint", "status")
+
+
+def validate_record(error_id, record):
+    """Raises ValueError unless the JSON read from a record file has what every reader of the store indexes."""
+    if not isinstance(record, dict):
+        raise ValueError(f"the record is a {type(record).__name__}, not an object")
+    for name in RECORD_TEXT_FIELDS:
+        if not isinstance(record.get(name), str):
+            raise ValueError(f"the record has no text field {name!r}")
+    if record["id"] != error_id:
+        raise ValueError(f"the record's id {record['id']!r} is not the name of its directory")
+    count = record.get("count", 1)
+    if not isinstance(count, int) or isinstance(count, bool):
+        raise ValueError(f"the record's count is not a number: {count!r}")
+    return record
+
+
 def load_record(error_id, on_quarantine=None):
     path = record_path(error_id)
     if not os.path.isfile(path):
         return None
     try:
         with open(path) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+            return validate_record(error_id, json.load(f))
+    except (ValueError, OSError) as exc:  # a JSONDecodeError and a UnicodeDecodeError are ValueErrors
         quarantine_record(error_id, exc, on_quarantine)
         return None
 
@@ -232,17 +248,23 @@ def all_records(on_quarantine=None):
 
 
 def recompute_unread(on_quarantine=None):
-    count = sum(1 for rec in all_records(on_quarantine) if rec.get("status") == "new")
+    count = sum(1 for rec in all_records(on_quarantine) if rec.get("status") == STATUS_NEW)
     path = unread_file()
     current = None
     if os.path.isfile(path):
         try:
-            current = int(open(path).read().strip())
+            with open(path) as f:
+                current = int(f.read().strip())
         except (ValueError, OSError):
             current = None
     if current != count:
         atomic_write(path, f"{count}\n")
     return count
+
+
+def publish_unread_count(on_quarantine=None):
+    with store_lock():
+        return recompute_unread(on_quarantine)
 
 
 def prune_retention():
@@ -268,15 +290,14 @@ def get_record_or_die(error_id):
     return rec
 
 
-def load_mute_patterns(cache=None):
+def load_mute_patterns(cache):
     path = mute_file()
     try:
         mtime = os.stat(path).st_mtime
     except OSError:
-        if cache is not None:
-            cache.clear()
+        cache.clear()
         return []
-    if cache is not None and cache.get("mtime") == mtime:
+    if cache.get("mtime") == mtime:
         return cache["patterns"]
     patterns = []
     invalid = []
@@ -289,14 +310,13 @@ def load_mute_patterns(cache=None):
                 patterns.append(re.compile(line))
             except re.error as exc:
                 invalid.append((line, str(exc)))
-    if cache is not None:
-        cache["mtime"] = mtime
-        cache["patterns"] = patterns
-        cache["invalid"] = invalid
+    cache["mtime"] = mtime
+    cache["patterns"] = patterns
+    cache["invalid"] = invalid
     return patterns
 
 
-def mute_matches(fingerprint, title, cache=None):
+def mute_matches(fingerprint, title, cache):
     patterns = load_mute_patterns(cache)
     return any(p.search(fingerprint) or p.search(title) for p in patterns)
 
@@ -360,8 +380,8 @@ def apply_mute(rec):
     if pattern not in existing:
         with open(path, "a") as f:
             f.write(pattern + "\n")
-    if rec.get("status") != "muted":
-        rec["status"] = "muted"
+    if rec.get("status") != STATUS_MUTED:
+        rec["status"] = STATUS_MUTED
         save_record(rec["id"], rec)
         recompute_unread()
 
@@ -377,10 +397,28 @@ def field_str(value):
     return str(value)
 
 
+WHITESPACE_RUN_RE = re.compile(r"\s+")
+
+
+def one_line(text):
+    return WHITESPACE_RUN_RE.sub(" ", text).strip()
+
+
+# Everything the journal gave us is untrusted text. A terminal obeys the control characters in it (an escape sequence can
+# rewrite the screen or set the clipboard), so every line printed from a record goes through printable().
+UNPRINTABLE_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # all C0 and C1 controls but the tab and the newline
+
+
+def printable(text):
+    return UNPRINTABLE_RE.sub("\ufffd", text)
+
+
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 # quickshell logs console.error as "<ESC>[31m ERROR<ESC>[97m qml<ESC>[0m: text" at journal priority 6 (info),
 # so the level marker in the text is the only signal that a QML error happened.
 QML_ERROR_RE = re.compile(r'\s*ERROR\s+qml: (.*)', re.DOTALL)
+# The kernel logs a refused fork() at journal priority 6 (info), so only the text tells that a cgroup hit its pids.max.
+FORK_REJECTED_RE = re.compile(r'cgroup: fork rejected by pids controller in (/\S*)')
 
 
 UUID_RE = re.compile(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b')
@@ -413,6 +451,14 @@ def from_own_user_manager(entry):
     return (field_str(entry.get("_UID")) == uid
             and field_str(entry.get("_EXE")) == SYSTEMD_EXE
             and field_str(entry.get("_SYSTEMD_UNIT")) == f"user@{uid}.service")
+
+
+def from_root_or_own_user(entry):
+    return field_str(entry.get("_UID")) in ("0", str(os.getuid()))
+
+
+def from_oomd(entry):
+    return field_str(entry.get("_UID")) == "0" and field_str(entry.get("_EXE")) == OOMD_EXE
 
 
 def from_coredump_handler(entry):
@@ -493,6 +539,17 @@ def classify_unit_failure(entry, unit_exits):
     }
 
 
+def classify_fork_rejection(entry, message):
+    match = FORK_REJECTED_RE.fullmatch(message.strip()) if field_str(entry.get("_TRANSPORT")) == "kernel" else None
+    if not match:
+        return None
+    scope = match.group(1).rsplit("/", 1)[-1] or match.group(1)
+    return {
+        "source": "limit", "title": f"fork rejected: {scope} hit its process limit", "summary": message.strip(),
+        "identifier": scope, "unit": "", "exe": "", "pid": "",
+    }
+
+
 def classify(entry, unit_exits):
     message_id = entry.get("MESSAGE_ID")
     message = field_str(entry.get("MESSAGE"))
@@ -519,7 +576,10 @@ def classify(entry, unit_exits):
         if classified:
             return classified
 
-    if message_id in (MESSAGE_ID_KERNEL_OOM, MESSAGE_ID_OOMD_KILL):
+    # The kernel's kill is announced by the system manager, or by the user manager of the cgroup's owner; the oomd's
+    # by systemd-oomd. Another sender with the same MESSAGE_ID is only a record of whatever it logged.
+    if (message_id == MESSAGE_ID_OOMD_KILL and from_oomd(entry)) \
+            or (message_id == MESSAGE_ID_KERNEL_OOM and (from_system_manager(entry) or from_own_user_manager(entry))):
         title = "process killed by systemd-oomd" if message_id == MESSAGE_ID_OOMD_KILL \
             else "process killed by the kernel (out of memory)"
         pid = field_str(entry.get("PID")) or field_str(entry.get("_PID"))
@@ -530,7 +590,11 @@ def classify(entry, unit_exits):
             "identifier": pid or exe or comm or syslog_id, "unit": "", "exe": exe, "pid": pid,
         }
 
-    if syslog_id == "vekrona" and entry.get("VEKRONA_TITLE") is not None:
+    classified = classify_fork_rejection(entry, message)
+    if classified:
+        return classified
+
+    if syslog_id == "vekrona" and entry.get("VEKRONA_TITLE") is not None and from_root_or_own_user(entry):
         source = field_str(entry.get("VEKRONA_SOURCE"))
         title = field_str(entry.get("VEKRONA_TITLE")) or message
         return {
@@ -555,8 +619,413 @@ def classify(entry, unit_exits):
     return None
 
 
+# USB hotplug. A KVM switch, a suspend or a cable pull makes the kernel and the audio/video stack log errors that are the
+# plain effect of a device leaving or arriving; a port that really fails logs the same lines. HotplugTracker tells the two
+# apart by what the journal says happened around each line. Every decision uses the entries' own
+# __REALTIME_TIMESTAMP and never the clock, so replaying a journal decides exactly like following it.
+HOTPLUG_HOLD = 3  # a kernel error can come milliseconds before the disconnect that explains it
+HOTPLUG_SETTLE_AFTER_WAKE = 30  # after a resume, devices come back and fail on the way; the window opens at the suspend entry
+HOTPLUG_KNOCK_ON = 15  # how long after a USB event the audio/video stack still trips over the device
+HOTPLUG_STABLE = 60  # a device connected this long, outside a settle, is bound
+HOTPLUG_FAIL_WINDOW = 60
+HOTPLUG_FAIL_THRESHOLD = 3
+HOTPLUG_CYCLE_WINDOW = 120
+HOTPLUG_CYCLE_THRESHOLD = 5
+HOTPLUG_FLAP_PERSIST = 60  # a flap that ended inside this time was a transient, however many cycles it took
+HOTPLUG_REFRESH = 30  # at most one record update per this much entry time while a fault goes on
+HOTPLUG_PRIME = 120
+USB_HISTORY = 64
+
+SLEEP_EXE = "/usr/lib/systemd/systemd-sleep"
+SUSPEND_RE = re.compile(r"PM: (?:suspend|hibernation) entry")
+RESUME_RE = re.compile(r"PM: (?:suspend|hibernation) exit|System returned from sleep operation")
+
+USB_ID = r"\d+-\d+(?:\.\d+)*"
+USB_PORT_LINE_RE = re.compile(rf"usb (?:usb(?P<bus>\d+)|(?P<hub>{USB_ID}))-port(?P<port>\d+): ")
+# A USB device logs as "usb PATH:", an interface of it as "DRIVER PATH:N.M:". Another bus has the same "DRIVER N-N:" form
+# (an I2C address is 5-0021), but never the interface suffix.
+USB_DEVICE_LINE_RE = re.compile(rf"(?:usb (?P<device>{USB_ID})|[\w-]+ (?P<interface>{USB_ID}):\d+\.\d+): ")
+KERNEL_DEVICE_RE = re.compile(rf"\+usb:(?P<path>{USB_ID})(?::\d+\.\d+)?")
+DISCONNECT_RE = re.compile(r"USB disconnect, device number \d+")
+NEW_DEVICE_RE = re.compile(r"new [\w+ -]*USB device number \d+")
+IDENTIFY_RE = re.compile(r"New USB device found, idVendor=(?P<vid>[0-9a-f]{4}), idProduct=(?P<pid>[0-9a-f]{4})")
+MANUFACTURER_RE = re.compile(r"Manufacturer: (?P<name>.+)")
+PRODUCT_RE = re.compile(r"Product: (?P<name>.+)")
+ENUMERATION_FAILURE_RE = re.compile(
+    r"device not accepting address \d+, error -\d+|device descriptor read/\w+, error -\d+"
+    r"|can't set config #\d+, error -\d+|unable to read config index|Cannot enable\. Maybe the USB cable is bad\?")
+PORT_DEAD_RE = re.compile(r"unable to enumerate USB device")
+
+# What the audio/video stack logs about a device that is no longer there.
+KNOCK_ON_IDENTIFIERS = ("wireplumber", "pipewire", "pipewire-pulse", "(udev-worker)", "systemd-udevd")
+KNOCK_ON_RE = re.compile(
+    r"can't open control for card hw:\d+|error iterating devices: No such device|ALSA close failed"
+    r"|spa\.alsa: .*(?:No such device|close failed)|Cannot open '/dev/video\d+'|Failed to activate V4L2 device"
+    r"|Object activation aborted: PipeWire proxy destroyed|78-sound-card\.rules")
+
+
+class UsbFault(enum.IntEnum):
+    NONE = 0
+    FAILING = 1
+    FLAPPING = 2
+    DEAD = 3
+
+
+USB_FAULT_TITLES = {
+    UsbFault.FAILING: "USB device keeps failing",
+    UsbFault.FLAPPING: "USB device keeps reconnecting",
+    UsbFault.DEAD: "USB port left disabled",
+}
+
+UsbHeld = namedtuple("UsbHeld", "time path message classified failure dead connect")
+
+
+def entry_seconds(entry):
+    raw = field_str(entry.get("__REALTIME_TIMESTAMP"))
+    return int(raw) / 1_000_000 if raw.isascii() and raw.isdigit() else None
+
+
+def is_kernel(entry):
+    return field_str(entry.get("_TRANSPORT")) == "kernel"
+
+
+def is_sleep_edge(entry, message, pattern):
+    return pattern.match(message) is not None and (is_kernel(entry) or field_str(entry.get("_EXE")) == SLEEP_EXE)
+
+
+def usb_line(entry):
+    """The USB path a kernel entry is about and the rest of its message, or (None, message) when it names no valid path."""
+    message = field_str(entry.get("MESSAGE"))
+    port_line = USB_PORT_LINE_RE.match(message)
+    if port_line:
+        parent = f"{port_line['bus']}-" if port_line["bus"] else f"{port_line['hub']}."
+        return parent + port_line["port"], message[port_line.end():]
+    device_line = USB_DEVICE_LINE_RE.match(message)
+    if device_line:
+        return device_line["device"] or device_line["interface"], message[device_line.end():]
+    kernel_device = KERNEL_DEVICE_RE.fullmatch(field_str(entry.get("_KERNEL_DEVICE")))
+    return (kernel_device["path"] if kernel_device else None), message
+
+
+def usb_ancestors(path):
+    while "." in path:
+        path = path.rsplit(".", 1)[0]
+        yield path
+
+
+def usb_port_label(path):
+    hub, dot, number = path.rpartition(".")
+    if dot:
+        return f"{hub}-port{number}"
+    bus, _, number = path.partition("-")
+    return f"usb{bus}-port{number}"
+
+
+def plural(count, noun):
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+def duration_text(seconds):
+    if seconds < 90:
+        return f"{round(seconds)} s"
+    if seconds < 5400:
+        return f"{round(seconds / 60)} min"
+    return f"{seconds / 3600:.1f} h"
+
+
+class UsbPort:
+    def __init__(self, path):
+        self.path = path
+        self.vidpid = None
+        self.manufacturer = None
+        self.product = None
+        self.connects = deque(maxlen=USB_HISTORY)
+        self.disconnects = deque(maxlen=USB_HISTORY)
+        self.failures = deque(maxlen=USB_HISTORY)
+        self.key = None
+        self.counted = 0
+        self.emitted = UsbFault.NONE
+        self.emitted_at = None
+        self.run_last = None
+        self.start_run(None)
+
+    # A run is the stretch of connects and failures with no quiet minute in between.
+    def start_run(self, t):
+        self.run_start = t
+        self.connect_total = 0
+        self.failure_total = 0
+        self.errors = 0
+        self.last_error = ""
+        self.state = UsbFault.NONE
+        # A run after a quiet minute is a new episode: its record is raised again.
+        self.reraise = self.emitted != UsbFault.NONE
+        self.dirty = False
+        self.failures.clear()
+
+    def touch(self, t):
+        if self.run_last is None or t - self.run_last >= HOTPLUG_STABLE:
+            self.start_run(t)
+        self.run_last = t if self.run_last is None else max(self.run_last, t)
+
+    # Another device on the same port is not the one that failed.
+    def identified(self, vidpid, t):
+        if self.vidpid not in (None, vidpid):
+            self.start_run(t)
+            self.run_last = t
+            self.key = None
+            self.counted = 0
+            self.emitted = UsbFault.NONE
+        self.vidpid = vidpid
+
+    def connected_before(self, t):
+        return max((c for c in self.connects if c <= t), default=None)
+
+    def who(self):
+        return " ".join(part for part in (self.manufacturer or self.product, self.vidpid) if part) or "unknown device"
+
+
+class HotplugTracker:
+    def __init__(self):
+        self.ports = {}
+        self.usb_events = deque(maxlen=256)
+        self.sleeps = deque(maxlen=16)  # [entry, exit] of each suspend; exit is None while it goes on
+        self.held = []
+        self.primed = set()
+        self.clock = 0.0
+
+    @property
+    def holding(self):
+        return bool(self.held) or any(port.dirty for port in self.ports.values())
+
+    def port(self, path):
+        if path not in self.ports:
+            self.ports[path] = UsbPort(path)
+        return self.ports[path]
+
+    def prime(self, entries):
+        for entry in entries:
+            self.observe(entry)
+            cursor = entry.get("__CURSOR")
+            if cursor:
+                self.primed.add(cursor)
+
+    def observe(self, entry):
+        t = entry_seconds(entry)
+        if t is not None:
+            self.clock = max(self.clock, t)
+        message = field_str(entry.get("MESSAGE"))
+        if is_sleep_edge(entry, message, SUSPEND_RE):
+            self.sleeps.append([self._required(t, message), None])
+        elif is_sleep_edge(entry, message, RESUME_RE):
+            self._wake(self._required(t, message))
+        elif is_kernel(entry):
+            path, body = usb_line(entry)
+            if path is not None:
+                self._observe_usb(path, body, t)
+
+    def _wake(self, t):
+        if self.sleeps and self.sleeps[-1][1] is None:
+            self.sleeps[-1][1] = t
+        else:
+            self.sleeps.append([t, t])
+
+    def _required(self, t, message):
+        if t is None:
+            raise ValueError(f"the journal entry {message!r} changes the USB state but has no usable __REALTIME_TIMESTAMP")
+        return t
+
+    def _observe_usb(self, path, body, t):
+        if DISCONNECT_RE.match(body):
+            self.port(path).disconnects.append(self._required(t, body))
+            self.usb_events.append(t)
+        elif NEW_DEVICE_RE.match(body):
+            port = self.port(path)
+            port.touch(self._required(t, body))
+            port.connects.append(t)
+            port.connect_total += 1
+            self.usb_events.append(t)
+        elif identity := IDENTIFY_RE.match(body):
+            self.port(path).identified(f"{identity['vid']}:{identity['pid']}", self._required(t, body))
+        elif name := MANUFACTURER_RE.match(body):
+            self.port(path).manufacturer = name["name"]
+        elif name := PRODUCT_RE.match(body):
+            self.port(path).product = name["name"]
+        elif ENUMERATION_FAILURE_RE.match(body) or PORT_DEAD_RE.match(body):
+            self.usb_events.append(self._required(t, body))
+
+    def process(self, entry, classified):
+        """Takes every journal entry with what classify() made of it; returns the records to ingest now."""
+        if entry.get("__CURSOR") not in self.primed:
+            self.observe(entry)
+        held = self._hold(entry, classified)
+        if held is not None:
+            self.held.append(held)
+        records = self._release(self.clock)
+        if held is None and classified is not None:
+            records.insert(0, classified)
+        return records
+
+    def _hold(self, entry, classified):
+        t = entry_seconds(entry)
+        if t is None:
+            return None
+        message = field_str(entry.get("MESSAGE"))
+        is_error = classified is not None and classified["source"] == "journal"
+        if not is_kernel(entry):
+            if is_error and classified["identifier"] in KNOCK_ON_IDENTIFIERS and KNOCK_ON_RE.search(message):
+                return UsbHeld(t, None, message, classified, False, False, False)
+            return None
+        path, body = usb_line(entry)
+        dead = PORT_DEAD_RE.match(body) is not None
+        failure = dead or ENUMERATION_FAILURE_RE.match(body) is not None
+        connect = path is not None and NEW_DEVICE_RE.match(body) is not None
+        if path is None or not (failure or is_error or connect):
+            return None
+        return UsbHeld(t, path, message, classified, failure, dead, connect)
+
+    def _release(self, now):
+        ready = [held for held in self.held if held.time + HOTPLUG_HOLD <= now]
+        self.held = [held for held in self.held if held.time + HOTPLUG_HOLD > now]
+        return self._judge_all(ready)
+
+    def flush(self):
+        """Judges whatever is still held, and publishes counts that changed since the last record."""
+        ready, self.held = self.held, []
+        records = self._judge_all(ready)
+        records += [self._record(port, changed=False) for port in self.ports.values() if port.dirty]
+        return records
+
+    def _judge_all(self, ready):
+        verdicts = [self._judge(held) for held in sorted(ready, key=lambda held: held.time)]
+        return [record for record in verdicts if record is not None]
+
+    def _judge(self, held):
+        if held.path is None:
+            return self._judge_knock_on(held)
+        if held.connect:
+            return self._judge_connect(held)
+        return self._judge_usb(held)
+
+    # A port that flaps with clean enumerations, no failure line in between, is judged by its connects alone.
+    def _judge_connect(self, held):
+        port = self.port(held.path)
+        if not self._flapping(port, held.time):
+            return None
+        if port.failure_total == 0:
+            port.counted = port.connect_total
+        port.state = max(port.state, UsbFault.FLAPPING)
+        return self._emit(port)
+
+    def _settling(self, t):
+        return any(start <= t and (end is None or t < end + HOTPLUG_SETTLE_AFTER_WAKE) for start, end in self.sleeps)
+
+    def _judge_knock_on(self, held):
+        near = any(held.time - HOTPLUG_KNOCK_ON <= e <= held.time + HOTPLUG_HOLD for e in self.usb_events)
+        return None if near or self._settling(held.time) else held.classified
+
+    def _disconnects(self, path):
+        for ancestor in (path, *usb_ancestors(path)):
+            if ancestor in self.ports:
+                yield from self.ports[ancestor].disconnects
+
+    def _gone(self, path, t):
+        if any(abs(d - t) <= HOTPLUG_HOLD for d in self._disconnects(path)):
+            return True
+        left = max((d for d in self._disconnects(path) if d <= t), default=None)
+        if left is None:
+            return False
+        connected = self.ports[path].connected_before(t) if path in self.ports else None
+        return connected is None or connected < left
+
+    # A device is no more settled than the hubs it hangs off.
+    def _stable(self, path, t):
+        connects = (self.ports[p].connected_before(t) for p in (path, *usb_ancestors(path)) if p in self.ports)
+        connected = max((c for c in connects if c is not None), default=None)
+        return (connected is None or t - connected >= HOTPLUG_STABLE) and not self._settling(t)
+
+    def _judge_usb(self, held):
+        t = held.time
+        if self._gone(held.path, t):
+            return None
+        stable = self._stable(held.path, t)
+        if not (held.failure or stable):
+            return None
+        port = self.port(held.path)
+        port.touch(t)
+        port.counted += 1
+        if stable:
+            port.errors += 1
+            port.last_error = (held.message.strip().splitlines() or ["(empty message)"])[0][:200]
+            port.state = max(port.state, UsbFault.FAILING)
+        if held.failure:
+            port.failures.append(t)
+            port.failure_total += 1
+        if held.dead:
+            port.state = UsbFault.DEAD
+        elif held.failure and not stable and self._flapping(port, t):
+            port.state = max(port.state, UsbFault.FLAPPING)
+        return self._emit(port)
+
+    def _flapping(self, port, t):
+        failures = sum(1 for f in port.failures if t - HOTPLUG_FAIL_WINDOW < f <= t)
+        cycles = sum(1 for c in port.connects if t - HOTPLUG_CYCLE_WINDOW < c <= t)
+        persisted = t - port.run_start >= HOTPLUG_FLAP_PERSIST
+        return persisted and (failures >= HOTPLUG_FAIL_THRESHOLD or cycles >= HOTPLUG_CYCLE_THRESHOLD)
+
+    def _emit(self, port):
+        if port.state == UsbFault.NONE:
+            return None
+        changed = port.state != port.emitted
+        if not changed and port.run_last - port.emitted_at < HOTPLUG_REFRESH:
+            port.dirty = True
+            return None
+        return self._record(port, changed)
+
+    def _record(self, port, changed):
+        raised, port.reraise = changed or port.reraise, False
+        port.emitted = port.state
+        port.emitted_at = port.run_last
+        port.dirty = False
+        port.key = port.key or f"{port.path}|{port.vidpid or 'unknown'}"
+        return {
+            "source": "usb", "title": USB_FAULT_TITLES[port.state], "summary": self._summary(port),
+            "identifier": port.key, "unit": "", "exe": "", "pid": "",
+            "fingerprint_message": "usb fault", "fault": True, "raise": raised,
+            "count": port.counted,
+            "usb_path": port.path, "usb_present": not self._gone(port.path, port.run_last),
+        }
+
+    def _summary(self, port):
+        if port.state == UsbFault.FAILING:
+            return (f"USB device {port.path} ({port.who()}) keeps failing while connected: "
+                    f"{plural(port.errors, 'error')}, last: {port.last_error}")
+        ending = "port left disabled" if port.state == UsbFault.DEAD else "still flapping"
+        return (f"USB port {usb_port_label(port.path)} ({port.who()}): "
+                f"{plural(port.failure_total, 'enumeration failure')}, {plural(port.connect_total, 'reconnect')} "
+                f"in {duration_text(port.run_last - port.run_start)}; {ending}")
+
+
+def recent_kernel_entries(seconds):
+    result = subprocess.run(["journalctl", "-k", "-q", "-o", "json", "--since", f"-{seconds}s"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(f"journalctl -k exited with status {result.returncode}: {result.stderr.strip()}")
+    return [json.loads(line) for line in result.stdout.splitlines() if line]
+
+
+def usb_capture_commands(classified):
+    path = classified["usb_path"]
+    mentions = "|".join("\\b" + name.replace(".", "\\.") + "\\b" for name in (path, usb_port_label(path)))
+    commands = [["journalctl", "-k", "--since", "-10min", "-o", "short-iso", "--grep", mentions], ["lsusb", "-t"]]
+    if classified["usb_present"]:
+        commands.append(["udevadm", "info", f"/sys/bus/usb/devices/{path}"])
+    return commands
+
+
 def capture_commands(classified):
     source = classified["source"]
+    if source == "usb":
+        return usb_capture_commands(classified)
     if source == "coredump":
         return [["coredumpctl", "info", "--", classified["pid"]]]
     if source == "unit":
@@ -564,6 +1033,8 @@ def capture_commands(classified):
         unit = classified["unit"]
         return [["journalctl", *user_flag, "-u", unit, "-n", "200"],
                 ["systemctl", *user_flag, "status", "--", unit]]
+    if source == "limit":
+        return [["journalctl", "-k", "-n", "200", "-o", "short-iso"]]
     pid = classified.get("pid")
     identifier = classified.get("identifier")
     if PID_RE.fullmatch(pid or ""):
@@ -587,7 +1058,7 @@ def capture_context(classified):
 
 
 def sorted_records(include_muted):
-    records = [r for r in all_records() if include_muted or r.get("status") != "muted"]
+    records = [r for r in all_records() if include_muted or r.get("status") != STATUS_MUTED]
     records.sort(key=lambda r: r.get("last_seen", ""), reverse=True)
     return records
 
@@ -628,23 +1099,36 @@ def journald_send(fields):
         sock.close()
 
 
-def cmd_report(args):
-    title = args.title
-    summary = args.summary or ""
+# The journal is the real user's, whatever HOME says: a report from a process under a scratch HOME (an agent or a draft test
+# running a tool by hand) would still land in the real error store. The title is printed, so nothing is lost silently.
+def refuse_foreign_home(title):
+    home, real_home = os.path.expanduser("~"), pwd.getpwuid(os.getuid()).pw_dir
+    if os.path.realpath(home) != os.path.realpath(real_home):
+        vekrona_cli.exit_unrecorded(PROG, f"not reporting {title!r}: HOME={home} is not the home of uid {os.getuid()} ({real_home}), "
+                                          "so this process is not the user's own")
+
+
+def send_report(title, summary, source):
     message = f"{title}: {summary}" if summary else title
     fields = {
         "SYSLOG_IDENTIFIER": "vekrona",
         "PRIORITY": "3",
-        "VEKRONA_SOURCE": args.source,
+        "VEKRONA_SOURCE": source,
         "VEKRONA_TITLE": title,
         "MESSAGE": message,
     }
     if summary:
         fields["VEKRONA_SUMMARY"] = summary
+    journald_send(fields)
+
+
+def cmd_report(args):
+    refuse_foreign_home(args.title)
     try:
-        journald_send(fields)
+        send_report(args.title, args.summary or "", args.source)
     except OSError as exc:
-        die(f"failed to write to the journal: {exc}")
+        # Not die(): its plain toast is the last resort of the caller, whose chokepoint sends it once for a failed report.
+        vekrona_cli.exit_unrecorded(PROG, f"failed to write to the journal: {exc}")
 
 
 def cmd_list(args):
@@ -654,21 +1138,22 @@ def cmd_list(args):
         return
     print(f"{'ID':<24} {'SOURCE':<9} {'STATUS':<8} {'COUNT':>5} {'AGE':>5}  TITLE")
     for rec in records:
-        print(f"{rec['id']:<24} {rec['source']:<9} {rec['status']:<8} "
-              f"{rec.get('count', 1):>5} {age_str(rec.get('last_seen')):>5}  {rec['title']}")
+        print(printable(f"{rec['id']:<24} {rec['source']:<9} {rec['status']:<8} "
+                        f"{rec.get('count', 1):>5} {age_str(rec.get('last_seen')):>5}  {one_line(rec['title'])}"))
 
 
 def cmd_show(args):
     rec = get_record_or_die(args.id)
     for key in ("id", "source", "title", "summary", "fingerprint", "first_seen",
                 "last_seen", "count", "status", "unit", "exe", "pid"):
-        print(f"{key}: {rec.get(key, '')}")
+        print(printable(f"{key}: {rec.get(key, '')}"))
     ctx = context_path(args.id)
     print()
     print(f"context: {ctx}")
     if os.path.isfile(ctx):
         print()
-        print(open(ctx).read())
+        with open(ctx, errors="replace", newline="") as f:
+            print(printable(f.read()))
 
 
 SKILL_NAME = "vekrona-diagnose"
@@ -741,58 +1226,23 @@ def cmd_prompt(args):
 def cmd_mark_launched(args):
     with store_lock():
         rec = get_record_or_die(args.id)
-        if rec.get("status") != "muted":
-            rec["status"] = "launched"
+        if rec.get("status") != STATUS_MUTED:
+            rec["status"] = STATUS_LAUNCHED
             save_record(args.id, rec)
             recompute_unread()
     print(f"launched: {args.id}")
 
 
-def rofi_theme_str_or_die():
-    theme_bin = resolve_tool("vekrona-render-theme")
-    if not theme_bin:
-        die("vekrona-render-theme not found (needed to theme the rofi picker)")
+def cmd_refresh_unread(args):
     try:
-        result = subprocess.run([theme_bin, "rofi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, timeout=10)
+        publish_unread_count()
     except OSError as exc:
-        die(f"failed to run vekrona-render-theme: {exc}")
-    if result.returncode != 0:
-        die(f"vekrona-render-theme rofi failed: {(result.stderr or '').strip()}")
-    return result.stdout
-
-
-def cmd_pick(args):
-    records = sorted_records(include_muted=False)
-    if not records:
-        print("no errors recorded")
-        failure = vekrona_cli.notify_send("vekrona", "no errors recorded", urgency="normal")
-        if failure:
-            die(f"failed to show the notification: {failure}")
-        return
-    if not shutil.which("rofi"):
-        die("rofi not found (install the 'rofi' package)")
-    lines = [
-        f"[{r['source']}] {r['title']} ×{r.get('count', 1)} — {age_str(r.get('last_seen'))}"
-        for r in records
-    ]
-    theme_str = rofi_theme_str_or_die()
-    result = subprocess.run(
-        ["rofi", "-dmenu", "-i", "-no-custom", "-p", "Errors", "-format", "i", "-theme-str", theme_str],
-        input="\n".join(lines), capture_output=True, text=True,
-    )
-    if result.returncode == 1 or (result.returncode == 0 and not result.stdout.strip()):
-        return
-    if result.returncode != 0:
-        die(f"rofi exited with status {result.returncode}: {(result.stderr or '').strip()}")
-    selection = result.stdout.strip()
-    if not selection.isdigit() or int(selection) >= len(records):
-        die(f"rofi returned an unexpected selection: {selection!r}")
-    error_id = records[int(selection)]["id"]
-    agent_bin = resolve_tool("vekrona-agent")
-    if not agent_bin:
-        die("vekrona-agent not found on PATH")
-    os.execvp(agent_bin, [agent_bin, "--pick", "--error", error_id])
+        title = f"cannot write the unread count: {exc}"
+        try:
+            send_report(title, "", "vekrona")
+        except OSError as report_exc:
+            title = f"{title} (and writing it to the journal failed: {report_exc})"
+        vekrona_cli.exit_unrecorded(PROG, title)
 
 
 def cmd_mute(args):
@@ -802,37 +1252,58 @@ def cmd_mute(args):
     print(f"muted: {args.id}")
 
 
+def mark_seen(error_id, rec):
+    rec["status"] = STATUS_SEEN
+    save_record(error_id, rec)
+
+
+def ack_all_new():
+    for rid in all_record_ids():
+        rec = load_record(rid)
+        if rec and rec.get("status") == STATUS_NEW:
+            mark_seen(rid, rec)
+
+
+def ack_ids(error_ids):
+    acked, missing = [], []
+    for rid in error_ids:
+        rec = load_record(rid)
+        if rec is None:
+            missing.append(rid)
+        elif rec.get("status") != STATUS_MUTED:
+            mark_seen(rid, rec)
+            acked.append(rid)
+    return acked, missing
+
+
 def cmd_ack(args):
-    if args.all and args.id:
-        die("ack takes either an id or --all, not both")
+    if args.all and args.ids:
+        vekrona_cli.exit_unrecorded(PROG, "ack takes either error ids or --all, not both")
+    if not args.all and not args.ids:
+        vekrona_cli.exit_unrecorded(PROG, "ack takes error ids or --all, and got neither")
     if args.all:
-        changed = False
         with store_lock():
-            for rid in all_record_ids():
-                rec = load_record(rid)
-                if rec and rec.get("status") == "new":
-                    rec["status"] = "seen"
-                    save_record(rid, rec)
-                    changed = True
-            if changed:
-                recompute_unread()
+            ack_all_new()
+            recompute_unread()
         print("acked all new errors")
         return
-    if not args.id:
-        die("ack requires an id or --all")
     with store_lock():
-        rec = get_record_or_die(args.id)
-        if rec.get("status") != "muted":
-            rec["status"] = "seen"
-            save_record(args.id, rec)
-            recompute_unread()
-    print(f"acked: {args.id}")
+        acked, missing = ack_ids(args.ids)
+        recompute_unread()
+    for rid in acked:
+        print(f"acked: {rid}")
+    # An id can be pruned or removed between the list that offered it and this call; nothing is left to ack then.
+    for rid in missing:
+        warn(f"no such error, nothing to ack: {rid}")
 
 
 def cmd_rm(args):
     with store_lock():
         get_record_or_die(args.id)
-        shutil.rmtree(record_dir(args.id), ignore_errors=True)
+        try:
+            shutil.rmtree(record_dir(args.id))
+        except OSError as exc:
+            die(f"failed to remove {args.id}: {exc}")
         recompute_unread()
     print(f"removed: {args.id}")
 
@@ -849,7 +1320,7 @@ def system_journal_readable():
 
 
 def journal_argv(use_system, cursor):
-    argv = ["journalctl", "-f", "-o", "json", "--show-cursor"]
+    argv = ["journalctl", "-f", "-o", "json"]
     if not use_system:
         argv.append("--user")
     if cursor:
@@ -863,8 +1334,8 @@ def read_cursor():
     path = cursor_file()
     if not os.path.isfile(path):
         return None
-    text = open(path).read().strip()
-    return text or None
+    with open(path) as f:
+        return f.read().strip() or None
 
 
 def cmd_watch(args):
@@ -874,260 +1345,107 @@ def cmd_watch(args):
     gi.require_version("GLibUnix", "2.0")
     from gi.repository import GLib, Gio, GLibUnix
 
-    def get_name_owner(bus, name):
-        try:
-            result = bus.call_sync(
-                "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
-                "GetNameOwner", GLib.Variant("(s)", (name,)),
-                GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 5000, None,
-            )
-            return result.unpack()[0]
-        except GLib.Error:
-            return None
-
     class Watcher:
-        def __init__(self, bus, loop, owner):
+        def __init__(self, bus, loop):
             self.bus = bus
             self.loop = loop
-            self.owner = owner
             self.exit_code = 0
             self.fingerprint_index = {}
-            self.notif_map = {}
             self.mute_cache = {}
-            self.toasted_invalid_mute_lines = set()
+            self.reported_invalid_mute_lines = set()
             self.default_mutes, self.invalid_default_mutes = load_default_mutes()
-            self.quarantine_toasted = set()
-            self.error_toast_times = {}
-            self.error_toast_suppressed = {}
+            self.quarantine_reported = set()
+            self.internal_reports = []
+            self.last_resort_toast_times = {}
+            self.last_resort_toasts_suppressed = {}
             self.unit_exits = UnitExitMemory()
-            self.notify_fail_count = 0
-            self.burst_window_start = None
-            self.burst_count = 0
-            self.burst_collapsed = 0
-            self.burst_flush_scheduled = False
+            self.hotplug = HotplugTracker()
+            self.hotplug_timer = None
             self.lines_since_cursor_flush = 0
             self.last_cursor = None
             self.capture_pool = ThreadPoolExecutor(max_workers=CAPTURE_WORKERS)
             self.captures_pending = 0
             self.journal_closed = False
             for rid in all_record_ids():
-                rec = load_record(rid, self._toast_once_quarantine)
+                rec = load_record(rid, self._report_quarantine_once)
                 if rec:
                     self.fingerprint_index[rec["fingerprint"]] = rid
-            self._load_notif_map()
+            self._publish_unread_count()
 
-        def _toast_once_quarantine(self, error_id, message):
-            if error_id in self.quarantine_toasted:
-                return
-            self.quarantine_toasted.add(error_id)
-            self.send_plain_toast("vekrona-errors", message)
-
-        def _load_notif_map(self):
-            path = notifications_file()
-            if not os.path.isfile(path):
-                return
+        # The shell's FileView only watches a file that exists when it starts, so the count is written even when no
+        # error was ever recorded.
+        def _publish_unread_count(self):
             try:
-                with open(path) as f:
-                    data = json.load(f)
-                if data.get("owner") != self.owner or not self.owner:
-                    return
-                loaded = {int(notif_id): tuple(mapping) for notif_id, mapping in data.get("map", {}).items()}
-            except (OSError, ValueError, TypeError, AttributeError) as exc:
-                warn(f"ignoring the corrupt notification map {path}: {exc!r}")
-                return
-            self.notif_map.update(loaded)
-
-        def _persist_notif_map(self):
-            data = {
-                "owner": self.owner,
-                "map": {str(k): list(v) for k, v in self.notif_map.items()},
-            }
-            try:
-                atomic_write(notifications_file(), json.dumps(data))
+                publish_unread_count(self._report_quarantine_once)
             except OSError as exc:
-                warn(f"failed to persist the notification map: {exc}")
+                message = f"cannot write the unread count: {exc}"
+                warn(message)
+                self.report_internal("cannot write the unread count", message)
 
-        def _on_name_owner_changed(self, connection, sender, path, iface, signal, params, user_data):
-            name, old_owner, new_owner = params.unpack()
-            if name != "org.freedesktop.Notifications":
+        # The watcher's own errors become records like any other, so they reach the robot's list and its dot.
+        # They are queued and ingested from the main loop because they arise while the store lock is held.
+        def report_internal(self, title, summary):
+            if not self.internal_reports:
+                GLib.idle_add(self.ingest_internal_reports)
+            self.internal_reports.append({
+                "source": "vekrona", "title": title, "summary": summary,
+                "identifier": PROG, "unit": "", "exe": "", "pid": "",
+            })
+
+        def ingest_internal_reports(self):
+            while self.internal_reports:
+                classified = self.internal_reports.pop(0)
+                try:
+                    self.ingest(classified)
+                except Exception as exc:
+                    message = f"{classified['title']}: {classified['summary']} (and recording it failed: {exc})"
+                    warn(message)
+                    # The store is what the robot shows, so a toast is all that is left to surface this.
+                    self._last_resort_toast(classified["title"], message)
+            self._quit_if_journal_closed_and_idle()
+            return False
+
+        def _report_quarantine_once(self, error_id, message):
+            if error_id in self.quarantine_reported:
                 return
-            self._set_owner(new_owner or None)
+            self.quarantine_reported.add(error_id)
+            self.report_internal("corrupt error record", message)
 
-        def _set_owner(self, owner):
-            self.owner = owner
-            self.notif_map.clear()
-            self._persist_notif_map()
-
-        def _daemon_renders_markup(self):
+        # The body is journal text sent as it is: vekrona-shell's notification server advertises no body markup and shows
+        # the body as plain text (Notifications.qml), so escaping it would show up as literal &amp; and &lt;.
+        def _send_toast(self, body):
             try:
-                result = self.bus.call_sync(
-                    "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
-                    "org.freedesktop.Notifications", "GetCapabilities", None,
-                    GLib.VariantType("(as)"), Gio.DBusCallFlags.NONE, 5000, None,
-                )
-                return "body-markup" in result.unpack()[0]
-            except Exception as exc:
-                warn(f"cannot ask the notification daemon whether it renders markup, escaping the body: {exc}")
-                return True
-
-        def _notify(self, title, body, actions, hints):
-            try:
-                if self._daemon_renders_markup():
-                    body = xml.sax.saxutils.escape(body)
                 variant = GLib.Variant(
                     "(susssasa{sv}i)",
-                    ("vekrona", 0, "", title, body, actions, hints, -1),
+                    ("vekrona", 0, "", PROG, body, [], {"urgency": GLib.Variant("y", URGENCY_CRITICAL)}, -1),
                 )
-                result = self.bus.call_sync(
+                self.bus.call_sync(
                     "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
                     "org.freedesktop.Notifications", "Notify", variant,
                     GLib.VariantType("(u)"), Gio.DBusCallFlags.NONE, 5000, None,
                 )
-                return result.unpack()[0]
             except Exception as exc:
-                self.notify_fail_count += 1
-                warn(f"failed to send a desktop notification (failure #{self.notify_fail_count}): {exc}")
-                return None
+                warn(f"failed to send a desktop notification: {exc}")
 
-        def send_plain_toast(self, title, body, urgency=2):
-            self._notify(title, body, [], {"urgency": GLib.Variant("y", urgency)})
-
-        def _toast_rate_limited(self, category, title, body):
+        def _last_resort_toast(self, category, body):
             now = time.monotonic()
-            last = self.error_toast_times.get(category)
-            if last is not None and now - last < INTERNAL_TOAST_RATE_LIMIT:
-                self.error_toast_suppressed[category] = self.error_toast_suppressed.get(category, 0) + 1
+            last = self.last_resort_toast_times.get(category)
+            if last is not None and now - last < LAST_RESORT_TOAST_RATE_LIMIT:
+                self.last_resort_toasts_suppressed[category] = self.last_resort_toasts_suppressed.get(category, 0) + 1
                 return
-            suppressed = self.error_toast_suppressed.pop(category, 0)
-            self.error_toast_times[category] = now
+            suppressed = self.last_resort_toasts_suppressed.pop(category, 0)
+            self.last_resort_toast_times[category] = now
             if suppressed:
                 body = f"{body} ({suppressed} more suppressed)"
-            self.send_plain_toast(title, body)
-
-        def _burst_allow(self):
-            now = time.monotonic()
-            if self.burst_window_start is None or now - self.burst_window_start > BURST_WINDOW:
-                self.burst_window_start = now
-                self.burst_count = 0
-            self.burst_count += 1
-            if self.burst_count <= BURST_LIMIT:
-                return True
-            self.burst_collapsed += 1
-            if not self.burst_flush_scheduled:
-                self.burst_flush_scheduled = True
-                remaining = max(1.0, BURST_WINDOW - (now - self.burst_window_start))
-                GLib.timeout_add(int(remaining * 1000), self._flush_burst)
-            return False
-
-        def _flush_burst(self):
-            n = self.burst_collapsed
-            self.burst_collapsed = 0
-            self.burst_flush_scheduled = False
-            if n > 0:
-                plural = "s" if n != 1 else ""
-                notif_id = self._notify("vekrona errors", f"{n} new error{plural}",
-                                         ["fix", "Open"],
-                                         {"urgency": GLib.Variant("y", 1)})
-                if notif_id is not None:
-                    self.notif_map[notif_id] = ("pick", None)
-                    self._persist_notif_map()
-            return False
-
-        def send_error_toast(self, error_id, record):
-            if not self._burst_allow():
-                return
-            urgency = 2 if record["source"] in ("coredump", "oom") else 1
-            body = record["summary"] or record["title"]
-            if record.get("count", 1) > 1:
-                body = f"{body} ×{record['count']}"
-            actions = ["fix", "Fix with agent", "mute", "Mute"]
-            hints = {"urgency": GLib.Variant("y", urgency)}
-            notif_id = self._notify(record["title"], body, actions, hints)
-            if notif_id is not None:
-                self.notif_map[notif_id] = ("error", error_id)
-                self._persist_notif_map()
-
-        def _spawn_and_watch(self, argv):
-            try:
-                proc = Gio.Subprocess.new(
-                    argv, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE)
-            except GLib.Error as exc:
-                self.send_plain_toast("vekrona", f"failed to launch agent: {exc}")
-                return
-            proc.communicate_utf8_async(None, None, self._on_spawned_done)
-
-        def _on_spawned_done(self, proc, result):
-            try:
-                proc.communicate_utf8_finish(result)
-            except GLib.Error as exc:
-                self.send_plain_toast("vekrona", f"failed to launch agent: {exc}")
-                return
-            status = proc.get_exit_status()
-            if status != 0:
-                self.send_plain_toast("vekrona", f"failed to launch agent: exit status {status}")
-
-        def launch_agent(self, error_id):
-            agent_bin = resolve_tool("vekrona-agent")
-            if not agent_bin:
-                self.send_plain_toast("vekrona", "failed to launch agent: vekrona-agent not found on PATH")
-                return
-            self._spawn_and_watch([agent_bin, "--pick", "--error", error_id])
-
-        def launch_pick(self):
-            self._spawn_and_watch([os.path.realpath(__file__), "pick"])
-
-        def do_mute(self, error_id):
-            with store_lock():
-                rec = load_record(error_id, self._toast_once_quarantine)
-                if rec is not None:
-                    apply_mute(rec)
-
-        def on_action_invoked(self, connection, sender, path, iface, signal, params, user_data):
-            if sender != self.owner:
-                return
-            try:
-                notif_id, action_key = params.unpack()
-            except Exception:
-                return
-            mapping = self.notif_map.get(notif_id)
-            if mapping is None:
-                self.send_plain_toast("vekrona", "this notification is stale; use Hyper+Shift+A", urgency=1)
-                return
-            kind, error_id = mapping
-            if action_key == "fix":
-                if kind == "error":
-                    self.launch_agent(error_id)
-                else:
-                    self.launch_pick()
-            elif action_key == "mute" and kind == "error":
-                self.do_mute(error_id)
-
-        def on_notification_closed(self, connection, sender, path, iface, signal, params, user_data):
-            if sender != self.owner:
-                return
-            try:
-                notif_id = params.unpack()[0]
-            except Exception:
-                return
-            if self.notif_map.pop(notif_id, None) is not None:
-                self._persist_notif_map()
-
-        def _stale(self, old_iso, now):
-            if not old_iso:
-                return True
-            try:
-                old = datetime.fromisoformat(old_iso)
-            except ValueError:
-                return True
-            return (now - old).total_seconds() > DEDUPE_WINDOW
+            self._send_toast(body)
 
         def _check_invalid_mute_lines(self):
             invalid = (self.mute_cache.get("invalid") or []) + self.invalid_default_mutes
             for line, reason in invalid:
-                if line in self.toasted_invalid_mute_lines:
+                if line in self.reported_invalid_mute_lines:
                     continue
-                self.toasted_invalid_mute_lines.add(line)
-                self.send_plain_toast("vekrona-errors", f"invalid mute pattern, ignored: {line} ({reason})")
+                self.reported_invalid_mute_lines.add(line)
+                self.report_internal("invalid mute pattern", f"invalid mute pattern, ignored: {line} ({reason})")
 
         def ingest(self, classified):
             with store_lock():
@@ -1136,10 +1454,10 @@ def cmd_watch(args):
         def _ingest_locked(self, classified):
             source = classified["source"]
             identifier = classified["identifier"]
-            title = classified["title"]
             summary = classified["summary"]
-            message_for_fp = f"{title}\n{summary}"
+            message_for_fp = classified.get("fingerprint_message", f"{classified['title']}\n{summary}")
             fingerprint = fingerprint_for(source, identifier, message_for_fp)
+            title = one_line(classified["title"])
             now = datetime.now(timezone.utc)
             now_iso = now.isoformat()
 
@@ -1152,36 +1470,36 @@ def cmd_watch(args):
 
             if muted:
                 if existing_id:
-                    rec = load_record(existing_id, self._toast_once_quarantine)
-                    if rec and rec.get("status") != "muted":
+                    rec = load_record(existing_id, self._report_quarantine_once)
+                    if rec and rec.get("status") != STATUS_MUTED:
                         apply_mute(rec)
                 return
 
             if existing_id:
-                rec = load_record(existing_id, self._toast_once_quarantine)
+                rec = load_record(existing_id, self._report_quarantine_once)
                 if rec is None:
                     existing_id = None
-                elif rec.get("status") == "muted":
+                elif rec.get("status") == STATUS_MUTED:
+                    return
+                elif classified.get("fault"):
+                    self._update_fault(existing_id, rec, classified, now_iso)
                     return
                 else:
-                    old_last_seen = rec.get("last_seen")
                     rec["count"] = rec.get("count", 1) + 1
                     rec["last_seen"] = now_iso
-                    became_new = rec.get("status") in ("seen", "launched")
+                    became_new = rec.get("status") in (STATUS_SEEN, STATUS_LAUNCHED)
                     if became_new:
-                        rec["status"] = "new"
+                        rec["status"] = STATUS_NEW
                     save_record(existing_id, rec)
                     if became_new:
                         recompute_unread()
-                    if became_new or self._stale(old_last_seen, now):
-                        self.send_error_toast(existing_id, rec)
                     return
 
             error_id = new_error_id(now, fingerprint)
             record = {
                 "id": error_id, "source": source, "title": title, "summary": summary,
                 "fingerprint": fingerprint, "first_seen": now_iso, "last_seen": now_iso,
-                "count": 1, "status": "new", "unit": classified.get("unit", ""),
+                "count": classified.get("count", 1), "status": STATUS_NEW, "unit": classified.get("unit", ""),
                 "exe": classified.get("exe", ""), "pid": classified.get("pid", ""),
             }
             save_record(error_id, record)
@@ -1191,9 +1509,21 @@ def cmd_watch(args):
                 self.fingerprint_index = {
                     fp: rid for fp, rid in self.fingerprint_index.items() if rid != removed_id
                 }
-            self._capture_context_then_toast(error_id, classified)
+            self._capture_context(error_id, classified)
 
-        def _capture_context_then_toast(self, error_id, classified):
+        # A fault the hotplug tracker follows keeps one record: its title, summary and count are rewritten in place, and
+        # only a change of state or a new episode (the tracker's decision) raises the record again.
+        def _update_fault(self, error_id, rec, classified, now_iso):
+            rec.update(title=classified["title"], summary=classified["summary"],
+                       count=classified["count"], last_seen=now_iso)
+            raised = classified["raise"] and rec.get("status") in (STATUS_SEEN, STATUS_LAUNCHED)
+            if raised:
+                rec["status"] = STATUS_NEW
+            save_record(error_id, rec)
+            if raised:
+                recompute_unread()
+
+        def _capture_context(self, error_id, classified):
             self.captures_pending += 1
             future = self.capture_pool.submit(capture_context, classified)
             future.add_done_callback(
@@ -1207,16 +1537,13 @@ def cmd_watch(args):
                 warn(f"failed to capture the context of {error_id}: {exc}")
                 context = f"(failed to capture context: {exc})\n"
             with store_lock():
-                record = load_record(error_id, self._toast_once_quarantine)
-                if record is not None:
+                if load_record(error_id, self._report_quarantine_once) is not None:
                     atomic_write(context_path(error_id), context)
-            if record is not None and record.get("status") != "muted":
-                self.send_error_toast(error_id, record)
             self._quit_if_journal_closed_and_idle()
             return False
 
         def _quit_if_journal_closed_and_idle(self):
-            if self.journal_closed and self.captures_pending == 0:
+            if self.journal_closed and self.captures_pending == 0 and not self.internal_reports:
                 self.loop.quit()
 
         def _persist_cursor(self, cursor):
@@ -1233,7 +1560,7 @@ def cmd_watch(args):
             except json.JSONDecodeError as exc:
                 message = f"skipping a journalctl line that is not JSON: {exc}: {line[:200]!r}"
                 warn(message)
-                self._toast_rate_limited("bad-journal-line", "vekrona-errors", message)
+                self.report_internal("skipped a journalctl line that is not JSON", message)
                 return
             cursor = entry.get("__CURSOR")
             classified = None
@@ -1241,15 +1568,36 @@ def cmd_watch(args):
                 if entry.get("MESSAGE_ID") == MESSAGE_ID_UNIT_PROCESS_EXITED:
                     self.unit_exits.remember(entry)
                 classified = classify(entry, self.unit_exits)
-                if classified is not None:
-                    self.ingest(classified)
+                for record in self.hotplug.process(entry, classified):
+                    self.ingest(record)
             except Exception as exc:
                 warn(f"failed to process a journal entry: {exc}")
-                self._toast_rate_limited("ingest-error", "vekrona-errors",
-                                          f"failed to process a journal entry: {exc}")
+                self.report_internal("failed to process a journal entry", str(exc))
+            self._rearm_hotplug_flush()
             self.lines_since_cursor_flush += 1
             if cursor and (classified is not None or self.lines_since_cursor_flush >= CURSOR_FLUSH_EVERY):
                 self._persist_cursor(cursor)
+
+        # Entries held back for their disconnect are judged once no entry has followed them for the hold time.
+        def _rearm_hotplug_flush(self):
+            if self.hotplug_timer is not None:
+                GLib.source_remove(self.hotplug_timer)
+                self.hotplug_timer = None
+            if self.hotplug.holding:
+                self.hotplug_timer = GLib.timeout_add(int(HOTPLUG_HOLD * 1000), self._flush_hotplug_timer)
+
+        def _flush_hotplug_timer(self):
+            self.hotplug_timer = None
+            self.flush_hotplug()
+            return False
+
+        def flush_hotplug(self):
+            try:
+                for record in self.hotplug.flush():
+                    self.ingest(record)
+            except Exception as exc:
+                warn(f"failed to record a USB fault: {exc}")
+                self.report_internal("failed to record a USB fault", str(exc))
 
         def flush_cursor_on_exit(self):
             if self.last_cursor and self.lines_since_cursor_flush:
@@ -1258,6 +1606,7 @@ def cmd_watch(args):
         def on_journal_died(self, reason):
             warn(f"{reason}; exiting so systemd restarts the watcher")
             self.exit_code = 1
+            self.flush_hotplug()
             self.flush_cursor_on_exit()
             self.journal_closed = True
             self._quit_if_journal_closed_and_idle()
@@ -1297,21 +1646,27 @@ def cmd_watch(args):
             stream.read_line_async(GLib.PRIORITY_DEFAULT, None, self._on_stderr_line)
 
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-    owner = get_name_owner(bus, "org.freedesktop.Notifications")
     loop = GLib.MainLoop()
-    watcher = Watcher(bus, loop, owner)
+    watcher = Watcher(bus, loop)
 
     use_system, reason = system_journal_readable()
     if not use_system:
         detail = f" ({reason})" if reason else ""
-        watcher.send_plain_toast(
-            "vekrona-errors",
+        watcher.report_internal(
+            "cannot read the system journal",
             "cannot read the system journal: add your user to wheel or systemd-journal "
             f"and log in again{detail}",
         )
         log(f"falling back to the user journal only: {reason}")
 
     cursor = read_cursor()
+    if cursor and use_system:
+        try:
+            watcher.hotplug.prime(recent_kernel_entries(HOTPLUG_PRIME))
+        except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
+            message = f"cannot learn the USB state from the kernel journal: {exc}"
+            warn(message)
+            watcher.report_internal("cannot learn the USB state from the kernel journal", message)
     try:
         proc = Gio.Subprocess.new(
             journal_argv(use_system, cursor),
@@ -1320,20 +1675,10 @@ def cmd_watch(args):
     except GLib.Error as exc:
         die(f"failed to start journalctl: {exc}")
 
-    bus.signal_subscribe(None, "org.freedesktop.Notifications", "ActionInvoked",
-                          "/org/freedesktop/Notifications", None, Gio.DBusSignalFlags.NONE,
-                          watcher.on_action_invoked, None)
-    bus.signal_subscribe(None, "org.freedesktop.Notifications", "NotificationClosed",
-                          "/org/freedesktop/Notifications", None, Gio.DBusSignalFlags.NONE,
-                          watcher.on_notification_closed, None)
-    bus.signal_subscribe(None, "org.freedesktop.DBus", "NameOwnerChanged",
-                          "/org/freedesktop/DBus", "org.freedesktop.Notifications",
-                          Gio.DBusSignalFlags.NONE, watcher._on_name_owner_changed, None)
-    current_owner = get_name_owner(bus, "org.freedesktop.Notifications")
-    if current_owner != watcher.owner:
-        watcher._set_owner(current_owner)
-
     def on_sigterm():
+        watcher.flush_hotplug()
+        # A failed flush only queues its report for the idle handler, which the quit below would never let run.
+        watcher.ingest_internal_reports()
         watcher.flush_cursor_on_exit()
         try:
             proc.send_signal(signal.SIGTERM)
@@ -1363,7 +1708,7 @@ def build_parser():
     p.add_argument("--source", choices=["vekrona", "manual"], default="manual")
     p.set_defaults(func=cmd_report)
 
-    p = sub.add_parser("watch", help="follow the journal and raise desktop notifications")
+    p = sub.add_parser("watch", help="follow the journal and record its errors")
     p.set_defaults(func=cmd_watch)
 
     p = sub.add_parser("list", help="list recorded errors")
@@ -1382,15 +1727,15 @@ def build_parser():
     p.add_argument("id", type=error_id_arg)
     p.set_defaults(func=cmd_mark_launched)
 
-    p = sub.add_parser("pick", help="pick an error from a rofi menu and launch the agent on it")
-    p.set_defaults(func=cmd_pick)
+    p = sub.add_parser("refresh-unread", help="write the unread count file, creating the store, so the shell can always watch it")
+    p.set_defaults(func=cmd_refresh_unread)
 
     p = sub.add_parser("mute", help="mute an error's fingerprint")
     p.add_argument("id", type=error_id_arg)
     p.set_defaults(func=cmd_mute)
 
-    p = sub.add_parser("ack", help="acknowledge one error, or every new error with --all")
-    p.add_argument("id", nargs="?", type=error_id_arg)
+    p = sub.add_parser("ack", help="acknowledge the given errors, or every new error with --all")
+    p.add_argument("ids", nargs="*", type=error_id_arg, metavar="id")
     p.add_argument("--all", action="store_true")
     p.set_defaults(func=cmd_ack)
 

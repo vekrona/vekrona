@@ -1,4 +1,5 @@
 import os
+import pwd
 import stat
 import unittest
 
@@ -6,24 +7,37 @@ from harness import SandboxTestCase, report_entry
 
 
 class FailuresAreSurfacedTest(SandboxTestCase):
-    def test_a_line_that_is_not_json_is_reported_and_later_entries_still_land(self):
+    def test_a_line_that_is_not_json_is_recorded_as_an_error_and_later_entries_still_land(self):
         result = self.sandbox.watch(["{this is not json", report_entry("after the bad line")])
         self.assertIn("not JSON", result.stderr)
-        self.assertIn("after the bad line", self.sandbox.run("list").stdout)
-        self.assertEqual(self.sandbox.sent_notifications()[0]["summary"], "vekrona-errors")
+        listed = self.sandbox.run("list").stdout
+        self.assertIn("skipped a journalctl line that is not JSON", listed)
+        self.assertIn("after the bad line", listed)
 
-    def test_a_problem_right_after_boot_is_reported(self):
-        result = self.sandbox.watch(["{this is not json"], just_booted=True)
-        self.assertIn("not JSON", result.stderr)
-        self.assertEqual([n["summary"] for n in self.sandbox.sent_notifications()], ["vekrona-errors"])
+    def test_an_error_that_cannot_be_recorded_falls_back_to_a_plain_toast(self):
+        self.sandbox.make_the_store_unwritable()
+        result = self.sandbox.watch(["{this is not json"])
+        self.assertIn("recording it failed", result.stderr)
+        (toast,) = self.sandbox.toasts_mentioning("not JSON")
+        self.assertEqual(toast["summary"], "vekrona-error")
+        self.assertEqual(toast["actions"], [])
 
-    def test_a_corrupt_notification_map_is_reported_and_ignored(self):
-        os.makedirs(self.sandbox.store_dir())
-        with open(os.path.join(self.sandbox.store_dir(), "notifications.json"), "w") as f:
-            f.write('{"owner": ":1.1", "map": [1, 2')
-        result = self.sandbox.watch([report_entry("still recorded")])
-        self.assertIn("corrupt notification map", result.stderr)
-        self.assertIn("still recorded", self.sandbox.run("list").stdout)
+    def test_an_error_that_cannot_be_recorded_right_after_boot_still_falls_back_to_a_toast(self):
+        self.sandbox.make_the_store_unwritable()
+        self.sandbox.watch(["{this is not json"], just_booted=True)
+        (toast,) = self.sandbox.toasts_mentioning("not JSON")
+        self.assertEqual(toast["summary"], "vekrona-error")
+
+    def test_a_repeating_error_that_cannot_be_recorded_is_toasted_once_a_minute(self):
+        self.sandbox.make_the_store_unwritable()
+        self.sandbox.watch(["{this is not json", "{this is not json either"])
+        self.assertEqual(len(self.sandbox.toasts_mentioning("not JSON")), 1)
+
+    def test_a_store_that_cannot_hold_the_unread_count_is_surfaced_at_start(self):
+        self.sandbox.make_the_store_unwritable()
+        result = self.sandbox.watch([])
+        self.assertIn("cannot write the unread count", result.stderr)
+        self.assertEqual(len(self.sandbox.toasts_mentioning("cannot write the unread count")), 1)
 
     @unittest.skipIf(os.geteuid() == 0, "root ignores directory permissions")
     def test_a_corrupt_record_that_cannot_be_quarantined_is_not_reported_as_quarantined(self):
@@ -51,16 +65,12 @@ class FailuresAreSurfacedTest(SandboxTestCase):
         self.assertIn("failed to show this error as a notification", result.stderr)
         self.assertIn("no notification daemon", result.stderr)
 
-    def test_pick_with_nothing_to_pick_fails_when_the_notification_cannot_be_shown(self):
-        result = self.sandbox.run("pick", extra_env={"FAKE_NOTIFY_STATUS": "1"})
+    def test_a_report_that_cannot_reach_the_journal_fails_without_a_toast_of_its_own(self):
+        result = self.sandbox.run("report", "--title", "lost", extra_env={"HOME": pwd.getpwuid(os.getuid()).pw_dir, "VEKRONA_JOURNAL_SOCKET": "/nonexistent/journal"})
         self.assertEqual(result.returncode, 1)
-        self.assertIn("failed to show the notification", result.stderr)
-
-    def test_pick_with_nothing_to_pick_notifies_and_succeeds(self):
-        result = self.sandbox.run("pick")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("notify-send -u normal -a vekrona -- vekrona no errors recorded",
-                      self.sandbox.external_calls())
+        self.assertIn("failed to write to the journal", result.stderr)
+        self.assertEqual(self.sandbox.external_calls(), [])
+        self.assertEqual(self.sandbox.sent_notifications(), [])
 
 
 if __name__ == "__main__":

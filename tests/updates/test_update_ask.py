@@ -3,7 +3,7 @@ import unittest
 
 from update_harness import UpdateAskTestCase
 
-ASK = ["--timeout", "300", "--title", "Updates available", "--body", "Agents: pi 1 → 2",
+ASK = ["--timeout", "300", "--title", "Updates available", "--body", "System packages: curl 1 → 2",
        "--action", "install=Install now", "--action", "skip=Not tonight"]
 
 
@@ -17,7 +17,7 @@ class AnswerTest(UpdateAskTestCase):
         process, notification = self.ask_notification(daemon)
         self.assertEqual(
             (notification["summary"], notification["body"], notification["actions"]),
-            ("Updates available", "Agents: pi 1 → 2", ["install", "Install now", "skip", "Not tonight"]))
+            ("Updates available", "System packages: curl 1 → 2", ["install", "Install now", "skip", "Not tonight"]))
         daemon.command(f"action {notification['id']} skip")
         self.finish(process)
 
@@ -102,15 +102,8 @@ class BodySentThroughTheDaemon:
 
 
 class PlainDaemonBodyTest(BodySentThroughTheDaemon, UpdateAskTestCase):
-    def test_a_daemon_without_markup_gets_the_body_as_it_is(self):
+    def test_the_body_is_sent_as_it_is_because_the_shell_shows_no_markup(self):
         self.assertEqual(self.sent_body(), BODY)
-
-
-class MarkupDaemonBodyTest(BodySentThroughTheDaemon, UpdateAskTestCase):
-    CAPABILITIES = "actions,body,body-markup"
-
-    def test_a_daemon_with_markup_gets_the_body_escaped(self):
-        self.assertEqual(self.sent_body(), "&lt;b&gt;a&lt;/b&gt; &amp; b")
 
 
 class FailureTest(UpdateAskTestCase):
@@ -119,6 +112,11 @@ class FailureTest(UpdateAskTestCase):
         self.assertNotEqual(status, 0)
         self.assertEqual(stdout, "")
         self.assertIn("vekrona-update-ask:", stderr)
+
+    def test_its_failure_is_left_to_the_caller_to_record_and_is_not_toasted_here(self):
+        self.run_ask(*ASK)
+        with open(self.notify_send_log) as f:
+            self.assertEqual(f.read(), "")
 
     def test_a_failure_to_close_the_notification_after_the_timeout_is_an_error_with_no_answer(self):
         daemon = self.start_daemon()

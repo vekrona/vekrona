@@ -9,7 +9,7 @@ source "$REPO/tests/lib.sh"
 
 # `vekrona-proton stage` insists on root. A user namespace that maps the caller to uid 0 gives it that, with no
 # privileges on the host.
-unshare -r true || die "cannot create a user namespace to stand in for root"
+require_user_namespaces
 
 mkdir -p "$work/bin" "$work/feeds" "$work/rpmdb" "$work/repo"
 export PATH="$work/bin:$PATH" VEKRONA_PROTON_REPO_DIR="$work/repo" \

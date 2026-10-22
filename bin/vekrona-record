@@ -1,29 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+
 UNIT_NAME="vekrona-record"
 UNIT="$UNIT_NAME.service"
 DEST_DIR="$HOME/Videos/Recordings"
 
+[[ $# -eq 1 && "$1" == toggle ]] || refuse "usage: vekrona-record toggle"
+
 if systemctl --user is-active --quiet "$UNIT"; then
-  systemctl --user kill --signal=SIGINT "$UNIT"
+  systemctl --user kill --signal=SIGINT "$UNIT" || die "vekrona-record: could not stop the recording of $UNIT"
   notify-send -a vekrona "Recording" "stopped, saved under $DEST_DIR"
 else
-  mkdir -p "$DEST_DIR"
+  mkdir -p "$DEST_DIR" || die "vekrona-record: cannot create $DEST_DIR"
   FILE="$DEST_DIR/$(date +%Y%m%d-%H%M%S).mp4"
 
   geometry="$(slurp)" || { echo "vekrona-record: selection cancelled" >&2; exit 1; }
   [[ -n "$geometry" ]] || { echo "vekrona-record: selection cancelled" >&2; exit 1; }
 
   systemctl --user reset-failed "$UNIT" >/dev/null 2>&1 || true
-  systemd-run --user --collect --unit="$UNIT_NAME" wf-recorder -g "$geometry" -f "$FILE"
+  systemd-run --user --collect --unit="$UNIT_NAME" wf-recorder -g "$geometry" -f "$FILE" \
+    || die "vekrona-record: systemd-run could not start wf-recorder"
 
   if systemctl --user is-active --quiet "$UNIT"; then
     notify-send -a vekrona "Recording" "started, will save to $FILE"
     echo "recording: started, $FILE"
   else
-    echo "vekrona-record: wf-recorder failed to start" >&2
-    journalctl --user -u "$UNIT_NAME" -n 5 >&2 || true
-    exit 1
+    die "vekrona-record: wf-recorder failed to start, see: journalctl --user -u $UNIT_NAME"
   fi
 fi

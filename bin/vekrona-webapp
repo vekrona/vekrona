@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   printf 'usage: %s <app>\n' "$(basename "$0")" >&2
-  exit 1
+  exit 2
 }
 
 app="${1:-}"
@@ -11,9 +11,22 @@ app="${1:-}"
 
 self="$(readlink -f "$0")"
 repo_root="$(cd "$(dirname "$self")/.." && pwd)"
-url_file="$repo_root/config/firefox/webapps/$app/url"
+webapps_dir="$repo_root/config/firefox/webapps"
 
-[[ -f "$url_file" ]] || { echo "unknown webapp: $app (no $url_file)" >&2; exit 1; }
+# The name must be one of the directories there as listed, not a path that merely leads to one: it becomes part of a
+# profile name and of the path of the file that holds the address to open.
+known=()
+for dir in "$webapps_dir"/*/; do
+  known+=("$(basename "$dir")")
+done
+found=0
+for name in "${known[@]}"; do
+  [[ "$name" != "$app" ]] || found=1
+done
+[[ "$found" -eq 1 ]] || { echo "unknown webapp: $app (known: ${known[*]})" >&2; exit 1; }
+
+url_file="$webapps_dir/$app/url"
+[[ -f "$url_file" ]] || { echo "webapp $app has no url file: $url_file" >&2; exit 1; }
 
 export MOZ_APP_REMOTINGNAME="vekrona-$app"
 exec firefox --name "vekrona-$app" -P "vekrona-$app" --new-window "$(cat "$url_file")"

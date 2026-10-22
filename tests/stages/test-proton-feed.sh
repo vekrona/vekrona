@@ -72,6 +72,17 @@ dies_with "points outside" "$(feed lookalike "$(release Stable 1.0.0 RolloutProp
 dies_with "points outside" "$(feed plain-http "$(release Stable 1.0.0 RolloutProportion 1 http://proton.me/download/x.rpm)")"
 log "ok: dies on an rpm URL outside https://proton.me/download/"
 
+for url in https://proton.me/download/../evil/x.rpm https://proton.me/download/a/%2e%2e/x.rpm 'https://proton.me/download/{a,b}.rpm' \
+  'https://proton.me/download/x.rpm?a=b' 'https://proton.me/download/'; do
+  dies_with "points outside" "$(feed "tricky-url" "$(release Stable 1.0.0 RolloutProportion 1 "$url")")"
+done
+log "ok: dies on an rpm URL that climbs out of the prefix or carries characters curl or the shell would interpret"
+
+for version in ../../etc/x '1.0/../x' '-rf' 'v1.0' '1.0 2.0' '1.0;x'; do
+  dies_with "is not a version" "$(feed "tricky-version" "$(release Stable "$version" RolloutProportion 1)")"
+done
+log "ok: dies on a feed version that is not a plain version, since it becomes part of a file name"
+
 dies_with "no valid sha512" "$(feed short-sum "$(release Stable 1.0.0 RolloutProportion 1 "" abc)")"
 log "ok: dies on a missing or malformed sha512"
 

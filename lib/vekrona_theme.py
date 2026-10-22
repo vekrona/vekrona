@@ -11,14 +11,13 @@ MODES = ("dark", "light")
 COLOR_NAMES = (
     "bg", "surface-1", "surface-2", "surface-3", "ink", "ink-muted", "ink-disabled", "line", "line-strong",
     "accent", "on-accent", "accent-ink", "focus", "focus-inner", "selected", "danger", "on-danger", "danger-ink",
-    "warning", "on-warning", "success", "on-success", "info", "on-info", "scrim",
+    "warning", "on-warning", "success", "on-success", "info", "on-info",
 )
 # Metric group -> (prefix stripped from the token name, required token names). The result is camelCased.
 METRIC_GROUPS = {
     "spacing": ("", ("space-1", "space-2", "space-3", "space-4", "space-6", "space-8")),
     "border": ("border-", ("border-hair", "border-control", "border-focus")),
     "size": ("size-", ("size-target", "size-bar", "size-icon-s", "size-icon-m", "size-icon-l", "size-icon-xl")),
-    "opacity": ("opacity-", ("opacity-scrim",)),
 }
 TYPE_STYLES = ("display", "headline", "title", "body", "body-strong", "label", "caption", "mono")
 FAMILIES = ("sans", "mono", "icons")
@@ -27,9 +26,10 @@ GENERIC_FAMILIES = ("system-ui", "sans-serif", "ui-monospace", "monospace")
 # Design rules the tokens state only in prose ("120 ms ... 200 ms").
 MOTION_MS = {"fast": 120, "popover": 200}
 
-HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$")
-PX = re.compile(r"^(\d+)px$")
-EM = re.compile(r"^(-?\d+(?:\.\d+)?)em$")
+# Matched with fullmatch: "$" would also accept a trailing newline.
+HEX_COLOR = re.compile(r"#[0-9a-f]{6}")
+PX = re.compile(r"([0-9]+)px")
+EM = re.compile(r"(-?[0-9]+(?:\.[0-9]+)?)em")
 
 
 class ThemeError(Exception):
@@ -50,7 +50,7 @@ def fmt_pt(pt):
 
 
 def _px(token, value):
-    match = PX.match(value) if isinstance(value, str) else None
+    match = PX.fullmatch(value) if isinstance(value, str) else None
     if not match:
         raise ThemeError(f"token {token}: '{value}' is not a size like 16px")
     return int(match.group(1))
@@ -59,7 +59,7 @@ def _px(token, value):
 def _tracking(token, value):
     if value is None:
         return 0
-    match = EM.match(value) if isinstance(value, str) else None
+    match = EM.fullmatch(value) if isinstance(value, str) else None
     if not match:
         raise ThemeError(f"token {token}: letterSpacing '{value}' is not like 0.02em")
     number = float(match.group(1))
@@ -134,15 +134,14 @@ def _build(raw):
         values = color_index[name].get("value")
         for mode in MODES:
             value = values.get(mode) if isinstance(values, dict) else None
-            if not isinstance(value, str) or not HEX_COLOR.match(value.lower()):
+            if not isinstance(value, str) or not HEX_COLOR.fullmatch(value.lower()):
                 raise ThemeError(f"token {name}: {mode} value is missing or not a #rrggbb color: {value!r}")
             colors[mode][name] = value.lower()
 
     metrics = {}
     for group, (prefix, names) in METRIC_GROUPS.items():
         index = _named(raw[group]["tokens"], f"{group}.tokens", names)
-        parse = (lambda n, v: float(v)) if group == "opacity" else _px
-        metrics[group] = {camel(name.removeprefix(prefix)): parse(name, index[name].get("value")) for name in names}
+        metrics[group] = {camel(name.removeprefix(prefix)): _px(name, index[name].get("value")) for name in names}
     metrics["motion"] = dict(MOTION_MS)
 
     families = {name: _families(raw["type"]["families"], name) for name in FAMILIES}
