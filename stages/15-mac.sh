@@ -12,11 +12,7 @@ AKMOD_WL_MIN_FOR_KERNEL_7_2=6.30.223.271-63
 AKMODS_CACHE_DIR=/var/cache/akmods
 AKMODS_LOG=/var/log/akmods/akmods.log
 SLEEP_HOOK_NAME=vekrona-brcmfmac-resume
-MODPROBE_DROPINS=(
-  /etc/modprobe.d/vekrona-broadcom-wl.conf
-  /etc/modprobe.d/vekrona-apple-gmux.conf
-  /etc/modprobe.d/vekrona-mbp12-audio.conf
-)
+REBOOT_PENDING_DIR=/run/vekrona-reboot-pending
 
 target_kver="$(uname -r)"
 
@@ -97,14 +93,23 @@ ensure_brcmfmac_resume_hook() {
   [[ -x "$hook_path" ]] || die "sleep hook is not executable: $hook_path"
 }
 
-boot_time() { awk '/^btime/ {print $2}' /proc/stat; }
-
-changed_since_boot() { [[ "$(stat -c %Y "$1")" -gt "$(boot_time)" ]]; }
+# Installs a modprobe drop-in from etc/modprobe.d. A changed one reaches the modules only at the next boot, and /run is
+# empty after a boot, so a marker there says "changed since boot" without comparing file times against a clock that can
+# be stepped.
+ensure_modprobe_dropin() {
+  local name="$1" dst="/etc/modprobe.d/$1" changed=1
+  if root_file_current "$ROOT/etc/modprobe.d/$name" "$dst" 0644; then changed=0; fi
+  ensure_root_file "$ROOT/etc/modprobe.d/$name" "$dst"
+  if [[ $changed -eq 1 ]]; then
+    root install -d "$REBOOT_PENDING_DIR"
+    root touch "$REBOOT_PENDING_DIR/$name"
+  fi
+}
 
 reboot_pending_reasons() {
-  local dropin
-  for dropin in "${MODPROBE_DROPINS[@]}"; do
-    if [[ -e "$dropin" ]] && changed_since_boot "$dropin"; then echo "$dropin changed since boot"; fi
+  local marker
+  for marker in "$REBOOT_PENDING_DIR"/*; do
+    if [[ -e "$marker" ]]; then echo "/etc/modprobe.d/${marker##*/} changed since boot"; fi
   done
   if has_broadcom_wl_wifi && ! wl_module_loaded; then echo "wl module is not loaded"; fi
   if has_facetime_hd_camera && [[ ! -d /sys/module/facetimehd ]]; then echo "facetimehd module is not loaded"; fi
@@ -113,12 +118,13 @@ reboot_pending_reasons() {
 require_network
 
 if has_broadcom_wl_wifi || has_facetime_hd_camera; then
+  die_if_secure_boot_blocks_akmods
   ensure_kernel_devel_for_rebuilds
 fi
 
 if has_broadcom_wl_wifi; then
   ensure_akmod_wl
-  ensure_root_file "$ROOT/etc/modprobe.d/vekrona-broadcom-wl.conf" /etc/modprobe.d/vekrona-broadcom-wl.conf
+  ensure_modprobe_dropin vekrona-broadcom-wl.conf
   ensure_wl_module
 fi
 
@@ -127,7 +133,7 @@ if has_brcmfmac_43602; then
 fi
 
 if has_apple_gmux_dual_gpu; then
-  ensure_root_file "$ROOT/etc/modprobe.d/vekrona-apple-gmux.conf" /etc/modprobe.d/vekrona-apple-gmux.conf
+  ensure_modprobe_dropin vekrona-apple-gmux.conf
 fi
 
 if has_facetime_hd_camera; then
@@ -137,7 +143,7 @@ fi
 ensure_pkg libva-intel-driver
 
 if is_macbookpro12_1; then
-  ensure_root_file "$ROOT/etc/modprobe.d/vekrona-mbp12-audio.conf" /etc/modprobe.d/vekrona-mbp12-audio.conf
+  ensure_modprobe_dropin vekrona-mbp12-audio.conf
 fi
 
 warn "fans run on firmware defaults: mbpfan is not packaged for Fedora 44, so no fan control is installed"

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Run by the akmods@<kver> drop-in (etc/systemd/system/akmods@.service.d/vekrona-dracut.conf) after a successful kmod
+# build, as its only step. kernel-install built the initramfs before the module existed and UPDATEDEFAULT=no kept the
+# kernel out of the GRUB default; this regenerates the initramfs and promotes the newest kernel. An older kernel (a
+# downgrade) only gets its initramfs, because it must not take the default from the newest.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/update.sh"
+
+[[ $# -eq 1 ]] || { echo "usage: vekrona-kernel-ready KERNEL_VERSION" >&2; exit 2; }
+kver="$1"
+
+require_root
+newest="$(newest_installed_kver)"
+if [[ "$kver" == "$newest" ]]; then
+  ensure_kernel_boots_with_nvidia "$kver"
+else
+  with_kernel_lock ensure_nvidia_initramfs "$kver"
+fi

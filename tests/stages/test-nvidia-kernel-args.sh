@@ -10,7 +10,7 @@ mkdir -p "$work/bin" "$work/proc" "$work/boot" "$work/etc/kernel" "$work/etc/dra
 export VEKRONA_SYSFS_ROOT="$work"
 
 # Fakes: grubby keeps its args in $work/grubby-args and logs updates; lsinitrd prints $LSINITRD_OUT;
-# modinfo answers -F license from $MODINFO_LICENSE and -n from $MODINFO_PATH (exit 1 when unset).
+# modinfo answers -F license from $MODINFO_LICENSE, -F version from $MODINFO_VERSION and -n from $MODINFO_PATH (exit 1 when MODINFO_LICENSE is unset).
 cat > "$work/bin/grubby" <<'FAKE'
 #!/usr/bin/env bash
 case "$1" in
@@ -36,6 +36,7 @@ cat > "$work/bin/modinfo" <<'FAKE'
 case "$*" in
   *"-n nvidia"*) printf '%s\n' "$MODINFO_PATH" ;;
   *"-F license nvidia"*) printf '%s\n' "$MODINFO_LICENSE" ;;
+  *"-F version nvidia"*) printf '%s\n' "$MODINFO_VERSION" ;;
 esac
 FAKE
 cat > "$work/bin/systemctl" <<'FAKE'
@@ -233,6 +234,36 @@ if (LSINITRD_STATUS=1 initramfs_has_nvidia_options 7.0) 2>"$work/err"; then die 
 grep -q "lsinitrd -f etc/modprobe.d/vekrona-nvidia.conf failed" "$work/err" || die "a failing lsinitrd -f did not surface its error"
 log "ok: a failing lsinitrd -f surfaces instead of reading as stale"
 
+# --- nvidia_reboot_reason ---
+
+# The loaded module's age is the mtime sysfs gives /sys/module/nvidia; touch -d pins both clocks, so no test waits.
+loaded_module="$work/sys/module/nvidia"
+reboot_conf="$work$NVIDIA_MODPROBE_CONF"
+mkdir -p "$loaded_module"
+printf '615.1\n' > "$loaded_module/version"
+printf 'options nvidia\n' > "$reboot_conf"
+export MODINFO_LICENSE=NVIDIA MODINFO_VERSION=615.1
+
+touch -d '2026-01-01 10:00:00' "$reboot_conf"
+touch -d '2026-01-01 10:05:00' "$loaded_module"
+[[ -z "$(nvidia_reboot_reason)" ]] || die "a module loaded after the options were written was reported as pending"
+
+touch -d '2026-01-01 10:10:00' "$reboot_conf"
+[[ "$(nvidia_reboot_reason)" == *"$NVIDIA_MODPROBE_CONF changed after the nvidia module loaded"* ]] \
+  || die "a module loaded live before the options existed (akmods' modprobe) was not reported as pending"
+
+touch -d '2026-01-01 10:00:00' "$reboot_conf"
+MODINFO_VERSION=615.2 nvidia_reboot_reason | grep -qF 'loaded nvidia 615.1, on disk 615.2' || die "a stale loaded version was not reported as pending"
+
+rm "$loaded_module/version"
+[[ "$(nvidia_reboot_reason)" == "the nvidia module is not loaded" ]] || die "an unloaded module was not reported"
+
+rm "$reboot_conf"
+if (nvidia_reboot_reason) 2>"$work/err"; then die "a missing modprobe options file was not reported"; fi
+grep -q "missing $NVIDIA_MODPROBE_CONF" "$work/err" || die "a missing modprobe options file did not surface its error"
+unset MODINFO_LICENSE MODINFO_VERSION
+log "ok: only a module loaded after the modprobe options, at the on-disk version, counts as rebooted"
+
 # --- nvidia_suspend_notifiers_off ---
 
 mkdir -p "$work/proc/driver/nvidia"
@@ -248,17 +279,37 @@ log "ok: only UseKernelSuspendNotifiers: 0 counts as effective"
 DROPIN="$(<"$ROOT/etc/systemd/system/akmods@.service.d/vekrona-dracut.conf")"
 UNIT=$'# /usr/lib/systemd/system/akmods@.service\n[Service]\nExecStart=/usr/sbin/akmods --kernels %i\n'
 
-akmods_unit() { SYSTEMCTL_OUT="$1" akmods_dropin_active 7.0; }
+akmods_unit() { SYSTEMCTL_OUT="$1" akmods_dropin_active akmods@7.0.service; }
 
 akmods_unit "$UNIT"$'\n'"$DROPIN" || die "the shipped drop-in was not recognised as active"
-log "ok: the shipped akmods@ drop-in counts as active"
+grep -qx 'Environment=HOME=/root' <<<"$DROPIN" || die "the drop-in does not set HOME, which vekrona-kernel-ready (lib/common.sh) requires of a system unit"
+log "ok: the shipped akmods@ drop-in counts as active and gives vekrona-kernel-ready its HOME"
 
 ! akmods_unit "$UNIT" || die "a unit without the drop-in was reported active"
-! akmods_unit "$UNIT"$'\n# ExecStartPost=/usr/bin/dracut -f --kver %i' || die "a commented-out dracut line was reported active"
-! akmods_unit "$UNIT"$'\nExecStartPost=/usr/bin/dracut -f --kver %i --no-hostonly' || die "a near-miss dracut line was reported active"
-log "ok: no drop-in, a commented line and a near-miss do not count"
+log "ok: a unit without the drop-in does not count"
 
-if (SYSTEMCTL_STATUS=1 akmods_dropin_active 7.0) 2>"$work/err"; then die "a failing systemctl was not reported"; fi
+READY_LINE='ExecStartPost=/usr/local/lib/vekrona/libexec/vekrona-kernel-ready %i'
+! akmods_unit "$UNIT"$'\n# '"$READY_LINE" || die "a commented-out kernel-ready line was reported active"
+! akmods_unit "$UNIT"$'\n'"$READY_LINE --now" || die "a near-miss kernel-ready line was reported active"
+! akmods_unit "$UNIT"$'\nExecStartPost=/usr/bin/dracut -f --kver %i' || die "a drop-in that only runs dracut was reported active"
+! grep -q '^ExecStartPost=/usr/bin/dracut' <<<"$DROPIN" || die "the shipped drop-in runs dracut itself, which would race an update's own pass; vekrona-kernel-ready regenerates under the kernel lock"
+log "ok: the drop-in counts only with vekrona-kernel-ready, which is its only step"
+
+BOOT_DROPIN="$(<"$ROOT/etc/systemd/system/akmods.service.d/vekrona-dracut.conf")"
+BOOT_UNIT=$'# /usr/lib/systemd/system/akmods.service\n[Service]\nExecStart=/usr/sbin/akmods --from-init\n'
+
+boot_unit() { SYSTEMCTL_OUT="$1" akmods_dropin_active akmods.service; }
+
+boot_unit "$BOOT_UNIT"$'\n'"$BOOT_DROPIN" || die "the shipped akmods.service drop-in was not recognised as active"
+! boot_unit "$BOOT_UNIT" || die "akmods.service without the drop-in was reported active"
+! boot_unit "$BOOT_UNIT"$'\n'"$DROPIN" || die "the akmods@ drop-in was accepted for akmods.service"
+[[ -x "$ROOT/libexec/vekrona-nvidia-initramfs" ]] || die "the script the akmods.service drop-in runs is missing or not executable"
+log "ok: the shipped akmods.service drop-in counts as active, and only its own line does"
+
+if (akmods_dropin_active akmods-keygen.target) 2>"$work/err"; then die "a unit without a shipped drop-in was reported active"; fi
+grep -q "no initramfs drop-in is shipped for akmods-keygen.target" "$work/err" || die "an unknown unit did not surface its error"
+
+if (SYSTEMCTL_STATUS=1 akmods_dropin_active akmods@7.0.service) 2>"$work/err"; then die "a failing systemctl was not reported"; fi
 grep -q "cannot read unit akmods@7.0.service" "$work/err" || die "a failing systemctl did not surface its error"
 log "ok: an unreadable unit surfaces instead of reading as inactive"
 

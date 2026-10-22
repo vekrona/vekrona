@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# akmods.service (every boot) is the drop-in's ExecStartPost: it rebuilds the running kernel's initramfs when an
+# nvidia build just made it stale, and does nothing on the boots where akmods built nothing.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$ROOT/lib/common.sh"
+source "$ROOT/lib/update.sh" # points the error reporter at /usr/bin/true: this root copy has no bin/vekrona-error
+
+require_root
+# The lock keeps this pass and an update's (or vekrona-kernel-ready's) from running dracut on the same image at once.
+with_kernel_lock regenerate_nvidia_initramfs_if_older "$(uname -r)"
