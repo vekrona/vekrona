@@ -9,13 +9,12 @@ BarPill {
     required property var bar
     readonly property real menuWidth: 280 - 2 * VekronaTheme.space4
 
-    icon: "keyboard"
     value: Keyboard.available && Keyboard.current ? Keyboard.current.code : "--"
     ariaName: "Keyboard layout: " + (Keyboard.current?.name ?? "unknown")
     visible: Keyboard.layouts.length > 1
     // A pill that changes width on a switch shifts the right-aligned cluster, and with it the menu anchored to the pill.
-    // Every code is two letters (Keyboard.layoutFor), and no two letters are wider than these.
-    widestValue: "WW"
+    // It reserves the width of the widest code among the layouts, and no more, so no value leaves slack in the bar.
+    widestValue: Keyboard.layouts.map(layout => layout.code)
 
     // Right click is the one-handed switch; the wheel does nothing, so a trackpad brushing the bar never changes what you type.
     onClicked: bar.togglePopout(popout)
@@ -100,7 +99,7 @@ BarPill {
             ariaName: "Change keyboard layouts, opens settings"
             onClicked: {
                 root.bar.openPopout = null;
-                Exec.detached(["qs", "-c", "vekrona-shell", "ipc", "call", "launcher", "settings", "keyboard"]);
+                root.bar.launcher.openSettings("keyboard");
             }
         }
     }

@@ -40,14 +40,10 @@ Row {
                 id: mouse
                 anchors.fill: parent
                 hoverEnabled: true
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
                 cursorShape: Qt.PointingHandCursor
-                onClicked: event => {
-                    if (event.button === Qt.RightButton || item.modelData.onlyMenu)
-                        menu.open();
-                    else
-                        item.modelData.activate();
-                }
+                // An icon with a menu shows it; one without asks the app to act, as for a window to open. Opening the
+                // menu of an icon without one is an error the shell logs.
+                onClicked: item.modelData.hasMenu ? menu.open() : item.modelData.activate()
             }
         }
     }

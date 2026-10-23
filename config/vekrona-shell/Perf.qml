@@ -1,68 +1,59 @@
 import QtQuick
-import Quickshell.Io
 import "Vekrona"
 import "."
 
-Row {
+// One frame split by a single line: the CPU load fills the left half and the memory use the right half. A click opens btop in a
+// window of its own, and the next one closes it.
+BarPill {
     id: root
 
-    property real previousBusy: 0
-    property real previousTotal: 0
-    property int cpuPercent: 0
-    property int ramPercent: 0
+    readonly property string monitorUnit: "vekrona-perf"
+    readonly property string monitorClass: "vekrona.perf"
 
-    function readCpu(stat: string): void {
-        const fields = stat.split("\n")[0].trim().split(/\s+/).slice(1, 9).map(Number);
-        const idle = fields[3] + fields[4];
-        const total = fields.reduce((sum, n) => sum + n, 0);
-        const busy = total - idle;
-        if (previousTotal > 0 && total > previousTotal)
-            cpuPercent = Math.round(100 * (busy - previousBusy) / (total - previousTotal));
-        previousBusy = busy;
-        previousTotal = total;
+    // The frame is border, half, separator, half, border across.
+    readonly property int halfWidth: 5
+
+    // A fill that grows from the bottom of its half to its percent, inside the frame.
+    component Fill: Rectangle {
+        property int percent: 0
+
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: VekronaTheme.borderControl
+        width: root.halfWidth
+        height: Math.round((parent.height - 2 * VekronaTheme.borderControl) * percent / 100)
+        color: root.ink
     }
 
-    function readRam(meminfo: string): void {
-        const kb = key => Number(meminfo.match(new RegExp("^" + key + ":\\s+(\\d+)", "m"))[1]);
-        ramPercent = Math.round(100 * (kb("MemTotal") - kb("MemAvailable")) / kb("MemTotal"));
-    }
+    keepIconSlot: true
+    ariaName: "CPU " + SystemLoad.cpuPercent + "%, memory " + SystemLoad.ramPercent + "%"
+    onClicked: Exec.toggleDetached(monitorUnit, Exec.inTerminalAs(monitorClass, ["btop"]), Exec.home)
 
-    Timer {
-        interval: 2000
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: {
-            stat.reload();
-            meminfo.reload();
+    Rectangle {
+        // Whole pixels, so no edge of the frame blurs.
+        x: Math.round((parent.width - width) / 2)
+        anchors.verticalCenter: parent.verticalCenter
+        width: 3 * VekronaTheme.borderControl + 2 * root.halfWidth
+        height: VekronaTheme.iconS - 2
+        color: "transparent"
+        border.width: VekronaTheme.borderControl
+        border.color: root.ink
+
+        Fill {
+            x: VekronaTheme.borderControl
+            percent: SystemLoad.cpuPercent
         }
-    }
 
-    FileView {
-        id: stat
-        path: "/proc/stat"
-        onLoaded: root.readCpu(text())
-    }
+        Rectangle {
+            x: VekronaTheme.borderControl + root.halfWidth
+            y: VekronaTheme.borderControl
+            width: VekronaTheme.borderControl
+            height: parent.height - 2 * VekronaTheme.borderControl
+            color: root.ink
+        }
 
-    FileView {
-        id: meminfo
-        path: "/proc/meminfo"
-        onLoaded: root.readRam(text())
-    }
-
-    BarPill {
-        icon: "speed"
-        value: root.cpuPercent + " %"
-        widestValue: "100 %"
-        ariaName: "CPU load"
-        onClicked: Exec.detached(Exec.inTerminal(["btop"]))
-    }
-
-    BarPill {
-        icon: "memory"
-        value: root.ramPercent + " %"
-        widestValue: "100 %"
-        ariaName: "Memory use"
-        onClicked: Exec.detached(Exec.inTerminal(["btop"]))
+        Fill {
+            x: 2 * VekronaTheme.borderControl + root.halfWidth
+            percent: SystemLoad.ramPercent
+        }
     }
 }

@@ -9,13 +9,47 @@ BarPill {
     required property var bar
     readonly property real wheelStep: 0.05
 
-    icon: Audio.glyph
-    value: Audio.percent + " %"
-    widestValue: "100 %"
+    // An icon, as for every bar widget, and the words instead of it while there is no default sink: the interface behind a KVM is away.
+    icon: Audio.hasOutput ? Audio.glyph : ""
+    value: Audio.hasOutput ? "" : Audio.levelText
     ariaName: "Sound"
     onClicked: bar.togglePopout(popout)
     onRightClicked: Audio.toggleMute()
-    onWheel: delta => Audio.setVolume(Audio.volume + (delta > 0 ? wheelStep : -wheelStep))
+    onWheel: delta => {
+        const steps = notches.steps(delta);
+        if (steps !== 0)
+            Audio.setVolume(Audio.volume + steps * wheelStep);
+    }
+
+    WheelSteps {
+        id: notches
+    }
+
+    // The volume is the speaker's fill: the filled glyph, shown from the bottom of the glyph's ink up to the volume. A muted speaker has none.
+    Item {
+        id: fill
+        readonly property real inkTop: fillGlyph.baselineOffset + inkBounds.tightBoundingRect.y
+        readonly property real inkHeight: inkBounds.tightBoundingRect.height
+
+        visible: !Audio.muted
+        width: parent.width
+        y: inkTop + inkHeight * (1 - Math.max(0, Math.min(1, Audio.volume)))
+        height: parent.height - y
+        clip: true
+
+        TextMetrics {
+            id: inkBounds
+            font: fillGlyph.font
+            text: fillGlyph.text
+        }
+
+        Pictogram {
+            id: fillGlyph
+            y: -fill.y
+            name: Audio.glyph
+            filled: true
+        }
+    }
 
     Popout {
         id: popout

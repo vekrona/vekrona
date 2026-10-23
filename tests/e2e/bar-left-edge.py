@@ -12,7 +12,7 @@ from bar_widgets import find_widgets
 
 def main():
     path, bar_height, icon_size, group_join = sys.argv[1], *map(int, sys.argv[2:5])
-    _, _, widgets, _, _ = find_widgets(path, bar_height, icon_size, group_join)
+    _, widgets, _, _ = find_widgets(path, bar_height, icon_size, group_join)
     if not widgets:
         print("found no widget in the right-side bar")
         sys.exit(1)
