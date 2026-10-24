@@ -24,6 +24,10 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
   (`etc/yum.repos.d/protonvpn-stable.repo`, tray through vekrona-shell's SNI
   tray); Mail (with Calendar), Pass and Authenticator are unsigned RPMs from
   Proton's feeds, sha512-checked into a local dnf repo by `vekrona-proton`.
+- Native, pinned GitHub RPM: rune (default editor for `$EDITOR`, Markdown and
+  plain text; a terminal app, so it needs no webapp sandbox and has no web
+  version; sha256-pinned in `lib/common.sh`, bumped by hand, see
+  `docs/updates.md`).
 - Daemon plus webapp: Syncthing (Fedora RPM user service for file access; its
   GUI at `127.0.0.1:8384` is a webapp behind a generated login, see
   `docs/threat-model.md`).

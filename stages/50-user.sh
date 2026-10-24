@@ -209,7 +209,9 @@ done < <(vekrona_webapp_profile_dirs)
 # vekrona-lock.service starts it as `qs -c vekrona-lock`, which looks under ~/.config/quickshell.
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-lock" "$HOME/.config/quickshell/vekrona-lock"
 
-ensure_default_browser
+ensure_symlink "$VEKRONA_ROOT/config/applications/vekrona-rune.desktop" "$HOME/.local/share/applications/vekrona-rune.desktop"
+ensure_default_app "$VEKRONA_BROWSER_DESKTOP" "${VEKRONA_BROWSER_MIMES[@]}"
+ensure_default_app "$VEKRONA_EDITOR_DESKTOP" "${VEKRONA_EDITOR_MIMES[@]}"
 
 ensure_symlink "$VEKRONA_ROOT/config/scopebuddy/scb.conf" "$HOME/.config/scopebuddy/scb.conf"
 ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/MangoHud/MangoHud.conf"

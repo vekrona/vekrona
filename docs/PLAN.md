@@ -112,7 +112,7 @@ vekrona/
                         # ensure_dir ensure_system_unit ensure_user_unit_enabled ensure_user_in_group 
                         # versionlock_has versionlock_evrs versionlock_installed kernel_cmdline_has grubby_has_arg 
                         # ensure_kernel_arg session_is_sway session_started_by_gdm assert assert_file_contains 
-                        # firefox_profile_root ensure_default_browser wlroots_package_name vekrona_desktop_pkgs (VEKRONA_DESKTOP_PKGS: the
+                        # firefox_profile_root ensure_default_app wlroots_package_name vekrona_desktop_pkgs (VEKRONA_DESKTOP_PKGS: the
                         # single list of packages vekrona installs and relies on, shared by 90a/90b's dnf mark user,
                         # 90b's dnf protected_packages, and 70-verify's post-cleanup package check)
   stages/

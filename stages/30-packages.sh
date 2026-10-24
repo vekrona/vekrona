@@ -21,6 +21,37 @@ ensure_rpm_key_absent() {
   ! gpg_pubkey_installed "$fingerprint_lower" || die "rpm signing key $fingerprint_lower is still installed after rpm -e $nvr"
 }
 
+# Installs the RPM from a root-owned copy whose sha256 is checked here: the RPM is unsigned, so the pin is the only trust anchor,
+# and root installs exactly the bytes checked, which a process of the user could not swap in the download directory.
+install_pinned_rune_rpm() {
+  local sum="$1" rpm_file="$2" root_dir="$3" copy
+  copy="$(root_owned_copy "$rpm_file" "$root_dir")"
+  assert_checksum sha256 "$sum" "$copy"
+  log "installing: ${copy##*/} (sha256 verified against the pin)"
+  root dnf install -y "$copy"
+}
+
+download_and_install_pinned_rune() {
+  local sum="$1" url="$2" download_dir="$3"
+  log "downloading: $url"
+  download_file "$url" "$download_dir/rune.rpm"
+  with_root_scratch_dir install_pinned_rune_rpm "$sum" "$download_dir/rune.rpm"
+}
+
+ensure_rune() {
+  local arch sum url pinned
+  arch="$(uname -m)"
+  sum="$(rune_rpm_sha256 "$arch")"
+  url="$(rune_rpm_url "$arch")"
+  pinned="$(rune_pinned_nvr)"
+  if [[ "$(rune_installed_nvr)" == "$pinned" ]]; then
+    log "package present: rune-$pinned"
+    return 0
+  fi
+  with_scratch_dir download_and_install_pinned_rune "$sum" "$url"
+  [[ "$(rune_installed_nvr)" == "$pinned" ]] || die "rune-$pinned did not install (rune is $(rune_installed_nvr))"
+}
+
 for pkg in "${!VEKRONA_PINNED_PKGS[@]}"; do
   ensure_pkg_from_repo "${VEKRONA_PINNED_PKGS[$pkg]}" "$pkg"
 done
@@ -68,6 +99,8 @@ root "$ROOT/bin/vekrona-proton" stage
 ensure_root_file "$ROOT/etc/yum.repos.d/vekrona-proton.repo" /etc/yum.repos.d/vekrona-proton.repo
 mapfile -t proton_pkgs < <(proton_package_names)
 ensure_pkg "${proton_pkgs[@]}"
+
+ensure_rune
 
 declare -a desktop_pkgs
 read_pkg_list desktop_pkgs vekrona_desktop_pkgs

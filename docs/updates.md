@@ -156,6 +156,22 @@ warns when a lock's `.fcNN` suffix no longer matches the running Fedora
 version, which is the signal that a lock is now holding back more than
 intended.
 
+## rune
+
+rune is the default editor (`$EDITOR`, and `.md` and text files open in Ghostty). It is a Rust terminal Markdown
+editor from [aka-rider/rune](https://github.com/aka-rider/rune), installed by stage `30-packages` from the GitHub
+release RPM `rune-<ver>-1.<arch>.rpm`. `vekrona-update` does not update it. To bump it by hand:
+
+1. Change `VEKRONA_RUNE_VERSION` and `VEKRONA_RUNE_RELEASE` (the `-<release>` in the RPM file name) in `lib/common.sh`.
+2. Take each arch's sha256 from the GitHub API asset `digest` field in `https://api.github.com/repos/aka-rider/rune/releases/tags/v<ver>`.
+3. Download each RPM and confirm it with `sha256sum`.
+4. Pin the values in `VEKRONA_RUNE_SHA256` in `lib/common.sh`.
+5. Run `./install.sh 30`.
+
+Trust model: TLS to github.com plus the API digest, reviewed into the repo at bump time. Unlike Proton, the sum is
+not fetched at install time. rune's RPMs are unsigned, so the pinned sha256 on a root-owned copy is the only check
+before dnf installs it.
+
 ## Proton apps
 
 Proton Mail (which includes Calendar), Proton Pass and Proton Authenticator are native apps installed from Proton's

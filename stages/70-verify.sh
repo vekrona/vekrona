@@ -49,6 +49,13 @@ ge() { [[ "$1" -ge "$2" ]]; }
 contains() { [[ "$2" == *"$1"* ]]; }
 not_contains() { [[ "$2" != *"$1"* ]]; }
 file_exists() { [[ -e "$1" ]]; }
+check_default_handler() {
+  local desktop="$1" mime
+  shift
+  for mime in "$@"; do
+    check assert "$desktop is the default handler of $mime" eq "$(xdg-mime query default "$mime")" "$desktop"
+  done
+}
 fprintd_sees_reader() { fprintd-list "$VEKRONA_USER" >/dev/null 2>&1; }
 dir_exists() { [[ -d "$1" ]]; }
 gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
@@ -268,6 +275,8 @@ if ran 30-packages; then
     fcver="${BASH_REMATCH[1]}"
     warn_check "versionlock entry matches fc$os_version_id: $entry" eq "$fcver" "$os_version_id"
   done < <(versionlock_evrs)
+  check assert "rune is installed at the pinned $(rune_pinned_nvr)" eq "$(rune_installed_nvr)" "$(rune_pinned_nvr)"
+  check assert "rune is on PATH" command -v rune
   check assert "greetd user exists" bash -c "getent passwd greetd >/dev/null"
   # The proton-vpn-daemon RPM enables and starts its split-tunneling service itself.
   check assert "me.proton.vpn.split_tunneling.service enabled" unit_enabled me.proton.vpn.split_tunneling
@@ -637,9 +646,9 @@ if ran 50-user; then
   check assert_file_contains "$HOME/.config/qt6ct/qt6ct.conf" "^# vekrona-render-theme: "
   check assert_file_contains "$HOME/.config/qt6ct/colors/vekrona.conf" "^# vekrona-render-theme: "
   check assert_file_contains "$HOME/.config/sway/config.d/90-vekrona-design.conf" "^# vekrona-render-theme: "
-  for browser_mime in "${VEKRONA_BROWSER_MIMES[@]}"; do
-    check assert "Firefox is the default handler of $browser_mime" eq "$(xdg-mime query default "$browser_mime")" "$VEKRONA_BROWSER_DESKTOP"
-  done
+  check_default_handler "$VEKRONA_BROWSER_DESKTOP" "${VEKRONA_BROWSER_MIMES[@]}"
+  check_default_handler "$VEKRONA_EDITOR_DESKTOP" "${VEKRONA_EDITOR_MIMES[@]}"
+  check assert "the rune launcher entry is linked into ~/.local/share/applications" file_exists "$HOME/.local/share/applications/$VEKRONA_EDITOR_DESKTOP"
   firefox_default_profile="$(awk -F= '/^\[Install/ {in_install=1; next} /^\[/ {in_install=0} in_install && $1 == "Default" {print $2; exit}' "$firefox_profiles_ini" 2>/dev/null || true)"
   if [[ -n "$firefox_default_profile" ]]; then
     firefox_root_dir="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"
@@ -674,6 +683,8 @@ assert isinstance(d.get("metrics"), dict), "metrics"
   user_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"
   warn_check "$HOME/.local/bin in systemd user PATH" contains "$HOME/.local/bin" "$user_path"
   warn_check "$HOME/.nix-profile/bin in systemd user PATH" contains "$HOME/.nix-profile/bin" "$user_path"
+  user_editor="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^EDITOR=//p')"
+  warn_check "EDITOR=rune in the systemd user environment (a login after this install picks it up)" eq "$user_editor" rune
 
   check assert "devbox runs" "$HOME/.nix-profile/bin/devbox" version
 fi

@@ -7,6 +7,7 @@ Applications, the `vekrona-*` commands, snapshots and rollback, and the bar's wo
 Vekrona installs a curated set of applications via the following channels:
 
 - **1Password + CLI**: vendor RPM repository (`downloads.1password.com/linux/rpm/stable`)
+- **rune**: the default editor (`$EDITOR`; `.md` and text files open in Ghostty); Zed remains for GPU editing. A pinned GitHub release RPM, see [updates](updates.md#rune)
 - **Proton VPN (GTK app + CLI)**: vendor RPM repository (`repo.protonvpn.com/fedora-$releasever-stable`, `repo_gpgcheck=1`; the key is vendored per Fedora release and pinned, and `protonvpn-stable-release` is not installed; the app shows in the bar's tray, the `proton-vpn-daemon` service `me.proton.vpn.split_tunneling` starts with the RPM)
 - **herdr**: COPR `rossetnocpes/herdr` (single-package COPR, upstream Rust builds for f43–rawhide)
 - **Zed**: Flathub Flatpak `dev.zed.Zed` (system-wide install, requires hardware Vulkan driver; Fedora-built RPMs freeze on F44 due to GCC 16/LLVM ABI bug rhbz#2464281, unresolved; updates via `flatpak update`)
