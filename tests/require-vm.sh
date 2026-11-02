@@ -1,14 +1,14 @@
 # shellcheck shell=bash
 # Every shell test entry point calls require_vm "${BASH_SOURCE[0]}" (tests/lib.sh does it for everything that sources it),
 # because a test run on the host can fork-bomb it, leave coredumps and write into the real error store. The VM marker is
-# what only the vekrona-dev guest has: Lima's boot-done file and the 9p mount of the vekrona-dev checkout.
+# what only the vekrona-dev guest has: the SMBIOS product name `vekrona-dev` that its libvirt domain sets.
 # The scenarios under tests/e2e and tests/bake-shaders.sh are the exception: they run on the host and drive the guest
 # through vekrona-dev, so they pass when vekrona-dev is on PATH (`vekrona-dev e2e` puts it there).
 # GitHub Actions' fedora:44 container is the other place: it is a throwaway machine, and the unit-tests job runs tests/run.sh
 # there. The Python tests ask this file too (tests/require_vm.py runs it), so the rule lives once.
 
 in_vekrona_dev_guest() {
-  [[ -e /run/lima-boot-done ]] && awk '$2 == "/mnt/vekrona-dev" && $3 == "9p" { found = 1 } END { exit !found }' /proc/mounts
+  [[ "$(cat /sys/class/dmi/id/product_name 2>/dev/null)" == vekrona-dev ]]
 }
 
 CONTAINER_MARKERS=(/.dockerenv /run/.containerenv)

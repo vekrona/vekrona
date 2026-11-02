@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# A test that moves the guest clock must not let the error watcher toast the record of lima's ssh noise again: without lima's guest agent
-# sshd logs "connect to /run/lima-guestagent.sock" for every connection of the host, the jump makes that record long unseen, and the
-# watcher toasts it at an arbitrary moment, over whatever the test clicks next (bar-caffeine lost a click to it, the agent picker opened).
+# A test that moves the guest clock must not let the error watcher toast an old record again: the jump makes the records of the
+# host's ssh connections long unseen, and the watcher toasts them at an arbitrary moment, over whatever the test clicks next
+# (bar-caffeine lost a click to it, the agent picker opened).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
