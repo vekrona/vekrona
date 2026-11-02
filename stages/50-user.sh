@@ -216,7 +216,6 @@ ensure_default_app "$VEKRONA_EDITOR_DESKTOP" "${VEKRONA_EDITOR_MIMES[@]}"
 ensure_symlink "$VEKRONA_ROOT/config/scopebuddy/scb.conf" "$HOME/.config/scopebuddy/scb.conf"
 ensure_symlink "$VEKRONA_ROOT/config/mangohud/MangoHud.conf" "$HOME/.config/MangoHud/MangoHud.conf"
 ensure_symlink_tree "$VEKRONA_ROOT/config/wireplumber" "$HOME/.config/wireplumber"
-ensure_symlink_tree "$VEKRONA_ROOT/config/pipewire" "$HOME/.config/pipewire"
 
 mapfile -t link_dirs < <(vekrona_link_dirs)
 prune_vekrona_links "${link_dirs[@]}"

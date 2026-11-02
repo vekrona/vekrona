@@ -46,17 +46,22 @@ nothing is pending the items are not there.
 
 ### Default firewall zone
 
-Stage `40-system` (`ensure_default_zone`, `lib/firewall.sh`) makes `public` the default firewalld zone. Fedora Workstation's own
-default, `FedoraWorkstation`, accepts every TCP and UDP port from 1025 up from the local network. `public` gets exactly what
-vekrona runs: `mdns` and `dhcpv6-client` (public's own), `syncthing` (22000/tcp and udp, 21027/udp for local discovery; its web
-GUI stays on 127.0.0.1), `steam-streaming` and `steam-lan-transfer` (Steam is installed by stage 30: Remote Play and local game
-transfer), and UDP 6001-6010 for AirPlay (`ensure_airplay_ports`). There is no sshd: stage 30 removes `openssh-server`, and the earlier `tailnet` firewall zone is removed by stage 40. A new service is one more
-word in `DEFAULT_ZONE_SERVICES` (`lib/firewall.sh`). If a NetworkManager connection is pinned to the `FedoraWorkstation` zone
+Stage `30-packages` installs `firewalld` and stage `40-system` enables it and starts it (`ensure_default_zone`, `lib/firewall.sh`). It
+makes `public` the default zone. Fedora Workstation's own default, `FedoraWorkstation`, accepts every TCP and UDP port from 1025 up
+from the local network. `public` holds exactly what vekrona runs and nothing else, services all of them and no port: `dhcpv6-client`,
+`syncthing` (22000/tcp and udp, 21027/udp for local discovery; its web GUI stays on 127.0.0.1), `steam-streaming` and
+`steam-lan-transfer` (Steam is installed by stage 30: Remote Play and local game transfer). Whatever else the zone holds, stock
+`ssh` and `mdns` or a port opened by hand or by an earlier vekrona (AirPlay's 6001-6010), the stage closes again. A new service is one
+more word in `DEFAULT_ZONE_SERVICES` (`lib/firewall.sh`). If a NetworkManager connection is pinned to the `FedoraWorkstation` zone
 (`nmcli -f connection.zone connection show <name>`), stage 40 reports it and `70-verify` fails until
 `nmcli connection modify <name> connection.zone ''` clears the pin.
 
-AirPlay: if the default zone does not open them already (`public`, not `FedoraWorkstation`), stage 40 opens UDP 6001-6010
-there, because AirPlay's timing and control channels use those ports.
+There is no sshd: stage 30 removes `openssh-server`, and stage 40 deletes the sshd drop-in, the `tailnet` firewall zone and the ssh
+reject rules that earlier installs left. Tailscale runs with shields up and Tailscale SSH off. AirPlay is gone too: `avahi`,
+`nss-mdns` and `pipewire-config-raop` are removed, the authselect profile no longer selects `with-mdns4`, and
+`/etc/systemd/resolved.conf.d/50-vekrona.conf` turns LLMNR and mDNS off in systemd-resolved, so nothing listens on 5353 or 5355. The
+vekrona-dev VM and the ISO test guest are the exception: they carry the marker `/etc/vekrona/keep-sshd`, which keeps `openssh-server` and
+the `ssh` service of the zone ([development](development.md)).
 
 ### Display settings
 

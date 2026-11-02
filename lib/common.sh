@@ -1706,10 +1706,10 @@ rune_rpm_sha256() {
 
 VEKRONA_DESKTOP_PKGS=(
   adw-gtk3-theme 1password 1password-cli NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl btop cliphist
-  dconf ffmpeg firefox flatpak gamemode gamescope ghostty
+  dconf ffmpeg firefox firewalld flatpak gamemode gamescope ghostty
   geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver irqbalance
   jq kanshi khal
-  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-config-raop pipewire-pulseaudio pipewire-utils playerctl polkit
+  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio pipewire-utils playerctl polkit
   proton-vpn-cli proton-vpn-gtk-app python3 python3-gobject python3-pyyaml python3-vdf qalculate qt6ct quickshell ripgrep rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd swayidle syncthing tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots
@@ -1739,8 +1739,9 @@ links_into_retired_mise_share() { [[ -L "$1" && "$(readlink "$1")" == "$VEKRONA_
 
 # Fedora's crash reporter duplicates vekrona-error, which records every coredump from systemd-coredump, and its applet
 # (abrt-gui) posts an "Oops!" card straight into the notification list instead of the errors panel.
+# AirPlay and mDNS are not used either: nothing announces this machine, and nothing listens for other machines' names.
 # shellcheck disable=SC2034
-VEKRONA_UNWANTED_PKGS=(abrt abrt-gui)
+VEKRONA_UNWANTED_PKGS=(abrt abrt-gui avahi nss-mdns pipewire-config-raop)
 
 # Remote login is not part of vekrona: openssh-server goes, unless a test guest keeps it (keep_sshd).
 vekrona_unwanted_pkgs() {

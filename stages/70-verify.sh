@@ -107,7 +107,7 @@ irqbalance_bans_nvme_when_running() {
 tailscale_operator_is_user() { [[ "$(tailscale_operator)" == "$VEKRONA_USER" ]]; }
 authselect_selection_ok() {
   local want have
-  want="$(printf '%s\n' custom/vekrona with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f | sort | paste -sd' ')"
+  want="$(printf '%s\n' custom/vekrona with-silent-lastlog with-fingerprint with-pam-u2f | sort | paste -sd' ')"
   have="$(authselect current --raw | tr ' ' '\n' | sed '/^$/d' | sort | paste -sd' ')"
   [[ "$have" == "$want" ]]
 }
@@ -429,25 +429,26 @@ if ran 40-system; then
 
   check assert "no sshd drop-in of an earlier install is left" path_absent /etc/ssh/sshd_config.d/10-vekrona.conf
   check assert "the tailnet zone file of an earlier install is gone" path_absent "$TAILNET_ZONE_FILE"
-  warn_check "firewalld is running" firewalld_active
-  if firewalld_active; then
-    # Assigned first: a failing firewall-cmd inside "$(...)" in a check's arguments would only read as an empty answer.
-    ssh_reject_running="$(zones_with_ssh_reject_rule)"
-    ssh_reject_permanent="$(zones_with_ssh_reject_rule --permanent)"
-    default_zone="$(root firewall-cmd --get-default-zone)"
-    check assert "no zone has the ssh reject rule of an earlier install" eq "$ssh_reject_running$ssh_reject_permanent" ""
-    check assert "the default zone is $DEFAULT_ZONE" eq "$default_zone" "$DEFAULT_ZONE"
-    for service in "${DEFAULT_ZONE_SERVICES[@]}"; do
-      check assert "the $service service is open in the $DEFAULT_ZONE zone (permanent)" firewall_query --permanent --zone="$DEFAULT_ZONE" --query-service="$service"
-    done
-    high_port_zones="$(zones_open_to_high_ports)"
-    check assert "no zone with an interface opens TCP 1025-65535 (a NetworkManager connection may pin one: nmcli connection modify <connection> connection.zone '')" eq "$high_port_zones" ""
-    check assert "the default zone lets AirPlay's UDP $AIRPLAY_UDP_LO-$AIRPLAY_UDP_HI in" zone_allows_udp_range "$default_zone" "$AIRPLAY_UDP_LO" "$AIRPLAY_UDP_HI"
-  fi
+  check assert "firewalld.service enabled" unit_enabled firewalld
+  check assert "firewalld.service active" unit_active firewalld
+  # Assigned first: a failing firewall-cmd inside "$(...)" in a check's arguments would only read as an empty answer.
+  ssh_reject_running="$(zones_with_ssh_reject_rule)"
+  ssh_reject_permanent="$(zones_with_ssh_reject_rule --permanent)"
+  default_zone="$(root firewall-cmd --get-default-zone)"
+  mapfile -t zone_services < <(default_zone_services)
+  check assert "no zone has the ssh reject rule of an earlier install" eq "$ssh_reject_running$ssh_reject_permanent" ""
+  check assert "the default zone is $DEFAULT_ZONE" eq "$default_zone" "$DEFAULT_ZONE"
+  check assert "the $DEFAULT_ZONE zone holds exactly ${zone_services[*]} and no port (permanent)" default_zone_is_exact permanent "${zone_services[@]}"
+  check assert "the $DEFAULT_ZONE zone holds exactly ${zone_services[*]} and no port (running)" default_zone_is_exact running "${zone_services[@]}"
+  high_port_zones="$(zones_open_to_high_ports)"
+  check assert "no zone with an interface opens TCP 1025-65535 (a NetworkManager connection may pin one: nmcli connection modify <connection> connection.zone '')" eq "$high_port_zones" ""
+  check assert "/etc/systemd/resolved.conf.d/50-vekrona.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/resolved.conf.d/50-vekrona.conf" /etc/systemd/resolved.conf.d/50-vekrona.conf
+  resolved_status="$(resolvectl status)"
+  check assert "systemd-resolved answers neither LLMNR nor mDNS" contains "Protocols: -LLMNR -mDNS" "$resolved_status"
 fi
 
 if ran 45-auth; then
-  check assert "authselect selects custom/vekrona with its four features" authselect_selection_ok
+  check assert "authselect selects custom/vekrona with its three features" authselect_selection_ok
   for f in system-auth password-auth; do
     check assert "both pam_u2f template lines pinned to pam://vekrona in the profile's $f" vekrona_pam_u2f_lines_ok "/etc/authselect/custom/vekrona/$f" 2
     check assert "the one enabled pam_u2f line pinned to pam://vekrona in /etc/pam.d/$f" vekrona_pam_u2f_lines_ok "/etc/pam.d/$f" 1
@@ -576,7 +577,6 @@ if ran 50-user; then
   check assert "vekrona-audio-watchdog.service linked" file_exists "$HOME/.config/systemd/user/vekrona-audio-watchdog.service"
   check assert "vekrona-audio-watchdog.service enabled" user_unit_enabled vekrona-audio-watchdog
   check assert "vekrona-audio-watchdog resolves on PATH" bash -c "command -v vekrona-audio-watchdog >/dev/null"
-  check assert "pipewire-config-raop installed" pkg_installed pipewire-config-raop
   check assert "pipewire-utils installed" pkg_installed pipewire-utils
   for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
     check assert "vekrona-diagnose skill linked: $skills_dir" file_exists "$skills_dir/vekrona-diagnose/SKILL.md"
@@ -596,8 +596,6 @@ if ran 50-user; then
   check assert_file_contains "$HOME/.config/wireplumber/wireplumber.conf.d/50-vekrona-audio.conf" '^[[:space:]]*node\.restore-default-targets[[:space:]]*=[[:space:]]*false[[:space:]]*$'
   check assert_file_contains "$HOME/.config/wireplumber/wireplumber.conf.d/50-vekrona-audio.conf" '^[[:space:]]*\{[[:space:]]*device\.name[[:space:]]*=[[:space:]]*"~alsa_card\.usb-MACROSILICON\.\*"'
   check assert_file_contains "$HOME/.config/wireplumber/wireplumber.conf.d/50-vekrona-audio.conf" '^[[:space:]]*device\.disabled[[:space:]]*=[[:space:]]*true[[:space:]]*$'
-  check assert_file_contains "$HOME/.config/pipewire/pipewire.conf.d/50-vekrona-raop.conf" '^[[:space:]]*module\.raop[[:space:]]*=[[:space:]]*false[[:space:]]*$'
-  check assert_file_contains "$HOME/.config/pipewire/pipewire.conf.d/50-vekrona-raop.conf" '^[[:space:]]*sess\.latency\.msec[[:space:]]*=[[:space:]]*247\.45[[:space:]]*$'
   check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"
   check assert "fc-match sans-serif (Ukrainian i, U+0456) -> Inter" bash -c "fc-match 'sans-serif:charset=0456' | grep -q Inter"
   check assert "fc-match monospace -> AtkynsonMono Nerd Font" bash -c "fc-match monospace | grep -q 'AtkynsonMono Nerd Font'"

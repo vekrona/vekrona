@@ -79,8 +79,6 @@ case "$action" in
 esac
 F
 
-firewalld_active() { true; }
-
 # zone NAME TARGET "SERVICES" "PORTS" "INTERFACES" "SOURCES": one zone, in both configurations.
 zone() {
   local mode name="$1"

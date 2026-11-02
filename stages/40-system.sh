@@ -113,12 +113,15 @@ ensure_system_unit_active tailscaled nix-daemon.service
 
 # Before the tailscale step, which dies on a logged-out node: the firewall does not depend on a Tailscale login.
 ensure_root_file_absent /etc/ssh/sshd_config.d/10-vekrona.conf # no RPM owns it, so it outlives openssh-server
+ensure_system_unit enabled firewalld
+ensure_system_unit_active firewalld
 ensure_tailnet_ssh_firewall_gone
-ensure_default_zone
-ensure_airplay_ports
-if firewalld_active; then
-  high_port_zones="$(zones_open_to_high_ports)"
-  [[ -z "$high_port_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$high_port_zones")open every TCP and UDP port from 1025 to this network and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone '')"
-fi
+mapfile -t zone_services < <(default_zone_services)
+ensure_default_zone "${zone_services[@]}"
+high_port_zones="$(zones_open_to_high_ports)"
+[[ -z "$high_port_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$high_port_zones")open every TCP and UDP port from 1025 to this network and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone '')"
+
+# LLMNR and mDNS answer to the local network and are not used (avahi is removed by stage 30).
+ensure_dropins_restarting systemd-resolved "$VEKRONA_ROOT/etc/systemd/resolved.conf.d" /etc/systemd/resolved.conf.d 50-vekrona.conf
 
 ensure_tailscale_settings "$VEKRONA_USER"
