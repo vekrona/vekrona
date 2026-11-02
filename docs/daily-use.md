@@ -19,7 +19,7 @@ Vekrona installs a curated set of applications via the following channels:
 - **Steam**: RPM Fusion (already installed; stage 60 sets Steam Play preset to `proton_experimental` for all titles)
 - **Nix**: Fedora 44's own `nix` and `nix-daemon` RPMs (flakes enabled by default; `/nix` lives on its own btrfs subvolume `nix` separate from root, so rollbacks never include the Nix store)
 - **devbox**: installed for the desktop user with `nix profile install` from a pinned nixpkgs commit (`DEVBOX_NIXPKGS_REV` in stage 50)
-- **Tailscale**: Fedora `updates` repository (no vendor repo needed; `tailscaled` enabled and active, you are operator: `tailscale up` without sudo; tray icon runs via user systemd unit)
+- **Tailscale**: Fedora `updates` repository (no vendor repo needed; `tailscaled` enabled and active, you are operator: `tailscale up` without sudo; shields up and Tailscale SSH off, so nothing on the tailnet can connect in: stage 40 sets them, but tailscaled keeps no setting until the node is logged in, so log in with `tailscale up --shields-up --ssh=false` and re-run `./install.sh 40`; tray icon runs via user systemd unit)
 - **btop**: Fedora repository
 - **Non-free codecs**: RPM Fusion (swap `ffmpeg-free` to `ffmpeg`, add freeworld gstreamer plugins, `mesa-va-drivers-freeworld`, openh264 via already-enabled `fedora-cisco-openh264`; VDPAU packages no longer exist in F44)
 
@@ -50,37 +50,10 @@ Stage `40-system` (`ensure_default_zone`, `lib/firewall.sh`) makes `public` the 
 default, `FedoraWorkstation`, accepts every TCP and UDP port from 1025 up from the local network. `public` gets exactly what
 vekrona runs: `mdns` and `dhcpv6-client` (public's own), `syncthing` (22000/tcp and udp, 21027/udp for local discovery; its web
 GUI stays on 127.0.0.1), `steam-streaming` and `steam-lan-transfer` (Steam is installed by stage 30: Remote Play and local game
-transfer), and UDP 6001-6010 for AirPlay (`ensure_airplay_ports`). ssh is closed outside the tailnet (below). A new service is one more
+transfer), and UDP 6001-6010 for AirPlay (`ensure_airplay_ports`). There is no sshd: stage 30 removes `openssh-server`, and the earlier `tailnet` firewall zone is removed by stage 40. A new service is one more
 word in `DEFAULT_ZONE_SERVICES` (`lib/firewall.sh`). If a NetworkManager connection is pinned to the `FedoraWorkstation` zone
 (`nmcli -f connection.zone connection show <name>`), stage 40 reports it and `70-verify` fails until
-`nmcli connection modify <name> connection.zone ''` clears the pin. The `tailnet` zone is unchanged.
-
-### Remote access (ssh over the tailnet)
-
-Stage `40-system` makes sshd take public keys only (`/etc/ssh/sshd_config.d/10-vekrona.conf`: no passwords, no
-keyboard-interactive logins, no root login) and open it to the tailnet only. firewalld has a `tailnet` zone
-(`/etc/firewalld/zones/tailnet.xml`) that holds `tailscale0` and the tailnet's address ranges (`100.64.0.0/10`,
-`fd7a:115c:a1e0::/48`) and allows `ssh` and nothing else; every other zone loses its `ssh` service, and a zone that still lets ssh in
-(an open port 22, or a target that accepts everything, as `trusted`, a hotspot or Docker have) gets a reject rule for it, so the LAN
-cannot reach sshd. sshd itself keeps listening on every address, because tailscaled may come up after it. While you are
-logged in over ssh from outside the tailnet (an install over the LAN), the stage keeps ssh in those zones so that it
-never cuts its own session off, reports that as a failure, and `70-verify` fails until you run `./install.sh 40` again
-from a console or over the tailnet. Put your public key in `~/.ssh/authorized_keys` before you rely on it;
-the stage warns when that file is empty. A machine without firewalld running gets a warning instead of the zone.
-
-The Headscale policy decides who may reach port 22. On `mesh.xiii.site`, the policy has to contain this (this host is
-`100.64.0.7`, the user is `admin@`):
-
-```json
-"groups": { "group:admin": ["admin@"] },
-"hosts":  { "vekrona": "100.64.0.7" },
-"grants": [
-  { "src": ["group:admin"], "dst": ["vekrona"], "ip": ["tcp:22"] }
-]
-```
-
-Remove any broader `*:*` rule: while it exists, every node on the tailnet may open port 22 here, not only the
-admin group.
+`nmcli connection modify <name> connection.zone ''` clears the pin.
 
 AirPlay: if the default zone does not open them already (`public`, not `FedoraWorkstation`), stage 40 opens UDP 6001-6010
 there, because AirPlay's timing and control channels use those ports.

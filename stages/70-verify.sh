@@ -10,7 +10,7 @@ source "$ROOT/lib/luks-fido2.sh"
 source "$ROOT/lib/facetimehd.sh"
 source "$ROOT/lib/proton.sh"
 source "$ROOT/lib/firewall.sh"
-source "$ROOT/lib/tailnet-ssh.sh"
+source "$ROOT/lib/tailscale.sh"
 source "$ROOT/lib/cuda-repo.sh"
 source "$ROOT/lib/geoclue.sh"
 source "$ROOT/lib/xremap.sh"
@@ -104,9 +104,7 @@ irqbalance_bans_nvme_when_running() {
   pid="$(systemctl show irqbalance -p MainPID --value)"
   [[ "$pid" -eq 0 ]] || tr '\0' ' ' <"/proc/$pid/cmdline" | grep -qF -- '--banmod=nvme'
 }
-tailscale_prefs() { root tailscale debug prefs; }
-tailscale_logged_out() { [[ "$(tailscale_prefs | jq -r '.LoggedOut')" == true ]]; }
-tailscale_operator_is_user() { [[ "$(tailscale_prefs | jq -r '.OperatorUser // ""')" == "$VEKRONA_USER" ]]; }
+tailscale_operator_is_user() { [[ "$(tailscale_operator)" == "$VEKRONA_USER" ]]; }
 authselect_selection_ok() {
   local want have
   want="$(printf '%s\n' custom/vekrona with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f | sort | paste -sd' ')"
@@ -293,6 +291,11 @@ if ran 30-packages; then
   for p in "${VEKRONA_RETIRED_PKGS[@]}"; do
     check assert "rpm -q $p finds nothing (retired)" pkg_absent "$p"
   done
+  declare -a unwanted_pkgs
+  read_pkg_list unwanted_pkgs vekrona_unwanted_pkgs
+  for p in "${unwanted_pkgs[@]}"; do
+    check assert "rpm -q $p finds nothing (unwanted)" pkg_absent "$p"
+  done
   check assert "command -v dms fails" bash -c "! command -v dms"
   check assert "versionlock has no dms" not versionlock_has dms
   check assert "repo not enabled: $VEKRONA_RETIRED_MISE_REPO_ID (retired)" not_repo_enabled "$VEKRONA_RETIRED_MISE_REPO_ID"
@@ -417,32 +420,22 @@ if ran 40-system; then
   done
 
   if tailscale_logged_out; then
-    warn_check "tailscale operator is $VEKRONA_USER (tailscaled forgets it across restarts until the first login: run 'tailscale up', then ./install.sh 40)" tailscale_operator_is_user
+    warn_check "tailscale operator is $VEKRONA_USER (tailscaled forgets it across restarts until the first login: run 'tailscale up --shields-up --ssh=false', then ./install.sh 40)" tailscale_operator_is_user
+    warn_check "tailscale has shields up and ssh off (tailscaled forgets them until the first login: run 'tailscale up --shields-up --ssh=false', then ./install.sh 40)" tailscale_hardened
   else
     check assert "tailscale operator is $VEKRONA_USER" tailscale_operator_is_user
+    check assert "tailscale has shields up and ssh off" tailscale_hardened
   fi
 
-  if has_sshd; then
-    check assert "sshd drop-in matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/ssh/sshd_config.d/10-vekrona.conf" "$SSHD_DROPIN"
-    check assert "sshd refuses password logins" eq "$(sshd_setting passwordauthentication)" no
-    check assert "sshd refuses keyboard-interactive logins" eq "$(sshd_setting kbdinteractiveauthentication)" no
-    check assert "sshd accepts public keys only" eq "$(sshd_setting authenticationmethods)" publickey
-    check assert "sshd refuses root logins" eq "$(sshd_setting permitrootlogin)" no
-  fi
-  warn_check "firewalld is running (it limits ssh to the tailnet)" firewalld_active
+  check assert "no sshd drop-in of an earlier install is left" path_absent /etc/ssh/sshd_config.d/10-vekrona.conf
+  check assert "the tailnet zone file of an earlier install is gone" path_absent "$TAILNET_ZONE_FILE"
+  warn_check "firewalld is running" firewalld_active
   if firewalld_active; then
-    check assert "$TAILNET_ZONE_FILE matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/firewalld/zones/tailnet.xml" "$TAILNET_ZONE_FILE"
-    for cidr in "${TAILNET_SOURCES[@]}"; do
-      check assert "$cidr is in the $TAILNET_ZONE zone" eq "$(root firewall-cmd --get-zone-of-source="$cidr")" "$TAILNET_ZONE"
-    done
-    warn_check "$TAILNET_IFACE is in the $TAILNET_ZONE zone (the sources decide anyway; NetworkManager may hold the interface elsewhere)" eq "$(root firewall-cmd --get-zone-of-interface="$TAILNET_IFACE")" "$TAILNET_ZONE"
-    check assert "the $TAILNET_ZONE zone opens ssh and nothing else" eq "$(root firewall-cmd --zone="$TAILNET_ZONE" --list-services)" ssh
-    # Assigned first: a failing firewall-cmd inside "$(...)" in a check's arguments would only read as an empty answer, "closed".
-    ssh_open_running="$(zones_allowing_ssh)"
-    ssh_open_permanent="$(zones_allowing_ssh --permanent)"
+    # Assigned first: a failing firewall-cmd inside "$(...)" in a check's arguments would only read as an empty answer.
+    ssh_reject_running="$(zones_with_ssh_reject_rule)"
+    ssh_reject_permanent="$(zones_with_ssh_reject_rule --permanent)"
     default_zone="$(root firewall-cmd --get-default-zone)"
-    check assert "no zone but $TAILNET_ZONE lets ssh in (stage 40 keeps ssh while it is used from outside the tailnet: run it from the tailnet)" eq "$ssh_open_running" ""
-    check assert "no zone but $TAILNET_ZONE lets ssh in after the next reload" eq "$ssh_open_permanent" ""
+    check assert "no zone has the ssh reject rule of an earlier install" eq "$ssh_reject_running$ssh_reject_permanent" ""
     check assert "the default zone is $DEFAULT_ZONE" eq "$default_zone" "$DEFAULT_ZONE"
     for service in "${DEFAULT_ZONE_SERVICES[@]}"; do
       check assert "the $service service is open in the $DEFAULT_ZONE zone (permanent)" firewall_query --permanent --zone="$DEFAULT_ZONE" --query-service="$service"

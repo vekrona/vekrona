@@ -5,44 +5,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/bin"
 source "$REPO/tests/lib.sh"
-
-# A fake package database: one file per installed package. ffmpeg conflicts with the -free libraries.
-cat > "$work/bin/rpm" <<'F'
-#!/usr/bin/env bash
-[[ "$1" == -q && -e "$FAKE_RPMDB/$2" ]]
-F
-cat > "$work/bin/dnf" <<'F'
-#!/usr/bin/env bash
-echo "$*" >> "$FAKE_DNF_LOG"
-[[ -z "${FAKE_DNF_FAIL:-}" ]] || exit 1
-allow_erasing=0
-[[ " $* " == *" --allowerasing "* ]] && allow_erasing=1
-conflicts() { compgen -G "$FAKE_RPMDB/*-free" >/dev/null; }
-names=()
-for arg in "${@:2}"; do [[ "$arg" == -* ]] || names+=("$arg"); done
-case "$1" in
-  install)
-    if conflicts; then
-      ((allow_erasing)) || { echo "conflicting requests" >&2; exit 1; }
-      rm -f "$FAKE_RPMDB"/*-free
-    fi
-    touch "$FAKE_RPMDB/${names[-1]}"
-    ;;
-  swap)
-    rm -f "$FAKE_RPMDB/${names[0]}" "$FAKE_RPMDB"/*-free
-    touch "$FAKE_RPMDB/${names[1]}"
-    ;;
-  *) exit 2 ;;
-esac
-F
-printf '#!/usr/bin/env bash\nexec "$@"\n' > "$work/bin/sudo"
-chmod +x "$work/bin/"*
-export PATH="$work/bin:$PATH" FAKE_RPMDB="$work/rpmdb" FAKE_DNF_LOG="$work/dnf.log"
-
-packages() { mkdir -p "$FAKE_RPMDB"; rm -f "$FAKE_RPMDB"/* "$FAKE_DNF_LOG"; local p; for p in "$@"; do touch "$FAKE_RPMDB/$p"; done; }
-installed() { [[ -e "$FAKE_RPMDB/$1" ]]; }
+source "$REPO/tests/stages/dnf-fakes.sh"
 
 packages libswscale-free libavcodec-free
 ensure_pkg_swapped ffmpeg-free ffmpeg

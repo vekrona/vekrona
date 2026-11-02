@@ -78,7 +78,6 @@ done
 for file in "${VEKRONA_RETIRED_AGENT_FILES[@]}"; do ensure_root_file_absent "$file"; done
 for tree in "${VEKRONA_RETIRED_AGENT_TREES[@]}"; do ensure_root_tree_absent "$tree"; done
 ensure_rpm_key_absent "$VEKRONA_RETIRED_MISE_KEY_FPR"
-ensure_pkg_absent "${VEKRONA_UNWANTED_PKGS[@]}"
 
 ensure_pkg_swapped ffmpeg-free ffmpeg
 
@@ -91,6 +90,10 @@ for pkg in "${VEKRONA_DESKTOP_PKGS[@]}"; do
   [[ -n "${VEKRONA_PINNED_PKGS[$pkg]+x}" ]] || desktop_pkgs_except_pinned+=("$pkg")
 done
 ensure_pkg "${desktop_pkgs_except_pinned[@]}"
+# After sway is installed: ensure_pkg_absent finds the protected wlroots package through it.
+declare -a unwanted_pkgs
+read_pkg_list unwanted_pkgs vekrona_unwanted_pkgs
+ensure_pkg_absent "${unwanted_pkgs[@]}"
 ensure_1password_repo_file
 
 # The repo directory and its metadata must exist before dnf reads the repo file, or every dnf run fails on it.

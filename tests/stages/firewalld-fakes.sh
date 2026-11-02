@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016 # the stub bodies are written to files literally and expand when the stub runs
-# A fake firewalld for the tests of lib/firewall.sh and lib/tailnet-ssh.sh (source it after tests/lib.sh). The caller sets
-# $scratch, $stubs (a directory first on PATH), $FW (the firewalld state) and $PEERS (what `ss` prints), and
-# TAILNET_ZONE_FILE. `stock` resets the state to a stock Fedora Workstation.
+# A fake firewalld for the tests of lib/firewall.sh (source it after tests/lib.sh). The caller sets $scratch, $stubs (a
+# directory first on PATH) and $FW (the firewalld state). `stock` resets the state to a stock Fedora Workstation.
 write_fake "$stubs/sudo" <<'F'
 #!/usr/bin/env bash
 exec "$@"
-F
-write_fake "$stubs/ss" <<'F'
-#!/usr/bin/env bash
-cat "$PEERS"
 F
 # A firewalld of one permanent and one running configuration, a directory of files per zone and mode.
 write_fake "$stubs/firewall-cmd" <<'F'
@@ -38,6 +33,8 @@ if [[ $zone_given -eq 1 && -z "$zone" ]]; then echo "Error: INVALID_ZONE: ''" >&
 [[ -n "$zone" ]] || zone="$(cat "$FW/default")"
 dir="$FW/$mode"
 has_line() { grep -qxF "$2" "$dir/$zone/$1"; }
+# Removes the whole line from the zone's file; like firewall-cmd, removing what is not there is no error.
+drop_line() { { grep -vxF -- "$2" "$dir/$zone/$1" || true; } >"$dir/$zone/$1.new" && mv "$dir/$zone/$1.new" "$dir/$zone/$1"; }
 # --query-* print yes or no and exit 0 or 1.
 query() { if has_line "$1" "$2"; then echo yes; else echo no; exit 1; fi; }
 case "$action" in
@@ -69,12 +66,15 @@ case "$action" in
   --query-service=*) query services "${action#--query-service=}" ;;
   --list-services) tr '\n' ' ' <"$dir/$zone/services" ;;
   --list-ports) tr '\n' ' ' <"$dir/$zone/ports" ;;
+  --list-rich-rules) cat "$dir/$zone/richrules" ;;
   --get-target) cat "$dir/$zone/target" ;;
   --query-rich-rule=*) query richrules "${action#--query-rich-rule=}" ;;
   # Changes apply to the configuration the mode names, the runtime one as well as the permanent one.
   --add-rich-rule=*) echo "${action#--add-rich-rule=}" >>"$dir/$zone/richrules" ;;
   --remove-service=*) sed -i "/^${action#--remove-service=}\$/d" "$dir/$zone/services" ;;
   --add-port=*) echo "${action#--add-port=}" >>"$dir/$zone/ports" ;;
+  --remove-port=*) drop_line ports "${action#--remove-port=}" ;;
+  --remove-rich-rule=*) drop_line richrules "${action#--remove-rich-rule=}" ;;
   *) echo "firewall-cmd stub: unexpected $*" >&2; exit 99 ;;
 esac
 F
@@ -96,13 +96,11 @@ zone() {
 }
 # firewalld of a stock Fedora Workstation: ssh in every zone but trusted, and the workstation zone in use.
 stock() {
-  rm -rf "$FW" "$TAILNET_ZONE_FILE"
+  rm -rf "$FW"
   mkdir -p "$FW"
   echo "${1:-FedoraWorkstation}" >"$FW/default"
   zone FedoraWorkstation default "dhcpv6-client samba-client ssh" "1025-65535/tcp 1025-65535/udp" "eth0" ""
   zone public default "dhcpv6-client mdns ssh" "" "" ""
   zone internal default "dhcpv6-client ssh" "" "" ""
   zone trusted ACCEPT "" "" "" ""
-  zone tailnet default "ssh" "" "tailscale0" "100.64.0.0/10 fd7a:115c:a1e0::/48"
-  : >"$PEERS"
 }

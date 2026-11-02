@@ -26,6 +26,38 @@ firewall_list() {
   tr -s '[:space:]' '\n' <<<"$answer" | sed '/^$/d'
 }
 
+# Earlier installs gave sshd a firewalld zone of its own and closed ssh in every other zone with a reject rule. sshd is
+# gone now, so both go: stage 40 removes them, 70-verify checks that none is left.
+TAILNET_ZONE_FILE=/etc/firewalld/zones/tailnet.xml
+SSH_REJECT_RULE='rule service name="ssh" reject'
+
+# The zones that have the ssh reject rule, one per line. Arguments: firewall-cmd's mode, "--permanent" or none.
+zones_with_ssh_reject_rule() {
+  local zones zone
+  zones="$(firewall_list "$@" --get-zones)" || die "cannot list the firewall zones"
+  while read -r zone; do
+    [[ -n "$zone" ]] || continue
+    if firewall_query "$@" --zone="$zone" --query-rich-rule="$SSH_REJECT_RULE"; then printf '%s\n' "$zone"; fi
+  done <<<"$zones"
+}
+
+ensure_tailnet_ssh_firewall_gone() {
+  local zones zone reload=0
+  firewalld_active || return 0
+  zones="$(zones_with_ssh_reject_rule --permanent)" || die "cannot list the zones with the ssh reject rule"
+  while read -r zone; do
+    [[ -n "$zone" ]] || continue
+    log "removing the ssh reject rule from the zone $zone"
+    root firewall-cmd --permanent --zone="$zone" --remove-rich-rule="$SSH_REJECT_RULE" >/dev/null
+    reload=1
+  done <<<"$zones"
+  if ! path_absent "$TAILNET_ZONE_FILE"; then
+    ensure_root_file_absent "$TAILNET_ZONE_FILE"
+    reload=1
+  fi
+  if [[ $reload -eq 1 ]]; then root firewall-cmd --reload; fi
+}
+
 # True when one of the open port ranges of ZONE covers PROTO ports LO-HI. Arguments after the ports: firewall-cmd's mode,
 # "--permanent" or none (the running configuration).
 zone_lists_port_range() {
@@ -63,7 +95,7 @@ ensure_airplay_ports() {
   root firewall-cmd --reload
 }
 
-# vekrona's default zone is public, which opens nothing but mDNS and dhcpv6-client (ssh goes with tailnet-ssh.sh), not the
+# vekrona's default zone is public, which opens nothing but mDNS and dhcpv6-client, not the
 # FedoraWorkstation zone's 1025-65535. What vekrona runs gets exactly its own openings, firewalld services all of them:
 #   mdns, dhcpv6-client  stock public; mDNS finds AirPlay speakers and answers the other machines' names
 #   syncthing            the Syncthing daemon (stage 50): 22000/tcp+udp, 21027/udp local discovery

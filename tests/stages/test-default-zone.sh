@@ -9,8 +9,7 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 stubs="$scratch/stubs"
 mkdir -p "$stubs"
-export FW="$scratch/fw" PEERS="$scratch/peers"
-TAILNET_ZONE_FILE="$scratch/tailnet.xml"
+export FW="$scratch/fw"
 source "$ROOT/tests/stages/firewalld-fakes.sh"
 
 ensure() { rc=0; (PATH="$stubs:$PATH" ensure_default_zone) >"$scratch/out" 2>&1 || rc=$?; }

@@ -14,6 +14,10 @@ VEKRONA_SYSTEM_DIR=/usr/local/lib/vekrona
 # The bin/ scripts root runs from there: vekrona-proton from the update units, vekrona-update-ask as the user it asks.
 # shellcheck disable=SC2034
 VEKRONA_SYSTEM_BIN=(vekrona-proton vekrona-update-ask)
+# A root-owned file the test guests carry (vekrona-dev's provisioning, the ISO test's kickstart): their host drives them over
+# ssh, so stage 30 keeps openssh-server there and stage 40 keeps ssh open in the default zone. Tests point this at a scratch file.
+VEKRONA_KEEP_SSHD_MARKER="${VEKRONA_KEEP_SSHD_MARKER:-/etc/vekrona/keep-sshd}"
+keep_sshd() { [[ -e "$VEKRONA_KEEP_SSHD_MARKER" ]]; }
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
@@ -1737,6 +1741,12 @@ links_into_retired_mise_share() { [[ -L "$1" && "$(readlink "$1")" == "$VEKRONA_
 # (abrt-gui) posts an "Oops!" card straight into the notification list instead of the errors panel.
 # shellcheck disable=SC2034
 VEKRONA_UNWANTED_PKGS=(abrt abrt-gui)
+
+# Remote login is not part of vekrona: openssh-server goes, unless a test guest keeps it (keep_sshd).
+vekrona_unwanted_pkgs() {
+  printf '%s\n' "${VEKRONA_UNWANTED_PKGS[@]}"
+  keep_sshd || printf '%s\n' openssh-server
+}
 
 vekrona_desktop_pkgs() {
   local wlroots_pkg
