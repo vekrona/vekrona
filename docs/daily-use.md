@@ -19,7 +19,7 @@ Vekrona installs a curated set of applications via the following channels:
 - **Steam**: RPM Fusion (already installed; stage 60 sets Steam Play preset to `proton_experimental` for all titles)
 - **Nix**: Fedora 44's own `nix` and `nix-daemon` RPMs (flakes enabled by default; `/nix` lives on its own btrfs subvolume `nix` separate from root, so rollbacks never include the Nix store)
 - **devbox**: installed for the desktop user with `nix profile install` from a pinned nixpkgs commit (`DEVBOX_NIXPKGS_REV` in stage 50)
-- **Tailscale**: Fedora `updates` repository (no vendor repo needed; `tailscaled` enabled and active, you are operator: `tailscale up` without sudo; shields up and Tailscale SSH off, so nothing on the tailnet can connect in: stage 40 sets them, but tailscaled keeps no setting until the node is logged in, so log in with `tailscale up --shields-up --ssh=false` and re-run `./install.sh 40`; tray icon runs via user systemd unit)
+- **Tailscale**: Fedora `updates` repository (no vendor repo needed; `tailscaled` enabled and active, you are operator: `tailscale up` without sudo; shields up and Tailscale SSH off, so nothing on the tailnet can connect in (what this breaks: another node cannot start a Syncthing connection to this one, receive a Taildrop file here, or open a Steam Remote Play session to this machine over the tailnet; connections this machine starts work as before): stage 40 sets them, but tailscaled keeps no setting until the node is logged in, so log in with `tailscale up --shields-up --ssh=false` and re-run `./install.sh 40`; tray icon runs via user systemd unit)
 - **btop**: Fedora repository
 - **Non-free codecs**: RPM Fusion (swap `ffmpeg-free` to `ffmpeg`, add freeworld gstreamer plugins, `mesa-va-drivers-freeworld`, openh264 via already-enabled `fedora-cisco-openh264`; VDPAU packages no longer exist in F44)
 
@@ -46,12 +46,15 @@ nothing is pending the items are not there.
 
 ### Default firewall zone
 
-Stage `30-packages` installs `firewalld` and stage `40-system` enables it and starts it (`ensure_default_zone`, `lib/firewall.sh`). It
+Stage `30-packages` installs `firewalld` and stage `40-system` enables and starts it, then `ensure_default_zone` (`lib/firewall.sh`)
 makes `public` the default zone. Fedora Workstation's own default, `FedoraWorkstation`, accepts every TCP and UDP port from 1025 up
 from the local network. `public` holds exactly what vekrona runs and nothing else, services all of them and no port: `dhcpv6-client`,
 `syncthing` (22000/tcp and udp, 21027/udp for local discovery; its web GUI stays on 127.0.0.1), `steam-streaming` and
 `steam-lan-transfer` (Steam is installed by stage 30: Remote Play and local game transfer). Whatever else the zone holds, stock
-`ssh` and `mdns` or a port opened by hand or by an earlier vekrona (AirPlay's 6001-6010), the stage closes again. A new service is one
+`ssh` and `mdns`, a port opened by hand or by an earlier vekrona (AirPlay's 6001-6010), a protocol, source port, forward port,
+rich rule, masquerading or a target other than `default`, the stage removes again, and it reloads firewalld when the running
+configuration differs from the permanent one. Stage 40 reports, and stage 70 fails on, a zone with an interface that opens every TCP port
+from 1025 or whose target is `ACCEPT` (`trusted`, or a zone that libvirt or Docker made). A new service is one
 more word in `DEFAULT_ZONE_SERVICES` (`lib/firewall.sh`). If a NetworkManager connection is pinned to the `FedoraWorkstation` zone
 (`nmcli -f connection.zone connection show <name>`), stage 40 reports it and `70-verify` fails until
 `nmcli connection modify <name> connection.zone ''` clears the pin.

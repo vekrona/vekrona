@@ -5,6 +5,16 @@ PAM_U2F_STOCK='pam_u2f.so cue'
 PAM_U2F_VEKRONA='pam_u2f.so cue pinverification=1 origin=pam://vekrona appid=pam://vekrona authfile=/etc/u2f_mappings'
 AUTHSELECT_PAM_FILES=(system-auth password-auth)
 
+# The profile stage 45-auth writes and selects, with the features it selects, and what `authselect current --raw` reports once it
+# is selected (sorted, on one line): 70-verify compares with the same.
+PROFILE_NAME=vekrona
+PROFILE_ID="custom/$PROFILE_NAME"
+PROFILE_FEATURES=(with-silent-lastlog with-fingerprint with-pam-u2f)
+
+wanted_authselect_selection() {
+  printf '%s\n' "$PROFILE_ID" "${PROFILE_FEATURES[@]}" | sort | paste -sd' '
+}
+
 authselect_base_dir() {
   local d
   for d in /usr/share/authselect/vendor/local /usr/share/authselect/default/local; do

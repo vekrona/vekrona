@@ -108,7 +108,7 @@ irqbalance_bans_nvme_when_running() {
 tailscale_operator_is_user() { [[ "$(tailscale_operator)" == "$VEKRONA_USER" ]]; }
 authselect_selection_ok() {
   local want have
-  want="$(printf '%s\n' custom/vekrona with-silent-lastlog with-fingerprint with-pam-u2f | sort | paste -sd' ')"
+  want="$(wanted_authselect_selection)"
   have="$(authselect current --raw | tr ' ' '\n' | sed '/^$/d' | sort | paste -sd' ')"
   [[ "$have" == "$want" ]]
 }
@@ -463,7 +463,7 @@ if ran 40-system; then
 fi
 
 if ran 45-auth; then
-  check assert "authselect selects custom/vekrona with its three features" authselect_selection_ok
+  check assert "authselect selects $PROFILE_ID with ${PROFILE_FEATURES[*]}" authselect_selection_ok
   for f in system-auth password-auth; do
     check assert "both pam_u2f template lines pinned to pam://vekrona in the profile's $f" vekrona_pam_u2f_lines_ok "/etc/authselect/custom/vekrona/$f" 2
     check assert "the one enabled pam_u2f line pinned to pam://vekrona in /etc/pam.d/$f" vekrona_pam_u2f_lines_ok "/etc/pam.d/$f" 1
