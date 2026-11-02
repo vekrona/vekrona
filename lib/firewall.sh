@@ -21,6 +21,26 @@ firewall_list() {
   tr -s '[:space:]' '\n' <<<"$answer" | sed '/^$/d'
 }
 
+# Like firewall_list, but one entry per line: rich rules and forward ports are not single words.
+firewall_lines() {
+  local answer
+  answer="$(root firewall-cmd "$@")" || die "firewall-cmd $* failed"
+  sed '/^$/d' <<<"$answer"
+}
+
+# The running configuration is the permanent one again after this.
+reload_firewalld() {
+  log "reloading firewalld"
+  root firewall-cmd --reload
+}
+
+# The zones some interface or source is in, one per line.
+active_zones() {
+  local active
+  active="$(root firewall-cmd --get-active-zones)" || die "cannot read the active zones"
+  awk '!/^[[:space:]]/ { print $1 }' <<<"$active" || die "awk failed on the active zones"
+}
+
 # Earlier installs gave sshd a firewalld zone of its own and closed ssh in every other zone with a reject rule. sshd is
 # gone now, so both go: stage 40 removes them, 70-verify checks that none is left.
 TAILNET_ZONE_FILE=/etc/firewalld/zones/tailnet.xml
@@ -36,8 +56,11 @@ zones_with_ssh_reject_rule() {
   done <<<"$zones"
 }
 
+# Removes both, then reloads when the permanent configuration changed or a running zone still has the rule.
 ensure_tailnet_ssh_firewall_gone() {
-  local zones zone reload=0
+  local zones zone running reload=0
+  running="$(zones_with_ssh_reject_rule)" || die "cannot list the running zones with the ssh reject rule"
+  if [[ -n "$running" ]]; then reload=1; fi
   zones="$(zones_with_ssh_reject_rule --permanent)" || die "cannot list the zones with the ssh reject rule"
   while read -r zone; do
     [[ -n "$zone" ]] || continue
@@ -49,20 +72,18 @@ ensure_tailnet_ssh_firewall_gone() {
     ensure_root_file_absent "$TAILNET_ZONE_FILE"
     reload=1
   fi
-  if [[ $reload -eq 1 ]]; then root firewall-cmd --reload; fi
+  if [[ $reload -eq 1 ]]; then reload_firewalld; fi
 }
 
-# True when one of the open port ranges of ZONE covers PROTO ports LO-HI. Arguments after the ports: firewall-cmd's mode,
-# "--permanent" or none (the running configuration).
-zone_lists_port_range() {
-  local zone="$1" proto="$2" lo="$3" hi="$4" entries entry range
-  shift 4
-  entries="$(firewall_list "$@" --zone="$zone" --list-ports)" || die "cannot list the open ports of the zone $zone"
+# True when one of the open TCP port ranges of ZONE (running configuration) covers 1025-65535.
+zone_opens_high_tcp_ports() {
+  local entries entry range
+  entries="$(firewall_list --zone="$1" --list-ports)" || die "cannot list the open ports of the zone $1"
   while read -r entry; do
-    [[ "$entry" == */"$proto" ]] || continue
-    range="${entry%/"$proto"}"
+    [[ "$entry" == */tcp ]] || continue
+    range="${entry%/tcp}"
     [[ "$range" == *-* ]] || range="$range-$range"
-    if (( ${range%-*} <= lo && ${range#*-} >= hi )); then return 0; fi
+    if (( ${range%-*} <= 1025 && ${range#*-} >= 65535 )); then return 0; fi
   done <<<"$entries"
   return 1
 }
@@ -83,11 +104,54 @@ default_zone_services() {
   if keep_sshd; then printf '%s\n' ssh; fi
 }
 
-# Makes public the default zone, with exactly the services given as arguments and no port: whatever else the zone holds
-# (stock ssh and mdns, ports opened by hand or by an older vekrona) is removed. Reloads if the permanent configuration changed.
-# Reports, without ending the install, an interface that a NetworkManager connection pins to a zone that opens the high ports.
+# What the default zone holds beyond the services given after the mode, as the firewall-cmd options that remove it, one per
+# line: another service, a port, protocol, source port, forward port or rich rule, masquerading, and (permanent only, the
+# running configuration has no target to read) a target other than "default". MODE is "permanent" or "running".
+default_zone_extras() {
+  local mode="$1" flags=() zone=(--zone="$DEFAULT_ZONE") wanted=("${@:2}") listed item kind target
+  if [[ "$mode" == permanent ]]; then flags=(--permanent); fi
+  listed="$(firewall_list "${flags[@]}" "${zone[@]}" --list-services)" || die "cannot list the services of the zone $DEFAULT_ZONE"
+  while read -r item; do
+    [[ -n "$item" ]] || continue
+    case " ${wanted[*]} " in *" $item "*) ;; *) printf '%s\n' "--remove-service=$item" ;; esac
+  done <<<"$listed"
+  for kind in port protocol source-port; do
+    listed="$(firewall_list "${flags[@]}" "${zone[@]}" "--list-${kind}s")" || die "cannot list the ${kind}s of the zone $DEFAULT_ZONE"
+    while read -r item; do
+      [[ -z "$item" ]] || printf '%s\n' "--remove-$kind=$item"
+    done <<<"$listed"
+  done
+  for kind in forward-port rich-rule; do
+    listed="$(firewall_lines "${flags[@]}" "${zone[@]}" "--list-${kind}s")" || die "cannot list the ${kind}s of the zone $DEFAULT_ZONE"
+    while IFS= read -r item; do
+      [[ -z "$item" ]] || printf '%s\n' "--remove-$kind=$item"
+    done <<<"$listed"
+  done
+  if firewall_query "${flags[@]}" "${zone[@]}" --query-masquerade; then printf '%s\n' --remove-masquerade; fi
+  if [[ "$mode" == permanent ]]; then
+    target="$(root firewall-cmd --permanent "${zone[@]}" --get-target)" || die "cannot read the target of the zone $DEFAULT_ZONE"
+    if [[ "$target" != default ]]; then printf '%s\n' --set-target=default; fi
+  fi
+}
+
+# True when the default zone holds exactly the services after the mode and nothing else, in the configuration MODE names
+# ("permanent" or "running").
+default_zone_is_exact() {
+  local mode="$1" flags=() extras service
+  shift
+  if [[ "$mode" == permanent ]]; then flags=(--permanent); fi
+  extras="$(default_zone_extras "$mode" "$@")" || die "cannot list what the zone $DEFAULT_ZONE holds"
+  [[ -z "$extras" ]] || return 1
+  for service in "$@"; do
+    firewall_query "${flags[@]}" --zone="$DEFAULT_ZONE" --query-service="$service" || return 1
+  done
+}
+
+# Makes public the default zone, with exactly the services given as arguments and nothing else (default_zone_extras): whatever
+# else the zone holds (stock ssh and mdns, ports opened by hand or by an older vekrona) is removed. Reloads when the permanent
+# configuration changed or the running one differs from it.
 ensure_default_zone() {
-  local wanted=("$@") default service known current port reload=0
+  local wanted=("$@") default service known extras option reload=0
   known="$(firewall_list --permanent --get-services)" || die "cannot list the firewalld services"
   for service in "${wanted[@]}"; do
     grep -qxF "$service" <<<"$known" || die "this firewalld has no service $service"
@@ -97,51 +161,43 @@ ensure_default_zone() {
     log "making $DEFAULT_ZONE the default zone (it was $default)"
     root firewall-cmd --set-default-zone="$DEFAULT_ZONE" >/dev/null
   fi
-  current="$(firewall_list --permanent --zone="$DEFAULT_ZONE" --list-services)" || die "cannot list the services of the zone $DEFAULT_ZONE"
-  while read -r service; do
-    [[ -n "$service" ]] || continue
-    case " ${wanted[*]} " in *" $service "*) continue ;; esac
-    log "closing the $service service in the zone $DEFAULT_ZONE"
-    root firewall-cmd --permanent --zone="$DEFAULT_ZONE" --remove-service="$service" >/dev/null
+  extras="$(default_zone_extras permanent "${wanted[@]}")" || die "cannot list what the zone $DEFAULT_ZONE holds"
+  while IFS= read -r option; do
+    [[ -n "$option" ]] || continue
+    log "zone $DEFAULT_ZONE: $option"
+    root firewall-cmd --permanent --zone="$DEFAULT_ZONE" "$option" >/dev/null
     reload=1
-  done <<<"$current"
-  current="$(firewall_list --permanent --zone="$DEFAULT_ZONE" --list-ports)" || die "cannot list the ports of the zone $DEFAULT_ZONE"
-  while read -r port; do
-    [[ -n "$port" ]] || continue
-    log "closing the port $port in the zone $DEFAULT_ZONE"
-    root firewall-cmd --permanent --zone="$DEFAULT_ZONE" --remove-port="$port" >/dev/null
-    reload=1
-  done <<<"$current"
+  done <<<"$extras"
   for service in "${wanted[@]}"; do
     firewall_query --permanent --zone="$DEFAULT_ZONE" --query-service="$service" && continue
     log "opening the $service service in the zone $DEFAULT_ZONE"
     root firewall-cmd --permanent --zone="$DEFAULT_ZONE" --add-service="$service" >/dev/null
     reload=1
   done
-  if [[ $reload -eq 1 ]]; then root firewall-cmd --reload; fi
+  if [[ $reload -eq 1 ]] || ! default_zone_is_exact running "${wanted[@]}"; then reload_firewalld; fi
   default="$(root firewall-cmd --get-default-zone)" || die "cannot read the default zone"
   [[ "$default" == "$DEFAULT_ZONE" ]] || die "the default zone is $default after setting it to $DEFAULT_ZONE"
-}
-
-# True when the default zone holds exactly the services after the first argument, and no port, in the configuration that
-# argument names: "permanent" or "running".
-default_zone_is_exact() {
-  local mode=() have ports
-  if [[ "$1" == permanent ]]; then mode=(--permanent); fi
-  shift
-  have="$(firewall_list "${mode[@]}" --zone="$DEFAULT_ZONE" --list-services | sort)" || die "cannot list the services of the zone $DEFAULT_ZONE"
-  ports="$(firewall_list "${mode[@]}" --zone="$DEFAULT_ZONE" --list-ports)" || die "cannot list the ports of the zone $DEFAULT_ZONE"
-  [[ "$have" == "$(printf '%s\n' "$@" | sort)" && -z "$ports" ]]
+  default_zone_is_exact running "${wanted[@]}" || die "the zone $DEFAULT_ZONE still differs from the wanted services after the reload"
 }
 
 # The zones some interface or source is in that open every TCP port from 1025: after ensure_default_zone these are the
 # connections NetworkManager pins to a zone of their own. One per line.
 zones_open_to_high_ports() {
-  local active zones zone
-  active="$(root firewall-cmd --get-active-zones)" || die "cannot read the active zones"
-  zones="$(awk '!/^[[:space:]]/ { print $1 }' <<<"$active")" || die "awk failed on the active zones"
+  local zones zone
+  zones="$(active_zones)" || die "cannot read the active zones"
   while read -r zone; do
     [[ -n "$zone" ]] || continue
-    if zone_lists_port_range "$zone" tcp 1025 65535; then printf '%s\n' "$zone"; fi
+    if zone_opens_high_tcp_ports "$zone"; then printf '%s\n' "$zone"; fi
+  done <<<"$zones"
+}
+
+# The zones some interface or source is in whose target accepts everything (trusted, or a hotspot's or Docker's zone). One per line.
+zones_accepting_everything() {
+  local zones zone target
+  zones="$(active_zones)" || die "cannot read the active zones"
+  while read -r zone; do
+    [[ -n "$zone" ]] || continue
+    target="$(root firewall-cmd --permanent --zone="$zone" --get-target)" || die "cannot read the target of the zone $zone"
+    if [[ "$target" == ACCEPT ]]; then printf '%s\n' "$zone"; fi
   done <<<"$zones"
 }

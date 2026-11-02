@@ -17,10 +17,7 @@ ensure() { rc=0; (PATH="$stubs:$PATH" ensure_tailnet_ssh_firewall_gone) >"$scrat
 rejecting() { PATH="$stubs:$PATH" zones_with_ssh_reject_rule "$@" | tr '\n' ' '; }
 
 stock
-for mode in perm run; do
-  echo "$SSH_REJECT_RULE" >>"$FW/$mode/public/richrules"
-  echo "$SSH_REJECT_RULE" >>"$FW/$mode/trusted/richrules"
-done
+for name in public trusted; do hold both "$name" rich-rules "$SSH_REJECT_RULE"; done
 echo "<zone/>" >"$TAILNET_ZONE_FILE"
 [[ "$(rejecting)" == "public trusted " ]] || die "the zones with the ssh reject rule are not found: '$(rejecting)'"
 ensure
@@ -28,11 +25,17 @@ ensure
 [[ ! -e "$TAILNET_ZONE_FILE" ]] || die "the tailnet zone file of an earlier install must go"
 log "ok: the ssh reject rules and the tailnet zone of an earlier install are removed"
 
-before="$(cat "$FW"/perm/*/richrules "$FW"/perm/*/services)"
+before="$(cat "$FW"/perm/*/rich-rules "$FW"/perm/*/services)"
 ensure
-[[ "$rc" == 0 && "$(cat "$FW"/perm/*/richrules "$FW"/perm/*/services)" == "$before" ]] || die "a system without them must be left alone: rc=$rc: $(cat "$scratch/out")"
-! grep -q 'removing' "$scratch/out" || die "a second run removed something: $(cat "$scratch/out")"
+[[ "$rc" == 0 && "$(cat "$FW"/perm/*/rich-rules "$FW"/perm/*/services)" == "$before" ]] || die "a system without them must be left alone: rc=$rc: $(cat "$scratch/out")"
+! grep -q 'removing\|reloading' "$scratch/out" || die "a second run removed or reloaded something: $(cat "$scratch/out")"
 log "ok: a second run changes nothing"
+
+stock
+hold run internal rich-rules "$SSH_REJECT_RULE"
+ensure
+[[ "$rc" == 0 && -z "$(rejecting)" ]] || die "a rule that only the running configuration has must be removed by a reload: rc=$rc, '$(rejecting)': $(cat "$scratch/out")"
+log "ok: a running zone that still has the rule is reloaded"
 
 stock
 FW_FAIL=--get-zones ensure

@@ -23,7 +23,7 @@ usage="usage: 'firewall-cmd --help' for usage information or see firewall-cmd(1)
 case "$action" in
   --state|--reload|--complete-reload|--runtime-to-permanent|--reset-to-defaults|--check-config|--get-default-zone|--set-default-zone=*|--get-active-zones|--get-active-policies|--panic-on|--panic-off|--query-panic|--lockdown-on|--lockdown-off|--query-lockdown|--get-log-denied|--get-ipset-types)
     if [[ $others -eq 1 ]]; then printf "%s\nCan't use stand-alone options with other options.\n" "$usage" >&2; exit 2; fi ;;
-  --get-target)
+  --get-target|--set-target=*)
     if [[ "$mode" != perm ]]; then printf '%s\nOption can be used only with --permanent.\n' "$usage" >&2; exit 2; fi ;;
 esac
 # FW_FAIL=--get-zones makes that option fail the way firewall-cmd does when firewalld stopped answering (status 252).
@@ -48,40 +48,31 @@ case "$action" in
     for m in perm run; do cat "$FW/$m/$(<"$FW/default")/interfaces" >>"$FW/$m/$new/interfaces"; : >"$FW/$m/$(<"$FW/default")/interfaces"; done
     echo "$new" >"$FW/default" ;;
   --get-services) echo "${FW_SERVICES:-dhcpv6-client mdns samba-client ssh steam-lan-transfer steam-streaming syncthing syncthing-gui}" ;;
-  --add-service=*) echo "${action#--add-service=}" >>"$dir/$zone/services" ;;
   --get-active-zones)
     for z in $(ls "$dir"); do
       if [[ -s "$dir/$z/interfaces" || -s "$dir/$z/sources" ]]; then printf '%s\n  interfaces: %s\n' "$z" "$(tr '\n' ' ' <"$dir/$z/interfaces")"; fi
     done ;;
-  --get-zone-of-source=*)
-    for z in $(ls "$dir"); do
-      if grep -qxF "${action#--get-zone-of-source=}" "$dir/$z/sources"; then echo "$z"; exit 0; fi
-    done
-    echo "no zone"; exit 0 ;;
-  --get-zone-of-interface=*)
-    for z in $(ls "$dir"); do
-      if grep -qxF "${action#--get-zone-of-interface=}" "$dir/$z/interfaces"; then echo "$z"; exit 0; fi
-    done
-    echo "no zone"; exit 0 ;;
-  --query-service=*) query services "${action#--query-service=}" ;;
-  --list-services) tr '\n' ' ' <"$dir/$zone/services" ;;
-  --list-ports) tr '\n' ' ' <"$dir/$zone/ports" ;;
-  --list-rich-rules) cat "$dir/$zone/richrules" ;;
   --get-target) cat "$dir/$zone/target" ;;
-  --query-rich-rule=*) query richrules "${action#--query-rich-rule=}" ;;
+  --set-target=*) echo "${action#--set-target=}" >"$dir/$zone/target" ;;
+  --query-service=*) query services "${action#--query-service=}" ;;
+  --query-rich-rule=*) query rich-rules "${action#--query-rich-rule=}" ;;
+  --query-masquerade) if [[ -s "$dir/$zone/masquerade" ]]; then echo yes; else echo no; exit 1; fi ;;
+  # Ports, protocols and source ports are listed on one line, forward ports and rich rules one per line.
+  --list-services|--list-ports|--list-protocols|--list-source-ports) tr '\n' ' ' <"$dir/$zone/${action#--list-}" ;;
+  --list-forward-ports|--list-rich-rules) cat "$dir/$zone/${action#--list-}" ;;
   # Changes apply to the configuration the mode names, the runtime one as well as the permanent one.
-  --add-rich-rule=*) echo "${action#--add-rich-rule=}" >>"$dir/$zone/richrules" ;;
-  --remove-service=*) sed -i "/^${action#--remove-service=}\$/d" "$dir/$zone/services" ;;
-  --add-port=*) echo "${action#--add-port=}" >>"$dir/$zone/ports" ;;
-  --remove-port=*) drop_line ports "${action#--remove-port=}" ;;
-  --remove-rich-rule=*) drop_line richrules "${action#--remove-rich-rule=}" ;;
+  --add-service=*) echo "${action#--add-service=}" >>"$dir/$zone/services" ;;
+  --remove-masquerade) : >"$dir/$zone/masquerade" ;;
+  --remove-service=*|--remove-port=*|--remove-protocol=*|--remove-source-port=*|--remove-forward-port=*|--remove-rich-rule=*)
+    option="${action%%=*}"
+    drop_line "${option#--remove-}s" "${action#*=}" ;;
   *) echo "firewall-cmd stub: unexpected $*" >&2; exit 99 ;;
 esac
 F
 
-# zone NAME TARGET "SERVICES" "PORTS" "INTERFACES" "SOURCES": one zone, in both configurations.
+# zone NAME TARGET "SERVICES" "PORTS" "INTERFACES" "SOURCES": one zone, in both configurations, holding nothing else.
 zone() {
-  local mode name="$1"
+  local mode kind name="$1"
   for mode in perm run; do
     mkdir -p "$FW/$mode/$name"
     printf '%s\n' "$2" >"$FW/$mode/$name/target"
@@ -89,8 +80,14 @@ zone() {
     printf '%s\n' "$4" | tr ' ' '\n' | sed '/^$/d' >"$FW/$mode/$name/ports"
     printf '%s\n' "$5" | tr ' ' '\n' | sed '/^$/d' >"$FW/$mode/$name/interfaces"
     printf '%s\n' "$6" | tr ' ' '\n' | sed '/^$/d' >"$FW/$mode/$name/sources"
-    : >"$FW/$mode/$name/richrules"
+    for kind in protocols source-ports forward-ports rich-rules masquerade; do : >"$FW/$mode/$name/$kind"; done
   done
+}
+# hold MODE ZONE KIND VALUE: one more line in a file of the zone (services, ports, protocols, source-ports, forward-ports,
+# rich-rules, masquerade). MODE is perm, run or both.
+hold() {
+  local mode
+  for mode in ${1/both/perm run}; do printf '%s\n' "$4" >>"$FW/$mode/$2/$3"; done
 }
 # firewalld of a stock Fedora Workstation: ssh in every zone but trusted, and the workstation zone in use.
 stock() {

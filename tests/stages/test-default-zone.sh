@@ -47,8 +47,31 @@ log "ok: ports left over from earlier are closed"
 before="$(cat "$FW"/perm/public/services "$FW"/perm/public/ports)"
 ensure
 [[ "$rc" == 0 && "$(cat "$FW"/perm/public/services "$FW"/perm/public/ports)" == "$before" ]] || die "a second run changed the zone: rc=$rc: $(cat "$scratch/out")"
-! grep -q 'opening\|closing\|making' "$scratch/out" || die "a second run opened, closed or changed something: $(cat "$scratch/out")"
+! grep -q 'opening\|zone public:\|making\|reloading' "$scratch/out" || die "a second run opened, closed, changed or reloaded something: $(cat "$scratch/out")"
 log "ok: a second run changes nothing"
+
+# "Exactly" covers everything a zone can hold, not only services and ports.
+stock public
+zone public default "dhcpv6-client syncthing steam-streaming steam-lan-transfer" "" "" ""
+hold both public protocols gre
+hold both public source-ports 53/udp
+hold both public forward-ports "port=80:proto=tcp:toport=8080:toaddr="
+hold both public rich-rules 'rule family="ipv4" source address="10.0.0.0/8" accept'
+hold both public masquerade yes
+echo ACCEPT >"$FW/perm/public/target"
+ensure
+for kind in ports protocols source-ports forward-ports rich-rules masquerade; do
+  [[ ! -s "$FW/perm/public/$kind" && ! -s "$FW/run/public/$kind" ]] || die "the zone still holds $kind: '$(cat "$FW/perm/public/$kind")'"
+done
+[[ "$rc" == 0 && "$(<"$FW/perm/public/target")" == default ]] || die "the zone target must be default: rc=$rc, '$(<"$FW/perm/public/target")': $(cat "$scratch/out")"
+log "ok: protocols, source ports, forward ports, rich rules, masquerading and a changed target are all undone"
+
+# The running configuration can differ from an exact permanent one (firewall-cmd without --permanent).
+echo ssh >>"$FW/run/public/services"
+ensure
+[[ "$rc" == 0 && "$(services_of run)" == "$FOUR" ]] || die "a running zone that differs from an exact permanent zone must be reloaded: rc=$rc, '$(services_of run)': $(cat "$scratch/out")"
+grep -q reloading "$scratch/out" || die "the reload did not happen: $(cat "$scratch/out")"
+log "ok: a running zone that differs from an exact permanent zone is reloaded"
 
 stock
 touch "$VEKRONA_KEEP_SSHD_MARKER"
@@ -59,6 +82,13 @@ ensure
 [[ "$rc" == 0 && "$(services_of perm)" == "$FOUR" ]] || die "without the marker ssh must be closed again: rc=$rc, '$(services_of perm)'"
 log "ok: ssh stays in the zone with the keep-sshd marker and goes without it"
 
+accepting() { PATH="$stubs:$PATH" zones_accepting_everything | tr '\n' ' '; }
+stock
+[[ -z "$(accepting)" ]] || die "trusted has no interface, so it accepts nothing: '$(accepting)'"
+zone trusted ACCEPT "" "" "docker0" ""
+[[ "$(accepting)" == "trusted " ]] || die "an active zone with the target ACCEPT must be found: '$(accepting)'"
+log "ok: an active zone that accepts everything is found"
+
 stock
 FW_SERVICES="dhcpv6-client mdns ssh" ensure
 [[ "$rc" != 0 ]] && grep -q 'no service syncthing' "$scratch/out" || die "a firewalld without a service vekrona needs must fail before anything changes: rc=$rc: $(cat "$scratch/out")"
@@ -68,7 +98,7 @@ log "ok: a firewalld that lacks one of the services fails before it changes the 
 stock
 FW_FAIL=--set-default-zone ensure
 [[ "$rc" != 0 ]] || die "a failing --set-default-zone was ignored"
-for failing in --list-services --list-ports; do
+for failing in --list-services --list-ports --list-protocols --list-source-ports --list-forward-ports --list-rich-rules --query-masquerade --get-target; do
   stock public
   FW_FAIL="$failing" ensure
   [[ "$rc" != 0 ]] || die "ensure_default_zone went on although firewall-cmd $failing failed"
