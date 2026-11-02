@@ -11,6 +11,7 @@ source "$ROOT/lib/facetimehd.sh"
 source "$ROOT/lib/proton.sh"
 source "$ROOT/lib/firewall.sh"
 source "$ROOT/lib/tailscale.sh"
+source "$ROOT/lib/kernel-hardening.sh"
 source "$ROOT/lib/cuda-repo.sh"
 source "$ROOT/lib/geoclue.sh"
 source "$ROOT/lib/xremap.sh"
@@ -443,6 +444,14 @@ if ran 40-system; then
   high_port_zones="$(zones_open_to_high_ports)"
   check assert "no zone with an interface opens TCP 1025-65535 (a NetworkManager connection may pin one: nmcli connection modify <connection> connection.zone '')" eq "$high_port_zones" ""
   check assert "/etc/systemd/resolved.conf.d/50-vekrona.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/resolved.conf.d/50-vekrona.conf" /etc/systemd/resolved.conf.d/50-vekrona.conf
+  check assert "/etc/modprobe.d/vekrona-hardening.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf" /etc/modprobe.d/vekrona-hardening.conf
+  for module in $(blocked_modules "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf"); do
+    check assert "modprobe runs /bin/false instead of loading $module" module_blocked "$module"
+  done
+  check assert "/etc/sysctl.d/60-vekrona.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/sysctl.d/60-vekrona.conf" /etc/sysctl.d/60-vekrona.conf
+  while read -r key value; do
+    check assert "sysctl $key is $value" eq "$(sysctl -n "$key")" "$value"
+  done < <(sysctl_settings "$VEKRONA_ROOT/etc/sysctl.d/60-vekrona.conf")
   resolved_status="$(resolvectl status)"
   check assert "systemd-resolved answers neither LLMNR nor mDNS" contains "Protocols: -LLMNR -mDNS" "$resolved_status"
 fi

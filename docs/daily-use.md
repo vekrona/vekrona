@@ -73,6 +73,12 @@ whatever requires them. Losing `NetworkManager-bluetooth` ends Bluetooth tetheri
 keyboard is `bluez` and is unaffected, and a Wi-Fi hotspot on the phone is the usual way to share its connection. The machine does
 not print: there is no CUPS. `iscsi-initiator-utils` stays because `libvirt-daemon-kvm` requires it; its sockets start only on use.
 
+### Kernel hardening
+
+Stage `40-system` installs `/etc/sysctl.d/60-vekrona.conf` and `/etc/modprobe.d/vekrona-hardening.conf` ([threat model](threat-model.md)).
+What you notice: `dmesg` needs `sudo` (`journalctl -k` does not), `gdb -p` and `strace -p` on a process that is not your child
+need `sudo`, and a FireWire controller does not work.
+
 ### Display settings
 
 Sway uses each monitor's preferred mode with VRR off. Put your own `output` lines (mode, scale, position) in a file in `~/.config/sway/config.d/`, which the repo does not track and `config/sway/config` includes last. Find the identifier with `swaymsg -t get_outputs`, for example `output "<make> <model> <serial>" mode 3840x2160@120Hz scale 1.5`.

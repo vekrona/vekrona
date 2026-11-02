@@ -121,6 +121,10 @@ ensure_default_zone "${zone_services[@]}"
 high_port_zones="$(zones_open_to_high_ports)"
 [[ -z "$high_port_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$high_port_zones")open every TCP and UDP port from 1025 to this network and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone '')"
 
+# Kernel attack surface: modules nothing here uses stay unloadable, and sysctl settings read after Fedora's own.
+ensure_root_file "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf" /etc/modprobe.d/vekrona-hardening.conf
+ensure_dropins_restarting systemd-sysctl.service "$VEKRONA_ROOT/etc/sysctl.d" /etc/sysctl.d 60-vekrona.conf
+
 # LLMNR and mDNS answer to the local network and are not used (avahi is removed by stage 30).
 ensure_dropins_restarting systemd-resolved "$VEKRONA_ROOT/etc/systemd/resolved.conf.d" /etc/systemd/resolved.conf.d 50-vekrona.conf
 
