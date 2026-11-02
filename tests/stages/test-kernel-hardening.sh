@@ -18,13 +18,14 @@ for module in $modules; do
 done
 log "ok: every blocked module is shipped by the running kernel as a module, and modprobe runs /bin/false for it"
 
-! module_blocked lizard -C "$modprobe_conf" || die "a module the file does not name must not read as blocked"
-log "ok: a module that is not listed is not blocked"
+# dummy is shipped and loadable, and the file does not name it.
+! module_blocked dummy -C "$modprobe_conf" || die "a shipped module the file does not name must not read as blocked"
+log "ok: a shipped module that is not listed is not blocked"
 
 settings="$(sysctl_settings "$sysctl_conf")"
 [[ -n "$settings" ]] || die "$sysctl_conf sets nothing"
 while read -r key value; do
   [[ -n "$value" ]] || die "the setting $key in $sysctl_conf has no value"
-  sysctl -N -- "$key" >/dev/null || die "the running kernel has no sysctl $key: systemd-sysctl would fail on it"
+  (sysctl_readings "$key" >/dev/null) || die "the running kernel has no sysctl $key: systemd-sysctl would fail on it"
 done <<<"$settings"
 log "ok: every sysctl key in the file exists in the running kernel"
