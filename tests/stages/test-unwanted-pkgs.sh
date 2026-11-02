@@ -20,6 +20,11 @@ touch "$VEKRONA_KEEP_SSHD_MARKER"
 log "ok: openssh-server is unwanted unless the keep-sshd marker exists"
 
 rm -f "$VEKRONA_KEEP_SSHD_MARKER"
+for pkg in $(vekrona_unwanted_pkgs); do
+  [[ " ${VEKRONA_DESKTOP_PKGS[*]} " != *" $pkg "* ]] || die "$pkg is both a desktop package and an unwanted one: stage 30 would install it and then refuse to remove it"
+done
+log "ok: no unwanted package is a desktop package"
+
 packages openssh-server abrt sway
 read_pkg_list wanted_gone vekrona_unwanted_pkgs
 ensure_pkg_absent "${wanted_gone[@]}"

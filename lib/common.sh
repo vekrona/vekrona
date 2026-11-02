@@ -1740,8 +1740,19 @@ links_into_retired_mise_share() { [[ -L "$1" && "$(readlink "$1")" == "$VEKRONA_
 # Fedora's crash reporter duplicates vekrona-error, which records every coredump from systemd-coredump, and its applet
 # (abrt-gui) posts an "Oops!" card straight into the notification list instead of the errors panel.
 # AirPlay and mDNS are not used either: nothing announces this machine, and nothing listens for other machines' names.
+#
+# What a Fedora Workstation install carries that a vekrona laptop or desktop never uses, each a daemon or a listener: printing and
+# scanning, mobile broadband and DSL, sssd (the authselect profile derives from `local`: no sss in nsswitch or PAM), PackageKit
+# (updates go through vekrona-update), rsyslog (the journal is the log), NFS and at. dnf takes what requires them along
+# (bluez-cups, libsane-hpaio, sssd-proxy, NetworkManager-bluetooth, ...); ensure_pkg_absent dies if that would be a desktop package.
+# iscsi-initiator-utils stays: libvirt-daemon-kvm requires it, and its sockets start only on use.
 # shellcheck disable=SC2034
-VEKRONA_UNWANTED_PKGS=(abrt abrt-gui avahi nss-mdns pipewire-config-raop)
+VEKRONA_UNWANTED_PKGS=(
+  abrt abrt-gui avahi nss-mdns pipewire-config-raop
+  cups cups-browsed cups-filters hplip gutenprint system-config-printer ipp-usb sane-backends
+  ModemManager NetworkManager-wwan NetworkManager-adsl
+  sssd-kcm sssd-common sssd-client PackageKit rsyslog nfs-utils at
+)
 
 # Remote login is not part of vekrona: openssh-server goes, unless a test guest keeps it (keep_sshd).
 vekrona_unwanted_pkgs() {

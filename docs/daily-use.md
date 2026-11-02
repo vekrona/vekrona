@@ -63,6 +63,16 @@ reject rules that earlier installs left. Tailscale runs with shields up and Tail
 vekrona-dev VM and the ISO test guest are the exception: they carry the marker `/etc/vekrona/keep-sshd`, which keeps `openssh-server` and
 the `ssh` service of the zone ([development](development.md)).
 
+### Packages vekrona removes
+
+Stage `30-packages` removes what a Fedora Workstation install carries and vekrona never uses (`VEKRONA_UNWANTED_PKGS`,
+`lib/common.sh`; stage 70 checks each one is gone): the crash reporter (`abrt`), `avahi`, printing and scanning (`cups`,
+`cups-browsed`, `cups-filters`, `hplip`, `gutenprint`, `system-config-printer`, `ipp-usb`, `sane-backends`), mobile broadband and DSL
+(`ModemManager`, `NetworkManager-wwan`, `NetworkManager-adsl`), `sssd`, `PackageKit`, `rsyslog`, `nfs-utils` and `at`, and with them
+whatever requires them. Losing `NetworkManager-bluetooth` ends Bluetooth tethering (PAN and DUN); pairing a phone, headset or
+keyboard is `bluez` and is unaffected, and a Wi-Fi hotspot on the phone is the usual way to share its connection. The machine does
+not print: there is no CUPS. `iscsi-initiator-utils` stays because `libvirt-daemon-kvm` requires it; its sockets start only on use.
+
 ### Display settings
 
 Sway uses each monitor's preferred mode with VRR off. Put your own `output` lines (mode, scale, position) in a file in `~/.config/sway/config.d/`, which the repo does not track and `config/sway/config` includes last. Find the identifier with `swaymsg -t get_outputs`, for example `output "<make> <model> <serial>" mode 3840x2160@120Hz scale 1.5`.
