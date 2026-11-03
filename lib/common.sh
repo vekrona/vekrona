@@ -1623,6 +1623,11 @@ kernel_arg_state() {
 
 nvidia_module_license() { modinfo -k "$1" -F license nvidia 2>/dev/null || true; }
 
+# The driver version the built nvidia module of kernel $1 reports (nothing when there is none), and the version of the
+# akmod-nvidia package every build compiles. They differ when the akmod was upgraded after the module was built.
+nvidia_module_version() { modinfo -k "$1" -F version nvidia 2>/dev/null || true; }
+akmod_nvidia_version() { rpm -q --qf '%{VERSION}\n' akmod-nvidia || die "akmod-nvidia is not installed, so no nvidia module can be built"; }
+
 # Prints what is wrong with the kernel's nvidia module (the proprietary one has license NVIDIA); nothing when fine.
 nvidia_module_problem() {
   local license
@@ -1710,23 +1715,29 @@ akmods_dropin_active() {
   grep -qxF "$want" <<<"$unit"
 }
 
-# Builds the proprietary nvidia module for kernel $1 unless it exists; dies when the build fails or the module is wrong.
+# Builds the proprietary nvidia module for kernel $1 unless the built one is proprietary and from the installed akmod-nvidia
+# version; dies when the build fails or the module is wrong. A module built from an older akmod stays on disk when the akmod
+# is upgraded, and loads as the old driver against the new userspace, so it counts as missing.
 # akmods builds from scratch on every call. --force makes it retry a build that failed earlier (it ignores such a kernel
 # otherwise, so one transient failure would block every retry). --rebuild is a `dnf reinstall`, which silently does
 # nothing for a kmod that was never installed (an offline update skips the akmods hook), so only an installed kmod with
 # the wrong module is rebuilt that way.
 ensure_nvidia_module() {
-  local kver="$1" problem akmods_args=(--force --kernels "$1")
-  if [[ "$(nvidia_module_license "$kver")" == NVIDIA ]]; then
-    log "ok: proprietary nvidia module already built for $kver"
+  local kver="$1" problem akmod_version module_version akmods_args=(--force --kernels "$1")
+  akmod_version="$(akmod_nvidia_version)"
+  module_version="$(nvidia_module_version "$kver")"
+  if [[ "$(nvidia_module_license "$kver")" == NVIDIA && "$module_version" == "$akmod_version" ]]; then
+    log "ok: proprietary nvidia module already built for $kver from akmod-nvidia $akmod_version"
   else
     if pkg_installed "kmod-nvidia-$kver"; then akmods_args=(--rebuild "${akmods_args[@]}"); fi
-    log "building the proprietary nvidia module for $kver"
+    log "building the proprietary nvidia module for $kver (akmod-nvidia $akmod_version, built module '${module_version:-none}')"
     root akmods "${akmods_args[@]}" || die "akmods failed for $kver; $NVIDIA_KERNEL_WAY_OUT"
   fi
   problem="$(nvidia_module_problem "$kver")"
   [[ -z "$problem" ]] || die "$problem; $NVIDIA_KERNEL_WAY_OUT"
-  log "ok: nvidia module for $kver is proprietary (license NVIDIA)"
+  module_version="$(nvidia_module_version "$kver")"
+  [[ "$module_version" == "$akmod_version" ]] || die "nvidia module for $kver is version '$module_version' after the build, akmod-nvidia is $akmod_version; $NVIDIA_KERNEL_WAY_OUT"
+  log "ok: nvidia module for $kver is proprietary (license NVIDIA), version $akmod_version"
 }
 
 # Regenerates the initramfs of kernel $1 when it lacks nvidia or is stale; dies unless the image then carries nvidia and

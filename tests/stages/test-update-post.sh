@@ -121,6 +121,8 @@ offline_update_brought_kernel initramfs; echo 1 >"$work/akmods.rc"
 assert_new_kernel_stays_out "akmods exits non-zero" "akmods --force --kernels $NEW_KVER"
 offline_update_brought_kernel open-module initramfs; echo 1 >"$work/akmods.rc"
 assert_new_kernel_stays_out "the rebuild of an open module fails" "akmods --rebuild --force --kernels $NEW_KVER"
+offline_update_brought_kernel stale-module nvidia-initramfs; touch "$work/akmods.builds-nothing"
+assert_new_kernel_stays_out "the rebuild leaves the module of an older akmod-nvidia in place" "akmods --rebuild --force --kernels $NEW_KVER"
 offline_update_brought_kernel module; echo 1 >"$work/dracut.rc"
 assert_new_kernel_stays_out "the initramfs is missing and dracut fails"
 offline_update_brought_kernel module initramfs; touch "$work/dracut.nonvidia"
@@ -132,6 +134,20 @@ post
 grep -qx "akmods --rebuild --force --kernels $NEW_KVER" "$FAKE_LOG" || die "the open module was not rebuilt with --rebuild: $(cat "$FAKE_LOG")"
 [[ "$(default_kernel)" == "$NEW_KVER" ]] || die "the kernel with the rebuilt module did not become the default: $(default_kernel)"
 log "ok: a kernel with an open-licensed module is rebuilt with --rebuild"
+
+# akmod-nvidia is version-locked, but once the lock is lifted an upgrade leaves the module built from the older akmod on disk, with
+# the right license and the wrong driver version.
+offline_update_brought_kernel stale-module nvidia-initramfs
+post
+grep -qx "akmods --rebuild --force --kernels $NEW_KVER" "$FAKE_LOG" || die "the module of an older akmod-nvidia was not rebuilt with --rebuild: $(cat "$FAKE_LOG")"
+[[ "$(modinfo -k "$NEW_KVER" -F version nvidia)" == "$(<"$work/akmod-version")" ]] || die "the rebuilt module is not the installed akmod-nvidia's version"
+[[ "$(default_kernel)" == "$NEW_KVER" ]] || die "the kernel with the rebuilt module did not become the default: $(default_kernel)"
+log "ok: a module built from an older akmod-nvidia is rebuilt, though its license is NVIDIA"
+
+offline_update_brought_kernel module nvidia-initramfs
+post
+grep -q '^akmods' "$FAKE_LOG" && die "a module of the installed akmod-nvidia version was rebuilt: $(cat "$FAKE_LOG")"
+log "ok: a module of the installed akmod-nvidia version is left alone"
 
 offline_update_brought_kernel initramfs failed-build
 post

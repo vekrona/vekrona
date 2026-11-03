@@ -17,7 +17,9 @@
 #                        offline.empty exists (dnf skipped everything check-upgrade listed)
 #   answer               what vekrona-update-ask prints
 #   packages, kernels    installed package names (rpm -q), and installed kernel-core versions, one per line
-#   modules/KVER         exists while the nvidia module is built for that kernel; modules/KVER.license holds its
+#   akmod-version        the version of the installed akmod-nvidia (`rpm -q --qf %{VERSION}`)
+#   modules/KVER         exists while the nvidia module is built for that kernel; modules/KVER.version holds the akmod version it was
+#                        built from when that is not the installed one (default: the installed one); modules/KVER.license holds its
 #                        license when that is not NVIDIA (the open module)
 #   default-kernel       the version `grubby --default-kernel` prints; `grubby --set-default` writes it
 #   saved-entry          the saved_entry `grub2-editenv list` prints (sysroot/boot/loader/entries/ID.conf are the entries)
@@ -49,6 +51,7 @@ make_world() {
   echo 7.0.0-100.fc44.x86_64 >"$w/kernels"
   touch "$w/sysroot/boot/vmlinuz-7.0.0-100.fc44.x86_64"
   echo 7.0.0-100.fc44.x86_64 >"$w/default-kernel"
+  echo 615.71.09 >"$w/akmod-version"
   echo 0 >"$w/akmods.rc"
   echo 0 >"$w/dracut.rc"
   echo 'options nvidia NVreg_UseKernelSuspendNotifiers=0' >"$w/sysroot/etc/modprobe.d/vekrona-nvidia.conf"
@@ -113,6 +116,9 @@ F
 if [[ "$1" == -q ]]; then
   case "$2" in
     kernel-core) cat "$FAKE_WORLD/kernels" ;;
+    # rpm -q --qf '%{VERSION}\n' PACKAGE: only the version of akmod-nvidia is ever asked, and it is whatever akmod-version holds.
+    --qf) [[ "$3" == '%{VERSION}\n' ]] || { echo "rpm stub: unexpected format $3" >&2; exit 99; }
+          if grep -qxF -- "$4" "$FAKE_WORLD/packages"; then cat "$FAKE_WORLD/akmod-version"; else echo "package $4 is not installed"; exit 1; fi ;;
     # Like the real rpm: an installed package is named on stdout, a missing one is reported there too, and exits 1.
     *) if grep -qxF -- "$2" "$FAKE_WORLD/packages"; then echo "$2-1.0-1.fc44.x86_64"; else echo "package $2 is not installed"; exit 1; fi ;;
   esac
@@ -127,7 +133,7 @@ F
 case "$3" in
   -F) case "$4" in
         license) if [[ -e "$FAKE_WORLD/modules/$2.license" ]]; then cat "$FAKE_WORLD/modules/$2.license"; else echo NVIDIA; fi ;;
-        version) echo 615.71.09 ;;
+        version) if [[ -e "$FAKE_WORLD/modules/$2.version" ]]; then cat "$FAKE_WORLD/modules/$2.version"; else cat "$FAKE_WORLD/akmod-version"; fi ;;
       esac ;;
   -n) echo "$FAKE_WORLD/modules/$2" ;;
 esac
@@ -149,7 +155,7 @@ rc="$(<"$FAKE_WORLD/akmods.rc")"
 [[ "$rc" -eq 0 ]] || { touch "$FAKE_WORLD/akmods-failed/$kver"; exit "$rc"; }
 [[ ! -e "$FAKE_WORLD/akmods.builds-nothing" ]] || exit 0
 if [[ -n "$rebuild" ]] && ! grep -qxF "kmod-nvidia-$kver" "$FAKE_WORLD/packages"; then exit 0; fi
-rm -f "$FAKE_WORLD/akmods-failed/$kver" "$FAKE_WORLD/modules/$kver.license"
+rm -f "$FAKE_WORLD/akmods-failed/$kver" "$FAKE_WORLD/modules/$kver.license" "$FAKE_WORLD/modules/$kver.version"
 touch "$FAKE_WORLD/modules/$kver"
 grep -qxF "kmod-nvidia-$kver" "$FAKE_WORLD/packages" || echo "kmod-nvidia-$kver" >>"$FAKE_WORLD/packages"
 F
@@ -235,13 +241,14 @@ add_nvidia_machine() {
 kernel_state() {
   local kver="$1" key image="$FAKE_WORLD/sysroot/boot/initramfs-$1.img"
   shift
-  rm -f "$FAKE_WORLD/modules/$kver" "$FAKE_WORLD/modules/$kver.license" "$FAKE_WORLD/akmods-failed/$kver" "$image"
+  rm -f "$FAKE_WORLD/modules/$kver" "$FAKE_WORLD/modules/$kver.license" "$FAKE_WORLD/modules/$kver.version" "$FAKE_WORLD/akmods-failed/$kver" "$image"
   for key in "$@"; do
     case "$key" in
-      module | open-module)
+      module | open-module | stale-module)
         touch -d 2026-01-02 "$FAKE_WORLD/modules/$kver"
         echo "kmod-nvidia-$kver" >>"$FAKE_WORLD/packages"
-        [[ "$key" != open-module ]] || echo "Dual MIT/GPL" >"$FAKE_WORLD/modules/$kver.license" ;;
+        [[ "$key" != open-module ]] || echo "Dual MIT/GPL" >"$FAKE_WORLD/modules/$kver.license"
+        [[ "$key" != stale-module ]] || echo 615.60.01 >"$FAKE_WORLD/modules/$kver.version" ;;
       failed-build) touch "$FAKE_WORLD/akmods-failed/$kver" ;;
       initramfs) echo init >"$image" ;;
       nvidia-initramfs) printf 'init\nusr/lib/modules/%s/extra/nvidia/nvidia.ko.xz\n' "$kver" >"$image" ;;
