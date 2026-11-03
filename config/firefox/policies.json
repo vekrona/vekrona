@@ -17,6 +17,12 @@
       "Cryptomining": true,
       "Fingerprinting": true,
       "EmailTracking": true
+    },
+    "Preferences": {
+      "dom.ipc.processPrelaunch.fission.number": {
+        "Value": 1,
+        "Status": "default"
+      }
     }
   }
 }
