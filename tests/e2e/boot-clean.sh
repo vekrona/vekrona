@@ -16,9 +16,7 @@ trap 'vekrona-dev run sudo rm -f "$GUEST_FAKE_AUTOSTART"' EXIT
 vekrona-dev run sudo bash -c "printf '[Desktop Entry]\nType=Application\nName=nvidia-settings Update\nExec=/usr/bin/true\n' >$GUEST_FAKE_AUTOSTART"
 
 vekrona-dev session
-previous_boot="$(boot_id)"
-vekrona-dev run sudo systemctl reboot --no-block
-vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- booted_again "$previous_boot"
+vekrona-dev reboot
 vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- greeter_up
 store_before="$(error_store)"
 vekrona-dev session

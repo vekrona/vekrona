@@ -250,9 +250,7 @@ mkdir -p "$NO_HARNESS_BIN"
 for t in bash id dirname readlink timeout python3; do
   ln -s "$(type -P "$t")" "$NO_HARNESS_BIN/$t"
 done
-for t in rofi; do
-  ln -s "$(type -P true)" "$NO_HARNESS_BIN/$t"
-done
+ln -s "$(type -P true)" "$NO_HARNESS_BIN/rofi"
 if no_harness_err="$(PATH="$NO_HARNESS_BIN" VEKRONA_ERROR_REPORTER="$(type -P true)" "$(command -v vekrona-agent)" choose 2>&1 >/dev/null)"; then
   fail "vekrona-agent choose with no harness on PATH unexpectedly succeeded"
 fi
@@ -378,5 +376,13 @@ assert_error_status launched "after a successful vekrona-agent --error launch"
 swaymsg -- '[app_id="vekrona.agent"] kill' >/dev/null || fail "could not close the real agent window"
 vekrona-error rm "$REAL_ERROR_ID" >/dev/null || fail "vekrona-error rm $REAL_ERROR_ID failed"
 echo "ok: vekrona-agent --error marked the record launched after a real launch, and left it new after --dry-run"
+
+# The stale-default cases record errors that name not-a-harness. The launcher's agent filter lists them, so none may outlive the check.
+for record in "$ERROR_STORE_DIR"/*/record.json; do
+  [[ -e "$record" ]] || continue
+  if grep -q -F -- "not-a-harness" "$record"; then
+    vekrona-error rm "$(basename "$(dirname "$record")")" >/dev/null || fail "vekrona-error rm failed for $record"
+  fi
+done
 
 echo "agent-launch-check OK"
