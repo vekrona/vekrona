@@ -34,7 +34,8 @@ fi
 for path in "$@"; do
   kept=()
   while IFS= read -r stale; do [[ "$stale" == "$path" ]] || kept+=("$stale"); done <"$STALE"
-  printf '%s\n' "${kept[@]}" >"$STALE"
+  : >"$STALE"
+  for stale in "${kept[@]}"; do echo "$stale" >>"$STALE"; done
 done
 FAKE
 chmod +x "$work/bin"/*
