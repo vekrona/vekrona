@@ -15,7 +15,7 @@ from vekrona_signin.service.enrollment import (
     FingerprintEnrollmentTask,
     SecurityKeyRegistrationTask,
 )
-from vekrona_signin.service.installation import FprintTask, LuksFido2Task, U2fKeysTask
+from vekrona_signin.service.installation import FprintTask, LuksFido2Task, U2fMappingsTask
 from vekrona_signin.service.kickstart import VekronaSignInKickstartSpecification
 from vekrona_signin.service.vekrona_signin_interface import VekronaSignInInterface
 
@@ -120,7 +120,7 @@ class VekronaSignInService(KickstartService):
         if self._security_key is not None:
             self._require_registered_user(self._security_key.username)
             tasks.append(LuksFido2Task(sysroot, self._security_key.luks_enrollment, disk_passphrase))
-            tasks.append(U2fKeysTask(sysroot, self._security_key.username, self._security_key.u2f_line))
+            tasks.append(U2fMappingsTask(sysroot, self._security_key.username, self._security_key.u2f_line))
         if self._fingerprint is not None:
             username, enrolled_print = self._fingerprint
             self._require_registered_user(username)

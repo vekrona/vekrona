@@ -18,8 +18,8 @@ with your password always available as a fallback.
 - The installer asks for three touches, all during the install: one to
   create the credential for the disk, one to answer a challenge that derives
   the disk secret (stored in a `systemd-fido2` token keyslot), and one to
-  create the credential for sudo and login. The installer writes it to `~/.config/Yubico/u2f_keys`; the first
-  `./install.sh 45` moves it into `/etc/u2f_mappings` (below).
+  create the credential for sudo and login. The installer writes it straight into the new system's
+  `/etc/u2f_mappings` (below), owned by root.
 - The installer also writes `fido2-device=auto,token-timeout=10s` into the new
   system's `/etc/crypttab` and generates its initramfs with FIDO2 support, so
   the very first boot already asks for the key's PIN and a touch. Without the
@@ -32,9 +32,9 @@ with your password always available as a fallback.
   ```
   Every pam_u2f line (sudo, polkit, the greeter, the lock screen) reads the one registration file
   `/etc/u2f_mappings`, owned by root. A file in your home directory, which any program you run can rewrite, would let
-  such a program register a key of its own and sign in as you (and as root through sudo); `./install.sh 45` therefore moves
-  your line from `~/.config/Yubico/u2f_keys` into `/etc/u2f_mappings` once, keeps only your own user's line, and
-  pam_u2f never reads the old file again. A second key is added with `pamu2fcfg -n -o pam://vekrona -i pam://vekrona | sudo tee -a /etc/u2f_mappings`.
+  such a program register a key of its own and sign in as you (and as root through sudo); the installer writes it there, and
+  `./install.sh 45` moves your line from `~/.config/Yubico/u2f_keys` (the file earlier ISOs wrote) into `/etc/u2f_mappings` once, keeps only your own
+  user's line, and pam_u2f never reads the old file again. A second key is added with `pamu2fcfg -n -o pam://vekrona -i pam://vekrona | sudo tee -a /etc/u2f_mappings`.
   then rerun `./install.sh 45` to update crypttab and rebuild the initramfs
   (it changes nothing on a system the installer already prepared).
 - PAM origin is fixed at `pam://vekrona` so later hostname changes do not break

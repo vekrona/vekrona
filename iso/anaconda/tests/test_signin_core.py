@@ -5,6 +5,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import _paths
 
@@ -14,9 +15,10 @@ from vekrona_signin.core.fido2_luks import FidoLuksEnrollment, passphrase, token
 from vekrona_signin.core.fprint import find_reader, storage_path
 from vekrona_signin.core.luks import parse_keyslot_numbers
 from vekrona_signin.core.pam_u2f import format_u2f_line
-from vekrona_signin.core.passwd import parse_account
 from vekrona_signin.core.private_files import write_private_file
 from vekrona_signin.core.security_key import find_descriptor
+from vekrona_signin.core import u2f_mappings
+from vekrona_signin.core.u2f_mappings import merge_u2f_mappings, write_u2f_mappings
 
 ENROLLMENT = FidoLuksEnrollment(
     credential_id=bytes(range(40)),
@@ -119,22 +121,87 @@ class KeyslotParsingTest(unittest.TestCase):
         self.assertEqual(after - before, {1})
 
 
-class PasswdTest(unittest.TestCase):
-    PASSWD = "root:x:0:0:root:/root:/bin/bash\nalice:x:1000:1001:Alice:/home/alice:/bin/zsh\n"
+ALICE_LINE = "alice:aB1=,cD2=,es256,+presence"
+BOB_LINE = "bob:eF3=,gH4=,es256,+presence"
 
-    def test_account_carries_uid_gid_and_home(self):
-        account = parse_account(self.PASSWD, "alice")
-        self.assertEqual((account.uid, account.gid, account.home), (1000, 1001, "/home/alice"))
 
-    def test_unknown_user_is_reported(self):
+class MergeU2fMappingsTest(unittest.TestCase):
+    def test_first_registration_is_the_line_and_a_newline(self):
+        self.assertEqual(merge_u2f_mappings("", "alice", ALICE_LINE), ALICE_LINE + "\n")
+
+    def test_other_users_lines_stay_and_the_new_line_comes_last(self):
+        self.assertEqual(merge_u2f_mappings(BOB_LINE + "\n", "alice", ALICE_LINE), f"{BOB_LINE}\n{ALICE_LINE}\n")
+
+    def test_an_older_line_of_the_user_is_replaced(self):
+        existing = f"alice:old=,old=,es256,+presence\n{BOB_LINE}\n"
+        self.assertEqual(merge_u2f_mappings(existing, "alice", ALICE_LINE), f"{BOB_LINE}\n{ALICE_LINE}\n")
+
+    def test_a_missing_final_newline_and_blank_lines_do_not_leak_into_the_result(self):
+        self.assertEqual(merge_u2f_mappings(f"\n{BOB_LINE}", "alice", ALICE_LINE), f"{BOB_LINE}\n{ALICE_LINE}\n")
+
+    def test_a_user_whose_name_starts_like_another_keeps_the_others_line(self):
+        self.assertEqual(
+            merge_u2f_mappings(ALICE_LINE + "\n", "al", "al:x=,y=,es256,+presence"),
+            f"{ALICE_LINE}\nal:x=,y=,es256,+presence\n",
+        )
+
+    def test_a_line_for_another_user_is_refused(self):
+        for user, line in (("alice", BOB_LINE), ("alice", "root:x=,y=,es256,+presence"), ("al", ALICE_LINE), ("alice", "")):
+            with self.subTest(user=user, line=line), self.assertRaises(SignInError):
+                merge_u2f_mappings("", user, line)
+
+    def test_a_line_that_smuggles_a_second_entry_is_refused(self):
+        for line in (ALICE_LINE + "\nroot:x=,y=,es256,+presence", ALICE_LINE + "\rroot:x=,y=,es256,+presence"):
+            with self.subTest(line=line), self.assertRaises(SignInError):
+                merge_u2f_mappings("", "alice", line)
+
+
+class WriteU2fMappingsTest(unittest.TestCase):
+    def setUp(self):
+        self.sysroot = tempfile.TemporaryDirectory()
+        self.addCleanup(self.sysroot.cleanup)
+        self.etc = Path(self.sysroot.name) / "etc"
+        self.etc.mkdir()
+        self.path = self.etc / "u2f_mappings"
+
+    def write(self, username, line):
+        write_u2f_mappings(self.sysroot.name, username, line, os.getuid(), os.getgid())
+
+    def test_file_is_world_readable_and_owned_as_asked(self):
+        self.write("alice", ALICE_LINE)
+        self.assertEqual(self.path.read_text(), ALICE_LINE + "\n")
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o644)
+        self.assertEqual((self.path.stat().st_uid, self.path.stat().st_gid), (os.getuid(), os.getgid()))
+
+    def test_existing_file_is_merged_not_replaced(self):
+        self.path.write_text(BOB_LINE + "\n")
+        self.write("alice", ALICE_LINE)
+        self.assertEqual(self.path.read_text(), f"{BOB_LINE}\n{ALICE_LINE}\n")
+
+    def test_no_temporary_file_is_left_beside_it(self):
+        self.write("alice", ALICE_LINE)
+        self.assertEqual([p.name for p in self.etc.iterdir()], ["u2f_mappings"])
+
+    def test_a_failed_rename_leaves_the_old_file_whole_and_no_temporary_file(self):
+        self.path.write_text(BOB_LINE + "\n")
+        with mock.patch.object(u2f_mappings.os, "replace", side_effect=OSError("rename failed")):
+            with self.assertRaises(OSError):
+                self.write("alice", ALICE_LINE)
+        self.assertEqual(self.path.read_text(), BOB_LINE + "\n")
+        self.assertEqual([p.name for p in self.etc.iterdir()], ["u2f_mappings"])
+
+    def test_a_refused_line_leaves_the_file_alone(self):
+        self.path.write_text(BOB_LINE + "\n")
         with self.assertRaises(SignInError):
-            parse_account(self.PASSWD, "bob")
+            self.write("alice", BOB_LINE)
+        self.assertEqual(self.path.read_text(), BOB_LINE + "\n")
+        self.assertEqual([p.name for p in self.etc.iterdir()], ["u2f_mappings"])
 
 
 class PrivateFileTest(unittest.TestCase):
     def test_file_is_private_and_created_directories_are_too(self):
         with tempfile.TemporaryDirectory() as base:
-            path = Path(base) / ".config/Yubico/u2f_keys"
+            path = Path(base) / "var/lib/fprint/alice"
             write_private_file(Path(base), path, b"line\n", os.getuid(), os.getgid())
             self.assertEqual(path.read_bytes(), b"line\n")
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)

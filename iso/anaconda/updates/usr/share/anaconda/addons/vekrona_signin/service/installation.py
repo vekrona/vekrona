@@ -17,14 +17,12 @@ from vekrona_signin.core.encrypted_storage import applied_partitioning, applied_
 from vekrona_signin.core.errors import PassphraseRejected, SignInError
 from vekrona_signin.core.fprint import storage_path
 from vekrona_signin.core.luks_layout import read_luks_layout
-from vekrona_signin.core.passwd import parse_account
 from vekrona_signin.core.private_files import write_private_file
+from vekrona_signin.core.u2f_mappings import U2F_MAPPINGS_RELATIVE_PATH, write_u2f_mappings
 
 log = get_module_logger(__name__)
 
-__all__ = ["LuksFido2Task", "U2fKeysTask", "FprintTask"]
-
-U2F_KEYS_RELATIVE_PATH = Path(".config/Yubico/u2f_keys")
+__all__ = ["LuksFido2Task", "U2fMappingsTask", "FprintTask"]
 
 
 def find_luks_backing_paths(device_tree):
@@ -49,10 +47,6 @@ def _restore_selinux_contexts(sysroot, path):
     returncode = util.execWithRedirect("restorecon", ["-R", str(path)], root=sysroot)
     if returncode != 0:
         raise SignInError(f"restorecon failed on {path} ({returncode}).")
-
-
-def _target_account(sysroot, username):
-    return parse_account((Path(sysroot) / "etc/passwd").read_text(), username)
 
 
 class LuksFido2Task(Task):
@@ -121,8 +115,8 @@ class LuksFido2Task(Task):
                 ) from error
 
 
-class U2fKeysTask(Task):
-    """Write the user's pam_u2f registration."""
+class U2fMappingsTask(Task):
+    """Register the security key in the installed system's /etc/u2f_mappings, which only root can change."""
 
     def __init__(self, sysroot, username, line):
         super().__init__()
@@ -135,14 +129,8 @@ class U2fKeysTask(Task):
         return "Register the security key for sign-in"
 
     def run(self):
-        account = _target_account(self._sysroot, self._username)
-        home = Path(self._sysroot) / account.home.lstrip("/")
-        if not home.is_dir():
-            raise SignInError(f"The home directory of {self._username} does not exist.")
-        write_private_file(
-            home, home / U2F_KEYS_RELATIVE_PATH, f"{self._line}\n".encode(), account.uid, account.gid
-        )
-        _restore_selinux_contexts(self._sysroot, Path("/") / account.home.lstrip("/") / ".config")
+        write_u2f_mappings(self._sysroot, self._username, self._line, 0, 0)
+        _restore_selinux_contexts(self._sysroot, Path("/") / U2F_MAPPINGS_RELATIVE_PATH)
         log.info("Security key registered for %s.", self._username)
 
 
