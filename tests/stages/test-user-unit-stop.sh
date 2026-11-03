@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 # The stub models one user unit, old.service, with the files of $scratch/:

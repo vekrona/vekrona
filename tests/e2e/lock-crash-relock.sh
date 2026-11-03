@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
@@ -12,7 +13,7 @@ locker_pid() { vekrona-dev sh systemctl --user show vekrona-lock -p MainPID --va
 
 # SIGKILL the locker, then wait for systemd to start the next one (a new MainPID).
 crash_locker() {
-  local before after
+  local before
   before="$(locker_pid)"
   vekrona-dev sh systemctl --user kill --signal=KILL --kill-whom=main vekrona-lock
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bash -c "after=\$(vekrona-dev sh systemctl --user show vekrona-lock -p MainPID --value); [[ \$after != 0 && \$after != $before ]]"

@@ -1,0 +1,7 @@
+# Read by shellcheck (tests/test-shellcheck.sh runs it over every shell file). The `# shellcheck source=` directives name the sourced file
+# relative to the sourcing script, since the scripts find their root at run time and shellcheck cannot evaluate that.
+external-sources=true
+source-path=SCRIPTDIR
+# A $ in single quotes is code for another shell or tool: a `bash -c` body run here or in the vekrona-dev guest, a stub body written
+# to a file, a jq program, a grep pattern for a literal $. Every SC2016 finding across the repo was one of these, so it only adds noise.
+disable=SC2016

@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 DROPIN="$ROOT/etc/systemd/system/akmods.service.d/vekrona-dracut.conf"
@@ -42,6 +43,7 @@ mapfile -t unit_environment < <(sed -n 's/^Environment=//p' "$DROPIN")
 # A system unit starts with no HOME, no user and the unit's own Environment=; the fakes stand in for the hardware.
 run_as_systemd() {
   rc=0
+  # shellcheck disable=SC2024 # the output goes to the test's own scratch file, written as the user
   sudo env -i "${unit_environment[@]}" PATH="$work/bin:/usr/bin:/usr/sbin" VEKRONA_SYSFS_ROOT="$work" VEKRONA_KERNEL_LOCK="$work/kernel.lock" "$script" >"$work/out" 2>&1 || rc=$?
 }
 

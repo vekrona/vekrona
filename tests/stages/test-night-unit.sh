@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 # The midnight run reboots the machine into dnf's offline transaction: only on mains power, never on a laptop's battery.

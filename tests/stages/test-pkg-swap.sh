@@ -5,7 +5,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
+# shellcheck source=dnf-fakes.sh
 source "$REPO/tests/stages/dnf-fakes.sh"
 
 packages libswscale-free libavcodec-free
@@ -16,7 +18,7 @@ log "ok: free ffmpeg libraries alone are replaced"
 
 packages ffmpeg-free libswscale-free
 ensure_pkg_swapped ffmpeg-free ffmpeg
-installed ffmpeg && ! installed ffmpeg-free || die "ffmpeg-free must be swapped for ffmpeg"
+{ installed ffmpeg && ! installed ffmpeg-free; } || die "ffmpeg-free must be swapped for ffmpeg"
 log "ok: ffmpeg-free is swapped"
 
 packages

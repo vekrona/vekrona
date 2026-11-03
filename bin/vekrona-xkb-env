@@ -10,6 +10,7 @@ usage() {
 
 [[ $# -eq 0 ]] || { [[ "$1" != -h && "$1" != --help ]] || usage 0; usage; }
 
+# shellcheck source=../lib/common.sh
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh"
 
 conf="${VEKRONA_XKB_CONF:-/etc/X11/xorg.conf.d/00-keyboard.conf}"

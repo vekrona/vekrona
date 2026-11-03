@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016 # the stub bodies are written to files literally and expand when the stub runs
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 SCRIPT="$ROOT/libexec/vekrona-snapper-snapshot"
 
@@ -37,7 +37,7 @@ out="$("$SCRIPT" pre 1234)"
 [[ "$out" == "tmp.snapper_pre_number=42" ]] || die "pre must print the variable the post action reads: '$out'"
 [[ ! -e "$work/PWNED" && ! -e "$work/PWNED2" ]] || die "the dnf command line was run by a shell"
 grep -qxF -- "$HOSTILE" "$work/snapper.args" || die "the command line did not reach snapper as one argument, unchanged: $(cat "$work/snapper.args")"
-grep -qx -- '-t' "$work/snapper.args" && grep -qx 'pre' "$work/snapper.args" || die "not a pre snapshot: $(cat "$work/snapper.args")"
+{ grep -qx -- '-t' "$work/snapper.args" && grep -qx 'pre' "$work/snapper.args"; } || die "not a pre snapshot: $(cat "$work/snapper.args")"
 log "ok: pre takes a pre snapshot described by the dnf command line, which stays one argument and never meets a shell"
 
 reset

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016 # the stub bodies are written to files literally and expand when the stub runs
 # A fake firewalld for the tests of lib/firewall.sh (source it after tests/lib.sh). The caller sets $scratch, $stubs (a
 # directory first on PATH) and $FW (the firewalld state). `stock` resets the state to a stock Fedora Workstation.
+: "${stubs:?source firewalld-fakes.sh with \$stubs set to a directory first on PATH}"
 write_fake "$stubs/sudo" <<'F'
 #!/usr/bin/env bash
 exec "$@"

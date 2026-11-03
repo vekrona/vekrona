@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
 
 session_is_sway || die "current session is not Sway (XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-unset}); start a Sway session first (log in through the greeter, or run start-sway from a text console), then rerun 90a-switch-dm"

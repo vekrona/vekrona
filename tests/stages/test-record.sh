@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 tool="$ROOT/bin/vekrona-record"
 
@@ -25,7 +26,7 @@ stub reporter 'echo "$*" >> "$SCRATCH/logs/reported"'
 export VEKRONA_ERROR_REPORTER="$stubs/reporter"
 
 run_record() {
-  rm -rf "$logs" "$scratch/home"
+  rm -rf "$logs" "${scratch:?}/home"
   mkdir -p "$logs" "$scratch/home"
   # A file where the Videos directory belongs makes mkdir -p fail.
   [[ -z "${BLOCK_DESTINATION:-}" ]] || touch "$scratch/home/Videos"

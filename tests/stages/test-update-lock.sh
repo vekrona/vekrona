@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
 
 scratch="$(mktemp -d)"

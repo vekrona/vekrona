@@ -7,7 +7,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
+# shellcheck source=../lib/update.sh
 source "$ROOT/lib/update.sh"
 
 usage() {

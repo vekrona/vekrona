@@ -9,6 +9,7 @@ trap 'rm -rf "$scratch"' EXIT
 # A throwaway HOME, set before lib/common.sh derives the legacy roots from it.
 export HOME="$scratch/home"
 mkdir -p "$HOME"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
 
 # The sourced file turned errexit on; the checks below inspect failures themselves.
@@ -41,10 +42,7 @@ log "ok: a symlinked ancestor is skipped too"
 
 # A symlinked $HOME is legitimate: links are still made.
 ln -s "$HOME" "$scratch/home-link"
-(
-  HOME="$scratch/home-link"
-  ensure_symlink "$VEKRONA_ROOT/config/a" "$HOME/.config/plain/a" 2>/dev/null
-)
+HOME="$scratch/home-link" ensure_symlink "$VEKRONA_ROOT/config/a" "$scratch/home-link/.config/plain/a" 2>/dev/null
 [[ -L "$HOME/.config/plain/a" ]] || die "a symlinked \$HOME blocked a normal link"
 log "ok: a symlinked HOME does not count as managed elsewhere"
 
@@ -122,13 +120,13 @@ prune_vekrona_links "$HOME/.local/bin" 2>/dev/null
 log "ok: ignored files are not linked, their stale links are pruned, untracked files are linked"
 
 # Outside a git checkout nothing is guessed: linking stops with an explanation.
-(
-  VEKRONA_ROOT="$scratch/not-a-checkout"
-  mkdir -p "$VEKRONA_ROOT/bin"
-  echo x > "$VEKRONA_ROOT/bin/tool"
-  if out="$(ensure_symlink_tree "$VEKRONA_ROOT/bin" "$scratch/dst" 2>&1)"; then exit 1; fi
-  [[ "$out" == *"not a git checkout"* ]]
-) || die "ensure_symlink_tree did not refuse a non-git root"
+not_a_checkout="$scratch/not-a-checkout"
+mkdir -p "$not_a_checkout/bin"
+echo x > "$not_a_checkout/bin/tool"
+if out="$(VEKRONA_ROOT="$not_a_checkout" ensure_symlink_tree "$not_a_checkout/bin" "$scratch/dst" 2>&1)"; then
+  die "ensure_symlink_tree linked from a non-git root without an error"
+fi
+[[ "$out" == *"not a git checkout"* ]] || die "ensure_symlink_tree did not refuse a non-git root: $out"
 [[ ! -e "$scratch/dst" ]] || die "ensure_symlink_tree linked from a non-git root"
 log "ok: a non-git root is refused"
 
@@ -142,7 +140,7 @@ rm "$HOME/.config/sway/c"
 ln -s "$OLD_CLONE/config/sway/c" "$HOME/.config/sway/c"
 [[ "$(vekrona_links "$HOME/.config/sway")" == "$HOME/.config/sway/c" ]] || die "vekrona_links missed a link into the old clone"
 is_legacy_link_target "$OLD_CLONE/config/sway/c" || die "the old clone is not legacy while running from elsewhere"
-( VEKRONA_ROOT="$OLD_CLONE"; ! is_legacy_link_target "$OLD_CLONE/config/sway/c" ) || die "the tree in use counted as legacy"
+if VEKRONA_ROOT="$OLD_CLONE" is_legacy_link_target "$OLD_CLONE/config/sway/c"; then die "the tree in use counted as legacy"; fi
 rm "$HOME/.config/sway/c"
 log "ok: links into the old clone are retargeted and recognised as legacy"
 

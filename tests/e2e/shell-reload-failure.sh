@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=lib/bar-dot.sh
 source "$ROOT/tests/e2e/lib/bar-dot.sh"
 
 STEP_TIMEOUT_SEC=60

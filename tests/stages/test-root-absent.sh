@@ -4,6 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 work="$(mktemp -d)"
@@ -72,6 +73,7 @@ grep -q "failed to remove $work/stuck-tree" "$work/err" || die "a surviving tree
 log "ok: a tree that survives its removal fails the call"
 
 share="$work/mise-share"
+# shellcheck disable=SC2034 # read by links_into_retired_mise_share in lib/common.sh
 VEKRONA_RETIRED_MISE_SHARE="$share"
 mkdir -p "$share/bin" "${share}x/bin" "$work/elsewhere"
 echo x > "$share/bin/tool"

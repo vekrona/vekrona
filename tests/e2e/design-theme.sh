@@ -4,6 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
@@ -12,7 +13,7 @@ SWITCHER_HOLD_MS=2500
 # The panel is far larger than this many surface-1 pixels; the bar height is where the counted rows start.
 PANEL_MIN_PIXELS=5000
 COLORS="$ROOT/tests/e2e/screen_colors.py"
-GUEST_SWAY_DROP_IN='~/.config/sway/config.d/90-vekrona-design.conf'
+GUEST_SWAY_DROP_IN='$HOME/.config/sway/config.d/90-vekrona-design.conf'
 BAR_PX="$(vekrona_token_get size size-bar)"
 export COLORS BAR_PX PANEL_MIN_PIXELS
 

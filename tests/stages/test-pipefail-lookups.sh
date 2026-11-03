@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
 
 work="$(mktemp -d)"
@@ -53,6 +54,7 @@ log "ok: flatpak remote lookups survive a long listing and die when flatpak fail
 [[ "$(FAKE_ID_FAIL=1 outcome user_in_group ann video)" == *"id -nG ann failed"* ]] || die "a failing id read as 'not a member'"
 log "ok: group membership survives a long group list and dies when id fails"
 
+# shellcheck disable=SC2034 # read by ensure_user_in_group in lib/common.sh
 VEKRONA_USER=ann
 export FAKE_ID_FIRST=ann
 [[ "$(FAKE_USERMOD_NOOP=1 outcome ensure_user_in_group video)" == *"user not added to video"* ]] \

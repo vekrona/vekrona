@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=lib/bar-widget.sh
 source "$ROOT/tests/e2e/lib/bar-widget.sh"
 
 STEP_TIMEOUT_SEC=60
@@ -67,7 +69,7 @@ trap cleanup EXIT
 vekrona-dev sh pactl set-default-sink "$SINK_NAME"
 
 vekrona-dev run mkdir -p "$GUEST_DIR"
-vekrona-dev run bash -c 'cat >"$1"' _ "$GUEST_PLAYER" <"$ROOT/tests/e2e/fake-mpris.py"
+guest_write "$ROOT/tests/e2e/fake-mpris.py" "$GUEST_PLAYER"
 
 vekrona-dev sh wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0
 await "the bar never showed the sound icon" bar_widget center sound

@@ -9,6 +9,7 @@ set -euo pipefail
 shopt -s inherit_errexit
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
 
 PROG="vekrona-suspend"

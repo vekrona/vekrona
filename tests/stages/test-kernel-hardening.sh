@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../../lib/kernel-hardening.sh
 source "$ROOT/lib/kernel-hardening.sh"
 
 modprobe_conf="$ROOT/etc/modprobe.d/vekrona-hardening.conf"

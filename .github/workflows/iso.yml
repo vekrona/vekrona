@@ -31,7 +31,7 @@ jobs:
       TEST_USER: vekrona-tester
     steps:
       - name: Install test dependencies
-        run: dnf install -y python3 python3-gobject dbus-daemon python3-dasbus python3-fido2 anaconda-core khal jq sudo procps-ng util-linux
+        run: dnf install -y python3 python3-gobject dbus-daemon python3-dasbus python3-fido2 anaconda-core khal jq sudo procps-ng util-linux ShellCheck
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
           chmod 440 "/etc/sudoers.d/$TEST_USER"
           chown -R "$TEST_USER:$TEST_USER" "$GITHUB_WORKSPACE"
 
-      - name: Run all headless test suites (error pipeline, stage helpers, Anaconda add-ons)
+      - name: Run all headless test suites (error pipeline, shellcheck, stage helpers, Anaconda add-ons)
         run: runuser -u "$TEST_USER" -- env HOME="/home/$TEST_USER" GITHUB_ACTIONS=true VEKRONA_TEST_LOG_DIR="/home/$TEST_USER/test-logs" bash "$GITHUB_WORKSPACE/tests/run.sh"
 
       - name: Upload the full test logs

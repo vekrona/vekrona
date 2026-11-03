@@ -306,7 +306,7 @@ ensure_root_file() {
   fi
   # The rename keeps the label of the temporary name, which policy may label differently from DST.
   root_relabel "$dst" "$(dirname "$dst")"
-  root_file_current "$src" "$dst" "$mode" && root_label_current "$dst" "$(dirname "$dst")" || die "content, mode or SELinux label mismatch after install: $dst"
+  { root_file_current "$src" "$dst" "$mode" && root_label_current "$dst" "$(dirname "$dst")"; } || die "content, mode or SELinux label mismatch after install: $dst"
 }
 
 # Installs a unit file from SRC into /etc/systemd/system under its own name and reloads systemd when that changed anything.
@@ -396,7 +396,7 @@ ensure_sudoers_dropin() {
   root mv -f "$tmp" "$dst" || die "could not move the checked sudoers drop-in into place: $dst"
   root_relabel "$dst"
   root visudo -c || die "sudo configuration invalid after installing $dst: remove it with a root shell"
-  root_file_current "$src" "$dst" 0440 && root_label_current "$dst" || die "content, mode or SELinux label mismatch after install: $dst"
+  { root_file_current "$src" "$dst" 0440 && root_label_current "$dst"; } || die "content, mode or SELinux label mismatch after install: $dst"
 }
 
 # Resolves "dnf ARGS..." with PROTECTED packages, prints the transaction and stores it in STORE instead of running it.
@@ -890,11 +890,12 @@ ensure_user_unit_stopped() {
 # A failing reload or lister dies here, because stage 70's check calls this inside an `if`, where set -e is off and a failure
 # would otherwise read as "no orphans".
 read_orphaned_autostart_units() {
-  local -n out="$1"
+  local -n units_out="$1"
   local listing
   systemctl --user daemon-reload || die "cannot reload the user manager"
   listing="$(systemctl --user list-units --all --plain --no-legend 'app-*@autostart.service')" || die "cannot list the user's autostart units"
-  mapfile -t out < <(awk '$2 == "not-found" && $3 == "active" { print $1 }' <<<"$listing")
+  # shellcheck disable=SC2034 # a nameref: this write sets the caller's variable
+  mapfile -t units_out < <(awk '$2 == "not-found" && $3 == "active" { print $1 }' <<<"$listing")
 }
 
 no_orphaned_autostart_units() {
@@ -906,16 +907,17 @@ no_orphaned_autostart_units() {
 # Like read_orphaned_autostart_units, these set the variable named $1 instead of printing, so that a die ends the caller too and not
 # a $( ) subshell. The user manager (user@UID.service) has a cgroup directory, and under it every user unit one of its own name.
 read_user_manager_cgroup_dir() {
-  local -n out="$1"
+  local -n manager_dir_out="$1"
   local cgroup
   cgroup="$(systemctl show -p ControlGroup --value "user@$(id -u).service")" || die "cannot read the cgroup of user@$(id -u).service"
   [[ -n "$cgroup" ]] || die "user@$(id -u).service has no cgroup"
-  out="$(vekrona_sysfs)/fs/cgroup$cgroup"
+  # shellcheck disable=SC2034 # a nameref: this write sets the caller's variable
+  manager_dir_out="$(vekrona_sysfs)/fs/cgroup$cgroup"
 }
 
 # The cgroup directory of the user unit $2, whichever slice it runs in.
 read_user_unit_cgroup_dir() {
-  local -n out="$1"
+  local -n unit_dir_out="$1"
   local unit="$2" manager candidate
   local -a found=()
   read_user_manager_cgroup_dir manager
@@ -923,7 +925,8 @@ read_user_unit_cgroup_dir() {
     if [[ -d "$candidate" ]]; then found+=("$candidate"); fi
   done
   ((${#found[@]} == 1)) || die "expected one cgroup named $unit under $manager, found ${#found[@]}"
-  out="${found[0]}"
+  # shellcheck disable=SC2034 # a nameref: this write sets the caller's variable
+  unit_dir_out="${found[0]}"
 }
 
 CGROUP_EMPTY_TIMEOUT_SEC="${CGROUP_EMPTY_TIMEOUT_SEC:-10}"
@@ -1044,11 +1047,11 @@ remove_retired_dir_if_empty() {
 # (a link into the checkout dangles once the checkout drops the unit) and its *.wants links, which `disable` cannot find once the
 # unit file is gone.
 read_user_unit_install_paths() {
-  local -n out="$1"
+  local -n paths_out="$1"
   local unit="$2" dir="$HOME/.config/systemd/user" path
-  out=()
+  paths_out=()
   for path in "$dir/$unit" "$dir"/*.wants/"$unit"; do
-    if [[ -e "$path" || -L "$path" ]]; then out+=("$path"); fi
+    if [[ -e "$path" || -L "$path" ]]; then paths_out+=("$path"); fi
   done
 }
 
@@ -1885,6 +1888,7 @@ SYSCONFIG_KERNEL=/etc/sysconfig/kernel
 kernel_updatedefault_is_no() {
   local file="${VEKRONA_SYSFS_ROOT:-}$SYSCONFIG_KERNEL"
   [[ -r "$file" ]] || die "cannot read $file"
+  # shellcheck disable=SC1090 # $file is the system's kernel sysconfig, chosen at run time
   [[ "$(UPDATEDEFAULT=; . "$file"; printf '%s' "$UPDATEDEFAULT")" == no ]]
 }
 
@@ -2186,12 +2190,16 @@ vekrona_active_theme_file() { printf '%s' "$(vekrona_state_dir)/active-theme.jso
 
 # What `xdg-open` (links in apps, the launcher's web results) hands web pages to: Firefox. xdg-settings would do
 # the same through xdg-mime, but it first has to detect the desktop environment, which Sway is not one of.
+# shellcheck disable=SC2034 # read by stages/50-user.sh and stages/70-verify.sh
 VEKRONA_BROWSER_DESKTOP=org.mozilla.firefox.desktop
+# shellcheck disable=SC2034 # read by stages/50-user.sh and stages/70-verify.sh
 VEKRONA_BROWSER_MIMES=(x-scheme-handler/http x-scheme-handler/https text/html)
 
 # The editor for Markdown and plain text: rune in a Ghostty window (config/applications/vekrona-rune.desktop, hidden from the
 # launcher). EDITOR and VISUAL are rune too (config/environment.d/vekrona.conf).
+# shellcheck disable=SC2034 # read by stages/50-user.sh and stages/70-verify.sh
 VEKRONA_EDITOR_DESKTOP=vekrona-rune.desktop
+# shellcheck disable=SC2034 # read by stages/50-user.sh and stages/70-verify.sh
 VEKRONA_EDITOR_MIMES=(text/markdown text/x-markdown text/plain)
 
 WEBAPP_USER_JS_HEADER="// vekrona: generated by stage 50-user from config/firefox/webapp-user.js and the webapp's own user.js; edit those, not this file"
@@ -2333,6 +2341,7 @@ btrfs_create_subvolume() {
 with_btrfs_top_level() {
   (
     top="$(mktemp -d)"
+    # shellcheck disable=SC2329 # the EXIT trap below runs it; shellcheck 0.11 misses a trap set inside a subshell
     cleanup_btrfs_top_level() {
       if mountpoint -q "$top"; then
         root umount "$top" || die "failed to unmount $top: the top-level btrfs volume stays mounted there"

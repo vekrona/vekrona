@@ -2,10 +2,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
+# shellcheck source=../lib/firewall.sh
 source "$ROOT/lib/firewall.sh"
+# shellcheck source=../lib/tailscale.sh
 source "$ROOT/lib/tailscale.sh"
+# shellcheck source=../lib/geoclue.sh
 source "$ROOT/lib/geoclue.sh"
+# shellcheck source=../lib/xremap.sh
 source "$ROOT/lib/xremap.sh"
 
 ensure_system_copy

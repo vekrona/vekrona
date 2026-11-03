@@ -1,5 +1,4 @@
 # shellcheck shell=bash
-# shellcheck disable=SC2016 # the bash -c bodies below run on the VM, where their $variables must expand, not here
 # Tests run only in the vekrona-dev VM (the e2e scenarios drive it from the host).
 # shellcheck source=require-vm.sh
 source "$(dirname "${BASH_SOURCE[0]}")/require-vm.sh"
@@ -8,7 +7,7 @@ require_vm "${BASH_SOURCE[1]}"
 # user's vekrona-errors watcher turns each record into a real entry in the error store, so a test's expected
 # failures would land there. The reporter is therefore replaced for this test and for every process it starts.
 export VEKRONA_ERROR_REPORTER=/usr/bin/true
-# shellcheck source=../lib/common.sh source-path=SCRIPTDIR
+# shellcheck source=../lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 # `vekrona-error report` writes to the journal socket, which feeds the user's real error store. A missing path makes
 # any report from a test fail loudly instead.
@@ -202,6 +201,8 @@ guest_pkill() {
   vekrona-dev run "$@" || status=$?
   ((status <= 1)) || { warn "could not stop in the guest: $* (exit $status)"; return 1; }
 }
+# Copies the host file $1 to the guest path $2 (the guest has no shared directory).
+guest_write() { vekrona-dev run bash -c 'cat >"$1"' _ "$2" <"$1"; }
 kill_guest() { guest_pkill pkill "$@"; }
 kill_guest_root() { guest_pkill sudo pkill "$@"; }
 
@@ -212,12 +213,17 @@ close_notification_centre() { vekrona-dev sh qs -c vekrona-shell ipc call notifi
 # Where the clickable parts of a notification card sit, measured from the right edge of the screen to their centre. A toast
 # floats space2 from the edge, the centre panel has space4 of padding, and a card has space3 of its own; a pill is 34 px wide
 # and 12 px from its neighbour.
+# shellcheck disable=SC2034 # read by the scenarios that source tests/lib.sh
 TOAST_DISMISS_FROM_RIGHT_PX=37
+# shellcheck disable=SC2034 # read by the scenarios that source tests/lib.sh
 CENTRE_DISMISS_FROM_RIGHT_PX=45
+# shellcheck disable=SC2034 # read by the scenarios that source tests/lib.sh
 CENTRE_COPY_FROM_RIGHT_PX=91
 # The card's own padding right of its close button: a click there is on no button and no text.
+# shellcheck disable=SC2034 # read by the scenarios that source tests/lib.sh
 CENTRE_CARD_PADDING_FROM_RIGHT_PX=22
 # The buttons sit level with the line above the summary, where the card names its sender.
+# shellcheck disable=SC2034 # read by the scenarios that source tests/lib.sh
 CARD_BUTTONS_ABOVE_SUMMARY_PX=16
 screen_width() { vekrona-dev sh bash -c "swaymsg -t get_outputs | jq -r '.[0].rect.width'"; }
 # Clicks on the card whose one-word summary is $1, at $2 px from the right edge of the screen, level with the summary or $3 px above it.
@@ -294,8 +300,8 @@ clock_restore() {
 # The agent icon's badge counts the file the error watcher writes. The shell rewrites that file with the count of the unseen
 # errors of the store as it starts, so a scenario writes it with unread_set once the shell is up (after clock_pin, which
 # restarts it). unread_stash stops the watcher and keeps the original, unread_restore puts both back.
-UNREAD_FILE='~/.local/state/vekrona/errors/unread'
-UNREAD_STASH='~/.local/state/vekrona/errors/unread.e2e-stash'
+UNREAD_FILE='$HOME/.local/state/vekrona/errors/unread'
+UNREAD_STASH='$HOME/.local/state/vekrona/errors/unread.e2e-stash'
 # A stash left by a run that was killed holds the original, and the file next to it is that run's: so an existing stash is
 # kept, never overwritten, and a restore without a stash leaves the file alone (a redirect would truncate it). Both are safe to
 # run twice, and the trap that calls unread_restore can go in before unread_stash.
@@ -626,6 +632,7 @@ booted_again() {
 greeter_up() { vekrona-dev run systemctl is-active --quiet greetd 2>/dev/null; }
 export -f boot_id booted_again greeter_up
 # vekrona-dev installs the guest's checkout here, below the home directory.
+# shellcheck disable=SC2034 # read by the scenarios that source tests/lib.sh
 GUEST_CHECKOUT_SUBPATH=.local/share/vekrona
 
 # The emulated USB audio card of the audio scenarios. The VM has no sound hardware: QEMU's emulated USB audio card stands in
@@ -636,6 +643,7 @@ GUEST_CHECKOUT_SUBPATH=.local/share/vekrona
 USB_AUDIO_ID=vekrona-audio
 USB_AUDIO_ADD="{\"driver\":\"usb-audio\",\"bus\":\"usb.0\",\"id\":\"$USB_AUDIO_ID\",\"port\":\"1\",\"audiodev\":\"audio1\"}"
 USB_AUDIO_DEL="{\"id\":\"$USB_AUDIO_ID\"}"
+# shellcheck disable=SC2034 # read by the scenarios that source tests/lib.sh
 USB_AUDIO_SINK=usb-QEMU
 FALLBACK_SINK=VekronaFallbackSink
 AUDIO_STREAM=pw-cat
@@ -670,7 +678,7 @@ audio_expect() {
 }
 audio_setup() {
   vekrona-dev run mkdir -p "$AUDIO_GUEST_DIR"
-  vekrona-dev run bash -c 'cat >"$1"' _ "$AUDIO_GUEST_STATE" <"$AUDIO_STATE_SOURCE"
+  guest_write "$AUDIO_STATE_SOURCE" "$AUDIO_GUEST_STATE"
   AUDIO_FALLBACK_MODULE="$(vekrona-dev sh pactl load-module module-null-sink "sink_name=$FALLBACK_SINK")"
 }
 audio_stream_start() { vekrona-dev spawn "$AUDIO_GUEST_DIR/stream.log" -- pw-cat -p --raw --rate 48000 --channels 2 --format s16 /dev/zero; }

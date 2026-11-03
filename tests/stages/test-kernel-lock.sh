@@ -4,7 +4,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
+# shellcheck source=update-fakes.sh
 source "$REPO/tests/stages/update-fakes.sh"
 
 work="$(mktemp -d)"

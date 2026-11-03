@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../../lib/authselect-vekrona.sh
 source "$ROOT/lib/authselect-vekrona.sh"
 
 BASE=/usr/share/authselect/default/local

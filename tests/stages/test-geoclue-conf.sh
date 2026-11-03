@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../../lib/geoclue.sh
 source "$ROOT/lib/geoclue.sh"
 SHIPPED="$ROOT/etc/geoclue/conf.d/90-vekrona.conf"
 

@@ -7,6 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 export HOME="$work/home"
 mkdir -p "$HOME" "$work/bin"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
 
 # A fake curl records its argv and writes the --output file unless FAKE_CURL_FAIL is set.

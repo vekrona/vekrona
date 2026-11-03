@@ -3,7 +3,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../../lib/cuda-repo.sh
 source "$ROOT/lib/cuda-repo.sh"
 REPOS="$ROOT/etc/yum.repos.d"
 KEYS="$ROOT/etc/pki/rpm-gpg"

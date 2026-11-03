@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016 # the stub bodies are written to files literally and expand when the stub runs
 # A fake package database with a fake rpm, dnf and sudo in front of PATH (source it after tests/lib.sh; the caller sets $work, a
 # scratch directory). One file per installed package in $FAKE_RPMDB. ffmpeg conflicts with the -free libraries.
 #   FAKE_DNF_FAIL=1       every dnf call fails
 #   FAKE_DNF_PROTECTED=1  the dry run of `dnf remove` refuses, as dnf does for a protected package
 # `packages NAME...` resets the database to exactly these packages, `installed NAME` asks for one.
+: "${work:?source dnf-fakes.sh with \$work set to a scratch directory}"
 mkdir -p "$work/bin"
 # rpm -q answers the two queries wlroots_package_name asks about sway; any other name is a package.
 write_fake "$work/bin/rpm" <<'F'

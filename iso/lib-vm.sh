@@ -503,7 +503,7 @@ vm_build_qemu_command() {
     -device usb-tablet
     -device usb-kbd
     # The guest reports freed pages, so the host's RSS follows the guest's use instead of staying at everything the guest ever touched.
-    -device virtio-balloon,free-page-reporting=on
+    -device "virtio-balloon,free-page-reporting=on"
     -qmp "unix:$state_dir/qmp.sock,server=on,wait=off"
     -chardev "socket,id=serial0,path=$state_dir/serial.sock,server=on,wait=off,logfile=$state_dir/serial.log"
     -serial chardev:serial0

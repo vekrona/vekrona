@@ -8,6 +8,7 @@ require_vm "${BASH_SOURCE[0]}"
 export XDG_RUNTIME_DIR
 XDG_RUNTIME_DIR="$(mktemp -d)"
 trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT
+# shellcheck source=../../iso/lib-vm.sh
 source "$ROOT/iso/lib-vm.sh"
 VM_LOCK_TIMEOUT_SEC=2
 

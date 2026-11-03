@@ -9,6 +9,7 @@ set -euo pipefail
 # that the store is as it was.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 NOW_DROPIN_DIR=/run/systemd/system/vekrona-update-now.service.d

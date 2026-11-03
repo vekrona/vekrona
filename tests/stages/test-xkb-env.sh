@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 skip_as_root "an unreadable keymap file is still read by root"
 tool="$ROOT/bin/vekrona-xkb-env"
@@ -106,7 +107,6 @@ for tool_name in sh bash env cat mktemp rm grep sed tail id dirname readlink; do
 done
 
 session_environment() {
-  # shellcheck disable=SC2016 # $1 expands in the inner sh
   env -i PATH="$stubs" HOME="$scratch/home" VEKRONA_XKB_CONF="$scratch/00-keyboard.conf" \
     sh -c 'set -o allexport; . "$1/config/sway/environment"; set +o allexport; env' sh "$ROOT"
 }

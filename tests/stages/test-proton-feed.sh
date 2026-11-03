@@ -5,17 +5,19 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
+# shellcheck source=../../lib/proton.sh
 source "$REPO/lib/proton.sh"
 
 FIXTURES="$REPO/tests/fixtures/proton"
 SUM="$(printf 'a%.0s' {1..128})"
-RPM_URL="https://proton.me/download/app/%s.rpm"
+RPM_URL_BASE="https://proton.me/download/app"
 
 # release CATEGORY VERSION ROLLOUT_FIELD ROLLOUT [RPM_URL [RPM_SUM]]: one feed release carrying a deb and an rpm.
 release() {
   local category="$1" version="$2" field="$3" rollout="$4"
-  local url="${5:-$(printf "$RPM_URL" "$version")}" sum="${6:-$SUM}"
+  local url="${5:-$RPM_URL_BASE/$version.rpm}" sum="${6:-$SUM}"
   jq -n --arg category "$category" --arg version "$version" --arg field "$field" --argjson rollout "$rollout" \
     --arg url "$url" --arg sum "$sum" \
     '{CategoryName: $category, Version: $version, ($field): $rollout,

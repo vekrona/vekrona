@@ -7,6 +7,7 @@ set -euo pipefail
 # logind arms its idle timer only when it starts, so a changed IdleActionSec needs a restart, not a reload.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60

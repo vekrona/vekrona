@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
@@ -135,7 +136,7 @@ clear_notifications
 trap 'stop_fake_icons; reset_output; rm -f "$MEASURE_FILE"' EXIT
 vekrona-dev run mkdir -p "$GUEST_DIR"
 for file in "$ROOT/tests/e2e/fake-sni.py" "$ROOT/tests/e2e/png_rows.py" "$FIXTURES"/*.png; do
-  vekrona-dev run bash -c 'cat >"$1"' _ "$GUEST_DIR/$(basename "$file")" <"$file"
+  guest_write "$file" "$GUEST_DIR/$(basename "$file")"
 done
 
 for scale in "${SCALES[@]}"; do

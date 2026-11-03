@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../../lib/firewall.sh
 source "$ROOT/lib/firewall.sh"
 
 scratch="$(mktemp -d)"
@@ -12,6 +14,7 @@ mkdir -p "$stubs"
 export FW="$scratch/fw"
 # The marker is a scratch file: the test passes the same where the real marker exists (the vekrona-dev VM) and where it does not.
 VEKRONA_KEEP_SSHD_MARKER="$scratch/keep-sshd"
+# shellcheck source=firewalld-fakes.sh
 source "$ROOT/tests/stages/firewalld-fakes.sh"
 
 FOUR="dhcpv6-client steam-lan-transfer steam-streaming syncthing "
@@ -97,7 +100,7 @@ log "ok: an ACCEPT zone with a catch-all reject rule is not one that accepts eve
 
 stock
 FW_SERVICES="dhcpv6-client mdns ssh" ensure
-[[ "$rc" != 0 ]] && grep -q 'no service syncthing' "$scratch/out" || die "a firewalld without a service vekrona needs must fail before anything changes: rc=$rc: $(cat "$scratch/out")"
+{ [[ "$rc" != 0 ]] && grep -q 'no service syncthing' "$scratch/out"; } || die "a firewalld without a service vekrona needs must fail before anything changes: rc=$rc: $(cat "$scratch/out")"
 [[ "$(<"$FW/default")" == FedoraWorkstation ]] || die "the default zone changed although the services are missing"
 log "ok: a firewalld that lacks one of the services fails before it changes the default zone"
 

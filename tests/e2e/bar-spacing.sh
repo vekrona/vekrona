@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=lib/bar-widget.sh
 source "$ROOT/tests/e2e/lib/bar-widget.sh"
 
 STEP_TIMEOUT_SEC=90
@@ -68,7 +70,7 @@ weather_fixture_apply "$WORST_CASE_CELSIUS"
 # The shell forgets the tray icons it was started without, so the fake one starts after the clock pin restarted it.
 vekrona-dev run mkdir -p "$GUEST_DIR"
 for file in "$ROOT/tests/e2e/fake-sni.py" "$ROOT/tests/e2e/png_rows.py" "$ROOT/tests/fixtures/tray/1password.png"; do
-  vekrona-dev run bash -c 'cat >"$1"' _ "$GUEST_DIR/$(basename "$file")" <"$file"
+  guest_write "$file" "$GUEST_DIR/$(basename "$file")"
 done
 vekrona-dev spawn "$GUEST_LOG" -- python3 "$GUEST_DIR/fake-sni.py" "$GUEST_DIR/1password.png"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- registered

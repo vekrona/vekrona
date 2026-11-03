@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 scratch="$(mktemp -d)"
@@ -28,7 +29,7 @@ stages_ran() { [[ -f "$scratch/ran" ]] && tr '\n' ' ' < "$scratch/ran" || true; 
 
 set_root_fs ext4
 if run_install 20-snapper; then die "install on an ext4 root must fail"; fi
-grep -qF 'root filesystem is ext4' "$scratch/stderr" && grep -qF 'needs btrfs' "$scratch/stderr" \
+{ grep -qF 'root filesystem is ext4' "$scratch/stderr" && grep -qF 'needs btrfs' "$scratch/stderr"; } \
   || die "error does not name the found filesystem and btrfs: $(cat "$scratch/stderr")"
 [[ -z "$(stages_ran)" ]] || die "a stage ran before the btrfs check failed: $(stages_ran)"
 log "ok: an ext4 root fails before any stage runs, naming ext4 and btrfs"

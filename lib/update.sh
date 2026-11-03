@@ -68,7 +68,6 @@ update_write_json() {
 }
 
 # jq program turning the groups array into the document updates.json holds. Arguments: $checked, $armed.
-# shellcheck disable=SC2016 # jq variables are meant to stay unexpanded
 UPDATE_STATE_JQ='{checked: $checked, pending: (length > 0), night_armed: $armed, groups: .}'
 
 # Writes the state of "nothing checked yet" unless updates.json exists, so the shell can always watch the file and its
@@ -95,7 +94,6 @@ update_publish() {
 # check-upgrade document; a package offered for two architectures counts once), $skipped (lines "name.arch" of the
 # updates that `dnf5 upgrade` leaves out) and $flatpak (lines "application<TAB>version"). Empty groups go. The Proton
 # RPMs come from the local vekrona-proton repo and get their own group.
-# shellcheck disable=SC2016 # jq variables ($installed, $dnf, ...) are meant to stay unexpanded
 UPDATE_GROUPS_JQ='
   def evr: sub("^0:"; "");
   def lines: split("\n") | map(select(length > 0) | split("\t"));

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 scratch="$(mktemp -d)"
@@ -260,7 +261,7 @@ reset_home; set_mode dark; ok_run all
 export SWAYSOCK=/nonexistent
 set_mode light
 ok_run sway
-[[ "$(swaymsg_calls)" -eq 1 ]] && grep -qx 'reload' "$scratch/swaymsg.log" || die "changed config did not trigger exactly one swaymsg reload"
+{ [[ "$(swaymsg_calls)" -eq 1 ]] && grep -qx 'reload' "$scratch/swaymsg.log"; } || die "changed config did not trigger exactly one swaymsg reload"
 ok_run sway
 [[ "$(swaymsg_calls)" -eq 1 ]] || die "unchanged config triggered a reload"
 set_mode dark

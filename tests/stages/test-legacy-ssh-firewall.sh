@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../../lib/firewall.sh
 source "$ROOT/lib/firewall.sh"
 
 scratch="$(mktemp -d)"
@@ -11,6 +13,7 @@ stubs="$scratch/stubs"
 mkdir -p "$stubs"
 export FW="$scratch/fw"
 TAILNET_ZONE_FILE="$scratch/tailnet.xml"
+# shellcheck source=firewalld-fakes.sh
 source "$ROOT/tests/stages/firewalld-fakes.sh"
 
 ensure() { rc=0; (PATH="$stubs:$PATH" ensure_tailnet_ssh_firewall_gone) >"$scratch/out" 2>&1 || rc=$?; }

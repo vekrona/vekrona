@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 work="$(mktemp -d)"
@@ -100,7 +101,7 @@ log "ok: an inactive unit (status 3) reads as not active"
 for failure in "5 unexpected failure" "1 Failed to connect to bus: No such file or directory"; do
   unit j enabled
   if (PROBE_FAIL="$failure" ensure_system_unit enabled j) 2>"$work/err"; then die "a failing is-enabled probe ($failure) was accepted"; fi
-  grep -q "systemctl is-enabled j" "$work/err" && grep -q "${failure#* }" "$work/err" || die "a failing probe ($failure) did not report itself: $(cat "$work/err")"
+  { grep -q "systemctl is-enabled j" "$work/err" && grep -q "${failure#* }" "$work/err"; } || die "a failing probe ($failure) did not report itself: $(cat "$work/err")"
   [[ "$(mutating_calls)" -eq 0 ]] || die "a failing probe ($failure) was followed by a change"
   if (PROBE_FAIL="$failure" ensure_system_unit_active j) 2>/dev/null; then die "a failing is-active probe ($failure) was accepted"; fi
   [[ "$(mutating_calls)" -eq 0 ]] || die "a failing is-active probe ($failure) was followed by a change"

@@ -18,6 +18,7 @@
 set -euo pipefail
 
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+# shellcheck source=../lib/common.sh
 source "$(dirname "$SELF")/../lib/common.sh"
 UNIT_NAME="vekrona-caffeine"
 UNIT="$UNIT_NAME.service"

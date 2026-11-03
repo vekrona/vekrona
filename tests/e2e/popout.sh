@@ -9,6 +9,7 @@ set -euo pipefail
 # 2. A reopened popout does not resume on the field that held the focus when it closed.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60

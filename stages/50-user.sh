@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
+# shellcheck source=../lib/display-scale.sh
 source "$ROOT/lib/display-scale.sh"
 
 # First: a user unit linked below runs its ~/.local/bin tool as soon as any daemon-reload (an RPM scriptlet, say) sees it.
@@ -39,7 +41,6 @@ ensure_symlink "$VEKRONA_ROOT/config/vdirsyncer/config.example" "$HOME/.config/v
 
 # The theme mode and the rendered theme come before any unit restart: the app switcher and the shell read active-theme.json on start.
 theme_state_dir="$(vekrona_state_dir)"
-theme_state_file="$(vekrona_active_theme_file)"
 theme_name_file="$(vekrona_theme_name_file)"
 ensure_dir "$theme_state_dir"
 if [[ ! -f "$theme_name_file" ]]; then

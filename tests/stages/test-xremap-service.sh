@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016 # the stub bodies are written to files literally and expand when the stub runs
 # xremap runs as a system service under its own user, which alone may read the keyboards; the session user is not in the input group.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=update-fakes.sh
 source "$ROOT/tests/stages/update-fakes.sh" # run_as_root
 
 work="$(mktemp -d)"
@@ -85,6 +86,7 @@ grep -q 'no Sway Wayland socket' "$work/err" || die "no sway: no reason: $(cat "
 log "ok: no or ambiguous compositor grants nothing"
 
 # --- xremap.path is rendered for one user's runtime directory ---
+# shellcheck source=../../lib/xremap.sh
 source "$ROOT/lib/xremap.sh"
 rendered="$(render_xremap_path_unit 1234 <"$ROOT/etc/systemd/system/xremap.path")"
 grep -qx 'PathExistsGlob=/run/user/1234/wayland-\[0-9\]' <<<"$rendered" || die "the path unit does not watch the user's runtime directory: $rendered"

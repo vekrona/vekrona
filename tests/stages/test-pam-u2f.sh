@@ -2,8 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../../lib/authselect-vekrona.sh
 source "$ROOT/lib/authselect-vekrona.sh"
+# shellcheck source=../../lib/pam-u2f.sh
 source "$ROOT/lib/pam-u2f.sh"
 
 scratch="$(mktemp -d)"

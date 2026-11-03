@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
+# shellcheck source=../lib/proton.sh
 source "$ROOT/lib/proton.sh"
 
 # An update (the 09:00 check, the midnight run) must not change the Proton repo or run dnf while this stage does; the lock

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016 # the stub bodies are written to files literally and expand when the stub runs
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 scratch="$(mktemp -d)"
@@ -34,12 +34,12 @@ ROFI_OUT=beta menu --prompt Pick
 [[ "$(<"$scratch/rofi.stdin")" == $'alpha\nbeta' ]] || die "the entries do not reach rofi: $(cat "$scratch/rofi.stdin")"
 argv_has Pick || die "the prompt does not reach rofi: $(cat "$scratch/rofi.argv")"
 argv_has '* { stub-theme: yes; }' || die "rofi is not themed by vekrona-render-theme rofi: $(cat "$scratch/rofi.argv")"
-! argv_has -mesg && ! argv_has -format || die "-mesg and -format must be off unless asked for: $(cat "$scratch/rofi.argv")"
+{ ! argv_has -mesg && ! argv_has -format; } || die "-mesg and -format must be off unless asked for: $(cat "$scratch/rofi.argv")"
 log "ok: a chosen entry is printed, themed, with the entries on rofi's stdin"
 
 ROFI_OUT=1 menu --prompt Pick --message "A hint" --index
 [[ "$rc" == 0 && "$out" == 1 ]] || die "--index must print rofi's answer: exit $rc, '$out'"
-argv_has -mesg && argv_has "A hint" && argv_has -format && argv_has i || die "--message and --index do not reach rofi: $(cat "$scratch/rofi.argv")"
+{ argv_has -mesg && argv_has "A hint" && argv_has -format && argv_has i; } || die "--message and --index do not reach rofi: $(cat "$scratch/rofi.argv")"
 log "ok: --message and --index reach rofi"
 
 ROFI_STATUS=1 menu --prompt Pick

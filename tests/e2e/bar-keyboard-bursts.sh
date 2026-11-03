@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
@@ -27,9 +28,10 @@ shim_lines_reach() { (($(shim_lines "$1" "$2") >= $3)); }
 # before the tick has been sent by then.
 burst_announced() { vekrona-dev run grep -q "$BURST_END" "$EVENTS_FILE"; }
 watching() { vekrona-dev run grep -q '"subscribed"' "$EVENTS_FILE"; }
-# Every failed query after the first of a run of failures is logged once, the first not at all, and nothing is logged as Keyboard.
+# Every failed query of KIND ($1) after the first of a run of failures is logged once, the first not at all, and nothing is logged
+# as Keyboard.
 failures_logged_once() {
-  (($(shell_errors) - ERRORS_BEFORE == $(shim_lines "$KIND" failed) - 1)) && [[ "$(keyboard_errors)" == "$KEYBOARD_ERRORS_BEFORE" ]]
+  (($(shell_errors) - ERRORS_BEFORE == $(shim_lines "$1" failed) - 1)) && [[ "$(keyboard_errors)" == "$KEYBOARD_ERRORS_BEFORE" ]]
 }
 export -f shim_lines shim_lines_are shim_lines_reach burst_announced watching failures_logged_once
 
@@ -155,7 +157,8 @@ drop_without_a_following_event() {
 
 # A query that never answers is stopped after its limit and logged once, and the next event asks again.
 timed_out_logged() { shell_log_count 'timed out after'; }
-timeout_logged() { (($(timed_out_logged) == TIMEOUTS_BEFORE + 1)); }
+# Whether exactly one more query timed out than the $1 logged before the step.
+timeout_logged() { (($(timed_out_logged) == $1 + 1)); }
 export -f timed_out_logged timeout_logged
 hung_query_is_stopped() {
   local kind=$1 cause=$2 timeouts_before
@@ -165,7 +168,7 @@ hung_query_is_stopped() {
   # An index nobody visited last: a workspace that is already current sends no event.
   "$cause" 5
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shim_lines_reach "$kind" hung 1
-  TIMEOUTS_BEFORE=$timeouts_before vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- timeout_logged
+  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- timeout_logged "$timeouts_before"
   vekrona-dev run rm -f "$SHIM_DIR/$kind.hang"
   "$cause" 6
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shim_lines_reach "$kind" passed 1
@@ -183,7 +186,7 @@ failures_are_logged_once() {
   hold_queries "$kind"
   "$cause" 2
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shim_lines_reach "$kind" held 1
-  KIND=$kind vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- failures_logged_once
+  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- failures_logged_once "$kind"
   vekrona-dev run rm -f "$SHIM_DIR/$kind.fail"
   verdict "$kind" ok
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shim_lines_reach "$kind" passed 1

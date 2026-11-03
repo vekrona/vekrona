@@ -6,6 +6,7 @@ set -euo pipefail
 # directory, so a new tool that acts without a verb fails here.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 # The tools that act bare on purpose: they only print, and the Sway environment file sources them without arguments.

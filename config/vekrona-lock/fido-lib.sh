@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by fido-keys.sh and u2f-stall-report.sh: the one definition of "a FIDO security key".
 
 # Prints the sysfs path of every hidraw device udev tags ID_FIDO_TOKEN=1.

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=90
 GUEST_SIGNAL_LOG=/tmp/vekrona-e2e-signal.log
-# shellcheck disable=SC2016 # $HOME expands in the guest
 GUEST_CONFIG='$HOME/.var/app/org.signal.Signal/config/Signal/config.json'
 
 config_has() { vekrona-dev sh bash -c "jq -e '$1' $GUEST_CONFIG >/dev/null 2>&1"; }

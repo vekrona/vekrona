@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016 # the stub body is written to a file literally and expands when the stub runs
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 tool="$ROOT/bin/vekrona-webapp"
 

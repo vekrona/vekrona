@@ -2,7 +2,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
+# shellcheck source=update-fakes.sh
 source "$REPO/tests/stages/update-fakes.sh"
 
 work="$(mktemp -d)"
@@ -50,7 +52,7 @@ log "ok: updates.json groups dnf, Flatpak and Proton updates, newest installed v
 [[ "$(field '{pending, night_armed}')" == '{"pending":true,"night_armed":true}' ]] || die "wrong flags: $(field .)"
 [[ "$(field '.checked | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+[+-][0-9:]+$")')" == true ]] || die "checked is not an ISO timestamp: $(field .checked)"
 [[ "$(stat -c %a "$JSON")" == 644 ]] || die "updates.json mode is $(stat -c %a "$JSON")"
-[[ -z "$(ls -A "$VEKRONA_STATE_DIR" | grep -v '^updates.json$')" ]] || die "left files behind: $(ls -A "$VEKRONA_STATE_DIR")"
+[[ -z "$(find "$VEKRONA_STATE_DIR" -mindepth 1 -maxdepth 1 ! -name updates.json)" ]] || die "left files behind: $(ls -A "$VEKRONA_STATE_DIR")"
 night_timer_active || die "pending updates did not arm the night timer"
 [[ "$(sed -n 1p "$FAKE_LOG")" == "vekrona-proton stage" ]] || die "the Proton repo was not staged first: $(cat "$FAKE_LOG")"
 log "ok: pending is true, the night timer is armed, the file is world-readable, whole, and Proton was staged first"

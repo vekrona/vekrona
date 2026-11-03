@@ -7,6 +7,7 @@ source "$ROOT/tests/require-vm.sh"
 require_vm "${BASH_SOURCE[0]}"
 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$(mktemp -d)}"
 export XDG_RUNTIME_DIR
+# shellcheck source=../../iso/lib-vm.sh
 source "$ROOT/iso/lib-vm.sh"
 
 work="$(mktemp -d)"

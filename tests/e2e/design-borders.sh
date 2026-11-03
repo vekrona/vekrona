@@ -2,12 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=30
 BORDER_PX="$(vekrona_token_get border border-hair)"
 GUEST_TERMINAL_LOG=/tmp/vekrona-e2e-terminal.log
-DROP_IN='~/.config/sway/config.d/90-vekrona-design.conf'
+DROP_IN='$HOME/.config/sway/config.d/90-vekrona-design.conf'
 
 focused_terminal() { vekrona-dev sh bash -c "swaymsg -t get_tree | jq '[.. | objects | select(.focused? == true and .app_id? == \"com.mitchellh.ghostty\")][0].current_border_width // empty'"; }
 terminal_is_focused() { [[ -n "$(focused_terminal)" ]]; }

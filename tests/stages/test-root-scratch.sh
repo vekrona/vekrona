@@ -3,7 +3,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
+# shellcheck source=update-fakes.sh
 source "$REPO/tests/stages/update-fakes.sh" # run_as_root: a user namespace that maps the caller to uid 0
 
 work="$(mktemp -d)"

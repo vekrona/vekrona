@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
 source "$ROOT/lib/common.sh"
 
 ALL_STAGES=(00-repos 20-snapper 10-nvidia 15-mac 30-packages 40-system 45-auth 50-user 60-gaming 65-login-manager 70-verify 90a-switch-dm 90b-remove)

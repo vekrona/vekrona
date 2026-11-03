@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 scratch="$(mktemp -d)"
@@ -44,7 +45,7 @@ log "ok: a crashed sway's leftover socket is not a running session"
 
 bind_socket $$
 run_install || die "install with a sway socket failed: $(cat "$scratch/stderr")"
-[[ "$(swaymsg_calls)" -eq 1 ]] && grep -qx -- "-s $XDG_RUNTIME_DIR/sway-ipc.1000.$$.sock reload" "$scratch/swaymsg.log" \
+{ [[ "$(swaymsg_calls)" -eq 1 ]] && grep -qx -- "-s $XDG_RUNTIME_DIR/sway-ipc.1000.$$.sock reload" "$scratch/swaymsg.log"; } \
   || die "install did not reload the live session found in XDG_RUNTIME_DIR exactly once: $(cat "$scratch/swaymsg.log" 2>&1)"
 log "ok: a TTY or SSH install reloads the live session found by its socket, next to a crashed one's"
 

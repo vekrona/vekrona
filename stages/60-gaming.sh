@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
 
 SCOPEBUDDY_URL="https://raw.githubusercontent.com/OpenGamingCollective/ScopeBuddy/1.5.0/bin/scopebuddy"

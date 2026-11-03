@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../../lib/luks-fido2.sh
 source "$ROOT/lib/luks-fido2.sh"
 FIXTURES="$ROOT/tests/fixtures/crypttab"
 

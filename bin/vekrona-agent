@@ -6,6 +6,7 @@ PROG="vekrona-agent"
 
 self="$(readlink -f "${BASH_SOURCE[0]}")"
 REPO_ROOT="$(cd "$(dirname "$self")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$REPO_ROOT/lib/common.sh"
 
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"

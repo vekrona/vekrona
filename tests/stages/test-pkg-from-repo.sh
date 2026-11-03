@@ -6,6 +6,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
 
 # dnf stub: repoquery --installed prints the repo recorded for the package in $FAKE_FROM (empty output and status 0

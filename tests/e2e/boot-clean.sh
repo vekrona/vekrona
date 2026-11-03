@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 BOOT_TIMEOUT_SEC=240
@@ -21,8 +22,8 @@ vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- greeter_up
 store_before="$(error_store)"
 vekrona-dev session
 
-failed="$(vekrona-dev sh systemctl --user --failed --no-legend)"
-[[ -z "$failed" ]] || die "a fresh login must leave no failed user units, but these failed: $failed"
+failed_units="$(vekrona-dev sh systemctl --user --failed --no-legend)"
+[[ -z "$failed_units" ]] || die "a fresh login must leave no failed user units, but these failed: $failed_units"
 log "ok: no failed user units"
 
 vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- vekrona-dev sh systemctl --user is-active --quiet vekrona-shell.service

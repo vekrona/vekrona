@@ -53,10 +53,16 @@ suites, keeps going after a failing one and exits non-zero if any failed.
 They need no desktop session or root, but several need Fedora packages
 (`anaconda-core`, `authselect`) that do not belong on a desktop, so run them
 in the vekrona-dev VM (`vekrona-dev test`, see below) rather than on the
-host. There are six suites. CI runs the same command in a
+host. CI runs the same command in a
 Fedora container (job `unit-tests` in `.github/workflows/iso.yml`), and the
 ISO build waits for it.
 
+- `tests/test-shellcheck.sh`: `shellcheck` over every shell file of the repo (found
+  by shebang or `.sh`), no finding allowed; needs `ShellCheck`. `.shellcheckrc`
+  holds the source path and the one check turned off for the whole repo (SC2016,
+  since a `$` in single quotes is always code for another shell there), and a
+  `# shellcheck source=` line above each `source` of a computed path names the
+  file. Any other `# shellcheck disable=` carries its reason on the same line.
 - `tests/errors/` (Python `unittest`): the error pipeline. Needs
   `python3-gobject` and `dbus-daemon`.
 - `tests/stages/` (`bash tests/stages/run.sh`): stage helpers: hardware

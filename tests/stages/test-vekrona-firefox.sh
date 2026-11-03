@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 # bin/vekrona-firefox reads the main Firefox profile: bookmarks and history from places.sqlite, the default
@@ -201,7 +202,8 @@ expect_rows "places can be read while another process holds the database exclusi
 "bookmark | Docs Bookmark | 1.0
 history | Example Blog | 0.4737
 history | Example About | 0.1053" example
-exec {LOCK[1]}>&-
+lock_in="${LOCK[1]}"
+exec {lock_in}>&-
 wait "$LOCK_PID"
 
 fails "--limit 0" "not a positive integer" places example --limit 0

@@ -6,7 +6,9 @@ set -euo pipefail
 # transaction stored and the marker written, which is the moment before the reboot.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
+# shellcheck source=../update-e2e-lib.sh
 source "$ROOT/tests/update-e2e-lib.sh"
 
 SHORT_ASK_TIMEOUT_SEC=2

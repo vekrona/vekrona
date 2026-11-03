@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # rune is the default editor: the default handler of Markdown and plain text, $EDITOR and $VISUAL of a fresh login, and what git
 # commit opens, where a message typed with real keys, saved and quit with rune's own keys becomes the commit.
-# shellcheck disable=SC2016 # $variables in the bash -c bodies expand in the guest
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60

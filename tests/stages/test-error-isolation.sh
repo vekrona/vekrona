@@ -15,6 +15,7 @@ trap 'rm -rf "$scratch"' EXIT
 # The bus of the desktop session that runs this test (a stand-in path): tests/lib.sh must cut every test process off it.
 desktop_bus="unix:path=$scratch/desktop-session-bus"
 export DBUS_SESSION_BUS_ADDRESS="$desktop_bus"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 # Stands in for the real reporter: it records the call where this test can see it. Exported by tests/lib.sh to

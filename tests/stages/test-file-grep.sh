@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 scratch="$(mktemp -d)"
@@ -23,8 +24,7 @@ done
 log "ok: grep errors are fatal, not 'absent'"
 
 if (VERSIONLOCK_FILE="$scratch/dir" versionlock_has pkg) 2>/dev/null; then die "unsearchable versionlock file read as present"; fi
-VERSIONLOCK_FILE="$scratch/missing"
-! versionlock_has pkg || die "a missing versionlock file must mean not locked"
+! VERSIONLOCK_FILE="$scratch/missing" versionlock_has pkg || die "a missing versionlock file must mean not locked"
 log "ok: versionlock_has distinguishes absent from unreadable"
 
 printf 'gpgkey=a\nname=b\ngpgkey=a\n' >"$scratch/repo"

@@ -5,7 +5,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
+# shellcheck source=dnf-fakes.sh
 source "$REPO/tests/stages/dnf-fakes.sh"
 
 # The marker is a scratch file: the test passes the same where the real marker exists (the vekrona-dev VM) and where it does not.
@@ -38,7 +40,7 @@ export FAKE_SYSTEMCTL_LOG="$work/systemctl.log"
 
 packages openssh-server abrt sway
 ensure_unwanted_pkgs_absent
-! installed openssh-server && ! installed abrt || die "the unwanted packages must be removed"
+{ ! installed openssh-server && ! installed abrt; } || die "the unwanted packages must be removed"
 installed sway || die "a package that is not unwanted must stay"
 log "ok: the unwanted packages are removed"
 [[ "$(<"$FAKE_SYSTEMCTL_LOG")" == reset-failed ]] || die "a removal must clear the failed units of the packages it removed: $(cat "$FAKE_SYSTEMCTL_LOG")"

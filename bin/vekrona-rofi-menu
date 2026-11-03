@@ -31,6 +31,7 @@ done
 [[ -n "$prompt" ]] || usage
 
 REPO_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$REPO_ROOT/lib/common.sh"
 
 fail() {

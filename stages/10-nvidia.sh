@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
+# shellcheck source=../lib/cuda-repo.sh
 source "$ROOT/lib/cuda-repo.sh"
 
 require_cmd rpm dnf5 grubby modinfo
@@ -102,10 +104,10 @@ while IFS= read -r p; do [[ -n "$p" ]] && lock_pkgs+=("$p"); done < <(rpm -qa --
 [[ ${#lock_pkgs[@]} -gt 0 ]] && versionlock_installed "${lock_pkgs[@]}"
 
 # An assignment, not "for kernel in $(installed_kvers)": a failing installed_kvers would leave the loop with nothing to check.
-installed="$(installed_kvers)"
+kernels="$(installed_kvers)"
 while IFS= read -r kernel; do
   problem="$(nvidia_module_problem "$kernel")"
   [[ -z "$problem" ]] || warn "$problem"
-done <<<"$installed"
+done <<<"$kernels"
 
 warn "reboot required: nvidia driver, kernel args, and modprobe options only take effect after reboot"

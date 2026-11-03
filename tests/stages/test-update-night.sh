@@ -2,7 +2,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
+# shellcheck source=update-fakes.sh
 source "$REPO/tests/stages/update-fakes.sh"
 
 work="$(mktemp -d)"
@@ -116,10 +118,10 @@ log "ok: a locked or idle hint without a running lock screen is somebody at the 
 
 scenario; touch "$work/pending"; add_session 1 Active=no
 night
-ran '^apply --offline$' && did_not '^runuser' || die "a background session was asked or blocked the install"
+{ ran '^apply --offline$' && did_not '^runuser'; } || die "a background session was asked or blocked the install"
 scenario; touch "$work/pending"; add_session 1 Type=tty
 night
-ran '^apply --offline$' && did_not '^runuser' || die "a console session was asked"
+{ ran '^apply --offline$' && did_not '^runuser'; } || die "a console session was asked"
 log "ok: only the active Wayland session counts as somebody at the machine"
 
 scenario; touch "$work/pending"

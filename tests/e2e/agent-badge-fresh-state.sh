@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
@@ -20,8 +21,8 @@ export -f danger_pixels badge_hidden badge_shown
 export ROOT DANGER_HEX BAR_HEIGHT_PX BADGE_MIN_PIXELS
 
 # A fresh account has no error store until the first error is recorded: set it aside, as that state, and put it back on exit.
-STORE='~/.local/state/vekrona/errors'
-ASIDE='~/.local/state/vekrona/errors.e2e-aside'
+STORE='$HOME/.local/state/vekrona/errors'
+ASIDE='$HOME/.local/state/vekrona/errors.e2e-aside'
 restore() {
   vekrona-dev sh bash -c "rm -rf $STORE && if [[ -e $ASIDE ]]; then mv $ASIDE $STORE; fi"
   vekrona-dev sh systemctl --user start vekrona-errors.service

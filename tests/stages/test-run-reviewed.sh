@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 work="$(mktemp -d)"
@@ -38,6 +39,6 @@ REVIEW_OUT="Nothing to do." outcome
 log "ok: nothing to do replays nothing and says so"
 
 REPLAY_STATUS=1 outcome
-[[ "$rc" != 0 ]] && grep -q 'dnf replay of the removal failed' "$work/out" && ! grep -qxE 'applied|nothing' "$work/out" \
+{ [[ "$rc" != 0 ]] && grep -q 'dnf replay of the removal failed' "$work/out" && ! grep -qxE 'applied|nothing' "$work/out"; } \
   || die "a failed replay must end the command, not read as applied or as nothing to do: exit $rc, $(cat "$work/out")"
 log "ok: a failed replay ends the command"

@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$ROOT/tests/lib.sh"
 
 work="$(mktemp -d)"
@@ -14,6 +15,7 @@ allowed() {
   local actions="$1"
   shift
   (
+    # shellcheck source=../require-vm.sh
     source "$ROOT/tests/require-vm.sh"
     in_vekrona_dev_guest() { return 1; }
     CONTAINER_MARKERS=("$@")

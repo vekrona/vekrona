@@ -2,9 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
+# shellcheck source=../lib/authselect-vekrona.sh
 source "$ROOT/lib/authselect-vekrona.sh"
+# shellcheck source=../lib/luks-fido2.sh
 source "$ROOT/lib/luks-fido2.sh"
+# shellcheck source=../lib/pam-u2f.sh
 source "$ROOT/lib/pam-u2f.sh"
 
 PROFILE_DIR="/etc/authselect/custom/$PROFILE_NAME"

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
 
 work="$(mktemp -d)"
@@ -98,5 +99,5 @@ log "ok: only the record from PID 1 ends the run"
 require_user_namespaces
 status=0
 unshare -r "$REPO/bin/vekrona-update" now >/dev/null 2>"$work/err" || status=$?
-[[ "$status" -ne 0 ]] && grep -q 'not root' "$work/err" || die "ran as root: $(cat "$work/err")"
+{ [[ "$status" -ne 0 ]] && grep -q 'not root' "$work/err"; } || die "ran as root: $(cat "$work/err")"
 log "ok: refuses to run as root"

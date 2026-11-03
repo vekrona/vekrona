@@ -5,6 +5,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+# shellcheck source=../lib.sh
 source "$REPO/tests/lib.sh"
 
 # `vekrona-proton stage` insists on root. A user namespace that maps the caller to uid 0 gives it that, with no
@@ -57,7 +58,7 @@ install_fake() { echo "$2" > "$FAKE_RPMDB/$1"; }
 
 stage() { unshare -r "$REPO/bin/vekrona-proton" stage 2>&1; }
 rpm_downloads() { { grep -c '\.rpm$' "$FAKE_CURL_LOG" || true; } }
-repo_rpms() { (cd "$work/repo" && ls | grep -v '^repodata$' | paste -sd' '); }
+repo_rpms() { find "$work/repo" -mindepth 1 -maxdepth 1 ! -name repodata -printf '%f\n' | sort | paste -sd' '; }
 reset_logs() { : > "$FAKE_CURL_LOG"; : > "$FAKE_CREATEREPO_LOG"; }
 
 publish proton-mail 1.10.0

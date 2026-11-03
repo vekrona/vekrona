@@ -2,19 +2,33 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
+# shellcheck source=../lib/authselect-vekrona.sh
 source "$ROOT/lib/authselect-vekrona.sh"
+# shellcheck source=../lib/pam-u2f.sh
 source "$ROOT/lib/pam-u2f.sh"
+# shellcheck source=../lib/yubikey-otp.sh
 source "$ROOT/lib/yubikey-otp.sh"
+# shellcheck source=../lib/luks-fido2.sh
 source "$ROOT/lib/luks-fido2.sh"
+# shellcheck source=../lib/facetimehd.sh
 source "$ROOT/lib/facetimehd.sh"
+# shellcheck source=../lib/proton.sh
 source "$ROOT/lib/proton.sh"
+# shellcheck source=../lib/firewall.sh
 source "$ROOT/lib/firewall.sh"
+# shellcheck source=../lib/tailscale.sh
 source "$ROOT/lib/tailscale.sh"
+# shellcheck source=../lib/kernel-hardening.sh
 source "$ROOT/lib/kernel-hardening.sh"
+# shellcheck source=../lib/cuda-repo.sh
 source "$ROOT/lib/cuda-repo.sh"
+# shellcheck source=../lib/geoclue.sh
 source "$ROOT/lib/geoclue.sh"
+# shellcheck source=../lib/xremap.sh
 source "$ROOT/lib/xremap.sh"
+# shellcheck source=../lib/display-scale.sh
 source "$ROOT/lib/display-scale.sh"
 
 [[ "${1:-}" == "--all" ]] && VEKRONA_VERIFY_ALL=1
@@ -577,9 +591,9 @@ if ran 50-user; then
   check assert "no vekrona symlink points to a missing or git-ignored file (stale: ${stale_bad_links:-none})" eq "$stale_bad_links" ""
   ghostty_links="$(vekrona_links "$HOME/.config/ghostty" | tr '\n' ' ')"
   check assert "no vekrona symlink left under ~/.config/ghostty (vekrona ships no Ghostty config; found: ${ghostty_links:-none})" eq "$ghostty_links" ""
-  check assert "~/.config/autostart/nvidia-settings-user.desktop links to $VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" \
+  check assert "$HOME/.config/autostart/nvidia-settings-user.desktop links to $VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" \
     eq "$(readlink "$HOME/.config/autostart/nvidia-settings-user.desktop")" "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop"
-  check assert "~/.config/autostart/sealertauto.desktop links to $VEKRONA_ROOT/config/autostart/sealertauto.desktop" \
+  check assert "$HOME/.config/autostart/sealertauto.desktop links to $VEKRONA_ROOT/config/autostart/sealertauto.desktop" \
     eq "$(readlink "$HOME/.config/autostart/sealertauto.desktop")" "$VEKRONA_ROOT/config/autostart/sealertauto.desktop"
   check assert "the systemd user manager generates no nvidia-settings autostart unit (the Hidden=true override took effect)" \
     path_absent "$XDG_RUNTIME_DIR/systemd/generator.late/app-nvidia\\x2dsettings\\x2duser@autostart.service"
@@ -611,7 +625,7 @@ if ran 50-user; then
   check assert "vekrona-session-teardown.service enabled" user_unit_enabled vekrona-session-teardown.service
   check assert "vekrona-session-teardown.service holds the shutdown delay lock while sway runs" present_iff sway_runs session_teardown_holds_shutdown_lock
   check assert "vekrona-shell.service active without automatic restarts while sway runs" present_iff sway_runs user_unit_active_without_restarts vekrona-shell.service
-  check assert "~/.config/DankMaterialShell is absent" path_absent "$HOME/.config/DankMaterialShell"
+  check assert "$HOME/.config/DankMaterialShell is absent" path_absent "$HOME/.config/DankMaterialShell"
   check assert "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell is absent" path_absent "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/danklinux-shell"
   check assert "vekrona-night.service linked" file_exists "$HOME/.config/systemd/user/vekrona-night.service"
   check assert "vekrona-weather.timer enabled" user_unit_enabled vekrona-weather.timer
