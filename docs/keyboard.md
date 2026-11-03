@@ -36,7 +36,7 @@ Cmd (plain `Mod4`):
 | Cmd+Return | toggle fullscreen |
 | Cmd+q | kill the focused window |
 | Cmd+Ctrl+q | `vekrona-lock start` (the macOS shortcut for the same thing as Hyper+Escape) |
-| Cmd+Tab, Cmd+Shift+Tab | app switcher (see below) |
+| Cmd+Tab, Cmd+Shift+Tab, and Cmd+Left/Right while it is open | app switcher (see below) |
 | Cmd+Shift+3 | `vekrona-screenshot screen` |
 | Cmd+Shift+4 | `vekrona-screenshot area` |
 | Cmd+Shift+5 | `vekrona-screenshot window` |
@@ -126,8 +126,9 @@ and the empty launcher lists the six most recent.
 
 Super+Tab works like Cmd+Tab on macOS: hold Super and press Tab to open a row
 of app icons, one per app across all workspaces, most recently used first.
-More Tab presses move right, Shift+Tab moves left, and releasing Super focuses
-the most recent window of the highlighted app, switching workspace if needed.
+More Tab presses move right, Shift+Tab moves left, and Right and Left (with
+Super still held) do the same. Releasing Super focuses the most recent window
+of the highlighted app, switching workspace if needed.
 A quick tap goes straight back to the previous app; Escape cancels and Return
 or a click picks.
 
@@ -152,11 +153,24 @@ the overlay and focuses the window with `I3.dispatch("[con_id=N] focus")`.
 Quickshell's foreign-toplevel `activate()` is not usable here: Sway accepts the
 request but does not move focus. The overlay takes exclusive keyboard focus
 while shown, but Sway bindings still run first, so Tab presses keep reaching
-the overlay's IPC.
+the overlay's IPC. That is also why Super+Left and Super+Right need a mode:
+in the default mode they are `focus left` and `focus right`, which Sway runs
+before the overlay sees the key. So the overlay dispatches `mode appswitch` when
+it opens and `mode default` when it closes, and again on every start or hot
+reload; `vekrona-app-switch.service` also runs `swaymsg mode default` when it
+stops, so a crashed or restarted overlay cannot leave Sway in the mode. The
+`appswitch` mode in `config/sway/config` binds Super+Tab, Super+Shift+Tab,
+Super+Right and Super+Left to the same `appswitch next|prev` calls. Escape and
+Return stay unbound, so they reach the overlay's own key handler. A mode
+replaces the default bindings, so every other Sway binding is off while the
+switcher is open, except the lid switch and the sleep key: Sway keeps switch
+bindings per mode, so the mode repeats them and a closed lid still locks and
+suspends. The dispatch is asynchronous, so an arrow pressed in the instant
+before the mode lands still moves focus.
 
 Neither Sway nor the overlay sees Super go up reliably: a `bindsym --release
 Super_L` in a mode never fires after Super+Tab, and Qt gets no key event for
-it. So opening the overlay also starts `wait-super-release.py`, which asks the
+it. So opening the overlay also starts `wait-super-release.py`, which reads
 the files `/run/xremap/super-L` and `/run/xremap/super-R`: xremap runs `vekrona-super-state` on every Super press and
 release (the `super-state` modmap in its config) and that writes 1 or 0 there, because your user cannot read the
 keyboards. It watches the directory with inotify and, when no Super key is down, exits and the overlay commits.

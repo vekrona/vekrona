@@ -19,6 +19,13 @@ run_check() { HOME="$scratch/home" "$tool" --check 2>"$scratch/stderr"; }
 run_check || die "repo config fails --check: $(cat "$scratch/stderr")"
 log "ok: repo config passes --check"
 
+# The app switcher's sway mode repeats Cmd+Tab; the cheat sheet must still list it once.
+list="$(HOME="$scratch/home" "$tool" --list)"
+# grep -c prints 0 and exits 1 when nothing matches; only a higher status is a failure.
+tab_rows="$(grep -c '^Cmd + Tab ' <<<"$list" || (($? == 1)))"
+[[ "$tab_rows" == 1 ]] || die "--list must list 'Cmd + Tab' exactly once, but lists it $tab_rows times"
+log "ok: --list shows Cmd + Tab once"
+
 # Sway binds Mod4+q (kill), so remapping Super-q in xremap shadows it.
 sed -i 's/^      Super-c: C-c$/&\n      Super-q: C-q/' "$scratch/home/.config/xremap/config.yml"
 grep -qxF '      Super-q: C-q' "$scratch/home/.config/xremap/config.yml" || die "test setup: Super-q was not added to cmd-layer"

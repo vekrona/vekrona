@@ -1,5 +1,10 @@
 set $hyper Mod4+Ctrl+Mod1
 set $term ghostty
+set $app_next qs -c vekrona-app-switch ipc call appswitch next
+set $app_prev qs -c vekrona-app-switch ipc call appswitch prev
+# The lid switch and the sleep key run in the default mode and in the app switcher's mode, so they are written once.
+set $lid_closed vekrona-suspend --lid
+set $sleep_now vekrona-suspend now
 
 include /etc/sway/config.d/*.conf
 include /usr/share/sway-systemd/95-xdg-desktop-autostart.conf
@@ -38,9 +43,9 @@ bindsym --no-repeat $hyper+Escape exec vekrona-lock start
 #: Lock screen, as on a Mac
 bindsym --no-repeat --to-code Mod4+Ctrl+q exec vekrona-lock start
 # The lid switch and the sleep key: vekrona-lid.service keeps logind from suspending on them, so the lock comes first.
-bindswitch --locked lid:on exec vekrona-suspend --lid
+bindswitch --locked lid:on exec $lid_closed
 #: Lock, then suspend
-bindsym --no-repeat --locked XF86Sleep exec vekrona-suspend now
+bindsym --no-repeat --locked XF86Sleep exec $sleep_now
 #: Open the power commands
 bindsym --no-repeat $hyper+BackSpace exec qs -c vekrona-shell ipc call launcher toggleMode power
 #: Show keybindings help
@@ -117,9 +122,9 @@ bindsym Mod4+Shift+Up move up
 bindsym Mod4+Shift+Right move right
 
 #: Switch to the next app (hold Super, Tab to keep cycling)
-bindsym Mod4+Tab exec qs -c vekrona-app-switch ipc call appswitch next
+bindsym Mod4+Tab exec $app_next
 #: Switch to the previous app (hold Super, Shift+Tab to keep cycling back)
-bindsym Mod4+Shift+Tab exec qs -c vekrona-app-switch ipc call appswitch prev
+bindsym Mod4+Shift+Tab exec $app_prev
 
 #: Enter resize mode
 bindsym --no-repeat --to-code $hyper+r mode "resize"
@@ -208,6 +213,23 @@ mode "resize" {
     bindsym Return mode "default"
     #: Exit resize mode
     bindsym Escape mode "default"
+}
+
+# The app switcher (config/vekrona-app-switch/shell.qml) enters this mode while it is open and leaves it on close. A mode replaces the
+# default bindings, so Left and Right reach the switcher instead of moving focus, and Tab repeats here. Escape and Return are unbound
+# on purpose: they reach the switcher's own key handler. The lid switch and the sleep key are repeated, because a mode has its own.
+mode "appswitch" {
+    #: Switch to the next app (hold Super, Tab to keep cycling)
+    bindsym Mod4+Tab exec $app_next
+    #: Switch to the previous app (hold Super, Shift+Tab to keep cycling back)
+    bindsym Mod4+Shift+Tab exec $app_prev
+    #: Next app while the app switcher is open (Super held)
+    bindsym Mod4+Right exec $app_next
+    #: Previous app while the app switcher is open (Super held)
+    bindsym Mod4+Left exec $app_prev
+    bindswitch --locked lid:on exec $lid_closed
+    #: Lock, then suspend
+    bindsym --no-repeat --locked XF86Sleep exec $sleep_now
 }
 
 for_window [class="^[Ss]team$"] floating enable
