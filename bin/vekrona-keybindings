@@ -263,7 +263,8 @@ def merge_alternative_chords(bindings):
     groups = {}
     order_list = []
     for b in bindings:
-        key = (b.mode, tuple(b.mods), b.description, b.command)
+        # Not the mode: a mode that repeats a default binding (the app switcher's Tab) is the same row of the cheat sheet.
+        key = (tuple(b.mods), b.description, b.command)
         if key not in groups:
             groups[key] = []
             order_list.append(key)
@@ -280,7 +281,7 @@ def merge_alternative_chords(bindings):
         merged.append(Binding(
             mods=first.mods,
             key=combined_keys,
-            key_raw=None,
+            key_raw=first.key_raw if all(g.key_raw == first.key_raw for g in group) else None,
             command=first.command,
             description=first.description,
             mode=first.mode,

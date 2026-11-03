@@ -14,9 +14,7 @@ WATCHER='$HOME/.config/quickshell/vekrona-app-switch/wait-super-release.py'
 
 watcher_running() { vekrona-dev run pgrep -f "[w]ait-super-release.py" >/dev/null; }
 watcher_exited() { vekrona-dev run grep -q '^exit=' "$GUEST_LOG"; }
-# xremap writes 1 here when it sees Super go down; a watcher started before that finds no Super down and ends at once.
-super_recorded_down() { vekrona-dev run grep -qx 1 /run/xremap/super-L; }
-export -f watcher_running watcher_exited super_recorded_down
+export -f watcher_running watcher_exited
 export GUEST_LOG
 
 remove_log() { vekrona-dev run rm -f "$GUEST_LOG"; }

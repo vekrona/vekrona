@@ -505,6 +505,9 @@ flatpak_running() {
 }
 flatpak_stopped() { ! flatpak_running "$1"; }
 export -f window_count window_open window_closed focused_app_id focused_is flatpak_running flatpak_stopped
+# xremap writes 1 here when it sees Super go down. An app switcher opened before that finds no Super down and commits at once.
+super_recorded_down() { vekrona-dev run grep -qx 1 /run/xremap/super-L; }
+export -f super_recorded_down
 
 # The keyboard layout pill. Sway splits a command at commas, so the layout list is quoted inside the command.
 set_layouts() { vekrona-dev sh swaymsg "input type:keyboard xkb_layout \"$1\""; }

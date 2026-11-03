@@ -7,12 +7,21 @@ source "$ROOT/tests/lib.sh"
 bind_re='^[[:space:]]*bindsym[[:space:]]+((--[^[:space:]]+[[:space:]]+)*)[^[:space:]]+[[:space:]]+(.+)$'
 repeating_re='^(focus |move |resize |workspace number |split[vh]$|mode "default"$|exec qs -c vekrona-app-switch ipc call appswitch |exec qs -c vekrona-shell ipc call (audio|brightness) (increment|decrement) |exec brightnessctl )'
 
+# The config names shared commands with `set $name command`; the check reads the command a binding runs.
+declare -A variables
+while IFS= read -r line; do
+  if [[ "$line" =~ ^set[[:space:]]+\$([A-Za-z_]+)[[:space:]]+(.+)$ ]]; then
+    variables[${BASH_REMATCH[1]}]="${BASH_REMATCH[2]}"
+  fi
+done <"$ROOT/config/sway/config"
+
 checked=0
 offenders=()
 while IFS= read -r line; do
   [[ "$line" =~ $bind_re ]] || continue
   checked=$((checked + 1))
   flags="${BASH_REMATCH[1]}" command="${BASH_REMATCH[3]}"
+  for name in "${!variables[@]}"; do command="${command//\$$name/${variables[$name]}}"; done
   [[ "$flags" == *--no-repeat* || "$command" =~ $repeating_re ]] || offenders+=("$line")
 done <"$ROOT/config/sway/config"
 

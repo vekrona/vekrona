@@ -22,6 +22,9 @@ ShellRoot {
     property int selected: 0
     property bool shown: false
 
+    // A hot reload while the switcher is open leaves Sway in the appswitch mode, and the unit does not stop for it (a stop or crash is covered by ExecStopPost).
+    Component.onCompleted: I3.dispatch("mode default")
+
     // ---- Design tokens: tokens.json, the Vekrona Design System (config/tokens.json, linked next to
     // this file). Every lookup is a call of token or typeStyle with a quoted name; tests/stages/
     // test-app-switch-tokens.sh holds those names to the ones tokens.json defines.
@@ -215,6 +218,7 @@ ShellRoot {
             selected = dir > 0 ? 1 : apps.length - 1;
             shown = true;
             superWatch.running = true;
+            I3.dispatch("mode appswitch");
         } else {
             selected = (selected + dir + items.length) % items.length;
         }
@@ -225,6 +229,7 @@ ShellRoot {
             return;
         shown = false;
         superWatch.running = false;
+        I3.dispatch("mode default");
         if (commit)
             I3.dispatch("[con_id=" + items[selected].id + "] focus");
     }
@@ -286,10 +291,6 @@ ShellRoot {
                     root.finish(false);
                 else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                     root.finish(true);
-                else if (event.key === Qt.Key_Right)
-                    root.step(1);
-                else if (event.key === Qt.Key_Left)
-                    root.step(-1);
             }
         }
 
