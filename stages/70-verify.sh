@@ -91,6 +91,8 @@ logind_started_after_idle_dropin() {
   (( started >= $(stat -c %Y /etc/systemd/logind.conf.d/vekrona-idle.conf) ))
 }
 mem_sleep_offers_deep() { grep -qw deep /sys/power/mem_sleep; }
+# The kernel lists the algorithms of a zram device and brackets the one in use.
+zram_algorithm() { sed -E 's/.*\[([^]]+)\].*/\1/' /sys/block/zram0/comp_algorithm; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
 # The Global section of `resolvectl status`: the per-link sections below it may differ and do not tell what resolved answers by default.
 resolved_global_status() {
@@ -387,6 +389,13 @@ if ran 40-system; then
   warn_check "hardware offers deep suspend (/sys/power/mem_sleep lists deep); otherwise suspend falls back to s2idle" mem_sleep_offers_deep
   check assert "oomd drop-in present" file_exists /etc/systemd/oomd.conf.d/vekrona.conf
   check assert "coredump retention drop-in present" file_exists /etc/systemd/coredump.conf.d/50-vekrona.conf
+  check assert "/etc/systemd/zram-generator.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/zram-generator.conf" /etc/systemd/zram-generator.conf
+  if [[ ! -e /sys/block/zram0/comp_algorithm ]]; then
+    warn_check "no zram0 device" false
+  else
+    zram_algo="$(zram_algorithm)"
+    warn_check "zram uses $zram_algo (zstd is configured and applies at the next boot, an older device keeps its algorithm)" eq "$zram_algo" zstd
+  fi
   if irqbalance_wanted; then
     check assert "irqbalance bans the nvme driver (sysconfig matches the checkout)" root_files_equal "$VEKRONA_ROOT/etc/sysconfig/irqbalance" /etc/sysconfig/irqbalance
     check assert "irqbalance drop-in matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/system/irqbalance.service.d/vekrona.conf" /etc/systemd/system/irqbalance.service.d/vekrona.conf

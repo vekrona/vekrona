@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The two files that shrink the kernel's attack surface (etc/modprobe.d/vekrona-hardening.conf, etc/sysctl.d/60-vekrona.conf) are
-# the only list of what is blocked and set: stage 70-verify and tests/stages/test-kernel-hardening.sh read the names from them.
+# etc/modprobe.d/vekrona-hardening.conf (the modules blocked) and etc/sysctl.d/60-vekrona.conf (vekrona's kernel sysctls: hardening and
+# swap) are the only lists of what is blocked and set: stage 70-verify and tests/stages/test-kernel-hardening.sh read the names from them.
 
 # The modules a modprobe.d file blocks, one per line.
 blocked_modules() { awk '$1 == "install" { print $2 }' "$1"; }

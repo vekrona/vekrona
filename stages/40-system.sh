@@ -50,6 +50,8 @@ ensure_root_file "$VEKRONA_ROOT/etc/claude-code/managed-settings.json" /etc/clau
 # logind arms its idle timer only when it starts, so IdleAction needs a restart (sessions stay up), not a reload.
 ensure_dropins_restarting systemd-logind "$VEKRONA_ROOT/etc/systemd/logind.conf.d" /etc/systemd/logind.conf.d vekrona-inhibit-delay.conf vekrona-idle.conf
 ensure_root_file "$VEKRONA_ROOT/etc/systemd/sleep.conf.d/vekrona.conf" /etc/systemd/sleep.conf.d/vekrona.conf
+# zram-generator sets the device up at boot: a running zram0 keeps its algorithm until the next boot.
+ensure_root_file "$VEKRONA_ROOT/etc/systemd/zram-generator.conf" /etc/systemd/zram-generator.conf
 ensure_dropins_restarting systemd-oomd "$VEKRONA_ROOT/etc/systemd/oomd.conf.d" /etc/systemd/oomd.conf.d vekrona.conf
 ensure_root_file "$VEKRONA_ROOT/etc/systemd/coredump.conf.d/50-vekrona.conf" /etc/systemd/coredump.conf.d/50-vekrona.conf
 # irqbalance spreads interrupts over cores, which a battery only pays for: laptops run without it.
@@ -125,7 +127,7 @@ high_port_zones="$(zones_open_to_high_ports)"
 accepting_zones="$(zones_accepting_everything)"
 [[ -z "$accepting_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$accepting_zones")accept every connection and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone ''), or a program such as libvirt or Docker made it"
 
-# Kernel attack surface: modules nothing here uses stay unloadable, and sysctl settings read after Fedora's own.
+# Modules nothing here uses stay unloadable; the sysctl file holds vekrona's kernel sysctls (hardening and swap), read after Fedora's own.
 ensure_root_file "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf" /etc/modprobe.d/vekrona-hardening.conf
 ensure_dropins_restarting systemd-sysctl.service "$VEKRONA_ROOT/etc/sysctl.d" /etc/sysctl.d 60-vekrona.conf
 
