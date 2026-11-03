@@ -532,17 +532,11 @@ lock_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-lock; 
 lock_inactive() { inactive lock_active; }
 key_watcher_running() { vekrona-dev sh pgrep -f fido-keys.sh >/dev/null; }
 # OCR drops the small texts of the lock screen when the clock is in the picture, so only the lower part of the screen is read.
-lock_text_shown() {
-  local shot lower status=0
-  shot="$(vekrona-dev shot)" || abort "cannot take a screenshot"
-  lower="${shot%.png}-lower.png"
-  magick "$shot" -gravity south -crop 100%x55%+0+0 +repage "$lower" || abort "cannot crop the screenshot $shot"
-  text_shown "$1" "$lower" || status=$?
-  rm -f "$shot" "$lower"
-  return "$status"
-}
+LOCK_TEXT_BOTTOM_PERCENT=55
+lock_text_shown() { text_shown --bottom "$LOCK_TEXT_BOTTOM_PERCENT" "$1"; }
 lock_text_absent() { absent lock_text_shown "$1"; }
 export -f lock_active lock_inactive key_watcher_running lock_text_shown lock_text_absent
+export LOCK_TEXT_BOTTOM_PERCENT
 
 # Reboots. An unreachable guest answers nothing, which must not count as a new boot.
 boot_id() { vekrona-dev run cat /proc/sys/kernel/random/boot_id; }

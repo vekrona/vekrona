@@ -67,15 +67,14 @@ lock_screen() {
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- key_watcher_running
 }
 
-command -v magick >/dev/null || die "the e2e scenario needs ImageMagick (magick) to crop screenshots"
 vekrona-dev session
 # The pointer rests on the status line after the login and garbles its OCR.
 vekrona-dev move 10 10
 
+KEY_ATTACHED=1
 if ! vekrona-dev usb attach "$KEY_ID"; then
   skip "cannot hand $KEY_ID to the guest (stop pcscd on the host first); the wedged key scenario did not run"
 fi
-KEY_ATTACHED=1
 
 wedge_pam_stack
 LOCK_STARTED_AT="$(vekrona-dev sh date +%s)"
@@ -96,8 +95,8 @@ log "ok: the watchdog logs a stall report with the hung PAM child's thread state
 restore_pam_stack
 vekrona-dev usb detach "$KEY_ID"
 KEY_ATTACHED=0
-vekrona-dev usb attach "$KEY_ID"
 KEY_ATTACHED=1
+vekrona-dev usb attach "$KEY_ID"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- pin_expected
 log "ok: replugging the key starts a new attempt and asks for its PIN again"
 

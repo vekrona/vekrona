@@ -62,14 +62,13 @@ lock_screen() {
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- key_watcher_running
 }
 
-command -v magick >/dev/null || die "the e2e scenario needs ImageMagick (magick) to crop screenshots"
 vekrona-dev session
 vekrona-dev move 10 10
 
+KEY_ATTACHED=1
 if ! vekrona-dev usb attach "$KEY_ID"; then
   skip "cannot hand $KEY_ID to the guest (stop pcscd on the host first); the PIN scenario did not run"
 fi
-KEY_ATTACHED=1
 
 install_pin_stack
 lock_screen

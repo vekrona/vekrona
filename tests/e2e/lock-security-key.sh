@@ -39,7 +39,6 @@ detach_key() {
 }
 trap detach_key EXIT
 
-command -v magick >/dev/null || die "the e2e scenario needs ImageMagick (magick) to crop screenshots"
 vekrona-dev session
 # The pointer rests on the status line after the login and garbles its OCR.
 vekrona-dev move 10 10
@@ -50,10 +49,10 @@ log "ok: without a key the lock screen asks for a password and not for a key PIN
 unlock_with_password
 log "ok: the password unlocks it and LockedHint is no"
 
+KEY_ATTACHED=1
 if ! vekrona-dev usb attach "$KEY_ID"; then
   skip "cannot hand $KEY_ID to the guest (stop pcscd on the host first); the key scenarios did not run"
 fi
-KEY_ATTACHED=1
 
 lock_screen
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- key_prompt_shown
@@ -65,8 +64,8 @@ vekrona-dev usb detach "$KEY_ID"
 KEY_ATTACHED=0
 lock_screen
 key_prompt_hidden || die "with the key unplugged, the lock screen must not ask for its PIN"
-vekrona-dev usb attach "$KEY_ID"
 KEY_ATTACHED=1
+vekrona-dev usb attach "$KEY_ID"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- key_prompt_shown
 log "ok: plugging the key in while locked shows the PIN prompt"
 vekrona-dev usb detach "$KEY_ID"
