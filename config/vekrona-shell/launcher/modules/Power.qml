@@ -86,10 +86,6 @@ LauncherModule {
         return all;
     }
 
-    function opened() {
-        updates.reload();
-    }
-
     function row(item): var {
         const action = {
             id: item.id,
