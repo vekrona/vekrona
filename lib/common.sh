@@ -252,19 +252,32 @@ root_make_dir() {
   root_relabel "${created[@]}"
 }
 
+# Gives the paths given the labels policy assigns them, and says so when that changed anything. Relabeling in place keeps the
+# file's modification time, which a file that is already installed and right must keep (stage 70 compares it with the start of
+# the daemon that reads it).
+ensure_root_labels() {
+  if root_label_current "$@"; then return 0; fi
+  log "relabeling: $*"
+  root_relabel "$@"
+  root_label_current "$@" || die "restorecon left a wrong SELinux label on one of: $*"
+}
+
 # DST is read through root: its directory may be unreadable to the invoking user (/etc/polkit-1/rules.d is 750 root:polkitd).
-# A file whose content and mode are right but whose label (or its directory's) is not is not current: ensure_root_file repairs it.
 root_file_current() {
   local src="$1" dst="$2" mode="$3" want
   root test -f "$dst" && root cmp -s "$src" "$dst" || return 1
   printf -v want '%o' "$((8#$mode))"
-  [[ "$(root stat -c %a "$dst")" == "$want" ]] && root_label_current "$dst" "$(dirname "$dst")"
+  [[ "$(root stat -c %a "$dst")" == "$want" ]]
 }
 
 ensure_root_file() {
   local src="$1" dst="$2" mode="${3:-0644}" tmp
   [[ -f "$src" ]] || die "source missing: $src"
-  if root_file_current "$src" "$dst" "$mode"; then log "up to date: $dst"; return 0; fi
+  if root_file_current "$src" "$dst" "$mode"; then
+    ensure_root_labels "$dst" "$(dirname "$dst")"
+    log "up to date: $dst"
+    return 0
+  fi
   log "installing: $dst"
   root_make_dir "$(dirname "$dst")"
   tmp="$(root mktemp "$dst.XXXXXX")"
@@ -274,7 +287,7 @@ ensure_root_file() {
   fi
   # The rename keeps the label of the temporary name, which policy may label differently from DST.
   root_relabel "$dst" "$(dirname "$dst")"
-  root_file_current "$src" "$dst" "$mode" || die "content, mode or SELinux label mismatch after install: $dst"
+  root_file_current "$src" "$dst" "$mode" && root_label_current "$dst" "$(dirname "$dst")" || die "content, mode or SELinux label mismatch after install: $dst"
 }
 
 # Installs a unit file from SRC into /etc/systemd/system under its own name and reloads systemd when that changed anything.
@@ -318,6 +331,7 @@ ensure_sudoers_dropin() {
   local src="$1" dst="/etc/sudoers.d/${1##*/}" tmp
   [[ -f "$src" ]] || die "source missing: $src"
   if root_file_current "$src" "$dst" 0440 && [[ "$(root stat -c %U:%G "$dst")" == root:root ]]; then
+    ensure_root_labels "$dst"
     log "up to date: $dst"
     return 0
   fi
@@ -334,7 +348,7 @@ ensure_sudoers_dropin() {
   root mv -f "$tmp" "$dst" || die "could not move the checked sudoers drop-in into place: $dst"
   root_relabel "$dst"
   root visudo -c || die "sudo configuration invalid after installing $dst: remove it with a root shell"
-  root_file_current "$src" "$dst" 0440 || die "content, mode or SELinux label mismatch after install: $dst"
+  root_file_current "$src" "$dst" 0440 && root_label_current "$dst" || die "content, mode or SELinux label mismatch after install: $dst"
 }
 
 # Resolves "dnf ARGS..." with PROTECTED packages, prints the transaction and stores it in STORE instead of running it.

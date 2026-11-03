@@ -89,9 +89,11 @@ log "ok: the directories an install creates and the file it moves into place are
 
 : > "$RC_LOG"
 echo "$dir/sub/file" > "$STALE"
+inode="$(inode_of "$dir/sub/file")"
 ensure "$src" "$dir/sub/file" 0644
 [[ ! -s "$STALE" ]] || die "a file with the right content and mode but a wrong label kept its label"
-log "ok: identical content with a wrong SELinux label gets its label repaired"
+[[ "$(inode_of "$dir/sub/file")" == "$inode" ]] || die "a wrong label was repaired by rewriting the file, which moves its modification time"
+log "ok: identical content with a wrong SELinux label gets its label repaired in place"
 
 echo "$dir/sub" > "$STALE"
 ensure "$src" "$dir/sub/file" 0644
