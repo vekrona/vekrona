@@ -91,6 +91,24 @@ logind_started_after_idle_dropin() {
   (( started >= $(stat -c %Y /etc/systemd/logind.conf.d/vekrona-idle.conf) ))
 }
 mem_sleep_offers_deep() { grep -qw deep /sys/power/mem_sleep; }
+# Whether the mount at $1 carries every option that follows.
+mounted_with_options() {
+  local options o
+  options=",$(findmnt -no OPTIONS "$1")," || return 1
+  for o in "${@:2}"; do [[ "$options" == *",$o,"* ]] || return 1; done
+}
+# /tmp is not the subvolume yet, and stage 20 left it for the next boot: a running tmpfs, or a plain directory.
+tmp_awaits_subvolume() { ! mountpoint -q /tmp || [[ "$(findmnt -no FSTYPE /tmp)" == tmpfs ]]; }
+# The fstab line of MOUNTPOINT names the btrfs subvolume SUBVOL on the device /home is on.
+check_subvolume_fstab() {
+  local mountpoint="$1" subvol="$2" line home_line device options home_device
+  line="$(fstab_line_for_mountpoint "$mountpoint")" || die "no fstab entry for $mountpoint"
+  home_line="$(fstab_line_for_mountpoint /home)" || die "no fstab entry for /home"
+  read -r device _ _ options _ _ <<<"$line"
+  read -r home_device _ <<<"$home_line"
+  check assert "fstab $mountpoint options contain subvol=$subvol" contains "subvol=$subvol" "$options"
+  check assert "fstab $mountpoint device matches /home device" eq "$device" "$home_device"
+}
 # The kernel lists the algorithms of a zram device and brackets the one in use.
 zram_algorithm() { sed -E 's/.*\[([^]]+)\].*/\1/' /sys/block/zram0/comp_algorithm; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
@@ -264,18 +282,21 @@ if ran 20-snapper; then
   check assert "the dnf snapshot script is in the root-owned copy" file_executable "$VEKRONA_SYSTEM_DIR/libexec/vekrona-snapper-snapshot"
   check assert "the snapper actions file runs that script before and after each transaction" root_files_equal "$VEKRONA_ROOT/etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions" /etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions
 
-  nix_mounted_from_subvol() { [[ "$(findmnt -no SOURCE /nix 2>/dev/null)" == *"[/nix]" ]]; }
-  check assert "/nix mounted from subvolume nix" nix_mounted_from_subvol
+  check assert "/nix mounted from subvolume nix" btrfs_subvolume_mounted /nix nix
 
-  nix_fstab_line="$(fstab_line_for_mountpoint /nix)" || die "no fstab entry for /nix"
-  home_fstab_line="$(fstab_line_for_mountpoint /home)" || die "no fstab entry for /home"
-  read -r nix_device _ _ nix_options _ _ <<<"$nix_fstab_line"
-  read -r home_device _ <<<"$home_fstab_line"
-  check assert "fstab /nix options contain subvol=nix" contains "subvol=nix" "$nix_options"
-  check assert "fstab /nix device matches /home device" eq "$nix_device" "$home_device"
+  check_subvolume_fstab /nix nix
 
   check assert "/nix migration marker present" file_exists /nix/.vekrona-migrated
   check assert "/nix.pre-vekrona backup absent" path_absent /nix.pre-vekrona
+
+  check_subvolume_fstab /tmp tmp
+  if tmp_awaits_subvolume; then
+    warn_check "/tmp is not the tmp subvolume yet (a tmpfs or a plain directory), it mounts at the next boot" false
+  else
+    check assert "/tmp mounted from subvolume tmp" btrfs_subvolume_mounted /tmp tmp
+    check assert "/tmp is mounted nodev and nosuid" mounted_with_options /tmp nodev nosuid
+    check assert "/tmp mode is 1777" eq "$(stat -c %a /tmp)" 1777
+  fi
 fi
 
 if ran 30-packages; then

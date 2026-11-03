@@ -19,6 +19,8 @@ VEKRONA_SYSTEM_BIN=(vekrona-proton vekrona-update-ask)
 # inherited environment variable can make a real host keep sshd; a test assigns a scratch path after it sourced this file.
 VEKRONA_KEEP_SSHD_MARKER=/etc/vekrona/keep-sshd
 keep_sshd() { [[ -e "$VEKRONA_KEEP_SSHD_MARKER" ]]; }
+# The file system table the fstab helpers read and append to; a test assigns a scratch file after it sourced this file.
+VEKRONA_FSTAB=/etc/fstab
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
@@ -2154,16 +2156,17 @@ whitespace_normalized() { local -a f; read -r -a f <<<"$1"; printf '%s' "${f[*]}
 
 fstab_line_for_mountpoint() {
   local mountpoint="$1" matches
-  matches="$(awk -v m="$mountpoint" '$1 !~ /^#/ && NF >= 6 && $2 == m' /etc/fstab)"
+  matches="$(awk -v m="$mountpoint" '$1 !~ /^#/ && NF >= 6 && $2 == m' "$VEKRONA_FSTAB")"
   [[ -n "$matches" ]] || return 1
   [[ "$(wc -l <<<"$matches")" -eq 1 ]] || die "multiple fstab lines for mountpoint: $mountpoint"
   printf '%s' "$matches"
 }
 
-fstab_line_for_subvol() {
-  local ref="$1" target="$2" subvol="$3"
-  local line device fstype options dump pass
-  line="$(fstab_line_for_mountpoint "$ref")" || die "no fstab line for mountpoint: $ref"
+# The fstab line FSTAB_LINE mounted at TARGET from subvolume SUBVOL instead of the one it names, with the comma-separated
+# EXTRA_OPTIONS added.
+retarget_fstab_line() {
+  local line="$1" target="$2" subvol="$3" extra="${4:-}"
+  local device fstype options dump pass
   read -r device _ fstype options dump pass <<<"$line"
 
   local -a opts=() new_opts=()
@@ -2177,11 +2180,20 @@ fstab_line_for_subvol() {
       new_opts+=("$o")
     fi
   done
-  [[ $found -eq 1 ]] || die "expected exactly one subvol= option in fstab line for $ref, found $found"
+  [[ $found -eq 1 ]] || die "expected exactly one subvol= option in fstab line '$line', found $found"
+  if [[ -n "$extra" ]]; then new_opts+=("$extra"); fi
 
   local new_options
   IFS=','; new_options="${new_opts[*]}"; unset IFS
   printf '%s %s %s %s %s %s\n' "$device" "$target" "$fstype" "$new_options" "$dump" "$pass"
+}
+
+# The fstab line of REF_MOUNTPOINT, retargeted as above.
+fstab_line_for_subvol() {
+  local ref="$1" line
+  shift
+  line="$(fstab_line_for_mountpoint "$ref")" || die "no fstab line for mountpoint: $ref"
+  retarget_fstab_line "$line" "$@"
 }
 
 ensure_fstab_entry() {
@@ -2194,7 +2206,7 @@ ensure_fstab_entry() {
     die "fstab entry for $mountpoint differs, resolve manually: existing='$existing' wanted='$line'"
   fi
   log "appending fstab entry: $line"
-  printf '%s\n' "$line" | root tee -a /etc/fstab >/dev/null
+  printf '%s\n' "$line" | root tee -a "$VEKRONA_FSTAB" >/dev/null
   existing="$(fstab_line_for_mountpoint "$mountpoint")" || die "fstab entry not written for $mountpoint"
   [[ "$(whitespace_normalized "$existing")" == "$(whitespace_normalized "$line")" ]] || die "fstab entry not written for $mountpoint"
 }
@@ -2218,23 +2230,114 @@ mount_btrfs_top_level() {
   root mount -o subvolid=5 "$(root_btrfs_device)" "$dir"
 }
 
-is_btrfs_subvolume() { btrfs subvolume show "$1" >/dev/null 2>&1; }
+# Whether PATH, which exists, is the root of a btrfs subvolume: the root directory of every subvolume has inode 256
+# (BTRFS_FIRST_FREE_OBJECTID), and no other directory of a btrfs has. Plain stat answers it for any user, where `btrfs subvolume
+# show` is refused to all but root, and a failing stat dies instead of reading as "not a subvolume".
+is_btrfs_subvolume() {
+  local fstype inode
+  fstype="$(stat -f -c %T "$1")" || die "cannot tell which filesystem holds $1"
+  [[ "$fstype" == btrfs ]] || return 1
+  inode="$(stat -c %i "$1")" || die "cannot read the inode number of $1"
+  [[ "$inode" -eq 256 ]]
+}
+
+# Whether MOUNTPOINT is mounted from the btrfs subvolume SUBVOL, which findmnt shows as device[/subvol].
+btrfs_subvolume_mounted() { [[ "$(findmnt -no SOURCE "$1" 2>/dev/null || true)" == *"[/$2]" ]]; }
+
+btrfs_create_subvolume() {
+  log "creating subvolume: $1"
+  root btrfs subvolume create "$1"
+  root chown root:root "$1"
+  root chmod 0755 "$1"
+}
+
+# Runs "$@ DIR" with DIR the top-level btrfs volume (subvolid=5) mounted, and unmounts it afterwards.
+with_btrfs_top_level() {
+  (
+    top="$(mktemp -d)"
+    cleanup_btrfs_top_level() {
+      if mountpoint -q "$top"; then
+        root umount "$top" || die "failed to unmount $top: the top-level btrfs volume stays mounted there"
+      fi
+      rmdir "$top" || die "cannot remove $top"
+    }
+    trap cleanup_btrfs_top_level EXIT
+    mount_btrfs_top_level "$top"
+    "$@" "$top"
+  )
+}
+
+# Whether the subvolume PATH exists; a path that holds anything else is an error.
+btrfs_subvolume_exists() {
+  [[ -e "$1" ]] || return 1
+  is_btrfs_subvolume "$1" || die "path exists but is not a btrfs subvolume: $1"
+}
+
+# Creates the subvolume NAME in the top-level volume mounted at TOP unless it is one already.
+ensure_btrfs_subvolume() {
+  local path="$2/$1"
+  if btrfs_subvolume_exists "$path"; then
+    log "subvolume present: $path"
+    return 0
+  fi
+  btrfs_create_subvolume "$path"
+}
+
+# Makes the mount point PATH and its fstab line for the subvolume SUBVOL (an fstab line like /home's, with the comma-separated
+# EXTRA_OPTIONS added), which systemd reads from now on.
+ensure_btrfs_subvolume_fstab_entry() {
+  local path="$1" subvol="$2" extra="${3:-}"
+  root mkdir -p "$path"
+  ensure_fstab_entry "$path" "$(fstab_line_for_subvol /home "$path" "$subvol" "$extra")"
+  root systemctl daemon-reload
+}
+
+# ensure_btrfs_subvolume_fstab_entry, then the mount.
+mount_btrfs_subvolume() {
+  local path="$1" subvol="$2"
+  ensure_btrfs_subvolume_fstab_entry "$@"
+  root mount "$path"
+  btrfs_subvolume_mounted "$path" "$subvol" || die "$path not mounted from subvolume $subvol after mount"
+  root restorecon -R "$path"
+}
+
+# Runs with the top-level volume at TOP. The root of the tmp subvolume is the /tmp the system boots with, so it gets /tmp's owner, mode and
+# SELinux label here, on every run: a fresh subvolume is 0755 and unlabeled, and restorecon through TOP would match the path under TOP, not /tmp.
+ensure_tmp_subvolume_root() {
+  local path="$1/tmp"
+  ensure_btrfs_subvolume tmp "$1"
+  root chown root:root "$path"
+  root chmod 1777 "$path"
+  if selinuxenabled; then root chcon "$(matchpathcon -n /tmp)" "$path"; fi
+}
+
+# /tmp lives on disk, in a subvolume of its own: a tmpfs /tmp keeps scratch files in RAM, where zram holds them, and snapper snapshots
+# of root leave the subvolume out; systemd-tmpfiles still cleans it. A /tmp that is not the subvolume yet (a running tmpfs, or a plain
+# directory) is not mounted over, which would hide the X11 sockets and the scratch files of running programs: the subvolume mounts at boot.
+# A /tmp mounted from anything else is refused before the subvolume is made.
+ensure_tmp_subvolume() {
+  local on_subvolume=0
+  if btrfs_subvolume_mounted /tmp tmp; then
+    on_subvolume=1
+  elif mountpoint -q /tmp; then
+    [[ "$(findmnt -no FSTYPE /tmp)" == tmpfs ]] || die "/tmp is mounted from something other than tmpfs or the tmp subvolume: $(findmnt -no SOURCE /tmp)"
+  fi
+  with_btrfs_top_level ensure_tmp_subvolume_root
+  ensure_btrfs_subvolume_fstab_entry /tmp tmp nodev,nosuid
+  ((on_subvolume)) || log "/tmp subvolume takes effect at the next boot"
+}
 
 btrfs_migrate_dir_into_subvolume() {
   local subvol="$1" src="${2:-}"
   local marker="$subvol/.vekrona-migrated"
 
-  if is_btrfs_subvolume "$subvol"; then
+  if btrfs_subvolume_exists "$subvol"; then
     [[ -e "$marker" ]] || die "subvolume exists without migration marker (interrupted migration?): $subvol — inspect it, delete it with 'sudo btrfs subvolume delete <path>' (mount the top-level subvolume with subvolid=5 to reach it), then re-run ./install.sh 20; the source directory, if present, is untouched"
     log "subvolume already migrated: $subvol"
     return 0
   fi
-  [[ -e "$subvol" ]] && die "path exists but is not a btrfs subvolume: $subvol"
 
-  log "creating subvolume: $subvol"
-  root btrfs subvolume create "$subvol"
-  root chown root:root "$subvol"
-  root chmod 0755 "$subvol"
+  btrfs_create_subvolume "$subvol"
 
   if [[ -n "$src" ]]; then
     [[ -d "$src" ]] || die "source directory missing: $src"
