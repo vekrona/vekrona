@@ -120,7 +120,6 @@ sway_config_validates() {
   env XDG_RUNTIME_DIR="$1" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
 }
 tailscaled_start_hardens() { contains "--shields-up=true --ssh=false" "$(systemctl show tailscaled -p ExecStartPost --value)"; }
-tailscale_operator_is_user() { [[ "$(tailscale_operator)" == "$VEKRONA_USER" ]]; }
 authselect_selection_ok() {
   local want have
   want="$(wanted_authselect_selection)"
@@ -435,12 +434,13 @@ if ran 40-system; then
     check assert "$u active" unit_active "$u"
   done
 
-  if tailscale_logged_out; then
-    warn_check "tailscale operator is $VEKRONA_USER (tailscaled forgets it across restarts until the first login: run 'tailscale up', then ./install.sh 40)" tailscale_operator_is_user
+  tailscale_state="$(tailscale_prefs)" || die "cannot read the tailscale preferences"
+  if tailscale_logged_out "$tailscale_state"; then
+    warn_check "tailscale operator is $VEKRONA_USER (tailscaled forgets it across restarts until the first login: run 'tailscale up', then ./install.sh 40)" tailscale_operator_is "$tailscale_state" "$VEKRONA_USER"
   else
-    check assert "tailscale operator is $VEKRONA_USER" tailscale_operator_is_user
+    check assert "tailscale operator is $VEKRONA_USER" tailscale_operator_is "$tailscale_state" "$VEKRONA_USER"
   fi
-  check assert "tailscale has shields up and ssh off" tailscale_hardened
+  check assert "tailscale has shields up and ssh off" tailscale_hardened "$tailscale_state"
   check assert "tailscaled sets shields up and ssh off at every start, so a restart before the first login keeps them" tailscaled_start_hardens
 
   check assert "no sshd drop-in of an earlier install is left" path_absent /etc/ssh/sshd_config.d/10-vekrona.conf
