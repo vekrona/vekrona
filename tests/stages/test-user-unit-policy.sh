@@ -31,8 +31,11 @@ log "ok: the suspend block is held by the guard and released by the locker"
 
 # The lid and the sleep key go through vekrona-suspend (lock, then suspend), so logind must leave them to Sway while the session runs.
 grep -qF -- '--what=handle-lid-switch:handle-suspend-key --mode=block' "$units/vekrona-lid.service" || die "vekrona-lid.service must take the lid switch and the sleep key from logind"
-grep -qx 'bindswitch --locked lid:on exec vekrona-suspend --lid' "$ROOT/config/sway/config" || die "sway must run vekrona-suspend --lid when the lid closes"
-grep -qx 'bindsym --no-repeat --locked XF86Sleep exec vekrona-suspend now' "$ROOT/config/sway/config" || die "sway must run vekrona-suspend on the sleep key"
+# Sway binds them through variables, once in the default mode and once in the app switcher's mode, which has its own bindings.
+grep -qx 'set \$lid_closed vekrona-suspend --lid' "$ROOT/config/sway/config" || die "sway must run vekrona-suspend --lid when the lid closes"
+grep -qx 'set \$sleep_now vekrona-suspend now' "$ROOT/config/sway/config" || die "sway must run vekrona-suspend on the sleep key"
+[[ "$(grep -cx '[[:space:]]*bindswitch --locked lid:on exec \$lid_closed' "$ROOT/config/sway/config")" == 2 ]] || die "the lid switch must be bound in the default mode and in the app switcher's mode"
+[[ "$(grep -cx '[[:space:]]*bindsym --no-repeat --locked XF86Sleep exec \$sleep_now' "$ROOT/config/sway/config")" == 2 ]] || die "the sleep key must be bound in the default mode and in the app switcher's mode"
 log "ok: a closed lid and the sleep key lock before they suspend"
 
 # The unit runs outside every login session, where polkit refuses these two inhibitors ("Access denied") unless a rule allows them.
