@@ -36,7 +36,7 @@ ensure_u2f_mappings() {
     return 0
   fi
   tmp="$(root mktemp "$U2F_MAPPINGS.XXXXXX")" || die "cannot create a temp file next to $U2F_MAPPINGS"
-  if ! { printf '%s\n' "$lines" | root tee "$tmp" >/dev/null && root chmod 0644 "$tmp" && root mv -f "$tmp" "$U2F_MAPPINGS"; }; then
+  if ! { printf '%s\n' "$lines" | root tee "$tmp" >/dev/null && root chmod 0644 "$tmp" && root mv -f "$tmp" "$U2F_MAPPINGS" && root_relabel "$U2F_MAPPINGS"; }; then
     root rm -f "$tmp"
     die "cannot write $U2F_MAPPINGS"
   fi

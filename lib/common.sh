@@ -224,12 +224,40 @@ ensure_copr_absent() {
   done
 }
 
+# Gives a tree installed by root the SELinux labels policy assigns its path (on hosts that have SELinux tools).
+root_restorecon() { if command -v restorecon >/dev/null; then root restorecon -R "$1"; fi; }
+
+# Like root_restorecon for the paths given only, not what lies below them.
+root_relabel() { if command -v restorecon >/dev/null; then root restorecon "$@"; fi; }
+
+# True when every path given carries the SELinux label policy assigns it (always true on hosts without SELinux tools).
+root_label_current() {
+  local drift
+  if ! command -v restorecon >/dev/null; then return 0; fi
+  drift="$(root restorecon -nv "$@")" || die "restorecon -nv $* failed"
+  [[ -z "$drift" ]]
+}
+
+# Creates DIR and its missing parents, and labels each one it created: a directory made by root inherits the label of its
+# parent, which is not always the one policy gives its own path (/etc/systemd/resolved.conf.d).
+root_make_dir() {
+  local dir="$1" created=()
+  while ! root test -d "$dir"; do
+    created+=("$dir")
+    dir="$(dirname "$dir")"
+  done
+  if [[ ${#created[@]} -eq 0 ]]; then return 0; fi
+  root install -d "${created[0]}"
+  root_relabel "${created[@]}"
+}
+
 # DST is read through root: its directory may be unreadable to the invoking user (/etc/polkit-1/rules.d is 750 root:polkitd).
+# A file whose content and mode are right but whose label (or its directory's) is not is not current: ensure_root_file repairs it.
 root_file_current() {
   local src="$1" dst="$2" mode="$3" want
   root test -f "$dst" && root cmp -s "$src" "$dst" || return 1
   printf -v want '%o' "$((8#$mode))"
-  [[ "$(root stat -c %a "$dst")" == "$want" ]]
+  [[ "$(root stat -c %a "$dst")" == "$want" ]] && root_label_current "$dst" "$(dirname "$dst")"
 }
 
 ensure_root_file() {
@@ -237,13 +265,15 @@ ensure_root_file() {
   [[ -f "$src" ]] || die "source missing: $src"
   if root_file_current "$src" "$dst" "$mode"; then log "up to date: $dst"; return 0; fi
   log "installing: $dst"
-  root install -d "$(dirname "$dst")"
+  root_make_dir "$(dirname "$dst")"
   tmp="$(root mktemp "$dst.XXXXXX")"
   if ! { root install -m "$mode" "$src" "$tmp" && root mv -f "$tmp" "$dst"; }; then
     root rm -f "$tmp"
     die "install failed: $dst"
   fi
-  root_file_current "$src" "$dst" "$mode" || die "content or mode mismatch after install: $dst"
+  # The rename keeps the label of the temporary name, which policy may label differently from DST.
+  root_relabel "$dst" "$(dirname "$dst")"
+  root_file_current "$src" "$dst" "$mode" || die "content, mode or SELinux label mismatch after install: $dst"
 }
 
 # Installs a unit file from SRC into /etc/systemd/system under its own name and reloads systemd when that changed anything.
@@ -301,8 +331,9 @@ ensure_sudoers_dropin() {
     die "visudo rejected $src: not installed, sudo is unchanged"
   fi
   root mv -f "$tmp" "$dst" || die "could not move the checked sudoers drop-in into place: $dst"
+  root_relabel "$dst"
   root visudo -c || die "sudo configuration invalid after installing $dst: remove it with a root shell"
-  root_file_current "$src" "$dst" 0440 || die "content or mode mismatch after install: $dst"
+  root_file_current "$src" "$dst" 0440 || die "content, mode or SELinux label mismatch after install: $dst"
 }
 
 # Resolves "dnf ARGS..." with PROTECTED packages, prints the transaction and stores it in STORE instead of running it.
@@ -356,9 +387,6 @@ ensure_system_copy() {
   ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" "$VEKRONA_SYSTEM_DIR/etc/yum.repos.d/1password.repo"
   root_restorecon "$VEKRONA_SYSTEM_DIR"
 }
-
-# Gives a tree installed by root the SELinux labels policy assigns its path (on hosts that have SELinux tools).
-root_restorecon() { if command -v restorecon >/dev/null; then root restorecon -R "$1"; fi; }
 
 # True when DST holds exactly SRC's files (read as root); modes are not compared. __pycache__ is not part of a tree.
 root_tree_matches() { root diff -r -x __pycache__ "$1" "$2" >/dev/null; }

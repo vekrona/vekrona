@@ -461,6 +461,12 @@ if ran 40-system; then
   accepting_zones="$(zones_accepting_everything)"
   check assert "no zone with an interface accepts every connection (target ACCEPT: trusted, libvirt's or Docker's zone)" eq "$accepting_zones" ""
   check assert "/etc/systemd/resolved.conf.d/50-vekrona.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/resolved.conf.d/50-vekrona.conf" /etc/systemd/resolved.conf.d/50-vekrona.conf
+  # Every root file vekrona installs: the checkout's etc/ tree, plus the two it installs from elsewhere.
+  while read -r installed_file; do
+    root test -e "/$installed_file" || continue
+    check assert "/$installed_file and its directory carry the SELinux labels policy assigns them" root_label_current "/$installed_file" "$(dirname "/$installed_file")"
+  done < <(cd "$VEKRONA_ROOT" && find etc -type f && printf '%s\n' etc/xremap/config.yml usr/lib64/firefox/distribution/policies.json)
+  check assert "$VEKRONA_SYSTEM_DIR and everything below it carry the SELinux labels policy assigns them" root_label_current -R "$VEKRONA_SYSTEM_DIR"
   check assert "/etc/modprobe.d/vekrona-hardening.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf" /etc/modprobe.d/vekrona-hardening.conf
   for module in $(blocked_modules "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf"); do
     check assert "modprobe runs /bin/false instead of loading $module" module_blocked "$module"

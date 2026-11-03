@@ -21,8 +21,25 @@ dst="\${@: -1}"
 { cat "\$dst" 2>/dev/null || echo MISSING; } > "\$MV_SEEN"
 exec "$real_mv" "\$@"
 FAKE
+# restorecon stub: STALE lists the paths with a wrong label; `-nv` reports them and a plain run repairs them. Every call is logged.
+cat > "$work/bin/restorecon" <<'FAKE'
+#!/usr/bin/env bash
+echo "restorecon $*" >> "$RC_LOG"
+if [[ "$1" == -nv ]]; then
+  for path in "${@:2}"; do
+    while IFS= read -r stale; do [[ "$stale" != "$path" ]] || echo "Would relabel $path"; done <"$STALE"
+  done
+  exit 0
+fi
+for path in "$@"; do
+  kept=()
+  while IFS= read -r stale; do [[ "$stale" == "$path" ]] || kept+=("$stale"); done <"$STALE"
+  printf '%s\n' "${kept[@]}" >"$STALE"
+done
+FAKE
 chmod +x "$work/bin"/*
-export PATH="$work/bin:$PATH" MV_SEEN="$work/mv-seen"
+export PATH="$work/bin:$PATH" MV_SEEN="$work/mv-seen" RC_LOG="$work/restorecon.log" STALE="$work/stale"
+: > "$STALE"
 
 src="$work/src"
 dst="$work/etc/sub/file"
@@ -63,3 +80,25 @@ if (ensure_root_file "$work/nonexistent" "$work/etc/other" 0644) 2>"$work/err"; 
 grep -q 'source missing' "$work/err" || die "a missing source did not say so: $(cat "$work/err")"
 [[ ! -e "$work/etc/other" ]] || die "a missing source still created the destination"
 log "ok: a missing source is an error"
+
+dir="$work/etc/labeled"
+ensure "$src" "$dir/sub/file" 0644
+grep -qx "restorecon $dir/sub $dir" "$RC_LOG" || die "a created directory was not relabeled: $(cat "$RC_LOG")"
+grep -qx "restorecon $dir/sub/file $dir/sub" "$RC_LOG" || die "the installed file and its directory were not relabeled: $(cat "$RC_LOG")"
+log "ok: the directories an install creates and the file it moves into place are relabeled"
+
+: > "$RC_LOG"
+echo "$dir/sub/file" > "$STALE"
+ensure "$src" "$dir/sub/file" 0644
+[[ ! -s "$STALE" ]] || die "a file with the right content and mode but a wrong label kept its label"
+log "ok: identical content with a wrong SELinux label gets its label repaired"
+
+echo "$dir/sub" > "$STALE"
+ensure "$src" "$dir/sub/file" 0644
+[[ ! -s "$STALE" ]] || die "a file in a mislabeled directory left the directory mislabeled"
+log "ok: a mislabeled directory is repaired on a rerun"
+
+: > "$RC_LOG"
+ensure "$src" "$dir/sub/file" 0644
+! grep -q '^restorecon [^-]' "$RC_LOG" || die "a file with the right label was relabeled again: $(cat "$RC_LOG")"
+log "ok: a file with the right label is left alone"
