@@ -35,21 +35,24 @@ fi
 grep -q 'can never fire.*Mod4+q' "$scratch/stderr" || die "--check failed for the wrong reason: $(cat "$scratch/stderr")"
 log "ok: --check rejects a xremap remap that shadows a Sway binding"
 
-# The menu: the bin runs from a scratch tree whose theme renderer is a stub, with rofi and swaymsg stubs.
+# The menu: the bin runs from a scratch tree with the real vekrona-rofi-menu, a stub theme renderer, and rofi, swaymsg and error
+# reporter stubs.
 tree="$scratch/tree"
-mkdir -p "$tree/bin" "$tree/lib" "$scratch/stubs"
-cp "$tool" "$tree/bin/"
-cp "$ROOT/lib/vekrona_cli.py" "$tree/lib/"
+mkdir -p "$tree/bin" "$scratch/stubs"
+cp -r "$ROOT/lib" "$tree/"
+cp "$tool" "$ROOT/bin/vekrona-rofi-menu" "$tree/bin/"
 printf '#!/bin/sh\necho "* {}"\n' > "$tree/bin/vekrona-render-theme"
 printf '#!/bin/sh\ncat >/dev/null\n[ -z "$ROFI_STDERR" ] || echo "$ROFI_STDERR" >&2\n[ -z "$ROFI_OUT" ] || echo "$ROFI_OUT"\nexit "${ROFI_STATUS:-0}"\n' > "$scratch/stubs/rofi"
 printf '#!/bin/sh\necho "$*" >> "%s/swaymsg.log"\n' "$scratch" > "$scratch/stubs/swaymsg"
+printf '#!/bin/sh\necho "$*" >> "%s/reported"\n' "$scratch" > "$scratch/stubs/reporter"
 chmod +x "$tree/bin/vekrona-render-theme" "$scratch/stubs"/*
+export VEKRONA_ERROR_REPORTER="$scratch/stubs/reporter"
 # Rewrite the menu's config back to the repo's: the shadowing remap above was only for --check.
 cp "$ROOT/config/xremap/config.yml" "$scratch/home/.config/xremap/config.yml"
 export ROFI_STDERR="" ROFI_OUT="" ROFI_STATUS=0
 
 run_menu() {
-  rm -f "$scratch/swaymsg.log"
+  rm -f "$scratch/swaymsg.log" "$scratch/reported"
   rc=0
   HOME="$scratch/home" PATH="$scratch/stubs:$PATH" "$tree/bin/vekrona-keybindings" menu >/dev/null 2>"$scratch/stderr" || rc=$?
 }
@@ -61,6 +64,7 @@ log "ok: Esc in the menu ends quietly"
 ROFI_STATUS=65 ROFI_STDERR="theme parse error" run_menu
 [[ "$rc" == 1 ]] || die "a rofi that failed must fail the command, got exit $rc"
 grep -q 'rofi exited with status 65: theme parse error' "$scratch/stderr" || die "the rofi failure is not reported: $(cat "$scratch/stderr")"
+[[ "$(grep -c 'rofi exited with status 65: theme parse error' "$scratch/reported")" == 1 ]] || die "the rofi failure must be recorded exactly once: $(cat "$scratch/reported" 2>&1)"
 log "ok: a rofi failure is not taken for Esc"
 
 for answer in -1 99999 lizard; do

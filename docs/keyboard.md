@@ -194,8 +194,9 @@ and turned the next Super+Tab into an Alt+Tab Sway does not bind.
 panel: it reads `~/.config/sway/config` and its `include`s directly (Sway
 itself doesn't expand includes in `swaymsg -t get_config`), pairs every
 `bindsym` with the `#: <description>` comment line placed directly above it
-in the config, and renders them in a `rofi -dmenu` list styled from the
-active Vekrona theme mode (generated into `~/.local/state/vekrona/active-theme.json`).
+in the config, and renders them in a `rofi -dmenu` list (through
+`vekrona-rofi-menu`) styled from the active Vekrona theme mode (generated into
+`~/.local/state/vekrona/active-theme.json`).
 Alternative chords (`h` / `Left`) and the workspace 1..10 bindings (Cmd to switch, Hyper to move) are
 collapsed into single rows; picking a Sway row runs its command through
 `swaymsg`. It also lists the xremap Caps Lock and Cmd-layer remaps

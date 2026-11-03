@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s inherit_errexit
+
+PROG="vekrona-rofi-menu"
+# Exit statuses: 0 an entry was chosen and printed; 1 the menu was cancelled (Esc, or closed without a choice); 2 a usage error;
+# 3 the menu could not run, which this tool has already recorded with vekrona-error, so a caller ends without a second record.
+STATUS_CANCELLED=1
+STATUS_FAILED=3
+
+usage() {
+  cat >&2 <<USAGE
+usage: $PROG --prompt TEXT [--message TEXT] [--index] < entries
+reads one entry per line on stdin, shows them in a themed rofi menu and prints the chosen entry, or with --index its
+zero-based line number. Exit status: 0 chosen, $STATUS_CANCELLED cancelled (nothing printed), 2 usage, $STATUS_FAILED failed (recorded).
+USAGE
+  exit "${1:-2}"
+}
+
+prompt="" message="" index=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prompt) [[ $# -ge 2 ]] || usage; prompt="$2"; shift ;;
+    --message) [[ $# -ge 2 ]] || usage; message="$2"; shift ;;
+    --index) index=1 ;;
+    -h|--help) usage 0 ;;
+    *) usage ;;
+  esac
+  shift
+done
+[[ -n "$prompt" ]] || usage
+
+REPO_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+source "$REPO_ROOT/lib/common.sh"
+
+fail() {
+  report_failure "$PROG: $*"
+  exit "$STATUS_FAILED"
+}
+
+command -v rofi >/dev/null 2>&1 || fail "rofi not found (install the 'rofi' package)"
+theme_str="$("$REPO_ROOT/bin/vekrona-render-theme" rofi)" || fail "vekrona-render-theme rofi failed"
+
+rofi_argv=(rofi -dmenu -i -no-custom -p "$prompt" -theme-str "$theme_str")
+if [[ -n "$message" ]]; then rofi_argv+=(-mesg "$message"); fi
+if [[ "$index" == 1 ]]; then rofi_argv+=(-format i); fi
+
+rofi_stderr="$(mktemp)"
+trap 'rm -f "$rofi_stderr"' EXIT
+rofi_status=0
+chosen="$("${rofi_argv[@]}" 2>"$rofi_stderr")" || rofi_status=$?
+case "$rofi_status" in
+  0) ;;
+  1) exit "$STATUS_CANCELLED" ;;
+  *) fail "rofi exited with status $rofi_status: $(<"$rofi_stderr")" ;;
+esac
+[[ -n "$chosen" ]] || exit "$STATUS_CANCELLED"
+printf '%s\n' "$chosen"

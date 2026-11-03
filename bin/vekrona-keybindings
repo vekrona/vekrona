@@ -3,7 +3,6 @@ import argparse
 import glob
 import os
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -406,17 +405,9 @@ def load_xremap_rows(path):
     return rows
 
 
-def rofi_theme_str():
-    theme_bin = vekrona_cli.resolve_tool(__file__, "vekrona-render-theme")
-    if not theme_bin:
-        die("vekrona-render-theme not found (needed to theme the rofi menu)")
-    result = subprocess.run([theme_bin, "rofi"], capture_output=True, text=True)
-    if result.returncode != 0:
-        die((result.stderr or "vekrona-render-theme rofi failed").strip())
-    return result.stdout
-
-
-ROFI_CANCELLED = 1  # rofi -dmenu's exit status for Esc and for a menu closed without a choice
+# vekrona-rofi-menu's exit statuses (see its usage): the menu was cancelled, or failed and has already been recorded.
+MENU_CANCELLED = 1
+MENU_FAILED = 3
 HEADER_TEXT = "Cmd = Super · Hyper = Caps Lock held (or Super+Ctrl+Alt)"
 
 
@@ -489,23 +480,23 @@ def cmd_list(sway_main_path, xremap_path):
 
 
 def cmd_menu(sway_main_path, xremap_path):
-    if not shutil.which("rofi"):
-        die("rofi not found (install the 'rofi' package)")
+    menu_bin = vekrona_cli.resolve_tool(__file__, "vekrona-rofi-menu")
+    if not menu_bin:
+        die("vekrona-rofi-menu not found (needed to show the keybindings)")
     rows = build_all_rows(sway_main_path, xremap_path)
     lines = render_rows(rows)
 
-    result = subprocess.run(
-        ["rofi", "-dmenu", "-i", "-no-custom", "-p", "Keybindings", "-mesg", HEADER_TEXT,
-         "-format", "i", "-theme-str", rofi_theme_str()],
-        input="\n".join(lines), capture_output=True, text=True,
-    )
-    if result.returncode == ROFI_CANCELLED:
+    result = subprocess.run([menu_bin, "--prompt", "Keybindings", "--message", HEADER_TEXT, "--index"],
+                            input="\n".join(lines), stdout=subprocess.PIPE, text=True)
+    if result.returncode == MENU_CANCELLED:
         return
+    if result.returncode == MENU_FAILED:
+        sys.exit(1)
     if result.returncode != 0:
-        die(f"rofi exited with status {result.returncode}: {(result.stderr or result.stdout).strip()}")
+        die(f"vekrona-rofi-menu exited with status {result.returncode}")
     answer = result.stdout.strip()
     if not answer.isascii() or not answer.isdigit() or int(answer) >= len(rows):
-        die(f"rofi answered {answer!r}, which is not a row of the menu")
+        die(f"vekrona-rofi-menu answered {answer!r}, which is not a row of the menu")
     row = rows[int(answer)]
     if row.command:
         run = subprocess.run(["swaymsg", "--", row.command], capture_output=True, text=True)

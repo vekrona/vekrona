@@ -111,21 +111,17 @@ build_env_unset_argv() {
 }
 
 pick_tool() {
-  command -v rofi >/dev/null 2>&1 || die "rofi not found (install the 'rofi' package)"
-  local theme_str tools
-  theme_str="$("$REPO_ROOT/bin/vekrona-render-theme" rofi)" || die "vekrona-render-theme rofi failed"
+  local tools menu_status=0
   tools="$(installed_tools)"
   [[ -n "$tools" ]] || die "no agent harness is installed; install one, e.g. Claude Code: curl -fsSL https://claude.ai/install.sh | bash (PATH is $PATH)"
 
-  local chosen rofi_status=0
-  chosen="$(rofi -dmenu -i -no-custom -p "Coding agent" -theme-str "$theme_str" <<<"$tools")" || rofi_status=$?
-  case "$rofi_status" in
+  PICKED_TOOL="$("$REPO_ROOT/bin/vekrona-rofi-menu" --prompt "Coding agent" <<<"$tools")" || menu_status=$?
+  case "$menu_status" in
     0) ;;
     1) exit 0 ;;
-    *) die "rofi exited with status $rofi_status" ;;
+    3) exit 1 ;; # vekrona-rofi-menu has recorded the failure
+    *) die "vekrona-rofi-menu exited with status $menu_status" ;;
   esac
-  [[ -n "$chosen" ]] || exit 0
-  PICKED_TOOL="$chosen"
 }
 
 launch() {
