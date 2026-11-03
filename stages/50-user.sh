@@ -34,7 +34,6 @@ ensure_symlink "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" "$H
 ensure_symlink "$VEKRONA_ROOT/config/autostart/sealertauto.desktop" "$HOME/.config/autostart/sealertauto.desktop"
 
 ensure_symlink_tree "$VEKRONA_ROOT/config/systemd-user" "$HOME/.config/systemd/user"
-ensure_symlink "$VEKRONA_ROOT/config/vekrona-app-switch" "$HOME/.config/quickshell/vekrona-app-switch"
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-shell" "$HOME/.config/quickshell/vekrona-shell"
 ensure_symlink "$VEKRONA_ROOT/config/khal/config" "$HOME/.config/khal/config"
 ensure_symlink "$VEKRONA_ROOT/config/vdirsyncer/config.example" "$HOME/.config/vdirsyncer/config.example"
@@ -74,6 +73,7 @@ remove_retired "the weather and calendar timers now start with the sway session"
   "$HOME/.config/systemd/user/timers.target.wants/vekrona-calendar.timer"
 # User units an earlier vekrona installed and the checkout no longer ships: stopped, disabled, and their unit files and *.wants links removed.
 for retired_unit in "${VEKRONA_RETIRED_USER_UNITS[@]}"; do retire_user_unit "$retired_unit"; done
+remove_retired "the app switcher is part of vekrona-shell now" "$HOME/.config/quickshell/vekrona-app-switch"
 
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
@@ -210,7 +210,7 @@ prune_vekrona_links "${link_dirs[@]}"
 prune_dead_quickshell_instances "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell"
 systemctl --user daemon-reload
 # The units the sway session runs, in restart order, and the timers and watcher that trigger the others.
-session_services=(vekrona-lid vekrona-app-switch vekrona-idle vekrona-session-teardown vekrona-cliphist vekrona-shell vekrona-errors vekrona-audio-watchdog)
+session_services=(vekrona-lid vekrona-idle vekrona-session-teardown vekrona-cliphist vekrona-shell vekrona-errors vekrona-audio-watchdog)
 session_triggers=(vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path)
 ensure_user_unit_enabled "${session_services[@]/%/.service}" "${session_triggers[@]}" vekrona-update-notify.service syncthing.service
 # The syncthing webapp talks to this daemon, so it must not wait for the next login. A GUI login goes in while the daemon is stopped.

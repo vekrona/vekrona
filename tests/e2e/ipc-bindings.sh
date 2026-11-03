@@ -19,8 +19,15 @@ while read -r _ _ _ _ _ target name; do
 done <<<"$calls"
 log "ok: every ipc call in the sway config exists in the running shell"
 
-terminal="$(sed -nE 's/^set \$term (.+)$/\1/p' "$SWAY_CONFIG")"
-binaries="$(grep -E '^[[:space:]]*bindsym' "$SWAY_CONFIG" | grep -oE ' exec (--no-startup-id )?[^ ]+' | awk '{print $NF}' | sed "s/^\$term\$/$terminal/" | sort -u)"
+# A binding may run a program through a `set $name program args` variable of the config: the program is the first word of its value.
+bound_program() {
+  local word="$1" value
+  [[ "$word" == \$* ]] || { printf '%s\n' "$word"; return; }
+  value="$(sed -nE "s/^set \\\$${word#\$} (.+)$/\1/p" "$SWAY_CONFIG")"
+  [[ -n "$value" ]] || die "sway runs $word, which the config does not set"
+  printf '%s\n' "${value%% *}"
+}
+binaries="$(grep -E '^[[:space:]]*bindsym' "$SWAY_CONFIG" | grep -oE ' exec (--no-startup-id )?[^ ]+' | awk '{print $NF}' | sort -u | while read -r word; do bound_program "$word"; done | sort -u)"
 while read -r binary; do
   vekrona-dev sh bash -c 'command -v "$1" >/dev/null' _ "$binary" || die "sway binds '$binary', which is not installed in the guest"
 done <<<"$binaries"

@@ -1968,10 +1968,11 @@ VEKRONA_DESKTOP_PKGS=(
 # shellcheck disable=SC2034
 VEKRONA_RETIRED_PKGS=(dms dms-cli dgop danksearch matugen mise)
 
-# The user units a past vekrona installed and no longer ships. Stopping tailscale-systray drops the tray client (22 MiB resident);
-# Tailscale is managed from its CLI.
+# The user units a past vekrona installed and no longer ships. tailscale-systray was the tray client of Tailscale (22 MiB resident),
+# which is managed from its CLI; vekrona-app-switch became part of vekrona-shell, and stopping its unit also runs its
+# `swaymsg mode default`.
 # shellcheck disable=SC2034
-VEKRONA_RETIRED_USER_UNITS=(tailscale-systray.service)
+VEKRONA_RETIRED_USER_UNITS=(tailscale-systray.service vekrona-app-switch.service)
 
 # What mise and the coding agents (Claude Code, Codex, OpenCode, Pi, Cursor) left behind; stage 30 removes them.
 # /etc/claude-code/managed-settings.json stays: it is the login-method policy, installed by stage 40.

@@ -13,6 +13,9 @@ BusName=org.freedesktop.Notifications
 # The '-' keeps a failure from stopping the shell: no bar is worse. The subcommand reports the failure to the journal itself.
 ExecStartPre=-%h/.local/bin/vekrona-error refresh-unread
 ExecStart=/usr/bin/qs -c vekrona-shell
+# A stop, restart or crash while the app switcher is open would leave Sway in its appswitch mode, which has no binding to leave it.
+# The '-' is for the stop at logout, when Sway is already gone and swaymsg has nothing to talk to.
+ExecStopPost=-/usr/bin/swaymsg mode default
 SyslogIdentifier=vekrona-shell
 Restart=always
 RestartSec=1

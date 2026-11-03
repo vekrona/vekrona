@@ -14,13 +14,13 @@ log "ok: a unit that accepts exit 1 restarts on every exit"
 
 # The units the session cannot do without keep restarting however often they fail, with a delay that grows to a minute so
 # that a crash loop does not spin. Each failed exit still logs "Failed with result", which reaches the error pipeline.
-for unit in vekrona-shell vekrona-idle vekrona-app-switch vekrona-cliphist; do
+for unit in vekrona-shell vekrona-idle vekrona-cliphist; do
   grep -qx 'StartLimitIntervalSec=0' "$units/$unit.service" || die "$unit.service gives up after the default start limit, and the session loses it for good"
   grep -qE '^RestartSec=[1-9]' "$units/$unit.service" || die "$unit.service restarts with no pause, which spins a crash loop"
   grep -qE '^RestartSteps=[1-9]' "$units/$unit.service" || die "$unit.service restarts at a fixed rate: a crash loop never backs off"
   grep -qx 'RestartMaxDelaySec=60' "$units/$unit.service" || die "$unit.service must back off to a minute between restarts"
 done
-log "ok: the shell, the auto-lock, the app switcher and the clipboard history never give up, and back off to a minute"
+log "ok: the shell, the auto-lock and the clipboard history never give up, and back off to a minute"
 
 # A lock that cannot be made must keep the machine awake: the guard is a block lock on sleep, and the locker releases it at READY.
 grep -qF -- '--what=sleep --mode=block' "$units/vekrona-lock-guard.service" || die "vekrona-lock-guard.service must hold a block lock on sleep"

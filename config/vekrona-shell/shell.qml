@@ -42,6 +42,8 @@ ShellRoot {
 
     Polkit {}
 
+    AppSwitch {}
+
     Variants {
         model: Quickshell.screens
 

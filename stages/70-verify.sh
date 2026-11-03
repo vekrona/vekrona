@@ -608,7 +608,7 @@ if ran 50-user; then
   check assert "the old xremap user service is not enabled (xremap is a system service now)" not user_unit_enabled xremap
   check assert "syncthing.service enabled" user_unit_enabled syncthing
   check assert "syncthing waits for the network before it starts (nm-online drop-in linked and loaded)" contains "nm-online" "$(systemctl --user show syncthing.service -p ExecStartPre --value)"
-  check assert "vekrona-app-switch.service enabled" user_unit_enabled vekrona-app-switch.service
+  check assert "the retired vekrona-app-switch Quickshell config is gone" path_absent "$HOME/.config/quickshell/vekrona-app-switch"
   check assert "vekrona-shell Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-shell")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-shell")"
   check assert "vekrona-shell reaches the shared Vekrona module" file_exists "$HOME/.config/quickshell/vekrona-shell/Vekrona/qmldir"
   check assert "vekrona-shell.service enabled" user_unit_enabled vekrona-shell.service
@@ -738,7 +738,6 @@ assert d.get("mode") == sys.argv[2], d.get("mode")
 assert isinstance(d.get("metrics"), dict), "metrics"
 ' "$(vekrona_active_theme_file)" "$recorded_theme_name"
   check assert "vekrona-lock resolves import \"Vekrona\" through ~/.config/quickshell" file_exists "$HOME/.config/quickshell/vekrona-lock/Vekrona/qmldir"
-  check assert "vekrona-app-switch reads tokens.json through ~/.config/quickshell" test -r "$HOME/.config/quickshell/vekrona-app-switch/tokens.json"
 
   check assert "no stale vekrona-gpu.conf from an earlier install (the GPU is chosen at login by vekrona-gpu-env)" path_absent "$HOME/.config/environment.d/vekrona-gpu.conf"
   check assert "vekrona-gpu-env runs" vekrona-gpu-env

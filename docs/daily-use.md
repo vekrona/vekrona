@@ -123,8 +123,7 @@ Design System; never edit it by hand, re-import the design by copying the file.
 generates `~/.local/state/vekrona/active-theme.json`, GTK 3/4 css, gsettings,
 qt6ct, the Sway drop-in, Firefox userChrome and rofi from it. vekrona-shell and
 vekrona's other Quickshell apps read the generated `active-theme.json` (shell,
-lock screen) or `tokens.json` itself (app switcher), so the generated file is
-output, never input. The shell reloads it on every write, so `vekrona-theme`
+lock screen), so the generated file is output, never input. The shell reloads it on every write, so `vekrona-theme`
 only has to run the renderer: it records the mode, renders, and restores the
 previous files and exits non-zero if the renderer fails. It never retries or
 restarts the shell itself.

@@ -3,9 +3,11 @@ import QtQuick
 import Quickshell
 import Quickshell.I3
 
-// Sway's windows and which workspaces hold one: the one reader of the sway tree, for every widget that wants it. The tree
-// is read again only when an event changes what it holds (a window or workspace appears, goes or moves), not for every title
-// or focus change, which fire all the time.
+// Sway's windows, which workspaces hold one, and which window takes the focus: the one reader of the sway tree and of its window
+// events, for every widget that wants them. The tree is read again only when an event changes what it holds (a window or workspace
+// appears, goes or moves), not for every title or focus change, which fire all the time. An event that arrives while a read runs
+// may be newer than the answer, so the window set comes from a read that SwayQuery runs once more after it, and the focus of such
+// an answer is not reported.
 Singleton {
     id: root
 
@@ -16,6 +18,15 @@ Singleton {
     property var windows: []
     // The numbers of the workspaces that hold a window.
     property var occupiedNumbers: []
+    // A focus event arrived while the tree was being read, so the focused window of that answer may be older than the event.
+    property bool focusMovedDuringRead: false
+
+    // The window with the Sway container id `id` took the focus. Reported for every focus event, and for the focused window of a
+    // tree read, which catches up on focus changes whose events were lost.
+    signal focused(int id)
+    // The window with the Sway container id `id` closed. A window that closes while events are lost is not reported; it only
+    // drops out of `windows` at the next read.
+    signal closed(int id)
 
     // The windows of the tree, leaves only: Sway containers that hold an app.
     function leaves(node): var {
@@ -62,16 +73,26 @@ Singleton {
         }
     }
 
-    // Whether an event of the window or workspace subscription alters the tree.
-    function altersTree(event): bool {
-        let change;
+    // Reads an event of the window or workspace subscription: reports a window's focus or close, and reads the tree again when the
+    // event alters it.
+    function follow(event): void {
+        let e;
         try {
-            change = JSON.parse(event.data).change;
-        } catch (e) {
-            console.error("Windows: a sway " + event.type + " event is not valid JSON: " + e);
-            return true;
+            e = JSON.parse(event.data);
+        } catch (error) {
+            console.error("Windows: a sway " + event.type + " event is not valid JSON: " + error);
+            query.run();
+            return;
         }
-        return treeChanges.includes(change);
+        if (event.type === "window" && e.change === "focus") {
+            if (query.querying)
+                focusMovedDuringRead = true;
+            focused(e.container.id);
+        } else if (event.type === "window" && e.change === "close") {
+            closed(e.container.id);
+        }
+        if (treeChanges.includes(e.change))
+            query.run();
     }
 
     SwayQuery {
@@ -80,19 +101,22 @@ Singleton {
         onParsed: json => {
             root.windows = root.leaves(json);
             root.occupiedNumbers = root.occupiedWorkspaces(json);
+            const current = root.windows.find(window => window.focused);
+            if (current && !root.focusMovedDuringRead)
+                root.focused(current.id);
+            root.focusMovedDuringRead = false;
         }
-        // What the widgets show from the last answer is no longer known; the failure itself has been logged.
+        // What the widgets show from the last answer is no longer known; the failure itself has been logged. The next read starts
+        // after every event seen so far, so its focus is current.
         onUnavailable: {
             root.windows = [];
             root.occupiedNumbers = [];
+            root.focusMovedDuringRead = false;
         }
     }
 
     I3IpcListener {
         subscriptions: ["window", "workspace"]
-        onIpcEvent: event => {
-            if (root.altersTree(event))
-                query.run();
-        }
+        onIpcEvent: event => root.follow(event)
     }
 }

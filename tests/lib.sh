@@ -509,6 +509,22 @@ export -f window_count window_open window_closed focused_app_id focused_is flatp
 super_recorded_down() { vekrona-dev run grep -qx 1 /run/xremap/super-L; }
 export -f super_recorded_down
 
+# One key event (down|up) for a QEMU key code, as JSON for `input-send-event`.
+key_json() {
+  local down=false
+  [[ "$1" == down ]] && down=true
+  printf '{"type":"key","data":{"down":%s,"key":{"type":"qcode","data":"%s"}}}' "$down" "$2"
+}
+# QMP's `send-key` with a hold time queues every later key behind the release, so Super is held by sending its press and its
+# release as events of their own.
+key_event() { vekrona-dev qmp input-send-event "{\"events\":[$(key_json "$1" "$2")]}" >/dev/null; }
+# A tap sends press and release in one call: two calls could be further apart than sway's repeat_delay, and the held key would repeat.
+key_tap() { vekrona-dev qmp input-send-event "{\"events\":[$(key_json down "$1"),$(key_json up "$1")]}" >/dev/null; }
+
+binding_mode() { vekrona-dev sh bash -c 'set -o pipefail; swaymsg -t get_binding_state | jq -r .name'; }
+mode_is() { [[ "$(binding_mode)" == "$1" ]]; }
+export -f binding_mode mode_is
+
 # The keyboard layout pill. Sway splits a command at commas, so the layout list is quoted inside the command.
 set_layouts() { vekrona-dev sh swaymsg "input type:keyboard xkb_layout \"$1\""; }
 # A changed code keeps the pill in place (its width is fixed); other text containing EN or UA sits elsewhere on screen. The pill

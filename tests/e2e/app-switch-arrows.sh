@@ -11,20 +11,6 @@ export GUEST_BINDINGS
 # Sway binding events the scenario has caused so far. Each is one `qs ... ipc call` that sway starts and does not wait for.
 bindings_expected=0
 
-# One key event (down|up) for a QEMU key code, as JSON for `input-send-event`.
-key_json() {
-  local down=false
-  [[ "$1" == down ]] && down=true
-  printf '{"type":"key","data":{"down":%s,"key":{"type":"qcode","data":"%s"}}}' "$down" "$2"
-}
-# QMP's `send-key` with a hold time queues every later key behind the release, so Super is held by sending its press and its
-# release as events of their own.
-key_event() { vekrona-dev qmp input-send-event "{\"events\":[$(key_json "$1" "$2")]}" >/dev/null; }
-# A tap sends press and release in one call: two calls could be further apart than sway's repeat_delay, and the held key would repeat.
-key_tap() { vekrona-dev qmp input-send-event "{\"events\":[$(key_json down "$1"),$(key_json up "$1")]}" >/dev/null; }
-
-binding_mode() { vekrona-dev sh bash -c 'set -o pipefail; swaymsg -t get_binding_state | jq -r .name'; }
-mode_is() { [[ "$(binding_mode)" == "$1" ]]; }
 binding_runs() {
   local runs status=0
   runs="$(vekrona-dev run grep -c '"change":"run"' "$GUEST_BINDINGS")" || status=$?
@@ -32,11 +18,11 @@ binding_runs() {
   printf '%s\n' "$runs"
 }
 bindings_reached() { (($(binding_runs) >= $1)); }
-ipc_calls_running() { vekrona-dev run pgrep -f '[q]s -c vekrona-app-switch ipc call'; }
+ipc_calls_running() { vekrona-dev run pgrep -f '[q]s -c vekrona-shell ipc call appswitch'; }
 ipc_calls_done() { absent ipc_calls_running; }
-export -f binding_mode mode_is binding_runs bindings_reached ipc_calls_running ipc_calls_done
+export -f binding_runs bindings_reached ipc_calls_running ipc_calls_done
 
-# Presses and releases KEY, then waits until sway has run its binding and the overlay has handled the call. The calls are
+# Presses and releases KEY, then waits until sway has run its binding and the shell has handled the call. The calls are
 # separate processes, so without the wait two quick presses could reach the overlay in either order.
 tap() {
   key_tap "$1"

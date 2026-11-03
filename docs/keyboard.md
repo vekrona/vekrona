@@ -132,23 +132,25 @@ of the highlighted app, switching workspace if needed.
 A quick tap goes straight back to the previous app; Escape cancels and Return
 or a click picks.
 
-The overlay is a resident Quickshell instance, `config/vekrona-app-switch/shell.qml`,
-started once per session by `vekrona-app-switch.service` (wanted by
-`sway-session.target`, restarted by systemd if it dies) and hidden until
-needed. Stage 50 links the config to `~/.config/quickshell/vekrona-app-switch`
-so `qs -c vekrona-app-switch` finds it. The overlay reads `config/tokens.json`
-itself (the committed symlink `config/vekrona-app-switch/tokens.json`), in the
-mode that `$XDG_STATE_HOME/vekrona/theme` names, and restyles when either
-changes. Cmd+Tab and Cmd+Shift+Tab are plain
-Sway bindings that run `qs -c vekrona-app-switch ipc call appswitch next|prev`:
-the first call shows the overlay, later ones step it. A cold Quickshell start
-per switch (QML compile, desktop entry scan, icon lookup) used to cost ~250 ms
-in the VM and over a second on real hardware, which is why the overlay stays
-resident with its desktop entries and icons warm.
+The switcher lives in the shell: `config/vekrona-shell/AppSwitch.qml`, an overlay window
+that stays hidden until needed, with colors and metrics from `VekronaTheme` like
+every other shell surface. Cmd+Tab and Cmd+Shift+Tab are plain Sway bindings that
+run `qs -c vekrona-shell ipc call appswitch next|prev`: the first call shows the
+overlay, later ones step it. When it opens it claims the keyboard through
+`KeyboardSurface`, so an open launcher or notification centre closes.
 
-The overlay tracks windows itself: it reads Sway's tree once at startup, then
-follows `window` events (new, close, focus), so the most-recently-used order
-needs no daemon or state file and opening it runs no query. Committing hides
+The overlay lists the windows of `Windows.qml`, the shell's one reader of
+Sway's tree: it reads the tree when the shell starts, whenever a `window` or
+`workspace` event adds, closes or moves something, and when Quickshell
+connects to Sway again. Quickshell does that only after a malformed IPC frame,
+which Sway never sends; a socket that Sway closes stays closed (see `TODO.md`).
+A read replaces the list, so a window whose close event was lost drops out,
+while the windows that remain keep their recency. The recency comes from the
+focus events, so the most-recently-used order needs no daemon or state file
+and opening the switcher runs no query. An event that arrives while a read
+runs may be newer than its answer: a close or a new window makes `SwayQuery`
+read once more, and a focus change keeps the answer's focused window from
+counting as the most recent. Committing hides
 the overlay and focuses the window with `I3.dispatch("[con_id=N] focus")`.
 Quickshell's foreign-toplevel `activate()` is not usable here: Sway accepts the
 request but does not move focus. The overlay takes exclusive keyboard focus
@@ -157,8 +159,10 @@ the overlay's IPC. That is also why Super+Left and Super+Right need a mode:
 in the default mode they are `focus left` and `focus right`, which Sway runs
 before the overlay sees the key. So the overlay dispatches `mode appswitch` when
 it opens and `mode default` when it closes, and again on every start or hot
-reload; `vekrona-app-switch.service` also runs `swaymsg mode default` when it
-stops, so a crashed or restarted overlay cannot leave Sway in the mode. The
+reload. The shell's unit also runs `swaymsg mode default` after the shell exits
+(`ExecStopPost`), so a shell that is stopped or crashes cannot leave Sway in
+the mode while systemd restarts it, or for good when it is not restarted. A
+shell that hangs with the switcher open is not caught (see `TODO.md`). The
 `appswitch` mode in `config/sway/config` binds Super+Tab, Super+Shift+Tab,
 Super+Right and Super+Left to the same `appswitch next|prev` calls. Escape and
 Return stay unbound, so they reach the overlay's own key handler. A mode
@@ -170,10 +174,11 @@ before the mode lands still moves focus.
 
 Neither Sway nor the overlay sees Super go up reliably: a `bindsym --release
 Super_L` in a mode never fires after Super+Tab, and Qt gets no key event for
-it. So opening the overlay also starts `wait-super-release.py`, which reads
-the files `/run/xremap/super-L` and `/run/xremap/super-R`: xremap runs `vekrona-super-state` on every Super press and
+it. So opening the overlay also creates `SuperKeys.qml`, which follows the files
+`/run/xremap/super-L` and `/run/xremap/super-R`: xremap runs `vekrona-super-state` on every Super press and
 release (the `super-state` modmap in its config) and that writes 1 or 0 there, because your user cannot read the
-keyboards. It watches the directory with inotify and, when no Super key is down, exits and the overlay commits.
+keyboards. When no Super key is down the overlay commits; after 60 s it commits anyway. The watcher exists only
+while the overlay is open, because a restart of xremap replaces `/run/xremap` and an older watcher would never see the new files.
 
 `tests/e2e/app-switch-latency.sh` guards the speed with real key presses: the
 overlay must be on screen within 200 ms of Cmd+Tab and focus must change within

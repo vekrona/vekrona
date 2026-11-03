@@ -49,17 +49,6 @@ done
 [[ -z "$(find "$work/state" -type f ! -name super-L)" ]] || die "an unknown key wrote a file: $(ls "$work/state")"
 log "ok: vekrona-super-state records Super down and up and refuses anything else"
 
-# --- wait-super-release.py: exits when no Super key is down, and only then ---
-printf 1 >"$work/state/super-R"; printf 0 >"$work/state/super-L"
-python3 "$ROOT/config/vekrona-app-switch/wait-super-release.py" &
-waiter=$!
-until pgrep -P "$waiter" -x inotifywait >/dev/null || ! kill -0 "$waiter" 2>/dev/null; do :; done
-kill -0 "$waiter" 2>/dev/null || die "the waiter ended while Super_R was down"
-printf 0 >"$work/state/super-R"
-wait "$waiter" || die "the waiter did not end cleanly after Super_R went up"
-printf 0 >"$work/state/super-R"
-python3 "$ROOT/config/vekrona-app-switch/wait-super-release.py" || die "the waiter did not return at once with no Super key down"
-log "ok: the app switcher's waiter returns when the last Super key is up"
 unset VEKRONA_SUPER_STATE_DIR
 
 # --- vekrona-xremap-access: the ACLs, and the one compositor it may serve ---

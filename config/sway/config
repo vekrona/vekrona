@@ -1,7 +1,7 @@
 set $hyper Mod4+Ctrl+Mod1
 set $term ghostty
-set $app_next qs -c vekrona-app-switch ipc call appswitch next
-set $app_prev qs -c vekrona-app-switch ipc call appswitch prev
+set $app_next qs -c vekrona-shell ipc call appswitch next
+set $app_prev qs -c vekrona-shell ipc call appswitch prev
 # The lid switch and the sleep key run in the default mode and in the app switcher's mode, so they are written once.
 set $lid_closed vekrona-suspend --lid
 set $sleep_now vekrona-suspend now
@@ -215,7 +215,7 @@ mode "resize" {
     bindsym Escape mode "default"
 }
 
-# The app switcher (config/vekrona-app-switch/shell.qml) enters this mode while it is open and leaves it on close. A mode replaces the
+# The app switcher (config/vekrona-shell/AppSwitch.qml) enters this mode while it is open and leaves it on close. A mode replaces the
 # default bindings, so Left and Right reach the switcher instead of moving focus, and Tab repeats here. Escape and Return are unbound
 # on purpose: they reach the switcher's own key handler. The lid switch and the sleep key are repeated, because a mode has its own.
 mode "appswitch" {
