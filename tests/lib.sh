@@ -228,13 +228,13 @@ click_card() {
   vekrona-dev click "$(($(screen_width) - $2))" "$((y - ${3:-0}))"
 }
 
-# The bar's clock shows the guest's date, which tests cannot choose while lima's guest agent keeps syncing it from the
-# host, and Quickshell's SystemClock never notices a jump until the shell restarts. clock_pin stops the agent, sets
-# the date ("YYYY-MM-DD HH:MM:SS") and restarts the shell; clock_restore undoes all three. The guest's seconds of
-# uptime carry the real time across the pin, and the agent then syncs the exact time again.
-# Without the agent the host's ssh connections make sshd log an error again and again, and a jump of the clock makes
-# the error watcher see that record as long unseen: it toasts it again, at an arbitrary moment, over whatever the test
-# clicks next. So the watcher is stopped for the pin, and started once the clock is real again, when the record is not stale.
+# The bar's clock shows the guest's date, which tests cannot choose while the guest's NTP client keeps syncing it, and
+# Quickshell's SystemClock never notices a jump until the shell restarts. clock_pin turns NTP off, sets the date
+# ("YYYY-MM-DD HH:MM:SS") and restarts the shell; clock_restore undoes all three. The guest's seconds of uptime carry the
+# real time across the pin, and NTP then syncs the exact time again.
+# A jump of the clock makes the error watcher see the records of earlier errors as long unseen: it toasts them again, at an
+# arbitrary moment, over whatever the test clicks next. So the watcher is stopped for the pin, and started once the clock is
+# real again, when no record is stale.
 # A jump across midnight fires vekrona-update-night.timer (00:00), which stages an offline update and reboots the VM in the
 # middle of the suite, and an evening clock makes the update notice ask its question and take the keyboard. So both are
 # stopped for the pin, and the ones that were running are started once the clock is real again (a timer that is started
@@ -264,7 +264,7 @@ clock_pin() {
   guest_unit_state_is_active user vekrona-update-notify.path && CLOCK_NOTIFY_PATH_WAS_ACTIVE=1
   vekrona-dev sh systemctl --user stop vekrona-errors.service "${UPDATE_NOTIFY_UNITS[@]}"
   vekrona-dev run sudo systemctl stop "$NIGHT_TIMER"
-  vekrona-dev run sudo systemctl stop lima-guestagent
+  vekrona-dev run sudo timedatectl set-ntp false
   vekrona-dev run sudo date -s "$1" >/dev/null
   restart_shell
 }
@@ -285,9 +285,9 @@ clock_restore_night_timer() {
   ((${CLOCK_NIGHT_TIMER_WAS_ACTIVE:-0})) || return 0
   vekrona-dev run sudo systemctl start "$NIGHT_TIMER"
 }
-# The time goes first and lima's agent right after it, which syncs the exact time again; the rest follows even when a step failed.
+# The time goes first and NTP right after it, which syncs the exact time again; the rest follows even when a step failed.
 clock_restore() {
-  run_cleanups clock_restore_time 'vekrona-dev run sudo systemctl start lima-guestagent' \
+  run_cleanups clock_restore_time 'vekrona-dev run sudo timedatectl set-ntp true' \
     'vekrona-dev sh systemctl --user start vekrona-errors.service' clock_restore_update_notify clock_restore_night_timer restart_shell
 }
 
@@ -556,10 +556,10 @@ GUEST_CHECKOUT_SUBPATH=.local/share/vekrona
 # The emulated USB audio card of the audio scenarios. The VM has no sound hardware: QEMU's emulated USB audio card stands in
 # for the interface behind the KVM, and a null sink for the onboard one (an ALSA dummy card cannot be unloaded again while
 # WirePlumber holds it). Port 1 keeps the card's name (alsa_card.usb-...-1-00) the same on every plug, as the Scarlett's is,
-# which is what lets WirePlumber recognise it and restore what it stored. The audiodev id is the one Lima's QEMU command line
-# defines (-audiodev none,id=snd0). A scenario calls audio_setup, traps audio_teardown, and waits with audio_expect.
+# which is what lets WirePlumber recognise it and restore what it stored. The bus and the audiodev id are the ones libvirt's
+# QEMU command line gives the domain's <controller type='usb'> and <audio id='1'> (-device qemu-xhci,id=usb, -audiodev id=audio1). A scenario calls audio_setup, traps audio_teardown, and waits with audio_expect.
 USB_AUDIO_ID=vekrona-audio
-USB_AUDIO_ADD="{\"driver\":\"usb-audio\",\"bus\":\"usb-bus.0\",\"id\":\"$USB_AUDIO_ID\",\"port\":\"1\",\"audiodev\":\"snd0\"}"
+USB_AUDIO_ADD="{\"driver\":\"usb-audio\",\"bus\":\"usb.0\",\"id\":\"$USB_AUDIO_ID\",\"port\":\"1\",\"audiodev\":\"audio1\"}"
 USB_AUDIO_DEL="{\"id\":\"$USB_AUDIO_ID\"}"
 USB_AUDIO_SINK=usb-QEMU
 FALLBACK_SINK=VekronaFallbackSink
@@ -625,7 +625,7 @@ ulimit -c 0
 # every thread of the user's processes against the limit, so it sits above their current thread count by a margin that
 # grows with it: a busy machine forks more between two looks. The limit is hard, so it applies only where a test may fail the
 # machine it runs on: the guest and the CI container, never the host that drives the guest, where it would make the driver
-# (limactl, ssh, the e2e scenario's own forks) fail with EAGAIN.
+# (virsh, ssh, the e2e scenario's own forks) fail with EAGAIN.
 # A shell started by a test sources this file again, and by then its parent's cap is the hard limit: it can only be lowered.
 if in_vekrona_dev_guest || in_ci_container; then
   process_threads=$(ps -eLo pid= -u "$UID" | wc -l)

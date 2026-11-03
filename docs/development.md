@@ -77,10 +77,11 @@ ISO build waits for it.
 ## Sandbox VM (vekrona-dev)
 
 Changes are verified in [vekrona-dev](https://github.com/vekrona/vekrona-dev),
-a Lima VM (Fedora 44 cloud image under QEMU/KVM) that mounts this checkout
-read-only, installs it with the real `install.sh`, logs into Sway by typing
-at the greeter, drives it with QMP key presses, and checks the screen with
-OCR and image metrics computed inside the guest. Nothing under test, and no
+a libvirt VM (Fedora 44 cloud image, sVirt-confined QEMU, `qemu:///system`;
+run its `libvirt/host-setup.sh` once with sudo) that gets this checkout by
+rsync over ssh, installs it with the real `install.sh`, logs into Sway by
+typing at the greeter, drives it with key presses sent through `virsh`, and
+checks the screen with OCR and image metrics computed inside the guest. Nothing under test, and no
 test dependency, touches the host desktop.
 
 ```

@@ -16,12 +16,13 @@ QSB_TARGETS=(--glsl "120,150,300 es" --hlsl 50 --msl 12)
 mode="${1:-bake}"
 [[ $# -le 1 && ( "$mode" == bake || "$mode" == --check ) ]] || die "usage: $0 [--check]"
 
+vekrona-dev mirror
 vekrona-dev run bash -c 'rpm -q "$1" >/dev/null || sudo dnf install -y "$1" >&2' _ "$QSB_PKG"
 fresh="$(mktemp -d)"
 trap 'rm -rf "$fresh"' EXIT
 for frag in "$SHELL_DIR"/*.frag; do
   name="$(basename "$frag")"
-  # The guest mount is read-only, so the baker writes to stdout.
+  # The baker writes to stdout, so that the guest's mirror stays as pushed.
   vekrona-dev run "$QSB" "${QSB_TARGETS[@]}" -o /dev/stdout "$GUEST_SHELL_DIR/$name" >"$fresh/$name.qsb"
   if [[ "$mode" == bake ]]; then
     cp "$fresh/$name.qsb" "$SHELL_DIR/$name.qsb"
