@@ -37,4 +37,5 @@ CaffeineChoices 1.0 CaffeineChoices.qml
 NotificationsButton 1.0 NotificationsButton.qml
 Polkit 1.0 Polkit.qml
 AppSwitch 1.0 AppSwitch.qml
+SwayConfig 1.0 SwayConfig.qml
 SuperKeys 1.0 SuperKeys.qml

@@ -97,6 +97,8 @@ sway_socket() {
 }
 
 # The sway config is symlinked into the checkout, so a running session keeps the old one until it is told to reload.
+# vekrona-shell tells it on every change of the config file that `sway -C` accepts; this reload covers sessions where the shell
+# isn't running, and the changes that arrive before it is up.
 reload_running_sway() {
   local socket
   socket="$(sway_socket)"

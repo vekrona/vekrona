@@ -44,6 +44,8 @@ ShellRoot {
 
     AppSwitch {}
 
+    SwayConfig {}
+
     Variants {
         model: Quickshell.screens
 

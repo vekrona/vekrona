@@ -88,11 +88,14 @@ test dependency, touches the host desktop.
 
 ```
 vekrona-dev up                  # once
-vekrona-dev install             # after every edit (install.sh reloads a running sway)
+vekrona-dev install             # after every edit (the shell reloads sway on config change)
 vekrona-dev session             # logged-in sway session
 vekrona-dev e2e tests/e2e/*.sh  # end-to-end scenarios
 vekrona-dev test                # tests/run.sh, inside the VM
 ```
+
+`install.sh` reloads a running Sway too, which covers sessions where
+vekrona-shell is not running.
 
 `tests/e2e/` holds the end-to-end scenarios: host-side scripts that drive
 the VM through `vekrona-dev` and read like specifications of what the user
