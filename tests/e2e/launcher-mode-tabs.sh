@@ -19,6 +19,10 @@ clip_listed() { launcher_is '.mode == "clip" and (.selectedId | startswith("clip
 settings_listed() { launcher_is '.mode == "settings" and .view == "" and .selectedId == "settings:theme"'; }
 night_selected() { launcher_is '.mode == "settings" and .selectedId == "settings:night"'; }
 audio_view() { launcher_is '.mode == "settings" and (.view | endswith("Audio output"))' && launcher_tab_lit settings; }
+# The footer's Enter and Esc hints read $1 and $2, with the strip holding the focus.
+footer_is() { launcher_is ".stripFocused and .footer.primary == \"$1\" and .footer.escape == \"$2\""; }
+strip_unfocused() { launcher_is '.stripFocused | not'; }
+export -f footer_is strip_unfocused
 export -f in_mode query_is stored clip_listed settings_listed night_selected audio_view
 
 # Waits for the mode $1 with only the tab $2 lit; $3 says what has just happened.
@@ -68,6 +72,14 @@ vekrona-dev key left
 vekrona-dev key spc
 expect_mode calc calc "Tab, Left, Space from the Search tab"
 log "ok: Tab enters the strip on the lit tab, not on the first one, and Space opens the focused tab"
+
+vekrona-dev key tab
+expect_that "the footer must offer Switch to Calculator and Search while the strip holds the focus on the lit Calculator tab" footer_is "Switch to Calculator" Search
+vekrona-dev key right
+expect_that "the footer must follow the focused tab to Search" footer_is "Switch to Search" Search
+vekrona-dev key esc
+expect_that "the footer must stop offering Search once Escape hands the focus back to the search field" strip_unfocused
+log "ok: the footer says what Enter and Escape do while the strip holds the focus"
 
 vekrona-dev key tab
 vekrona-dev key esc

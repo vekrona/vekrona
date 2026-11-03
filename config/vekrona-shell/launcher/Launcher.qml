@@ -57,7 +57,11 @@ PanelWindow {
     readonly property var selectedActions: selectedEntry === null ? [] : selectedEntry.result.actions ?? []
     readonly property var panelActions: actionsEntry === null ? [] : actionsEntry.result.actions ?? []
     readonly property string escapeStep: armed !== null ? "disarm" : viewStack.length > 0 ? "back" : modeModule !== null ? "leaveMode" : search.text !== "" ? "clear" : "close"
-    readonly property string escapeLabel: selectedEntry !== null ? "" : ({
+    // Whether the mode tabs hold the keyboard focus: there Enter and Space switch to the focused tab and Escape hands the focus
+    // back to the search field, and no row is acted on, so the footer must not offer the selected row's keys.
+    readonly property bool stripFocused: strip.activeFocus
+    readonly property string primaryLabel: stripFocused ? "Switch to " + strip.currentLabel : selectedActions.length > 0 ? selectedActions[0].label : ""
+    readonly property string escapeLabel: stripFocused ? "Search" : selectedEntry !== null ? "" : ({
             "disarm": "",
             "back": "Back",
             "leaveMode": "Leave mode",
@@ -790,7 +794,8 @@ PanelWindow {
 
         // The launcher's state as compact JSON. This is a seam for the tests (tests/lib.sh reads it), and it hands the typed
         // query to any process of the user that asks over IPC: {open, mode, query, view, selectedId, armed, actionsOpen, rows, empty,
-        // tabs}. A tab is {slash, active, x, y}: its mode, whether it is lit, and the centre of its square in screen pixels.
+        // stripFocused, footer, tabs}. The footer is {primary, escape}, the labels of its Enter and Esc hints. A tab is
+        // {slash, active, x, y}: its mode, whether it is lit, and the centre of its square in screen pixels.
         // The window is only the panel, so the tabs' window coordinates are moved by where the panel sits on the output.
         function state(): string {
             return JSON.stringify({
@@ -803,6 +808,11 @@ PanelWindow {
                 actionsOpen: root.actionsOpen,
                 rows: root.rows.filter(entry => entry.type === "row").length,
                 empty: root.rows.some(entry => entry.type === "empty"),
+                stripFocused: root.stripFocused,
+                footer: {
+                    primary: root.primaryLabel,
+                    escape: root.escapeLabel
+                },
                 tabs: strip.placement().map(tab => Object.assign({}, tab, {
                     x: tab.x + root.panelLeft,
                     y: tab.y + root.panelTop
@@ -1026,10 +1036,10 @@ PanelWindow {
                     title: root.footerModule === null ? "" : root.footerModule.title
                     escapeLabel: root.escapeLabel
                     toastText: root.toastText
-                    primaryLabel: root.selectedActions.length > 0 ? root.selectedActions[0].label : ""
-                    armedLabel: root.armed === null ? "" : root.armed.action.label
-                    hasActions: root.selectedActions.length > 0
-                    onPrimaryClicked: root.activateSelected(0)
+                    primaryLabel: root.primaryLabel
+                    armedLabel: root.armed === null || root.stripFocused ? "" : root.armed.action.label
+                    hasActions: root.selectedActions.length > 0 && !root.stripFocused
+                    onPrimaryClicked: root.stripFocused ? strip.activateCurrent() : root.activateSelected(0)
                     onActionsClicked: root.openActions()
                 }
             }

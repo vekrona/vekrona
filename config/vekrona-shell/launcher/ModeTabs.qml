@@ -18,6 +18,8 @@ FocusScope {
     // The mode whose tab is lit: Apps ("") for both of its modes, the root search and /apps.
     readonly property string litSlash: launcher.activeSlash === "apps" ? "" : launcher.activeSlash
     property int current: 0
+    // The name of the focused tab, which Enter and Space open.
+    readonly property string currentLabel: tabs[current].label
 
     signal leave
 
@@ -56,6 +58,10 @@ FocusScope {
         if (slash !== litSlash || launcher.viewStack.length > 0)
             launcher.openMode(slash);
         leave();
+    }
+
+    function activateCurrent(): void {
+        activate(tabs[current].slash);
     }
 
     // Takes focus with the lit tab current, or the first one for a mode without a tab.
@@ -110,7 +116,7 @@ FocusScope {
         if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter && event.key !== Qt.Key_Space)
             return;
         if (!event.isAutoRepeat)
-            activate(tabs[current].slash);
+            activateCurrent();
         event.accepted = true;
     }
 
