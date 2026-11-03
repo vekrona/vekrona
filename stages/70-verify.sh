@@ -66,7 +66,12 @@ not_repo_enabled() { ! repo_enabled "$1"; }
 copr_enabled() { repo_enabled "$(copr_id "$1")"; }
 unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; }
 unit_active() { eq "$(systemctl is-active "$1" 2>/dev/null || true)" active; }
-user_unit_enabled() { eq "$(systemctl --user is-enabled "$1" 2>/dev/null || true)" enabled; }
+user_unit_enabled() { unit_is_enabled "$1" --user; }
+user_unit_not_installed() {
+  local -a paths
+  read_user_unit_install_paths paths "$1"
+  ((${#paths[@]} == 0))
+}
 user_unit_loaded() { eq "$(systemctl --user show -p LoadState --value "$1" 2>/dev/null || true)" loaded; }
 # rpm -q exits 1 for an absent package and for a broken rpm database alike, so only its "is not installed" answer counts.
 pkg_absent() { [[ "$(LC_ALL=C rpm -q "$1" 2>&1 || true)" == "package $1 is not installed" ]]; }
@@ -577,8 +582,11 @@ if ran 50-user; then
   check assert "vekrona-shell Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-shell")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-shell")"
   check assert "vekrona-shell reaches the shared Vekrona module" file_exists "$HOME/.config/quickshell/vekrona-shell/Vekrona/qmldir"
   check assert "vekrona-shell.service enabled" user_unit_enabled vekrona-shell.service
-  check assert "tailscale-systray.service enabled" user_unit_enabled tailscale-systray.service
-  check assert "tailscale-systray.service waits for the StatusNotifierWatcher" contains org.kde.StatusNotifierWatcher "$(systemctl --user show tailscale-systray.service -p ExecStartPre --value)"
+  for retired_unit in "${VEKRONA_RETIRED_USER_UNITS[@]}"; do
+    check assert "the retired $retired_unit is not running" not unit_is_active "$retired_unit" --user
+    check assert "the retired $retired_unit is not enabled" not user_unit_enabled "$retired_unit"
+    check assert "the retired $retired_unit has no unit file or *.wants link under ~/.config/systemd/user" user_unit_not_installed "$retired_unit"
+  done
   check assert "vekrona-cliphist.service enabled" user_unit_enabled vekrona-cliphist.service
   check assert "vekrona-idle.service enabled" user_unit_enabled vekrona-idle.service
   check assert "vekrona-lid.service enabled (the lid switch and the sleep key are Sway's, which locks before it suspends)" user_unit_enabled vekrona-lid.service

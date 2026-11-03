@@ -36,7 +36,7 @@ Read before filing:
 
 - Project and version: quickshell 0.3.1-5.fc44 (COPR build); the line is `src/services/status_notifier/item.cpp:317` in the local checkout (`~/wrk/quickshell`, at a3dcff2).
 - Symptom on vekrona: the journal has `WARN quickshell.service.sni.item: Unable to create pixmap for tray icon qs::service::sni::StatusNotifierItem(0x7faeb2353a00)`, seen on the owner's host on 2026-10-16 (21:31:34, 21:31:44, 21:35:04) and in vekrona-dev with `tests/e2e/fake-sni.py`.
-- Root cause as known: the warning streams the `StatusNotifierItem*` through `QDebug`, which prints only the class name and an address, so the log never names the app, the D-Bus service or the icon. The task brief called it a raw pointer; it is Qt's `Class(0xaddr)` form. Why the pixmap is null is unknown; the first host warning is at the same minute as the restart of `tailscale systray` that TODO.md records (21:31), which may be a coincidence (unverified).
+- Root cause as known: the warning streams the `StatusNotifierItem*` through `QDebug`, which prints only the class name and an address, so the log never names the app, the D-Bus service or the icon. The task brief called it a raw pointer; it is Qt's `Class(0xaddr)` form. Why the pixmap is null is unknown.
 - Minimal reproduction: register an SNI item that offers no usable `IconPixmap` (zero size or empty) and no resolvable `IconName`; `tests/e2e/fake-sni.py` did this in vekrona-dev (it also logs `QImage::scaled: Image is a null image`). The exact payload is unverified.
 - vekrona workaround: none; it is log noise.
 - Request: log the item's address (D-Bus service name) and title instead of the pointer.
@@ -95,17 +95,7 @@ Read before filing:
 - File at: a comment on https://github.com/systemd/systemd/issues/43745 with the versions above (nothing new to file unless 259.9 behaves differently from what it describes). Related: https://github.com/systemd/systemd/issues/34988 (sudo/su handling in pam_systemd).
 - Issue title (new issue only): `logind: sessions created by sudo via pam_systemd stay in state "closing" forever`
 
-## 8. tailscale systray: exits 1 on SIGTERM, and starts before the StatusNotifierWatcher exists
-
-- Project and version: tailscale 1.98.8-1.fc44 (`tailscale systray`).
-- Symptom on vekrona: (a) on every stop or logout the unit ends `failed` because the process exits with status 1; vekrona-error records it. (b) at session start (2026-10-16 21:07) it logged `systray error: failed to register: The name is not activatable` because no StatusNotifierWatcher was on the bus yet, and then stayed without an icon; a restart at 21:31 registered fine (from TODO.md, not re-checked).
-- Root cause as known: (a) it logs "exiting", then its own cancelled IPN bus watch fails with "context canceled" and the process exits 1 (the comment in the unit; the tailscale source was not read). (b) it does not wait for or retry the registration.
-- Minimal reproduction: (a) `tailscale systray &`, then `kill -TERM` it and check `$?` (expected 143 or 0; observed 1). Not run for this note, since it would start a tray client. (b) start it when no StatusNotifierWatcher is on the session bus.
-- vekrona workaround: `config/systemd-user/tailscale-systray.service` has `SuccessExitStatus=1` for (a) and `ExecStartPre=/usr/bin/gdbus wait --session --timeout 30 org.kde.StatusNotifierWatcher` for (b). main's commit 5c58526 ordered the unit after `vekrona-shell.service` instead, but that service is ready when it owns the Notifications name, not when the watcher is on the bus, so the wait on the watcher itself replaces that ordering.
-- File at: https://github.com/tailscale/tailscale/issues
-- Issue titles: `tailscale systray: exit status 1 on SIGTERM ("context canceled" from the IPN bus watch)`; `tailscale systray: gives up when the StatusNotifierWatcher is not on the bus yet at start`
-
-## 9. setroubleshoot seapplet: its status icon needs X11
+## 8. setroubleshoot seapplet: its status icon needs X11
 
 - Project and version: setroubleshoot 3.3.36-3.fc44 (`/usr/bin/seapplet`, GTK 3 `GtkStatusIcon`).
 - Symptom on vekrona: at every login under Sway it logs `gtk_widget_get_scale_factor: assertion 'GTK_IS_WIDGET (widget)' failed` and shows no icon.
@@ -116,7 +106,7 @@ Read before filing:
 - File at: https://github.com/fedora-selinux/setroubleshoot/issues (unverified; Fedora's component is also on https://bugzilla.redhat.com)
 - Issue title: `seapplet: status icon is never created on Wayland (GtkStatusIcon), GTK_IS_WIDGET assertion at login`
 
-## 10. Other upstream items found in TODO.md
+## 9. Other upstream items found in TODO.md
 
 Already tracked there with their own next step; listed here so nothing is lost. Not written up further.
 

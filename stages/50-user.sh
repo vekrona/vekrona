@@ -61,22 +61,6 @@ for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/sk
   ensure_symlink "$VEKRONA_ROOT/config/agents/skills/vekrona-diagnose" "$skills_dir/vekrona-diagnose"
 done
 
-# A path an earlier vekrona left behind: $1 is why it is retired, the rest are the paths.
-remove_retired() {
-  local reason="$1" retired
-  shift
-  for retired in "$@"; do
-    if [[ -e "$retired" || -L "$retired" ]]; then
-      log "removing: $retired ($reason)"
-      if [[ -d "$retired" && ! -L "$retired" ]]; then chmod -R u+w "$retired"; fi
-      rm -rf "$retired"
-      [[ ! -e "$retired" && ! -L "$retired" ]] || die "failed to remove $retired"
-    else
-      log "absent: $retired"
-    fi
-  done
-}
-
 remove_retired "left by DankMaterialShell, which vekrona-shell replaced" \
   "$HOME/.config/systemd/user/sway-session.target.wants/dms.service" \
   "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service" \
@@ -88,6 +72,8 @@ remove_retired "left by DankMaterialShell, which vekrona-shell replaced" \
 remove_retired "the weather and calendar timers now start with the sway session" \
   "$HOME/.config/systemd/user/timers.target.wants/vekrona-weather.timer" \
   "$HOME/.config/systemd/user/timers.target.wants/vekrona-calendar.timer"
+# User units an earlier vekrona installed and the checkout no longer ships: stopped, disabled, and their unit files and *.wants links removed.
+for retired_unit in "${VEKRONA_RETIRED_USER_UNITS[@]}"; do retire_user_unit "$retired_unit"; done
 
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null
@@ -224,7 +210,7 @@ prune_vekrona_links "${link_dirs[@]}"
 prune_dead_quickshell_instances "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell"
 systemctl --user daemon-reload
 # The units the sway session runs, in restart order, and the timers and watcher that trigger the others.
-session_services=(vekrona-lid tailscale-systray vekrona-app-switch vekrona-idle vekrona-session-teardown vekrona-cliphist vekrona-shell vekrona-errors vekrona-audio-watchdog)
+session_services=(vekrona-lid vekrona-app-switch vekrona-idle vekrona-session-teardown vekrona-cliphist vekrona-shell vekrona-errors vekrona-audio-watchdog)
 session_triggers=(vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path)
 ensure_user_unit_enabled "${session_services[@]/%/.service}" "${session_triggers[@]}" vekrona-update-notify.service syncthing.service
 # The syncthing webapp talks to this daemon, so it must not wait for the next login. A GUI login goes in while the daemon is stopped.

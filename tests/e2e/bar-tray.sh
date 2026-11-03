@@ -28,7 +28,6 @@ MENU_LABEL="Fake menu entry"
 GUEST_DIR=/tmp/bar-tray
 GUEST_SNI="$GUEST_DIR/fake-sni.py"
 GUEST_LOG=/tmp/bar-tray-fake-sni.log
-TRAY_UNIT=tailscale-systray.service
 # How long a click is given to open a menu, which it must not (or to reopen one it closed). A menu opens within a second.
 QUIET_SEC=10
 DEFAULT_MODE=1280x800
@@ -38,7 +37,6 @@ SETTLED_MAX_DIFF=0.2
 scaled_px() { awk -v px="$1" -v scale="$2" 'BEGIN { printf "%d", px * scale + 0.5 }'; }
 # pkill exits 1 when no fake icon is running, which is fine.
 stop_fake_icons() { vekrona-dev run pkill -f "[b]ar-tray/fake-sni.py" || [[ $? -eq 1 ]]; }
-start_tray_unit() { vekrona-dev sh systemctl --user start "$TRAY_UNIT"; }
 reset_output() { vekrona-dev sh swaymsg output '*' mode "$DEFAULT_MODE" scale 1 >/dev/null; }
 set_output() {
   local scale="$1" mode="$DEFAULT_MODE"
@@ -133,11 +131,6 @@ export MENU_LABEL
 vekrona-dev session
 clear_notifications
 trap 'stop_fake_icons; reset_output; rm -f "$MEASURE_FILE"' EXIT
-# The fake icon must be the only one in the tray, or the measured box would depend on the order of the icons.
-if vekrona-dev sh systemctl --user is-active --quiet "$TRAY_UNIT"; then
-  trap 'stop_fake_icons; reset_output; rm -f "$MEASURE_FILE"; start_tray_unit' EXIT
-  vekrona-dev sh systemctl --user stop "$TRAY_UNIT"
-fi
 vekrona-dev run mkdir -p "$GUEST_DIR"
 for file in "$ROOT/tests/e2e/fake-sni.py" "$ROOT/tests/e2e/png_rows.py" "$FIXTURES"/*.png; do
   vekrona-dev run bash -c 'cat >"$1"' _ "$GUEST_DIR/$(basename "$file")" <"$file"

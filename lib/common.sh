@@ -664,9 +664,11 @@ ensure_system_unit() {
 
 # unit_state <var> is-active|is-enabled <unit> [systemctl flags]  Stores the state word systemctl prints. Both verbs
 # print the state even when they exit non-zero (is-active: 3 inactive, 4 not found; is-enabled: 1 disabled, masked or
-# linked, 4 not found; static, alias and indirect exit 0). Any other status, or output that is not one state word (an
-# unreachable bus, for one), means systemctl itself failed. The caller's shell must run this, not a $(...) subshell,
-# for the die to stop the install.
+# linked, 4 not found; static, alias and indirect exit 0). A unit that has no file at all makes is-enabled print nothing
+# and exit 1 ("Failed to get unit file state"), exactly as an unreachable bus does, so only the unit's LoadState tells them
+# apart: not-found stores "not-found", anything else (or a `show` that fails too) is a systemctl failure. Any other status,
+# or output that is not one state word, means systemctl itself failed. The caller's shell must run this, not a $(...)
+# subshell, for the die to stop the install.
 unit_state() {
   local var="$1" verb="$2" out rc=0
   shift 2
@@ -675,6 +677,10 @@ unit_state() {
     is-active:0 | is-active:3 | is-active:4 | is-enabled:0 | is-enabled:1 | is-enabled:4) ;;
     *) die "systemctl $verb $* failed with status $rc (its stderr is above)" ;;
   esac
+  if [[ "$verb:$rc" == is-enabled:1 && -z "$out" ]]; then
+    out="$(systemctl show -p LoadState --value "$@")" || die "systemctl is-enabled $* printed nothing and systemctl show cannot tell why (its stderr is above)"
+    [[ "$out" == not-found ]] || die "systemctl is-enabled $* printed nothing for a unit whose LoadState is '$out' (its stderr is above)"
+  fi
   [[ -n "$out" && "$out" != *[[:space:]]* ]] || die "systemctl $verb $* printed no single unit state word (stdout: '$out'; its stderr is above)"
   printf -v "$var" %s "$out"
 }
@@ -791,13 +797,62 @@ ensure_user_unit_enabled() {
   done
 }
 
+# Stops a user unit that is not inactive and disables it only when it is enabled (a vendor unit that was never enabled needs no
+# disable, and `disable` fails on a unit whose file is gone, which counts as not enabled).
 ensure_user_unit_stopped() {
-  local u
+  local u active enabled
   for u in "$@"; do
-    [[ "$(systemctl --user show -p LoadState --value "$u")" == loaded ]] || { log "user unit not loaded: $u"; continue; }
-    log "stopping and disabling: $u"
-    systemctl --user disable --now "$u" || die "cannot stop $u"
+    unit_state active is-active --user "$u"
+    if [[ "$active" != inactive ]]; then
+      log "stopping: $u"
+      systemctl --user stop "$u" || die "cannot stop $u"
+    fi
+    unit_state enabled is-enabled --user "$u"
+    if [[ "$enabled" == enabled ]]; then
+      log "disabling: $u"
+      systemctl --user disable "$u" || die "cannot disable $u"
+    else
+      log "not enabled, nothing to disable: $u"
+    fi
   done
+}
+
+# A path an earlier vekrona left behind: $1 is why it is retired, the rest are the paths.
+remove_retired() {
+  local reason="$1" retired
+  shift
+  for retired in "$@"; do
+    if [[ -e "$retired" || -L "$retired" ]]; then
+      log "removing: $retired ($reason)"
+      if [[ -d "$retired" && ! -L "$retired" ]]; then chmod -R u+w "$retired"; fi
+      rm -rf "$retired"
+      [[ ! -e "$retired" && ! -L "$retired" ]] || die "failed to remove $retired"
+    else
+      log "absent: $retired"
+    fi
+  done
+}
+
+# Sets the array named $1 to the paths under ~/.config/systemd/user that keep the user unit $2 installed: its unit file or link
+# (a link into the checkout dangles once the checkout drops the unit) and its *.wants links, which `disable` cannot find once the
+# unit file is gone.
+read_user_unit_install_paths() {
+  local -n out="$1"
+  local unit="$2" dir="$HOME/.config/systemd/user" path
+  out=()
+  for path in "$dir/$unit" "$dir"/*.wants/"$unit"; do
+    if [[ -e "$path" || -L "$path" ]]; then out+=("$path"); fi
+  done
+}
+
+# Takes a user unit that an earlier vekrona installed off the machine: stops it, disables it when it is enabled and removes its
+# unit file or link and its *.wants links. Stage 50 retires every unit of VEKRONA_RETIRED_USER_UNITS this way and stage 70 checks it.
+retire_user_unit() {
+  local unit="$1"
+  local -a paths
+  ensure_user_unit_stopped "$unit"
+  read_user_unit_install_paths paths "$unit"
+  remove_retired "the user unit $unit is retired" "${paths[@]}"
 }
 
 # The Syncthing GUI and REST API listen on 127.0.0.1:8384, which every process of the machine can reach, so without a
@@ -1763,6 +1818,11 @@ VEKRONA_DESKTOP_PKGS=(
 
 # shellcheck disable=SC2034
 VEKRONA_RETIRED_PKGS=(dms dms-cli dgop danksearch matugen mise)
+
+# The user units a past vekrona installed and no longer ships. Stopping tailscale-systray drops the tray client (22 MiB resident);
+# Tailscale is managed from its CLI.
+# shellcheck disable=SC2034
+VEKRONA_RETIRED_USER_UNITS=(tailscale-systray.service)
 
 # What mise and the coding agents (Claude Code, Codex, OpenCode, Pi, Cursor) left behind; stage 30 removes them.
 # /etc/claude-code/managed-settings.json stays: it is the login-method policy, installed by stage 40.

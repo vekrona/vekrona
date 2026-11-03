@@ -17,7 +17,6 @@ JOIN_PX="$(vekrona_token_get spacing space-2)"
 GUEST_DIR=/tmp/bar-tray-activate
 GUEST_SNI="$GUEST_DIR/fake-sni.py"
 GUEST_LOG=/tmp/bar-tray-activate-fake-sni.log
-TRAY_UNIT=tailscale-systray.service
 MEASURE_FILE="$(mktemp)"
 
 stop_fake_icons() { vekrona-dev run pkill -f "[b]ar-tray-activate/fake-sni.py" || [[ $? -eq 1 ]]; }
@@ -34,22 +33,11 @@ shell_criticals() { vekrona-dev sh journalctl --user --no-pager -o cat -t vekron
 export -f activated
 export GUEST_LOG
 
-restore() {
-  stop_fake_icons
-  rm -f "$MEASURE_FILE"
-  [[ "${tray_was_active:-0}" == 1 ]] && vekrona-dev sh systemctl --user start "$TRAY_UNIT"
-  return 0
-}
-trap restore EXIT
+trap 'stop_fake_icons; rm -f "$MEASURE_FILE"' EXIT
 
 vekrona-dev session
 clear_notifications
 vekrona-dev move 600 500
-tray_was_active=0
-if vekrona-dev sh systemctl --user is-active --quiet "$TRAY_UNIT"; then
-  tray_was_active=1
-  vekrona-dev sh systemctl --user stop "$TRAY_UNIT"
-fi
 vekrona-dev run mkdir -p "$GUEST_DIR"
 for file in "$ROOT/tests/e2e/fake-sni.py" "$ROOT/tests/e2e/png_rows.py"; do
   vekrona-dev run bash -c 'cat >"$1"' _ "$GUEST_DIR/$(basename "$file")" <"$file"

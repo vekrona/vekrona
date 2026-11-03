@@ -35,9 +35,9 @@ WORST_CASE_DATE="2026-08-26 22:22:00"
 WORST_CASE_MONTH=Aug
 # Both dots show, so the check covers the pills that carry one: a dot hangs over its pill's padding and widens no gap.
 UNREAD_COUNT=1
-# The bar the user sees: two tray icons (Tailscale's own unit and a fake 1Password), the weather, the load (a pictogram of two bars),
+# The bar the user sees: one tray icon (a fake 1Password), the weather, the load (a pictogram of two bars),
 # a second keyboard layout, the sound and network icons, the agent and the bell with their dots, the clock. A battery shows on laptops only.
-EXPECTED_KINDS=PPTPTPPPPT
+EXPECTED_KINDS=PTPTPPPPT
 SINK_NAME=VekronaTestSink
 GUEST_DIR=/tmp/bar-spacing
 GUEST_LOG=/tmp/bar-spacing-fake-sni.log

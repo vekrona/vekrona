@@ -7,7 +7,7 @@ Item {
     required property url source
     required property color tint
     property int size: VekronaTheme.iconS
-    // Some tray icons (Tailscale's) ship an opaque square. A corner alpha of at least opaqueIconAlpha marks one, and
+    // Some tray icons ship an opaque square. A corner alpha of at least opaqueIconAlpha marks one, and
     // opaqueContrastGain scales its glyph's contrast to the corner colour into the mask.
     readonly property real opaqueIconAlpha: 0.98
     readonly property real opaqueContrastGain: 2
