@@ -102,8 +102,9 @@ with_scratch_dir install_xremap_path_unit
 ensure_dropins_restarting xremap.service "$VEKRONA_ROOT/config/xremap" /etc/xremap config.yml
 ensure_system_unit --now enabled xremap.path
 
-# These only reload systemd: restarting NetworkManager would drop the network mid-install, and the ordering matters at shutdown.
-for dropin in NetworkManager.service.d/vekrona-shutdown-order.conf NetworkManager-dispatcher.service.d/vekrona-persist.conf; do
+# These only reload systemd: restarting NetworkManager would drop the network mid-install, and the ordering matters at shutdown;
+# tailscaled gets shields up and ssh off by ensure_tailscale_settings below, and again by the drop-in at its next start.
+for dropin in NetworkManager.service.d/vekrona-shutdown-order.conf NetworkManager-dispatcher.service.d/vekrona-persist.conf tailscaled.service.d/vekrona-hardening.conf; do
   ensure_root_file "$VEKRONA_ROOT/etc/systemd/system/$dropin" "/etc/systemd/system/$dropin"
 done
 root systemctl daemon-reload
