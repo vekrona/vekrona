@@ -123,8 +123,10 @@ check_scale_change() {
 MEASURE_FILE="$(mktemp)"
 menu_shown() { text_shown "$MENU_LABEL"; }
 menu_gone() { absent menu_shown; }
+slurp_running() { vekrona-dev run pgrep -x slurp >/dev/null; }
+slurp_gone() { absent slurp_running; }
 menu_errors() { shell_log_count 'QApplication mode'; }
-export -f menu_shown menu_gone
+export -f menu_shown menu_gone slurp_running slurp_gone
 export MENU_LABEL
 
 "$ROOT/tests/bake-shaders.sh" --check
@@ -191,4 +193,12 @@ vekrona-dev click "$icon_x" "$icon_y"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- menu_gone || die "a second left click on the tray icon must close its menu"
 stays_absent "$QUIET_SEC" menu_shown || die "a second left click on the tray icon closed its menu and then reopened it"
 log "ok: a second left click on the tray icon closes its menu and leaves it closed"
+# An open tray menu holds the keyboard grab, so slurp ignores Esc until the menu closes; the screenshot tool must close it first.
+vekrona-dev click "$icon_x" "$icon_y"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- menu_shown || die "left-clicking a tray icon must open its menu again"
+vekrona-dev key super-shift-4
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- slurp_running || die "Cmd+Shift+4 must start the area selection"
+vekrona-dev key esc
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- slurp_gone || die "a screenshot selection must take the keyboard from an open tray menu so that one Esc ends it, but slurp is still running"
+log "ok: a screenshot selection takes the keyboard from an open tray menu: one Esc ends it"
 stop_fake_icons

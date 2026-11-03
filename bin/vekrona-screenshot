@@ -9,6 +9,10 @@ usage() {
   exit 2
 }
 
+# A shell that answers closes the menus in milliseconds. The selection lock is held meanwhile, so a shell that hangs would
+# otherwise block this screenshot and, through the lock, every later one.
+TRAY_CLOSE_TIMEOUT_SEC=2
+
 CLIPBOARD=0
 if [[ "${1-}" == "--clipboard" ]]; then
   CLIPBOARD=1
@@ -37,6 +41,15 @@ case "$MODE" in
     flock -n "$selecting" || flock_rc=$?
     ((flock_rc != 1)) || exit 0
     ((flock_rc == 0)) || die "Screenshot failed: could not lock the selection (flock exit $flock_rc)"
+    # A tray menu is a popup that sway draws above slurp's overlay and slurp's grab does not dismiss, so it would hide the selection.
+    # A shell that cannot close the menus is reported, and the screenshot goes on.
+    close_rc=0
+    close_out="$(timeout "$TRAY_CLOSE_TIMEOUT_SEC" qs -c vekrona-shell ipc call tray closeMenus 2>&1)" || close_rc=$?
+    if ((close_rc == 124)); then
+      warn "the shell did not answer in ${TRAY_CLOSE_TIMEOUT_SEC}s, so an open tray menu may hide the selection"
+    elif ((close_rc != 0)); then
+      warn "could not close the tray menus, so an open one may hide the selection: $close_out"
+    fi
     slurp_err="$(mktemp)" || die "Screenshot failed: cannot create a temporary file"
     trap 'rm -f "$slurp_err"' EXIT
     slurp_rc=0

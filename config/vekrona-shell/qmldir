@@ -39,3 +39,4 @@ Polkit 1.0 Polkit.qml
 AppSwitch 1.0 AppSwitch.qml
 SwayConfig 1.0 SwayConfig.qml
 SuperKeys 1.0 SuperKeys.qml
+singleton TrayMenus 1.0 TrayMenus.qml

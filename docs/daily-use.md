@@ -199,7 +199,7 @@ vekrona-screenshot --clipboard window   # copy to clipboard, no file
 vekrona-record toggle           # slurp region select, systemd-run transient user unit toggle, saved to ~/Videos/Recordings
 ```
 
-Super+Shift+3/4/5 work like Cmd+Shift+3/4/5 on macOS, and adding Ctrl copies to the clipboard without saving a file. In area mode, click a window or drag a rectangle. Saved shots are also copied to the clipboard, and the notification has Edit (opens swappy) and Delete (moves the shot to the trash) buttons.
+Super+Shift+3/4/5 work like Cmd+Shift+3/4/5 on macOS, and adding Ctrl copies to the clipboard without saving a file. In area mode, click a window or drag a rectangle; area and window mode close an open tray menu first, which would otherwise stay on top of the selection, and screen mode captures it. Saved shots are also copied to the clipboard, and the notification has Edit (opens swappy) and Delete (moves the shot to the trash) buttons.
 
 Webapps (each opens a dedicated Firefox profile and window, set up by stage
 `50-user` from `config/firefox/webapps/<app>/`):

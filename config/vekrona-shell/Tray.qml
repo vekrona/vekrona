@@ -4,7 +4,18 @@ import Quickshell.Services.SystemTray
 import "Vekrona"
 
 Row {
+    // Each screen's bar has its own tray, and each closes its own menus when asked.
+    Connections {
+        target: TrayMenus
+
+        function onCloseRequested(): void {
+            for (let i = 0; i < icons.count; i++)
+                icons.itemAt(i).closeMenu();
+        }
+    }
+
     Repeater {
+        id: icons
         model: SystemTray.items
 
         Item {
@@ -14,6 +25,12 @@ Row {
 
             width: VekronaTheme.iconS + 2 * VekronaTheme.space2
             height: VekronaTheme.sizeTarget
+
+            // QsMenuAnchor.close() logs an error when no menu is open.
+            function closeMenu(): void {
+                if (menu.visible)
+                    menu.close();
+            }
 
             Rectangle {
                 anchors.fill: parent

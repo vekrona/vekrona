@@ -39,6 +39,11 @@ if [[ -n "${SLURP_SIGNAL:-}" ]]; then
   exit $((128 + SLURP_SIGNAL))
 fi
 if [[ -n "${SLURP_OUT:-}" ]]; then echo "$SLURP_OUT"; else echo "${SLURP_ERR:-selection cancelled}" >&2; exit 1; fi'
+# QS_HANG: a shell that never answers. Opening a fifo nobody writes to blocks in bash itself, so timeout's TERM ends the stub.
+mkfifo "$scratch/never-written"
+stub qs 'echo "$*" >> "$SCRATCH/logs/qs"
+[[ "${QS_HANG:-}" != 1 ]] || exec 3<"$SCRATCH/never-written"
+[[ "${QS_FAIL:-}" != 1 ]] || exit 1'
 stub swaymsg 'case "$2" in get_tree) cat "$SCRATCH/tree.json";; get_outputs) cat "$SCRATCH/outputs.json";; *) exit 1;; esac'
 stub wl-copy 'cat > "$SCRATCH/logs/clip"
 [[ "${WL_COPY_FAIL:-}" != 1 ]] || exit 1'
@@ -55,7 +60,8 @@ run_shot() {
   rm -rf "$logs" "$HOME/Pictures"
   mkdir -p "$logs"
   rc=0
-  PATH="$stubs:$PATH" "$tool" "$@" >/dev/null 2>"$scratch/stderr" || rc=$?
+  # The outer timeout turns a hang into exit 124, which expect_rc reports, instead of a test that never ends.
+  PATH="$stubs:$PATH" timeout 60 "$tool" "$@" >/dev/null 2>"$scratch/stderr" || rc=$?
 }
 
 saved_file() { find "$shots" -name '*.png' -print -quit 2>/dev/null; }
@@ -98,6 +104,26 @@ grep -qx -- "-r" "$logs/slurp" || die "window: slurp must get -r: $(cat "$logs/s
 SLURP_OUT="0,0 960x1080" run_shot area
 if grep -q -- "-r" "$logs/slurp"; then die "area: slurp must allow free drags"; fi
 log "ok: window restricts selection to windows"
+
+SLURP_OUT="100,200 400x300" run_shot area
+grep -qx -- "-c vekrona-shell ipc call tray closeMenus" "$logs/qs" || die "area: the shell must be asked to close the tray menus: $(cat "$logs/qs" 2>&1)"
+SLURP_OUT="0,0 960x1080" run_shot window
+grep -qx -- "-c vekrona-shell ipc call tray closeMenus" "$logs/qs" || die "window: the shell must be asked to close the tray menus: $(cat "$logs/qs" 2>&1)"
+SLURP_OUT="100,200 400x300" run_shot screen
+logged qs && die "screen: an open tray menu stays in the capture, the shell must not be asked: $(cat "$logs/qs")"
+log "ok: area and window close the tray menus before the selection, screen leaves them"
+
+QS_FAIL=1 SLURP_OUT="100,200 400x300" run_shot area
+expect_rc 0 "shell down"
+grep -q -- "tray menus" "$scratch/stderr" || die "shell down: the failure must reach stderr: $(cat "$scratch/stderr")"
+grep -q -- "-g 100,200 400x300 " "$logs/grim" || die "shell down: the screenshot must still be taken: $(cat "$logs/grim" 2>&1)"
+log "ok: an unreachable shell is reported on stderr and the selection goes on"
+
+QS_HANG=1 SLURP_OUT="100,200 400x300" run_shot area
+expect_rc 0 "shell hangs"
+grep -q -- "did not answer" "$scratch/stderr" || die "shell hangs: the timeout must reach stderr: $(cat "$scratch/stderr")"
+grep -q -- "-g 100,200 400x300 " "$logs/grim" || die "shell hangs: the screenshot must still be taken: $(cat "$logs/grim" 2>&1)"
+log "ok: a shell that does not answer is reported on stderr and the selection goes on"
 
 run_shot --clipboard screen
 expect_rc 0 "--clipboard"
