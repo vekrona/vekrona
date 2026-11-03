@@ -19,6 +19,11 @@ touch "$VEKRONA_KEEP_SSHD_MARKER"
 [[ "$(unwanted)" == *"abrt "* ]] || die "the marker must not shield the other unwanted packages: $(unwanted)"
 log "ok: openssh-server is unwanted unless the keep-sshd marker exists"
 
+# bash -c, not a subshell: the test's own assignment above must not stand in for the environment.
+env_marker="$(VEKRONA_KEEP_SSHD_MARKER="$work/from-environment" bash -c 'source "$1/lib/common.sh" && echo "$VEKRONA_KEEP_SSHD_MARKER"' _ "$REPO")"
+[[ "$env_marker" == /etc/vekrona/keep-sshd ]] || die "the environment must not move the keep-sshd marker, got $env_marker"
+log "ok: the environment cannot move the keep-sshd marker"
+
 rm -f "$VEKRONA_KEEP_SSHD_MARKER"
 for pkg in $(vekrona_unwanted_pkgs); do
   [[ " ${VEKRONA_DESKTOP_PKGS[*]} " != *" $pkg "* ]] || die "$pkg is both a desktop package and an unwanted one: stage 30 would install it and then refuse to remove it"

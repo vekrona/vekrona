@@ -15,8 +15,9 @@ VEKRONA_SYSTEM_DIR=/usr/local/lib/vekrona
 # shellcheck disable=SC2034
 VEKRONA_SYSTEM_BIN=(vekrona-proton vekrona-update-ask)
 # A root-owned file the test guests carry (vekrona-dev's provisioning, the ISO test's kickstart): their host drives them over
-# ssh, so stage 30 keeps openssh-server there and stage 40 keeps ssh open in the default zone. Tests point this at a scratch file.
-VEKRONA_KEEP_SSHD_MARKER="${VEKRONA_KEEP_SSHD_MARKER:-/etc/vekrona/keep-sshd}"
+# ssh, so stage 30 keeps openssh-server there and stage 40 keeps ssh open in the default zone. The path is fixed, so no
+# inherited environment variable can make a real host keep sshd; a test assigns a scratch path after it sourced this file.
+VEKRONA_KEEP_SSHD_MARKER=/etc/vekrona/keep-sshd
 keep_sshd() { [[ -e "$VEKRONA_KEEP_SSHD_MARKER" ]]; }
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
