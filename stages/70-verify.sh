@@ -105,6 +105,11 @@ irqbalance_bans_nvme_when_running() {
   pid="$(systemctl show irqbalance -p MainPID --value)"
   [[ "$pid" -eq 0 ]] || tr '\0' ' ' <"/proc/$pid/cmdline" | grep -qF -- '--banmod=nvme'
 }
+# --validate leaves its headless wayland-N socket behind; in the user's runtime directory xremap.path would take it for a session.
+sway_config_validates() {
+  chmod 700 "$1"
+  env XDG_RUNTIME_DIR="$1" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
+}
 tailscaled_start_hardens() { contains "--shields-up=true --ssh=false" "$(systemctl show tailscaled -p ExecStartPost --value)"; }
 tailscale_operator_is_user() { [[ "$(tailscale_operator)" == "$VEKRONA_USER" ]]; }
 authselect_selection_ok() {
@@ -543,8 +548,7 @@ if ran 50-user; then
   check assert "the systemd user manager generates no nvidia-settings autostart unit (the Hidden=true override took effect)" \
     path_absent "$XDG_RUNTIME_DIR/systemd/generator.late/app-nvidia\\x2dsettings\\x2duser@autostart.service"
   check assert "sway config.d exists (personal Sway settings, included last by the shared config)" dir_exists "$HOME/.config/sway/config.d"
-  check assert "sway config validates" env WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
-    sway --unsupported-gpu --validate -c "$HOME/.config/sway/config"
+  check assert "sway config validates" with_scratch_dir sway_config_validates
   check assert "sway panel scale drop-in present iff an internal panel is connected" present_iff has_internal_panel file_exists "$SWAY_PANEL_SCALE_DROPIN"
   check assert "system X11 keymap converts to Sway's XKB environment" vekrona-xkb-env
   check assert "xremap config validates" xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml"
