@@ -120,7 +120,7 @@ ensure_tailnet_ssh_firewall_gone
 mapfile -t zone_services < <(default_zone_services)
 ensure_default_zone "${zone_services[@]}"
 high_port_zones="$(zones_open_to_high_ports)"
-[[ -z "$high_port_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$high_port_zones")open every TCP port from 1025 to this network and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone '')"
+[[ -z "$high_port_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$high_port_zones")open every TCP port from $HIGH_PORTS_FIRST to this network and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone '')"
 accepting_zones="$(zones_accepting_everything)"
 [[ -z "$accepting_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$accepting_zones")accept every connection and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone ''), or a program such as libvirt or Docker made it"
 

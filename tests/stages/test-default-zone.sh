@@ -89,6 +89,12 @@ zone trusted ACCEPT "" "" "docker0" ""
 [[ "$(accepting)" == "trusted " ]] || die "an active zone with the target ACCEPT must be found: '$(accepting)'"
 log "ok: an active zone that accepts everything is found"
 
+hold perm trusted rich-rules 'rule family="ipv4" source address="10.0.0.0/8" drop'
+[[ "$(accepting)" == "trusted " ]] || die "a rule that drops one source is no catch-all, the zone still accepts the rest: '$(accepting)'"
+hold perm trusted rich-rules 'rule priority="32767" reject'
+[[ -z "$(accepting)" ]] || die "libvirt's zone (target ACCEPT, a lowest-priority reject of everything else) accepts nothing by default: '$(accepting)'"
+log "ok: an ACCEPT zone with a catch-all reject rule is not one that accepts everything"
+
 stock
 FW_SERVICES="dhcpv6-client mdns ssh" ensure
 [[ "$rc" != 0 ]] && grep -q 'no service syncthing' "$scratch/out" || die "a firewalld without a service vekrona needs must fail before anything changes: rc=$rc: $(cat "$scratch/out")"

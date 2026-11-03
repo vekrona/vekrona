@@ -457,7 +457,7 @@ if ran 40-system; then
   check assert "the $DEFAULT_ZONE zone holds exactly ${zone_services[*]} and no port (permanent)" default_zone_is_exact permanent "${zone_services[@]}"
   check assert "the $DEFAULT_ZONE zone holds exactly ${zone_services[*]} and no port (running)" default_zone_is_exact running "${zone_services[@]}"
   high_port_zones="$(zones_open_to_high_ports)"
-  check assert "no zone with an interface opens TCP 1025-65535 (a NetworkManager connection may pin one: nmcli connection modify <connection> connection.zone '')" eq "$high_port_zones" ""
+  check assert "no zone with an interface opens TCP $HIGH_PORTS_FIRST-$HIGH_PORTS_LAST (a NetworkManager connection may pin one: nmcli connection modify <connection> connection.zone '')" eq "$high_port_zones" ""
   accepting_zones="$(zones_accepting_everything)"
   check assert "no zone with an interface accepts every connection (target ACCEPT: trusted, libvirt's or Docker's zone)" eq "$accepting_zones" ""
   check assert "/etc/systemd/resolved.conf.d/50-vekrona.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/resolved.conf.d/50-vekrona.conf" /etc/systemd/resolved.conf.d/50-vekrona.conf

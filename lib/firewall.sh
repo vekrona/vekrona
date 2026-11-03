@@ -75,7 +75,11 @@ ensure_tailnet_ssh_firewall_gone() {
   if [[ $reload -eq 1 ]]; then reload_firewalld; fi
 }
 
-# True when one of the open TCP port ranges of ZONE (running configuration) covers 1025-65535.
+# The unprivileged ports Fedora Workstation's own zone opens to every network.
+HIGH_PORTS_FIRST=1025
+HIGH_PORTS_LAST=65535
+
+# True when one of the open TCP port ranges of ZONE (running configuration) covers HIGH_PORTS_FIRST-HIGH_PORTS_LAST.
 zone_opens_high_tcp_ports() {
   local entries entry range
   entries="$(firewall_list --zone="$1" --list-ports)" || die "cannot list the open ports of the zone $1"
@@ -83,7 +87,7 @@ zone_opens_high_tcp_ports() {
     [[ "$entry" == */tcp ]] || continue
     range="${entry%/tcp}"
     [[ "$range" == *-* ]] || range="$range-$range"
-    if (( ${range%-*} <= 1025 && ${range#*-} >= 65535 )); then return 0; fi
+    if (( ${range%-*} <= HIGH_PORTS_FIRST && ${range#*-} >= HIGH_PORTS_LAST )); then return 0; fi
   done <<<"$entries"
   return 1
 }
@@ -180,7 +184,7 @@ ensure_default_zone() {
   default_zone_is_exact running "${wanted[@]}" || die "the zone $DEFAULT_ZONE still differs from the wanted services after the reload"
 }
 
-# The zones some interface or source is in that open every TCP port from 1025: after ensure_default_zone these are the
+# The zones some interface or source is in that open every TCP port from the first unprivileged one: after ensure_default_zone these are the
 # connections NetworkManager pins to a zone of their own. One per line.
 zones_open_to_high_ports() {
   local zones zone
@@ -191,13 +195,25 @@ zones_open_to_high_ports() {
   done <<<"$zones"
 }
 
-# The zones some interface or source is in whose target accepts everything (trusted, or a hotspot's or Docker's zone). One per line.
+# True when ZONE (permanent configuration) rejects or drops what no other rule of it matched. libvirt's zone has the target
+# ACCEPT and a rich rule of the lowest priority that rejects everything, so only its explicit rules let anything in.
+zone_has_catch_all_rule() {
+  local rules rule
+  rules="$(firewall_lines --permanent --zone="$1" --list-rich-rules)" || die "cannot list the rich rules of the zone $1"
+  while IFS= read -r rule; do
+    if [[ "$rule" =~ ^rule(\ priority=\"[^\"]*\")?(\ family=\"[^\"]*\")?\ (reject|drop) ]]; then return 0; fi
+  done <<<"$rules"
+  return 1
+}
+
+# The zones some interface or source is in whose target accepts everything (trusted, or a hotspot's or Docker's zone) and
+# that have no catch-all reject or drop rule behind it. One per line.
 zones_accepting_everything() {
   local zones zone target
   zones="$(active_zones)" || die "cannot read the active zones"
   while read -r zone; do
     [[ -n "$zone" ]] || continue
     target="$(root firewall-cmd --permanent --zone="$zone" --get-target)" || die "cannot read the target of the zone $zone"
-    if [[ "$target" == ACCEPT ]]; then printf '%s\n' "$zone"; fi
+    if [[ "$target" == ACCEPT ]] && ! zone_has_catch_all_rule "$zone"; then printf '%s\n' "$zone"; fi
   done <<<"$zones"
 }
