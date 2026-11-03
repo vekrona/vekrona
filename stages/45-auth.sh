@@ -37,12 +37,12 @@ render_and_install_profile() {
 }
 
 ensure_profile_files() {
-  if with_scratch_dir profile_matches_rendered; then
+  if with_root_scratch_dir profile_matches_rendered; then
     log "authselect profile up to date: $PROFILE_ID"
     profile_files_changed=0
   else
     log "writing authselect profile: $PROFILE_ID"
-    with_scratch_dir render_and_install_profile
+    with_root_scratch_dir render_and_install_profile
     profile_files_changed=1
   fi
 }

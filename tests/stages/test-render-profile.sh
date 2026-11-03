@@ -8,10 +8,32 @@ source "$ROOT/lib/authselect-vekrona.sh"
 BASE=/usr/share/authselect/default/local
 [[ -d "$BASE" ]] || die "authselect base profile missing: $BASE"
 
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+# A directory whose owner stat cannot read is refused too, not taken for root's: an empty owner is no uid 0.
+gone="$(mktemp -u)"
+refused="$( (render_authselect_profile "$BASE" "$gone") 2>&1)" && die "rendering into a directory whose owner cannot be read must be refused"
+[[ ! -e "$gone" ]] || { root rm -rf "$gone"; die "a refused render still created $gone"; }
+grep -qF "cannot read the owner of the authselect profile directory $gone" <<<"$refused" || die "the refusal must say why, it said: $refused"
+log "ok: a directory whose owner cannot be read is refused before anything is written"
+
+skip_as_root "a directory root made is root-owned, so the refusal below cannot be provoked"
+
+# Root installs what is rendered, so the renderer takes only a directory the user cannot change.
+user_dir="$(mktemp -d)"
+trap 'rm -rf "$user_dir"' EXIT
+refused="$( (render_authselect_profile "$BASE" "$user_dir") 2>&1)" && die "rendering into a directory the user owns must be refused"
+[[ -z "$(ls -A "$user_dir")" ]] || die "a refused render still wrote into $user_dir"
+grep -qF 'not root-owned' <<<"$refused" || die "the refusal must say why, it said: $refused"
+log "ok: a directory the user owns is refused before anything is written"
+
+work="$(root mktemp -d)"
+trap 'rm -rf "$user_dir"; root rm -rf "$work"' EXIT
+root chmod 0755 "$work"
 
 render_authselect_profile "$BASE" "$work"
+
+foreign="$(find "$work" ! -user root -print)"
+[[ -z "$foreign" ]] || die "rendered files must be root-owned, these are not: $foreign"
+log "ok: every rendered file is root-owned"
 
 for f in system-auth password-auth; do
   pinned="$(grep -cF -- "$PAM_U2F_VEKRONA" "$work/$f" || true)"

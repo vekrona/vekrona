@@ -32,13 +32,17 @@ count_occurrences() {
   printf '%s' "$(((${#text} - ${#stripped}) / ${#needle}))"
 }
 
+# render_authselect_profile BASE DEST: DEST must be a directory only root can change (with_root_scratch_dir), because root installs
+# what is rendered into it: in a directory the user owns, any process of the user could swap a file between the render and the install.
 render_authselect_profile() {
-  local base="$1" dest="$2" f content found
-  cp -a "$base/." "$dest" || die "cannot copy authselect base profile from $base"
+  local base="$1" dest="$2" f content found owner
+  owner="$(stat -c %u "$dest")" || die "cannot read the owner of the authselect profile directory $dest"
+  [[ "$owner" == 0 ]] || die "authselect profile directory is not root-owned: $dest (owner uid '$owner')"
+  root cp -a "$base/." "$dest" || die "cannot copy authselect base profile from $base"
   for f in "${AUTHSELECT_PAM_FILES[@]}"; do
     content="$(<"$dest/$f")"
     found="$(count_occurrences "$content" "$PAM_U2F_STOCK")"
     [[ "$found" -eq 2 ]] || die "expected 2 pam_u2f lines in base profile $f, found $found"
-    printf '%s\n' "${content//"$PAM_U2F_STOCK"/"$PAM_U2F_VEKRONA"}" >"$dest/$f"
+    printf '%s\n' "${content//"$PAM_U2F_STOCK"/"$PAM_U2F_VEKRONA"}" | root tee "$dest/$f" >/dev/null || die "cannot write $dest/$f"
   done
 }
