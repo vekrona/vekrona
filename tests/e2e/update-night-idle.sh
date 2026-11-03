@@ -29,9 +29,7 @@ publish_decoy_update
 use_only_the_test_repo
 
 # A greeter with nobody logged in.
-previous_boot="$(boot_id)"
-vekrona-dev run sudo systemctl reboot --no-block
-vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- booted_again "$previous_boot"
+vekrona-dev reboot
 vekrona-dev until --timeout "$BOOT_TIMEOUT_SEC" -- greeter_up
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- no_graphical_login || die "somebody is logged in at the greeter"
 
