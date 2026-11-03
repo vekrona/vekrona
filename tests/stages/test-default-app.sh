@@ -9,11 +9,13 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 stubs="$scratch/stubs"
 defaults="$scratch/defaults"
-mkdir -p "$stubs" "$defaults"
-export DEFAULTS="$defaults"
+guesses="$scratch/guesses"
+mkdir -p "$stubs" "$defaults" "$guesses"
+export DEFAULTS="$defaults" GUESSES="$guesses"
 
-# An xdg-mime over one file per MIME type (the slash becomes a comma). XDG_FAIL=query makes every query fail,
-# XDG_FAIL=default makes every set fail, XDG_IGNORE_SET=1 makes a set succeed without storing anything.
+# An xdg-mime over one file per MIME type (the slash becomes a comma). A query answers from the stored default, else from
+# the guess file of that type (xdg-mime guesses from the installed .desktop files when nothing is stored). XDG_FAIL=query
+# makes every query fail, XDG_FAIL=default makes every set fail, XDG_IGNORE_SET=1 makes a set succeed without storing anything.
 cat >"$stubs/xdg-mime" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -21,7 +23,7 @@ key() { printf '%s/%s' "$DEFAULTS" "${1//\//,}"; }
 case "$1 $2" in
   "query default")
     [[ "${XDG_FAIL:-}" != query ]] || exit 4
-    if [[ -f "$(key "$3")" ]]; then cat "$(key "$3")"; fi
+    if [[ -f "$(key "$3")" ]]; then cat "$(key "$3")"; elif [[ -f "$GUESSES/${3//\//,}" ]]; then cat "$GUESSES/${3//\//,}"; fi
     ;;
   "default "*)
     [[ "${XDG_FAIL:-}" != default ]] || exit 4
@@ -34,7 +36,8 @@ chmod +x "$stubs/xdg-mime"
 
 ensure() { rc=0; (PATH="$stubs:$PATH" ensure_default_app "$@") >"$scratch/out" 2>&1 || rc=$?; }
 handler_of() { PATH="$stubs:$PATH" xdg-mime query default "$1"; }
-reset() { rm -f "$defaults"/*; }
+reset() { rm -f "$defaults"/* "$guesses"/*; }
+stored() { [[ "$(cat "$defaults/${1//\//,}" 2>/dev/null)" == "$2" ]]; }
 
 APP=vekrona-rune.desktop
 MIMES=(text/markdown text/plain)
@@ -44,9 +47,15 @@ ensure "$APP" "${MIMES[@]}"
 [[ "$rc" == 0 && "$(handler_of text/markdown)" == "$APP" && "$(handler_of text/plain)" == "$APP" ]] || die "the app did not become the default of every MIME type: rc=$rc: $(cat "$scratch/out")"
 log "ok: the app becomes the default handler of every MIME type"
 
-ensure "$APP" "${MIMES[@]}"
-if ! { [[ "$rc" == 0 ]] && ! grep -q 'setting default handler' "$scratch/out"; }; then die "a handler that is already set was set again: rc=$rc: $(cat "$scratch/out")"; fi
-log "ok: a handler that is already set is left alone"
+reset
+echo "$APP" >"$guesses/text,plain"
+ensure "$APP" text/plain
+if ! { [[ "$rc" == 0 ]] && stored text/plain "$APP"; }; then die "a type that xdg-mime only guesses to be the app's was not stored as its default: rc=$rc: $(cat "$scratch/out")"; fi
+log "ok: a guess that names the app is not taken for its default"
+
+ensure "$APP" text/plain
+[[ "$rc" == 0 ]] || die "setting a default twice failed: rc=$rc: $(cat "$scratch/out")"
+log "ok: setting a default twice is fine"
 
 reset
 echo other.desktop >"$defaults/text,plain"

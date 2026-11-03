@@ -1923,14 +1923,14 @@ ensure_webapp_user_js() {
   write_file_atomic "$dst" "$content"$'\n'
 }
 
-# ensure_default_app DESKTOP MIME...: makes DESKTOP the handler `xdg-open` and `gio open` pick for every MIME, and dies unless
-# xdg-mime then reports it.
+# ensure_default_app DESKTOP MIME...: writes DESKTOP as the default handler of every MIME type into ~/.config/mimeapps.list, so
+# that `xdg-open` and `gio open` pick it, and dies unless xdg-mime then reports it. It always writes: `xdg-mime query default`
+# also answers from a guess over every installed .desktop file (which depends on XDG_DATA_DIRS, so the answer differs between a
+# systemd service and a login shell with Flatpak exports), and a guess that happens to name DESKTOP now is not a default.
 ensure_default_app() {
   local desktop="$1" mime current
   shift
   for mime in "$@"; do
-    current="$(xdg-mime query default "$mime")" || die "xdg-mime query failed: $mime"
-    [[ "$current" == "$desktop" ]] && { log "default handler already set: $mime"; continue; }
     log "setting default handler: $mime = $desktop"
     xdg-mime default "$desktop" "$mime" || die "xdg-mime default failed: $mime"
     current="$(xdg-mime query default "$mime")" || die "xdg-mime query failed: $mime"
