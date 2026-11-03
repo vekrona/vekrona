@@ -17,8 +17,13 @@ or the icon is tinted wrongly.
 The coverage of a pixel is its share of INK_HEX in BAR_HEX, averaged over the channels and clamped to [0, 1].
 disc: the edge must be anti-aliased: a smooth disc of ICON_PX leaves a ring of about pi * ICON_PX pixels of partial coverage,
 a nearest-neighbour shrink leaves few. The disc must also be symmetric: rows (and columns) mirrored about the center of the box
-differ by at most one pixel in the count of pixels covered at least half. badged-disc is not checked for symmetry: the real icon's
+differ by at most one pixel in the count of pixels covered at least half. badged-disc is not checked by those counts: the real icon's
 rim sits on a half of a pixel at scale 1.25, so the count of covered pixels flips between mirrored rows of the source itself.
+disc and badged-disc: the center of coverage of the silhouette (the centroid of the coverages with every hole filled, which moves
+smoothly with every pixel of the edge) must sit within CENTROID_MAX_OFFSET_PX of the middle of the disc's extent, where the extent
+along an axis ends where the strongest coverage of each row or column crosses a half, interpolated between pixels. A disc that is
+clipped on one side or drawn off its box moves one and not the other. The holes are filled because badged-disc's keyhole is not
+symmetric top to bottom: left in, it moved the centroid of 1password.png by 0.25 px at scale 1 and 0.40 px at scale 1.25.
 Prints the box, the ink ratio, the partial pixels and the covered pixels per row and column; exits 1 when a check fails.
 """
 import math
@@ -41,6 +46,8 @@ PARTIAL_MAX_COVERAGE = 0.9
 DISC_MIN_PARTIAL_PER_CIRCUMFERENCE = 0.4
 COVERED_MIN_COVERAGE = 0.5
 MIRROR_MAX_DIFF = 1
+CENTROID_MAX_OFFSET_PX = 0.25
+EXTENT_COVERAGE = 0.5
 # 1password.png is 256 px wide; its keyhole is 2045 px, 0.031 of the icon area, and its ring 12141 px. Half the keyhole must survive the shrink.
 BADGED_DISC_HOLE_MIN_AREA_SHARE = 0.015
 BADGED_DISC_MIN_HOLES = 2
@@ -81,6 +88,38 @@ def low_regions(coverages):
                         todo.append(n)
             regions.append((pixels, any(px in (0, width - 1) or py in (0, height - 1) for px, py in pixels)))
     return regions
+
+
+def extent_middle(strongest):
+    """The middle of the span where the profile (the strongest coverage per row or column) is at least EXTENT_COVERAGE, in pixel
+    indexes. Each end is where the profile crosses EXTENT_COVERAGE, interpolated between two neighbours (the profile is padded with
+    zeros, so an edge that sits on the border of the box has its crossing half a pixel outside)."""
+    padded = [0.0, *strongest, 0.0]
+    covered = [i for i, c in enumerate(padded) if c >= EXTENT_COVERAGE]
+    if not covered:
+        sys.exit(f"no row or column of the icon is covered at least {EXTENT_COVERAGE}")
+    first, last = covered[0], covered[-1]
+    start = first - 1 + (EXTENT_COVERAGE - padded[first - 1]) / (padded[first] - padded[first - 1])
+    end = last + (padded[last] - EXTENT_COVERAGE) / (padded[last] - padded[last + 1])
+    return (start + end) / 2 - 1
+
+
+def centroid_offsets(coverages):
+    """How far the coverage-weighted centroid is from the middle of the icon's extent, as (dx, dy) in pixels."""
+    total = sum(sum(row) for row in coverages)
+    centroid_x = sum(c * x for row in coverages for x, c in enumerate(row)) / total
+    centroid_y = sum(c * y for y, row in enumerate(coverages) for c in row) / total
+    return (centroid_x - extent_middle([max(column) for column in zip(*coverages)]),
+            centroid_y - extent_middle([max(row) for row in coverages]))
+
+
+def silhouette(coverages, holes):
+    """The coverages with every enclosed hole filled: the disc's outline, which the opaque details inside it do not move."""
+    filled = [list(row) for row in coverages]
+    for pixels in holes:
+        for x, y in pixels:
+            filled[y][x] = 1.0
+    return filled
 
 
 def mirrored_mismatch(counts):
@@ -149,6 +188,8 @@ def main():
         column_counts = [sum(c >= COVERED_MIN_COVERAGE for c in column) for column in zip(*coverages)]
         hole_areas = sorted((len(pixels) for pixels in holes), reverse=True)
         print(f"{partial} partial px (anti-aliased edge); hole areas {hole_areas}; covered px per row {row_counts}, per column {column_counts}")
+        offset_x, offset_y = centroid_offsets(silhouette(coverages, holes))
+        print(f"centroid offset from the middle of the extent: x {offset_x:+.2f} px, y {offset_y:+.2f} px")
         min_hole_area = BADGED_DISC_HOLE_MIN_AREA_SHARE * icon_px**2
         big_holes = [area for area in hole_areas if area >= min_hole_area]
         if kind == "badged-disc" and len(big_holes) < BADGED_DISC_MIN_HOLES:
@@ -156,6 +197,8 @@ def main():
         min_partial = DISC_MIN_PARTIAL_PER_CIRCUMFERENCE * math.pi * icon_px
         if partial < min_partial:
             sys.exit(f"the disc icon must have a smooth anti-aliased edge: at least {min_partial:.0f} px of partial coverage, but it has {partial}")
+        if max(abs(offset_x), abs(offset_y)) > CENTROID_MAX_OFFSET_PX:
+            sys.exit(f"the {kind} icon must be symmetric: its center of coverage is {offset_x:+.2f} px (x) and {offset_y:+.2f} px (y) from the middle of its extent, more than {CENTROID_MAX_OFFSET_PX} px")
     if kind == "disc":
         rows_off = mirrored_mismatch(row_counts)
         if rows_off:
