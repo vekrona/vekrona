@@ -309,6 +309,30 @@ unread_restore() {
   vekrona-dev sh systemctl --user start vekrona-errors.service
 }
 
+# A scenario that provokes errors it must not leave behind, or that must find the store unchanged, compares the error store
+# before and after. The guest's watcher handles the journal in order, so a sentinel report that has reached the store shows that
+# everything logged before it has been handled too (error_watcher_sync).
+# The store's records, one "ID STATUS COUNT TITLE" line each, except the one whose title holds $1 (the sentinel).
+error_store_without() {
+  vekrona-dev run bash -c 'set -o pipefail; vekrona-error list --all | awk -v skip="$1" "NR > 1 && index(\$0, skip) == 0 { \$2 = \$5 = \"\"; print }"' _ "$1"
+}
+error_titled_listed() { vekrona-dev run bash -c 'vekrona-error list --all | grep -qF "$1"' _ "$1"; }
+export -f error_titled_listed
+error_titled_remove() {
+  vekrona-dev run bash -c 'set -euo pipefail; ids="$(vekrona-error list --all | { grep -F "$1" || [[ $? -eq 1 ]]; } | awk "{ print \$1 }")"; for id in $ids; do vekrona-error rm "$id"; done' _ "$1"
+}
+# The watcher drops a repeat of a fingerprint within 10 minutes, and digits do not change a fingerprint, so each run needs fresh
+# words. The title is the same on every call within a scenario run.
+sentinel_title() {
+  local words
+  mapfile -t words < <(printf '%s\n' amber basalt cedar dune ember fjord glacier harbor island jungle kelp lagoon | shuf -n 2)
+  printf 'Vekrona e2e %s %s\n' "${words[@]}"
+}
+error_watcher_sync() {
+  vekrona-dev run vekrona-error report --title "$1" --summary 'raised by an e2e scenario'
+  vekrona-dev until --timeout 60 -- error_titled_listed "$1" || die "the error watcher never recorded '$1', so it has not handled the journal up to it"
+}
+
 # The bar's right side is right-aligned, so the x of its leftmost widget moves whenever a widget appears or changes width.
 bar_left_edge() {
   python3 "$VEKRONA_ROOT/tests/e2e/bar-left-edge.py" "$(vekrona-dev shot)" \
