@@ -13,6 +13,7 @@ command -v inotifywait >/dev/null 2>&1 || fail "inotifywait not installed"
 command -v timeout >/dev/null 2>&1 || fail "timeout not installed"
 session_attach_existing \
   || fail "no live sway session found (expected session-check.sh to have brought one up already)"
+session_export_wayland_display || fail "could not find the sway session's WAYLAND_DISPLAY"
 
 AGENT_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 AGENT_CONFIG_FILE="$AGENT_CONFIG_HOME/vekrona/agent"
@@ -242,14 +243,14 @@ rm -f "$AGENT_CONFIG_FILE"
 vekrona-agent set claude || fail "vekrona-agent set claude (after picker checks) failed"
 
 # The VM may still have /usr/bin/claude from an earlier install, so this PATH is built from nothing but links to the
-# few tools vekrona-agent runs. `true` stands in for rofi, the theme renderer and the error reporter, which this path
-# never really needs.
+# few tools vekrona-agent runs (python3 is the interpreter of vekrona-render-theme, which it calls by its path in the checkout).
+# `true` stands in for rofi and the error reporter, which this path never really needs.
 NO_HARNESS_BIN="$STUB_DIR/no-harness-bin"
 mkdir -p "$NO_HARNESS_BIN"
-for t in bash id dirname readlink timeout; do
+for t in bash id dirname readlink timeout python3; do
   ln -s "$(type -P "$t")" "$NO_HARNESS_BIN/$t"
 done
-for t in rofi vekrona-render-theme; do
+for t in rofi; do
   ln -s "$(type -P true)" "$NO_HARNESS_BIN/$t"
 done
 if no_harness_err="$(PATH="$NO_HARNESS_BIN" VEKRONA_ERROR_REPORTER="$(type -P true)" "$(command -v vekrona-agent)" choose 2>&1 >/dev/null)"; then
