@@ -10,7 +10,8 @@ source "$ROOT/lib/luks-fido2.sh"
 source "$ROOT/lib/facetimehd.sh"
 source "$ROOT/lib/proton.sh"
 source "$ROOT/lib/firewall.sh"
-source "$ROOT/lib/tailnet-ssh.sh"
+source "$ROOT/lib/tailscale.sh"
+source "$ROOT/lib/kernel-hardening.sh"
 source "$ROOT/lib/cuda-repo.sh"
 source "$ROOT/lib/geoclue.sh"
 source "$ROOT/lib/xremap.sh"
@@ -104,12 +105,10 @@ irqbalance_bans_nvme_when_running() {
   pid="$(systemctl show irqbalance -p MainPID --value)"
   [[ "$pid" -eq 0 ]] || tr '\0' ' ' <"/proc/$pid/cmdline" | grep -qF -- '--banmod=nvme'
 }
-tailscale_prefs() { root tailscale debug prefs; }
-tailscale_logged_out() { [[ "$(tailscale_prefs | jq -r '.LoggedOut')" == true ]]; }
-tailscale_operator_is_user() { [[ "$(tailscale_prefs | jq -r '.OperatorUser // ""')" == "$VEKRONA_USER" ]]; }
+tailscale_operator_is_user() { [[ "$(tailscale_operator)" == "$VEKRONA_USER" ]]; }
 authselect_selection_ok() {
   local want have
-  want="$(printf '%s\n' custom/vekrona with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f | sort | paste -sd' ')"
+  want="$(wanted_authselect_selection)"
   have="$(authselect current --raw | tr ' ' '\n' | sed '/^$/d' | sort | paste -sd' ')"
   [[ "$have" == "$want" ]]
 }
@@ -293,6 +292,11 @@ if ran 30-packages; then
   for p in "${VEKRONA_RETIRED_PKGS[@]}"; do
     check assert "rpm -q $p finds nothing (retired)" pkg_absent "$p"
   done
+  declare -a unwanted_pkgs
+  read_pkg_list unwanted_pkgs vekrona_unwanted_pkgs
+  for p in "${unwanted_pkgs[@]}"; do
+    check assert "rpm -q $p finds nothing (unwanted)" pkg_absent "$p"
+  done
   check assert "command -v dms fails" bash -c "! command -v dms"
   check assert "versionlock has no dms" not versionlock_has dms
   check assert "repo not enabled: $VEKRONA_RETIRED_MISE_REPO_ID (retired)" not_repo_enabled "$VEKRONA_RETIRED_MISE_REPO_ID"
@@ -417,44 +421,49 @@ if ran 40-system; then
   done
 
   if tailscale_logged_out; then
-    warn_check "tailscale operator is $VEKRONA_USER (tailscaled forgets it across restarts until the first login: run 'tailscale up', then ./install.sh 40)" tailscale_operator_is_user
+    warn_check "tailscale operator is $VEKRONA_USER (tailscaled forgets it across restarts until the first login: run 'tailscale up --shields-up --ssh=false', then ./install.sh 40)" tailscale_operator_is_user
+    warn_check "tailscale has shields up and ssh off (tailscaled forgets them until the first login: run 'tailscale up --shields-up --ssh=false', then ./install.sh 40)" tailscale_hardened
   else
     check assert "tailscale operator is $VEKRONA_USER" tailscale_operator_is_user
+    check assert "tailscale has shields up and ssh off" tailscale_hardened
   fi
 
-  if has_sshd; then
-    check assert "sshd drop-in matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/ssh/sshd_config.d/10-vekrona.conf" "$SSHD_DROPIN"
-    check assert "sshd refuses password logins" eq "$(sshd_setting passwordauthentication)" no
-    check assert "sshd refuses keyboard-interactive logins" eq "$(sshd_setting kbdinteractiveauthentication)" no
-    check assert "sshd accepts public keys only" eq "$(sshd_setting authenticationmethods)" publickey
-    check assert "sshd refuses root logins" eq "$(sshd_setting permitrootlogin)" no
-  fi
-  warn_check "firewalld is running (it limits ssh to the tailnet)" firewalld_active
-  if firewalld_active; then
-    check assert "$TAILNET_ZONE_FILE matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/firewalld/zones/tailnet.xml" "$TAILNET_ZONE_FILE"
-    for cidr in "${TAILNET_SOURCES[@]}"; do
-      check assert "$cidr is in the $TAILNET_ZONE zone" eq "$(root firewall-cmd --get-zone-of-source="$cidr")" "$TAILNET_ZONE"
-    done
-    warn_check "$TAILNET_IFACE is in the $TAILNET_ZONE zone (the sources decide anyway; NetworkManager may hold the interface elsewhere)" eq "$(root firewall-cmd --get-zone-of-interface="$TAILNET_IFACE")" "$TAILNET_ZONE"
-    check assert "the $TAILNET_ZONE zone opens ssh and nothing else" eq "$(root firewall-cmd --zone="$TAILNET_ZONE" --list-services)" ssh
-    # Assigned first: a failing firewall-cmd inside "$(...)" in a check's arguments would only read as an empty answer, "closed".
-    ssh_open_running="$(zones_allowing_ssh)"
-    ssh_open_permanent="$(zones_allowing_ssh --permanent)"
-    default_zone="$(root firewall-cmd --get-default-zone)"
-    check assert "no zone but $TAILNET_ZONE lets ssh in (stage 40 keeps ssh while it is used from outside the tailnet: run it from the tailnet)" eq "$ssh_open_running" ""
-    check assert "no zone but $TAILNET_ZONE lets ssh in after the next reload" eq "$ssh_open_permanent" ""
-    check assert "the default zone is $DEFAULT_ZONE" eq "$default_zone" "$DEFAULT_ZONE"
-    for service in "${DEFAULT_ZONE_SERVICES[@]}"; do
-      check assert "the $service service is open in the $DEFAULT_ZONE zone (permanent)" firewall_query --permanent --zone="$DEFAULT_ZONE" --query-service="$service"
-    done
-    high_port_zones="$(zones_open_to_high_ports)"
-    check assert "no zone with an interface opens TCP 1025-65535 (a NetworkManager connection may pin one: nmcli connection modify <connection> connection.zone '')" eq "$high_port_zones" ""
-    check assert "the default zone lets AirPlay's UDP $AIRPLAY_UDP_LO-$AIRPLAY_UDP_HI in" zone_allows_udp_range "$default_zone" "$AIRPLAY_UDP_LO" "$AIRPLAY_UDP_HI"
-  fi
+  check assert "no sshd drop-in of an earlier install is left" path_absent /etc/ssh/sshd_config.d/10-vekrona.conf
+  check assert "the tailnet zone file of an earlier install is gone" path_absent "$TAILNET_ZONE_FILE"
+  check assert "firewalld.service enabled" unit_enabled firewalld
+  check assert "firewalld.service active" unit_active firewalld
+  # Assigned first: a failing firewall-cmd inside "$(...)" in a check's arguments would only read as an empty answer.
+  ssh_reject_running="$(zones_with_ssh_reject_rule)"
+  ssh_reject_permanent="$(zones_with_ssh_reject_rule --permanent)"
+  default_zone="$(root firewall-cmd --get-default-zone)"
+  mapfile -t zone_services < <(default_zone_services)
+  check assert "no zone has the ssh reject rule of an earlier install" eq "$ssh_reject_running$ssh_reject_permanent" ""
+  check assert "the default zone is $DEFAULT_ZONE" eq "$default_zone" "$DEFAULT_ZONE"
+  check assert "the $DEFAULT_ZONE zone holds exactly ${zone_services[*]} and no port (permanent)" default_zone_is_exact permanent "${zone_services[@]}"
+  check assert "the $DEFAULT_ZONE zone holds exactly ${zone_services[*]} and no port (running)" default_zone_is_exact running "${zone_services[@]}"
+  high_port_zones="$(zones_open_to_high_ports)"
+  check assert "no zone with an interface opens TCP 1025-65535 (a NetworkManager connection may pin one: nmcli connection modify <connection> connection.zone '')" eq "$high_port_zones" ""
+  accepting_zones="$(zones_accepting_everything)"
+  check assert "no zone with an interface accepts every connection (target ACCEPT: trusted, libvirt's or Docker's zone)" eq "$accepting_zones" ""
+  check assert "/etc/systemd/resolved.conf.d/50-vekrona.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/resolved.conf.d/50-vekrona.conf" /etc/systemd/resolved.conf.d/50-vekrona.conf
+  check assert "/etc/modprobe.d/vekrona-hardening.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf" /etc/modprobe.d/vekrona-hardening.conf
+  for module in $(blocked_modules "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf"); do
+    check assert "modprobe runs /bin/false instead of loading $module" module_blocked "$module"
+    check assert "$module is not loaded (a module loaded before the block stays until a reboot: reboot)" not module_loaded "${module//-/_}"
+  done
+  check assert "/etc/sysctl.d/60-vekrona.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/sysctl.d/60-vekrona.conf" /etc/sysctl.d/60-vekrona.conf
+  while read -r key value; do
+    readings="$(sysctl_readings "$key")" || die "cannot read the sysctl $key"
+    while read -r name have; do
+      check assert "sysctl $name is $value" eq "$have" "$value"
+    done <<<"$readings"
+  done < <(sysctl_settings "$VEKRONA_ROOT/etc/sysctl.d/60-vekrona.conf")
+  resolved_status="$(resolvectl status)"
+  check assert "systemd-resolved answers neither LLMNR nor mDNS" contains "Protocols: -LLMNR -mDNS" "$resolved_status"
 fi
 
 if ran 45-auth; then
-  check assert "authselect selects custom/vekrona with its four features" authselect_selection_ok
+  check assert "authselect selects $PROFILE_ID with ${PROFILE_FEATURES[*]}" authselect_selection_ok
   for f in system-auth password-auth; do
     check assert "both pam_u2f template lines pinned to pam://vekrona in the profile's $f" vekrona_pam_u2f_lines_ok "/etc/authselect/custom/vekrona/$f" 2
     check assert "the one enabled pam_u2f line pinned to pam://vekrona in /etc/pam.d/$f" vekrona_pam_u2f_lines_ok "/etc/pam.d/$f" 1
@@ -583,7 +592,6 @@ if ran 50-user; then
   check assert "vekrona-audio-watchdog.service linked" file_exists "$HOME/.config/systemd/user/vekrona-audio-watchdog.service"
   check assert "vekrona-audio-watchdog.service enabled" user_unit_enabled vekrona-audio-watchdog
   check assert "vekrona-audio-watchdog resolves on PATH" bash -c "command -v vekrona-audio-watchdog >/dev/null"
-  check assert "pipewire-config-raop installed" pkg_installed pipewire-config-raop
   check assert "pipewire-utils installed" pkg_installed pipewire-utils
   for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
     check assert "vekrona-diagnose skill linked: $skills_dir" file_exists "$skills_dir/vekrona-diagnose/SKILL.md"
@@ -603,8 +611,6 @@ if ran 50-user; then
   check assert_file_contains "$HOME/.config/wireplumber/wireplumber.conf.d/50-vekrona-audio.conf" '^[[:space:]]*node\.restore-default-targets[[:space:]]*=[[:space:]]*false[[:space:]]*$'
   check assert_file_contains "$HOME/.config/wireplumber/wireplumber.conf.d/50-vekrona-audio.conf" '^[[:space:]]*\{[[:space:]]*device\.name[[:space:]]*=[[:space:]]*"~alsa_card\.usb-MACROSILICON\.\*"'
   check assert_file_contains "$HOME/.config/wireplumber/wireplumber.conf.d/50-vekrona-audio.conf" '^[[:space:]]*device\.disabled[[:space:]]*=[[:space:]]*true[[:space:]]*$'
-  check assert_file_contains "$HOME/.config/pipewire/pipewire.conf.d/50-vekrona-raop.conf" '^[[:space:]]*module\.raop[[:space:]]*=[[:space:]]*false[[:space:]]*$'
-  check assert_file_contains "$HOME/.config/pipewire/pipewire.conf.d/50-vekrona-raop.conf" '^[[:space:]]*sess\.latency\.msec[[:space:]]*=[[:space:]]*247\.45[[:space:]]*$'
   check assert "fc-match sans-serif -> Atkinson Hyperlegible Next" bash -c "fc-match sans-serif | grep -q 'Atkinson Hyperlegible Next'"
   check assert "fc-match sans-serif (Ukrainian i, U+0456) -> Inter" bash -c "fc-match 'sans-serif:charset=0456' | grep -q Inter"
   check assert "fc-match monospace -> AtkynsonMono Nerd Font" bash -c "fc-match monospace | grep -q 'AtkynsonMono Nerd Font'"

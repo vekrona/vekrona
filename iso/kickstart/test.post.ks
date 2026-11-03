@@ -14,5 +14,15 @@ AllowHibernation=no
 AllowHybridSleep=no
 AllowSuspendThenHibernate=no
 EOF
+# iso/qemu-test.sh drives the guest over ssh. The marker keeps openssh-server through the install; the drop-in takes keys only
+# (the test user's password is public).
 systemctl enable sshd
+install -d /etc/vekrona
+install -m 0644 /dev/null /etc/vekrona/keep-sshd
+install -d /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/10-vekrona-test.conf <<'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+EOF
 %end

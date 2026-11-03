@@ -20,18 +20,7 @@ Read before filing:
 - File at: https://gitlab.freedesktop.org/pipewire/pipewire/-/issues (a merge request with the patch and test fits better; the owner decides).
 - Issue title: `protocol-native: crash in on_remote_data when a callback disconnects the core (impl->source is NULL)`
 
-## 2. PipeWire: RAOP sink wants `sess.latency.msec` to be a whole number of packets
-
-- Project and version: PipeWire 1.6.9 (`libpipewire-module-raop-discover`, `raop-sink`); the packaged `pipewire-config-raop` loads the module without arguments. Unverified: whether current master still does.
-- Symptom on vekrona: for each AirPlay sink PipeWire logs `sess.latency.msec 250.000000 should be an integer multiple of rtp.ptime 7.981859` and rounds the buffer itself.
-- Root cause as known: the default 250 ms is not a whole number of packets; a packet is 352 frames at 44100 Hz = 7.981859 ms. The task brief says the latency check "misbehaves" without that rounding; the repo only shows the warning and the rounding-down, so any worse effect is unverified.
-- Minimal reproduction: load PipeWire 1.6.9 with the stock `pipewire-config-raop` and let an AirPlay receiver be discovered; the line appears once per sink. Not re-run for this note (needs an AirPlay device); the repo comment in the workaround quotes the exact line.
-- vekrona workaround: `config/pipewire/pipewire.conf.d/50-vekrona-raop.conf` switches the packaged entry off (`module.raop = false`) and loads the module with `sess.latency.msec = 247.45`, which is 10912 frames, exactly 31 packets.
-- Request: make the shipped default a whole number of packets, or round it without a warning, or document the constraint.
-- File at: https://gitlab.freedesktop.org/pipewire/pipewire/-/issues
-- Issue title: `raop-sink: default sess.latency.msec 250 is not a multiple of rtp.ptime and logs a warning for every sink`
-
-## 3. WirePlumber: an async hook that never completes blocks the whole event queue
+## 2. WirePlumber: an async hook that never completes blocks the whole event queue
 
 - Project and version: WirePlumber 0.5.18-1.fc44. `docs/audio.md` on `bughunt/integrate` says the lack of a timeout was checked in 0.5.18 and in master on 2026-10-16.
 - Symptom on vekrona: WirePlumber stays alive and answers `wpctl`, but handles no device or node from then on: cards stay on profile `off`, `default.audio.sink` names a sink that is gone, `wpctl set-default` changes `default.configured.*` and nothing follows, the shell shows no default sink. Audio stops following hot-plug.
@@ -43,7 +32,7 @@ Read before filing:
 - File at: https://gitlab.freedesktop.org/pipewire/wireplumber/-/issues
 - Issue title: `Event dispatcher blocks forever when an async hook never completes (monitor/v4l2/create-device after a camera disappears)`
 
-## 4. Quickshell: the tray pixmap warning does not say which item
+## 3. Quickshell: the tray pixmap warning does not say which item
 
 - Project and version: quickshell 0.3.1-5.fc44 (COPR build); the line is `src/services/status_notifier/item.cpp:317` in the local checkout (`~/wrk/quickshell`, at a3dcff2).
 - Symptom on vekrona: the journal has `WARN quickshell.service.sni.item: Unable to create pixmap for tray icon qs::service::sni::StatusNotifierItem(0x7faeb2353a00)`, seen on the owner's host on 2026-10-16 (21:31:34, 21:31:44, 21:35:04) and in vekrona-dev with `tests/e2e/fake-sni.py`.
@@ -54,7 +43,7 @@ Read before filing:
 - File at: https://github.com/quickshell-mirror/quickshell/issues (the mirror named in the checkout's `README.md`; the canonical tracker is unverified).
 - Issue title: `StatusNotifierItem: "Unable to create pixmap for tray icon" does not say which item`
 
-## 5. Quickshell: FileView never sees a file whose parent directory does not exist yet
+## 4. Quickshell: FileView never sees a file whose parent directory does not exist yet
 
 - Project and version: quickshell 0.3.1-5.fc44; `src/io/fileview.cpp`, `FileView::updateWatchedFiles()` (lines ~494-530 in `~/wrk/quickshell`).
 - Symptom on vekrona: with `watchChanges: true` on a path whose directory is missing, the first load fails with "File does not exist" and the watch never fires when the file is created later. The bar's agent badge, the launcher's Agent module and the Power view's update items stayed stale until the shell restarted. Reproduced in a fresh vekrona-dev VM: 3 polls, one badge instead of two.
@@ -65,7 +54,7 @@ Read before filing:
 - File at: https://github.com/quickshell-mirror/quickshell/issues (canonical tracker unverified)
 - Issue title: `FileView: watchChanges never fires for a file whose parent directory does not exist at load time`
 
-## 5b. Quickshell: WlSessionLock never reports a lock the compositor ended
+## 4b. Quickshell: WlSessionLock never reports a lock the compositor ended
 
 - Project and version: quickshell 0.3.1-5.fc44; `src/wayland/session_lock.cpp`, `WlSessionLock::unlock()` (end of the function, in `~/wrk/quickshell` at a3dcff2).
 - Symptom on vekrona: a second `qs -c vekrona-lock` started while the screen is locked gets `ext_session_lock_v1.finished` from Sway at once (checked with `WAYLAND_DEBUG=1`, Sway 1.11), but `WlSessionLock.locked` and its `lockStateChanged` stay as they are, so the process idles with no lock. Only `secureStateChanged` (with `secure` false) is emitted.
@@ -75,7 +64,7 @@ Read before filing:
 - File at: https://github.com/quickshell-mirror/quickshell/issues (canonical tracker unverified); the human writes it.
 - Issue title: `WlSessionLock: lockStateChanged is not emitted when the compositor ends the lock (unlock() checks isLocked() after clearing it)`
 
-## 6. glycin: the sandbox hands an i386 seccomp filter to the x86_64 bwrap
+## 5. glycin: the sandbox hands an i386 seccomp filter to the x86_64 bwrap
 
 - Project and version: glycin-libs 2.1.5-1.fc44 (x86_64 and i686 both installed), bubblewrap 0.12.0, libseccomp 2.6.1 (x86_64 and i686).
 - Symptom on vekrona: the 32-bit Steam client (`~/.local/share/Steam/ubuntu12_32/steam`) loads the i686 glycin (`/usr/lib/libglycin-2.so.0`). glycin's sandbox probe runs `/usr/bin/bwrap --unshare-all ... --seccomp 202 /usr/bin/true` with a filter built for i386; bwrap dies with SIGSYS in `execve`/`wait4` (coredumps 2026-10-09 19:03 and 22:34, from TODO.md; not re-listed). Steam then logs `Glycin running without sandbox.` and decodes images unsandboxed. 64-bit apps are unaffected. Every Steam start files a vekrona-error record.
@@ -85,7 +74,7 @@ Read before filing:
 - File at: https://gitlab.gnome.org/GNOME/glycin/-/issues (URL from memory, unverified)
 - Issue title: `Sandbox probe passes an i386 seccomp filter to the x86_64 bwrap when glycin is loaded by a 32-bit process, bwrap dies with SIGSYS`
 
-## 7. irqbalance 1.9.5: touches kernel-managed NVMe IRQs, and the unit's PrivateNetwork=yes breaks thermal
+## 6. irqbalance 1.9.5: touches kernel-managed NVMe IRQs, and the unit's PrivateNetwork=yes breaks thermal
 
 - Project and version: irqbalance 1.9.5-2.fc44. The unit file `/usr/lib/systemd/system/irqbalance.service` is from the Fedora package (`rpm -qf` confirms); whether it matches upstream's `misc/irqbalance.service` is unverified.
 - Symptom on vekrona: (a) `Cannot change IRQ 86..117 affinity: Permission denied`, 32 lines per start and resume (`nvme0q1`..`nvme0q32`); present in the host journal (e.g. `Cannot change IRQ 108 affinity` at 2026-10-16 21:05:51). (b) `thermal: failed to receive messages` at every start.
@@ -96,7 +85,7 @@ Read before filing:
 - File at: (a) https://github.com/Irqbalance/irqbalance/issues; (b) Fedora's packaging, https://bugzilla.redhat.com (component irqbalance), after checking upstream's unit.
 - Issue titles: `Skip IRQs with kernel-managed affinity (NVMe MSI-X queues) instead of logging "Cannot change IRQ N affinity: Permission denied"`; `irqbalance.service: PrivateNetwork=yes breaks the thermal netlink lookup ("thermal: failed to receive messages")`
 
-## 8. systemd: logind sessions opened by sudo through pam_systemd stay in "closing"
+## 7. systemd: logind sessions opened by sudo through pam_systemd stay in "closing"
 
 - Project and version: systemd 259.9-1.fc44 with sudo 1.9.17-10.p2.fc44. Issue 43745 exists and is open (checked on GitHub on 2026-10-18): "Session stuck in closing state indefinitely when ReleaseSession arrives after scope has already stopped", filed 2026-09-12 against systemd 250 on AlmaLinux 9, from high-frequency short sudo calls. Whether 259.9 still has the defect is not checked.
 - Symptom on vekrona: each `sudo` registers a root background-light session with logind that is never reaped; 276 sessions in state `closing` piled up.
@@ -106,7 +95,7 @@ Read before filing:
 - File at: a comment on https://github.com/systemd/systemd/issues/43745 with the versions above (nothing new to file unless 259.9 behaves differently from what it describes). Related: https://github.com/systemd/systemd/issues/34988 (sudo/su handling in pam_systemd).
 - Issue title (new issue only): `logind: sessions created by sudo via pam_systemd stay in state "closing" forever`
 
-## 9. tailscale systray: exits 1 on SIGTERM, and starts before the StatusNotifierWatcher exists
+## 8. tailscale systray: exits 1 on SIGTERM, and starts before the StatusNotifierWatcher exists
 
 - Project and version: tailscale 1.98.8-1.fc44 (`tailscale systray`).
 - Symptom on vekrona: (a) on every stop or logout the unit ends `failed` because the process exits with status 1; vekrona-error records it. (b) at session start (2026-10-16 21:07) it logged `systray error: failed to register: The name is not activatable` because no StatusNotifierWatcher was on the bus yet, and then stayed without an icon; a restart at 21:31 registered fine (from TODO.md, not re-checked).
@@ -116,7 +105,7 @@ Read before filing:
 - File at: https://github.com/tailscale/tailscale/issues
 - Issue titles: `tailscale systray: exit status 1 on SIGTERM ("context canceled" from the IPN bus watch)`; `tailscale systray: gives up when the StatusNotifierWatcher is not on the bus yet at start`
 
-## 10. setroubleshoot seapplet: its status icon needs X11
+## 9. setroubleshoot seapplet: its status icon needs X11
 
 - Project and version: setroubleshoot 3.3.36-3.fc44 (`/usr/bin/seapplet`, GTK 3 `GtkStatusIcon`).
 - Symptom on vekrona: at every login under Sway it logs `gtk_widget_get_scale_factor: assertion 'GTK_IS_WIDGET (widget)' failed` and shows no icon.
@@ -127,7 +116,7 @@ Read before filing:
 - File at: https://github.com/fedora-selinux/setroubleshoot/issues (unverified; Fedora's component is also on https://bugzilla.redhat.com)
 - Issue title: `seapplet: status icon is never created on Wayland (GtkStatusIcon), GTK_IS_WIDGET assertion at login`
 
-## 11. Other upstream items found in TODO.md
+## 10. Other upstream items found in TODO.md
 
 Already tracked there with their own next step; listed here so nothing is lost. Not written up further.
 
@@ -140,5 +129,5 @@ Already tracked there with their own next step; listed here so nothing is lost. 
 - Flathub Signal: `SIGNAL_PASSWORD_STORE` override until flathub/org.signal.Signal #758 lands. Nothing to file.
 - Steam on Sway: blurry at scale 1.5 (ValveSoftware/steam-for-linux #4924, swaywm/sway PR #5090). Already tracked upstream.
 - MediaTek MT7922 Bluetooth timeouts after suspend (kernel `btmtk`, `linux-firmware`): needs one more suspend test before there is anything to report.
-- Packaging noise "report only if it starts to matter": atd `OPTS`, Thunar and Tumbler D-Bus service file names, NetworkManager `error setting IPv4 forwarding`, the initrd `systemd-escape` warning, Steam pressure-vessel `_srt_architecture_read_elf` assertion.
+- Packaging noise "report only if it starts to matter": Thunar and Tumbler D-Bus service file names, NetworkManager `error setting IPv4 forwarding`, the initrd `systemd-escape` warning, Steam pressure-vessel `_srt_architecture_read_elf` assertion.
 - HP OMEN 45L BIOS F.18 firmware errors (ACPI, thermal zone, `hp_bioscfg`): HP; check for a newer BIOS first.

@@ -26,7 +26,6 @@ HARMLESS = [
     ("dbus-broker-launch", "Activation request for 'org.freedesktop.nm_dispatcher' failed."),
     ("systemd-logind", "Refusing suspend operation, sleep is inhibited by UID 1000/xiii, PID 1529323/systemd-inhibit."),
     ("systemd-cryptsetup", "Specified device /dev/hidraw0 is not a FIDO2 device."),
-    ("sshd-session", "error: kex_exchange_identification: read: Connection reset by peer"),
 ]
 
 # Close relatives that point at a real fault, so they must still reach the dot.
@@ -42,7 +41,6 @@ REAL = [
     ("kernel", "usb 5-1-port3: over-current condition"),
     ("systemd-logind", "Failed to suspend system. System resumed again: Input/output error"),
     ("systemd-cryptsetup", "Failed to activate with FIDO2 security token: Operation not permitted"),
-    ("sshd-session", "error: PAM: Authentication failure for xiii from 192.168.50.42"),
 ]
 
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/firewall.sh"
-source "$ROOT/lib/tailnet-ssh.sh"
+source "$ROOT/lib/tailscale.sh"
 source "$ROOT/lib/geoclue.sh"
 source "$ROOT/lib/xremap.sh"
 
@@ -111,25 +111,23 @@ root systemctl daemon-reload
 ensure_system_unit enabled tailscaled nix-daemon.service
 ensure_system_unit_active tailscaled nix-daemon.service
 
-# Before the operator step, which dies on a logged-out node: ssh restrictions do not depend on a Tailscale login.
-# ensure_tailnet_ssh_only needs the tailscale0 interface, which tailscaled has created by now.
-ensure_default_zone
-ensure_sshd_keys_only
-ensure_tailnet_ssh_only
-ensure_airplay_ports
-if firewalld_active; then
-  high_port_zones="$(zones_open_to_high_ports)"
-  [[ -z "$high_port_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$high_port_zones")open every TCP and UDP port from 1025 to this network and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone '')"
-fi
+# Before the tailscale step, which dies on a logged-out node: the firewall does not depend on a Tailscale login.
+ensure_root_file_absent /etc/ssh/sshd_config.d/10-vekrona.conf # no RPM owns it, so it outlives openssh-server
+ensure_system_unit enabled firewalld
+ensure_system_unit_active firewalld
+ensure_tailnet_ssh_firewall_gone
+mapfile -t zone_services < <(default_zone_services)
+ensure_default_zone "${zone_services[@]}"
+high_port_zones="$(zones_open_to_high_ports)"
+[[ -z "$high_port_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$high_port_zones")open every TCP port from 1025 to this network and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone '')"
+accepting_zones="$(zones_accepting_everything)"
+[[ -z "$accepting_zones" ]] || report_failure "the zones $(tr '\n' ' ' <<<"$accepting_zones")accept every connection and have interfaces: a NetworkManager connection sets its zone (nmcli connection modify <connection> connection.zone ''), or a program such as libvirt or Docker made it"
 
-tailscale_operator() { root tailscale debug prefs | jq -r '.OperatorUser // ""'; }
+# Kernel attack surface: modules nothing here uses stay unloadable, and sysctl settings read after Fedora's own.
+ensure_root_file "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf" /etc/modprobe.d/vekrona-hardening.conf
+ensure_dropins_restarting systemd-sysctl.service "$VEKRONA_ROOT/etc/sysctl.d" /etc/sysctl.d 60-vekrona.conf
 
-ensure_tailscale_operator() {
-  local user="$1"
-  [[ "$(tailscale_operator)" == "$user" ]] && { log "tailscale operator: $user"; return 0; }
-  log "setting tailscale operator: $user"
-  root tailscale set --operator="$user"
-  [[ "$(tailscale_operator)" == "$user" ]] || die "tailscale operator not set to $user: run 'tailscale up' to log in, then re-run ./install.sh 40"
-}
+# LLMNR and mDNS answer to the local network and are not used (avahi is removed by stage 30).
+ensure_dropins_restarting systemd-resolved "$VEKRONA_ROOT/etc/systemd/resolved.conf.d" /etc/systemd/resolved.conf.d 50-vekrona.conf
 
-ensure_tailscale_operator "$VEKRONA_USER"
+ensure_tailscale_settings "$VEKRONA_USER"

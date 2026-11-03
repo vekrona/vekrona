@@ -7,10 +7,7 @@ source "$ROOT/lib/authselect-vekrona.sh"
 source "$ROOT/lib/luks-fido2.sh"
 source "$ROOT/lib/pam-u2f.sh"
 
-PROFILE_NAME=vekrona
-PROFILE_ID="custom/$PROFILE_NAME"
 PROFILE_DIR="/etc/authselect/custom/$PROFILE_NAME"
-PROFILE_FEATURES=(with-silent-lastlog with-fingerprint with-mdns4 with-pam-u2f)
 
 ensure_pkg pam-u2f yubikey-manager pamu2fcfg fido2-tools libfido2 fprintd fprintd-pam cryptsetup
 require_cmd authselect cryptsetup dracut lsinitrd jq findfs
@@ -56,9 +53,6 @@ current_authselect_selection() {
   tr ' ' '\n' <<<"$raw" | sed '/^$/d' | sort | paste -sd' '
 }
 
-wanted_authselect_selection() {
-  printf '%s\n' "$PROFILE_ID" "${PROFILE_FEATURES[@]}" | sort | paste -sd' '
-}
 
 previous_profile_id() {
   local raw

@@ -14,6 +14,10 @@ VEKRONA_SYSTEM_DIR=/usr/local/lib/vekrona
 # The bin/ scripts root runs from there: vekrona-proton from the update units, vekrona-update-ask as the user it asks.
 # shellcheck disable=SC2034
 VEKRONA_SYSTEM_BIN=(vekrona-proton vekrona-update-ask)
+# A root-owned file the test guests carry (vekrona-dev's provisioning, the ISO test's kickstart): their host drives them over
+# ssh, so stage 30 keeps openssh-server there and stage 40 keeps ssh open in the default zone. Tests point this at a scratch file.
+VEKRONA_KEEP_SSHD_MARKER="${VEKRONA_KEEP_SSHD_MARKER:-/etc/vekrona/keep-sshd}"
+keep_sshd() { [[ -e "$VEKRONA_KEEP_SSHD_MARKER" ]]; }
 
 log()  { printf '\033[1;34m[vekrona]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[vekrona] WARN:\033[0m %s\n' "$*" >&2; }
@@ -1702,10 +1706,10 @@ rune_rpm_sha256() {
 
 VEKRONA_DESKTOP_PKGS=(
   adw-gtk3-theme 1password 1password-cli NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl btop cliphist
-  dconf ffmpeg firefox flatpak gamemode gamescope ghostty
+  dconf ffmpeg firefox firewalld flatpak gamemode gamescope ghostty
   geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver irqbalance
   jq kanshi khal
-  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-config-raop pipewire-pulseaudio pipewire-utils playerctl polkit
+  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio pipewire-utils playerctl polkit
   proton-vpn-cli proton-vpn-gtk-app python3 python3-gobject python3-pyyaml python3-vdf qalculate qt6ct quickshell ripgrep rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd swayidle syncthing tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots
@@ -1735,8 +1739,26 @@ links_into_retired_mise_share() { [[ -L "$1" && "$(readlink "$1")" == "$VEKRONA_
 
 # Fedora's crash reporter duplicates vekrona-error, which records every coredump from systemd-coredump, and its applet
 # (abrt-gui) posts an "Oops!" card straight into the notification list instead of the errors panel.
+# AirPlay and mDNS are not used either: nothing announces this machine, and nothing listens for other machines' names.
+#
+# What a Fedora Workstation install carries that a vekrona laptop or desktop never uses, each a daemon or a listener: printing and
+# scanning, mobile broadband and DSL, sssd (the authselect profile derives from `local`: no sss in nsswitch or PAM), PackageKit
+# (updates go through vekrona-update), rsyslog (the journal is the log), NFS and at. dnf takes what requires them along
+# (bluez-cups, libsane-hpaio, sssd-proxy, NetworkManager-bluetooth, ...); ensure_pkg_absent dies if that would be a desktop package.
+# iscsi-initiator-utils stays: libvirt-daemon-kvm requires it, and its sockets start only on use.
 # shellcheck disable=SC2034
-VEKRONA_UNWANTED_PKGS=(abrt abrt-gui)
+VEKRONA_UNWANTED_PKGS=(
+  abrt abrt-gui avahi nss-mdns pipewire-config-raop
+  cups cups-browsed cups-filters hplip gutenprint system-config-printer ipp-usb sane-backends
+  ModemManager NetworkManager-wwan NetworkManager-adsl
+  sssd-kcm sssd-common sssd-client PackageKit rsyslog nfs-utils at
+)
+
+# Remote login is not part of vekrona: openssh-server goes, unless a test guest keeps it (keep_sshd).
+vekrona_unwanted_pkgs() {
+  printf '%s\n' "${VEKRONA_UNWANTED_PKGS[@]}"
+  keep_sshd || printf '%s\n' openssh-server
+}
 
 vekrona_desktop_pkgs() {
   local wlroots_pkg
