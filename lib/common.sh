@@ -154,6 +154,8 @@ ensure_pkg_absent() {
   for pkg in "${installed[@]}"; do
     ! pkg_installed "$pkg" || die "package still installed: $pkg"
   done
+  # A unit that failed because its package went away (or because a dependency did) has nothing left to retry.
+  root systemctl reset-failed
 }
 
 ensure_pkg_swapped() {
@@ -1737,20 +1739,23 @@ VEKRONA_RETIRED_MISE_KEY_FPR=24853EC9F655CE80B48E6C3A8B81C9D17413A06D
 # True for a symlink whose stored target lies under mise's share; the target may already dangle, so plain readlink.
 links_into_retired_mise_share() { [[ -L "$1" && "$(readlink "$1")" == "$VEKRONA_RETIRED_MISE_SHARE/"* ]]; }
 
-# Fedora's crash reporter duplicates vekrona-error, which records every coredump from systemd-coredump, and its applet
-# (abrt-gui) posts an "Oops!" card straight into the notification list instead of the errors panel.
-# AirPlay and mDNS are not used either: nothing announces this machine, and nothing listens for other machines' names.
-#
-# What a Fedora Workstation install carries that a vekrona laptop or desktop never uses, each a daemon or a listener: printing and
-# scanning, mobile broadband and DSL, sssd (the authselect profile derives from `local`: no sss in nsswitch or PAM), PackageKit
-# (updates go through vekrona-update), rsyslog (the journal is the log), NFS and at. dnf takes what requires them along
-# (bluez-cups, libsane-hpaio, sssd-proxy, NetworkManager-bluetooth, ...); ensure_pkg_absent dies if that would be a desktop package.
-# iscsi-initiator-utils stays: libvirt-daemon-kvm requires it, and its sockets start only on use.
+# What a Fedora Workstation install carries that vekrona never uses, each a daemon or a listener. dnf takes along what
+# requires them (bluez-cups, libsane-hpaio, sssd-proxy, NetworkManager-bluetooth, ...); ensure_pkg_absent dies if that would
+# be a desktop package. iscsi-initiator-utils stays: libvirt-daemon-kvm requires it, and its sockets start only on use.
 # shellcheck disable=SC2034
 VEKRONA_UNWANTED_PKGS=(
-  abrt abrt-gui avahi nss-mdns pipewire-config-raop
+  # Crash reporter: it duplicates vekrona-error, which records every systemd-coredump coredump, and abrt-gui posts an
+  # "Oops!" card into the notification list instead of the errors panel.
+  abrt abrt-gui
+  # mDNS and AirPlay: nothing announces this machine, and nothing listens for other machines' names. fwupd only recommends
+  # passim, but passim needs avahi over D-Bus, so it fails at every boot once avahi is gone.
+  avahi nss-mdns pipewire-config-raop passim
+  # Printing and scanning.
   cups cups-browsed cups-filters hplip gutenprint system-config-printer ipp-usb sane-backends
+  # Mobile broadband and DSL.
   ModemManager NetworkManager-wwan NetworkManager-adsl
+  # sssd (the authselect profile derives from `local`: no sss in nsswitch or PAM), PackageKit (updates go through
+  # vekrona-update), rsyslog (the journal is the log), NFS and at.
   sssd-kcm sssd-common sssd-client PackageKit rsyslog nfs-utils at
 )
 
@@ -1758,6 +1763,12 @@ VEKRONA_UNWANTED_PKGS=(
 vekrona_unwanted_pkgs() {
   printf '%s\n' "${VEKRONA_UNWANTED_PKGS[@]}"
   keep_sshd || printf '%s\n' openssh-server
+}
+
+ensure_unwanted_pkgs_absent() {
+  local unwanted_pkgs
+  read_pkg_list unwanted_pkgs vekrona_unwanted_pkgs
+  ensure_pkg_absent "${unwanted_pkgs[@]}"
 }
 
 vekrona_desktop_pkgs() {

@@ -25,15 +25,22 @@ for pkg in $(vekrona_unwanted_pkgs); do
 done
 log "ok: no unwanted package is a desktop package"
 
+write_fake "$work/bin/systemctl" <<'F'
+#!/usr/bin/env bash
+echo "$*" >> "$FAKE_SYSTEMCTL_LOG"
+F
+export FAKE_SYSTEMCTL_LOG="$work/systemctl.log"
+
 packages openssh-server abrt sway
-read_pkg_list wanted_gone vekrona_unwanted_pkgs
-ensure_pkg_absent "${wanted_gone[@]}"
+ensure_unwanted_pkgs_absent
 ! installed openssh-server && ! installed abrt || die "the unwanted packages must be removed"
 installed sway || die "a package that is not unwanted must stay"
 log "ok: the unwanted packages are removed"
+[[ "$(<"$FAKE_SYSTEMCTL_LOG")" == reset-failed ]] || die "a removal must clear the failed units of the packages it removed: $(cat "$FAKE_SYSTEMCTL_LOG")"
+log "ok: a removal resets the failed state of units whose package is gone"
 
 packages sway
-ensure_pkg_absent "${wanted_gone[@]}"
+ensure_unwanted_pkgs_absent
 ! grep -q remove "$FAKE_DNF_LOG" 2>/dev/null || die "with nothing unwanted installed dnf must not be asked to remove: $(cat "$FAKE_DNF_LOG")"
 log "ok: a system without them is left alone"
 

@@ -87,6 +87,15 @@ logind_started_after_idle_dropin() {
 }
 mem_sleep_offers_deep() { grep -qw deep /sys/power/mem_sleep; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
+# The Global section of `resolvectl status`: the per-link sections below it may differ and do not tell what resolved answers by default.
+resolved_global_status() {
+  local status
+  status="$(resolvectl status)" || die "resolvectl status failed"
+  awk '/^Global$/ { global = 1; next } /^$/ { global = 0 } global' <<<"$status"
+}
+# The state systemd reports: running, degraded (a unit failed), starting, ... `is-system-running` exits non-zero for all but running.
+system_state() { systemctl is-system-running || true; }
+failed_units() { systemctl --failed --plain --no-legend | awk '{ print $1 }' | paste -sd' '; }
 module_built_for_running_kernel() { modinfo -k "$(uname -r)" "$1" >/dev/null 2>&1; }
 nvidia_module_present_for() { modinfo -k "$1" nvidia >/dev/null 2>&1; }
 root_files_equal() { root cmp -s "$1" "$2"; }
@@ -455,7 +464,7 @@ if ran 40-system; then
   check assert "/etc/modprobe.d/vekrona-hardening.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf" /etc/modprobe.d/vekrona-hardening.conf
   for module in $(blocked_modules "$VEKRONA_ROOT/etc/modprobe.d/vekrona-hardening.conf"); do
     check assert "modprobe runs /bin/false instead of loading $module" module_blocked "$module"
-    check assert "$module is not loaded (a module loaded before the block stays until a reboot: reboot)" not module_loaded "${module//-/_}"
+    warn_check "$module is not loaded (a module loaded before the block stays until a reboot: reboot pending)" not module_loaded "${module//-/_}"
   done
   check assert "/etc/sysctl.d/60-vekrona.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/sysctl.d/60-vekrona.conf" /etc/sysctl.d/60-vekrona.conf
   while read -r key value; do
@@ -464,8 +473,8 @@ if ran 40-system; then
       check assert "sysctl $name is $value" eq "$have" "$value"
     done <<<"$readings"
   done < <(sysctl_settings "$VEKRONA_ROOT/etc/sysctl.d/60-vekrona.conf")
-  resolved_status="$(resolvectl status)"
-  check assert "systemd-resolved answers neither LLMNR nor mDNS" contains "Protocols: -LLMNR -mDNS" "$resolved_status"
+  resolved_global="$(resolved_global_status)"
+  check assert "systemd-resolved answers neither LLMNR nor mDNS (Global section)" contains "Protocols: -LLMNR -mDNS" "$resolved_global"
 fi
 
 if ran 45-auth; then
@@ -781,5 +790,8 @@ if ran 90a-switch-dm || ran 90b-remove; then
     check assert "override still present: $f" file_exists "$f"
   done
 fi
+
+state="$(system_state)"
+check assert "systemd is not degraded (failed units: $(failed_units))" not_contains degraded "$state"
 
 log "verify summary: ok=$ok_count warn=$warn_count"

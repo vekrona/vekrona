@@ -91,9 +91,7 @@ for pkg in "${VEKRONA_DESKTOP_PKGS[@]}"; do
 done
 ensure_pkg "${desktop_pkgs_except_pinned[@]}"
 # After sway is installed: ensure_pkg_absent finds the protected wlroots package through it.
-declare -a unwanted_pkgs
-read_pkg_list unwanted_pkgs vekrona_unwanted_pkgs
-ensure_pkg_absent "${unwanted_pkgs[@]}"
+ensure_unwanted_pkgs_absent
 ensure_1password_repo_file
 
 # The repo directory and its metadata must exist before dnf reads the repo file, or every dnf run fails on it.
