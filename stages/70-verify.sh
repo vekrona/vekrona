@@ -407,11 +407,10 @@ if ran 40-system; then
   check assert "geoclue lists the uid of $VEKRONA_USER and nobody else" eq "$geoclue_want" "$geoclue_have"
   check assert "Firefox's policies.json matches the checkout" root_files_equal "$VEKRONA_ROOT/config/firefox/policies.json" /usr/lib64/firefox/distribution/policies.json
   check assert "syncthing GUI requires a login" syncthing_gui_user_set
-  for dropin in NetworkManager.service.d/vekrona-shutdown-order.conf NetworkManager-dispatcher.service.d/vekrona-persist.conf; do
-    check assert "/etc/systemd/system/$dropin matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/system/$dropin" "/etc/systemd/system/$dropin"
-  done
-  check assert "NetworkManager stops before nm-dispatcher and wpa_supplicant" contains NetworkManager-dispatcher.service "$(systemctl show NetworkManager -p After --value)"
-  check assert "nm-dispatcher runs with --persist" contains "nm-dispatcher --persist" "$(systemctl show NetworkManager-dispatcher -p ExecStart --value)"
+  check assert "/etc/systemd/system/NetworkManager.service.d/vekrona-shutdown-order.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/system/NetworkManager.service.d/vekrona-shutdown-order.conf" /etc/systemd/system/NetworkManager.service.d/vekrona-shutdown-order.conf
+  check assert "NetworkManager stops before wpa_supplicant" contains wpa_supplicant.service "$(systemctl show NetworkManager -p After --value)"
+  check assert "no nm-dispatcher --persist drop-in from an earlier install" path_absent /etc/systemd/system/NetworkManager-dispatcher.service.d/vekrona-persist.conf
+  warn_check "nm-dispatcher runs without --persist (restart it or reboot if it still does)" not nm_dispatcher_runs_persistent
   check assert "hardware clock holds UTC" rtc_is_utc
   check assert "no dead usbcore modprobe drop-in from an earlier install" path_absent /etc/modprobe.d/vekrona-usb-autosuspend.conf
   check assert "no stale dGPU udev rule from an earlier install" path_absent /etc/udev/rules.d/70-vekrona-dgpu.rules

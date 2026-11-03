@@ -324,6 +324,35 @@ dropins_fingerprint() {
   done
 }
 
+# Whether the running nm-dispatcher process was started with --persist (an earlier install's drop-in). The unit's loaded
+# ExecStart says what the next start will run, not what runs now: daemon-reload leaves the old command line in the process.
+# Not running (MainPID 0) or exited since systemctl looked (the dispatcher exits when idle, also between the two reads here)
+# is not persistent. An unreadable command line of a process that still exists is an error.
+nm_dispatcher_runs_persistent() {
+  local pid arg args proc="${VEKRONA_SYSFS_ROOT:-}/proc"
+  pid="$(systemctl show -p MainPID --value NetworkManager-dispatcher.service)" || die "systemctl show NetworkManager-dispatcher failed"
+  [[ "$pid" =~ ^[0-9]+$ ]] || die "NetworkManager-dispatcher MainPID is not a number: $pid"
+  [[ "$pid" != 0 ]] || return 1
+  if ! mapfile -d '' -t args 2>/dev/null <"$proc/$pid/cmdline"; then
+    [[ -d "$proc/$pid" ]] || return 1
+    die "cannot read $proc/$pid/cmdline, the command line of nm-dispatcher (pid $pid), although the process exists"
+  fi
+  for arg in "${args[@]}"; do [[ "$arg" == --persist ]] && return 0; done
+  return 1
+}
+
+# Removes the earlier "nm-dispatcher --persist" drop-in and restarts a dispatcher that still runs with --persist, whether or
+# not this run removed the file: an earlier run may have removed it and died before the restart. The dispatcher is idle
+# between network events, so the restart is harmless; try-restart leaves a stopped one stopped.
+ensure_nm_dispatcher_not_persistent() {
+  ensure_root_file_absent "${VEKRONA_SYSFS_ROOT:-}/etc/systemd/system/NetworkManager-dispatcher.service.d/vekrona-persist.conf"
+  root systemctl daemon-reload
+  if nm_dispatcher_runs_persistent; then
+    log "nm-dispatcher runs with --persist: restarting it"
+    root systemctl try-restart NetworkManager-dispatcher.service
+  fi
+}
+
 # Installs a sudoers drop-in as root:root 0440 under its own name, but only once visudo accepts it. A broken drop-in
 # locks the owner out of sudo, and so out of the repair: the candidate is checked under a name sudo ignores (it holds a
 # dot) and moved into place only if it passes.
