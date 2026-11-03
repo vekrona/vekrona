@@ -10,18 +10,19 @@ POSITION_FILE="$(mktemp)"
 
 invocation() { vekrona-dev sh systemctl --user show -p InvocationID --value "$1"; }
 started_again() { [[ "$(invocation "$1")" != "$2" ]]; }
-weather_position() { vekrona-dev see find '°C' >"$POSITION_FILE"; }
+weather_position() { vekrona-dev see find "$WEATHER_FIXTURE_REGEX" >"$POSITION_FILE"; }
 clock_position() { vekrona-dev see find "$CLOCK_WEEKDAY" >"$POSITION_FILE"; }
 export -f invocation started_again weather_position clock_position
 export POSITION_FILE
-trap 'rm -f "$POSITION_FILE"' EXIT
+forget_position() { rm -f "$POSITION_FILE"; }
+trap 'run_cleanups forget_position weather_fixture_restore' EXIT
 
 vekrona-dev session
 CLOCK_WEEKDAY="$(vekrona-dev run date +%a)"
 export CLOCK_WEEKDAY
 vekrona-dev move 600 500
 clear_notifications
-vekrona-dev until --timeout 90 -- weather_written
+weather_fixture_apply "$WEATHER_FIXTURE_CELSIUS"
 
 refresh_on_open() {
   local unit="$1" locate="$2" before

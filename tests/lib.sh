@@ -318,6 +318,37 @@ bar_left_edge() {
 # A fresh session shows no weather pill until the weather unit's first run, 30 s in, has written its file.
 weather_written() { vekrona-dev run bash -c 'test -e ~/.local/state/vekrona/weather.json'; }
 export -f weather_written
+# The bar shows the weather of the day, whose digits an OCR regex cannot name. A scenario that needs a known pill calls
+# weather_fixture_apply CELSIUS with the fixture's current temperature: WEATHER_FIXTURE_CELSIUS shows rounded, for the regex
+# WEATHER_FIXTURE_REGEX. The OCR reads the bar's degree sign next to the load widget's bars as a degree sign, a dash or a
+# lowercase c, so any mark counts, and a bare "37" does not.
+# A clock such as 03:37 must not match. The scenario lists weather_fixture_restore among its cleanups, which puts the guest back.
+WEATHER_FIXTURE_CELSIUS=37.4
+WEATHER_FIXTURE_REGEX='^37 ?\S'
+GUEST_WEATHER_FIXTURE=/tmp/e2e-open-meteo.json
+GUEST_WEATHER_OVERRIDE='$HOME/.config/vekrona/weather.json'
+# The weather unit's result: vekrona-weather replaces it with the fixture's, so the guest's own is set aside and put back.
+GUEST_WEATHER_STATE='$HOME/.local/state/vekrona/weather.json'
+GUEST_WEATHER_ASIDE='$HOME/.local/state/vekrona/weather.json.e2e-aside'
+export WEATHER_FIXTURE_CELSIUS WEATHER_FIXTURE_REGEX
+# The timer's first run, 30 s into the session, would replace the fixture's result with the live forecast.
+weather_unit_ran() { [[ "$(vekrona-dev sh systemctl --user show -p ExecMainExitTimestampMonotonic --value vekrona-weather.service)" != 0 ]]; }
+export -f weather_unit_ran
+# An aside that is already there is a killed run's, which holds the guest's own result; a guest that had none gets none back.
+# The state goes aside before anything else changes, so that weather_fixture_restore undoes a failure half way.
+weather_fixture_apply() {
+  local celsius="$1"
+  vekrona-dev until --timeout 90 -- weather_unit_ran || die "the weather unit never ran, so its first run could still replace the fixture's forecast"
+  vekrona-dev run bash -c "if [[ ! -e $GUEST_WEATHER_ASIDE ]]; then if [[ -e $GUEST_WEATHER_STATE ]]; then mv $GUEST_WEATHER_STATE $GUEST_WEATHER_ASIDE; else : >$GUEST_WEATHER_ASIDE.none; fi; fi"
+  jq -e --argjson celsius "$celsius" '.current.temperature_2m = $celsius' "$VEKRONA_ROOT/tests/fixtures/open-meteo.json" \
+    | vekrona-dev run bash -c 'cat >"$1"' _ "$GUEST_WEATHER_FIXTURE"
+  vekrona-dev run bash -c "mkdir -p \$(dirname $GUEST_WEATHER_OVERRIDE) && echo '{\"latitude\": 52.5, \"longitude\": 13.4, \"name\": \"Berlin\"}' >$GUEST_WEATHER_OVERRIDE"
+  vekrona-dev sh env "VEKRONA_WEATHER_URL=file://$GUEST_WEATHER_FIXTURE" vekrona-weather run
+}
+weather_fixture_restore() {
+  vekrona-dev run bash -c "rm -f $GUEST_WEATHER_OVERRIDE $GUEST_WEATHER_FIXTURE; if [[ -e $GUEST_WEATHER_ASIDE ]]; then mv $GUEST_WEATHER_ASIDE $GUEST_WEATHER_STATE; elif [[ -e $GUEST_WEATHER_ASIDE.none ]]; then rm -f $GUEST_WEATHER_STATE $GUEST_WEATHER_ASIDE.none; fi"
+}
+
 # Waits until no widget is still on its way, then prints the bar's left edge: the weather pill is in, and two
 # screenshots in a row agree.
 settled_bar_left_edge() {
