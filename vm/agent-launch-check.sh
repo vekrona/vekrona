@@ -377,10 +377,10 @@ swaymsg -- '[app_id="vekrona.agent"] kill' >/dev/null || fail "could not close t
 vekrona-error rm "$REAL_ERROR_ID" >/dev/null || fail "vekrona-error rm $REAL_ERROR_ID failed"
 echo "ok: vekrona-agent --error marked the record launched after a real launch, and left it new after --dry-run"
 
-# The stale-default cases record errors that name not-a-harness. The launcher's agent filter lists them, so none may outlive the check.
+# The stale-default case records errors that name not-a-harness, the free-text picker case one that names "not a harness". The launcher's agent filter lists them, so none may outlive the check.
 for record in "$ERROR_STORE_DIR"/*/record.json; do
   [[ -e "$record" ]] || continue
-  if grep -q -F -- "not-a-harness" "$record"; then
+  if grep -q -E -- "not[- ]a[- ]harness" "$record"; then
     vekrona-error rm "$(basename "$(dirname "$record")")" >/dev/null || fail "vekrona-error rm failed for $record"
   fi
 done
