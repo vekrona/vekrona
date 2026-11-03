@@ -20,7 +20,7 @@ touch "$VEKRONA_KEEP_SSHD_MARKER"
 log "ok: openssh-server is unwanted unless the keep-sshd marker exists"
 
 # bash -c, not a subshell: the test's own assignment above must not stand in for the environment.
-env_marker="$(VEKRONA_KEEP_SSHD_MARKER="$work/from-environment" bash -c 'source "$1/lib/common.sh" && echo "$VEKRONA_KEEP_SSHD_MARKER"' _ "$REPO")"
+env_marker="$(VEKRONA_KEEP_SSHD_MARKER="$work/from-environment" bash -c 'source "$1/tests/lib.sh" && echo "$VEKRONA_KEEP_SSHD_MARKER"' _ "$REPO")"
 [[ "$env_marker" == /etc/vekrona/keep-sshd ]] || die "the environment must not move the keep-sshd marker, got $env_marker"
 log "ok: the environment cannot move the keep-sshd marker"
 

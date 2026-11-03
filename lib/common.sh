@@ -233,10 +233,10 @@ root_relabel() { if command -v restorecon >/dev/null; then root restorecon "$@";
 
 # True when every path given carries the SELinux label policy assigns it (always true on hosts without SELinux tools).
 root_label_current() {
-  local drift
+  local report
   if ! command -v restorecon >/dev/null; then return 0; fi
-  drift="$(root restorecon -nv "$@")" || die "restorecon -nv $* failed"
-  [[ -z "$drift" ]]
+  report="$(root restorecon -nv "$@")" || die "restorecon -nv $* failed"
+  ! file_grep_q '^Would relabel' <<<"$report"
 }
 
 # Creates DIR and its missing parents, and labels each one it created: a directory made by root inherits the label of its
