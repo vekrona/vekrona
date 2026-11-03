@@ -28,7 +28,6 @@ if [[ -e "$stale_gpu_env_file" || -L "$stale_gpu_env_file" ]]; then
 else
   log "absent: $stale_gpu_env_file"
 fi
-ensure_symlink "$VEKRONA_ROOT/config/xremap/config.yml" "$HOME/.config/xremap/config.yml"
 # Wayland session: `nvidia-settings -l` loads X11 settings and fails at every login when no NVIDIA driver is loaded.
 ensure_symlink "$VEKRONA_ROOT/config/autostart/nvidia-settings-user.desktop" "$HOME/.config/autostart/nvidia-settings-user.desktop"
 ensure_symlink "$VEKRONA_ROOT/config/autostart/sealertauto.desktop" "$HOME/.config/autostart/sealertauto.desktop"
@@ -74,6 +73,10 @@ remove_retired "the weather and calendar timers now start with the sway session"
 # User units an earlier vekrona installed and the checkout no longer ships: stopped, disabled, and their unit files and *.wants links removed.
 for retired_unit in "${VEKRONA_RETIRED_USER_UNITS[@]}"; do retire_user_unit "$retired_unit"; done
 remove_retired "the app switcher is part of vekrona-shell now" "$HOME/.config/quickshell/vekrona-app-switch"
+# A live link into the checkout, so prune_vekrona_links (stale links only) would keep it, and its directory is no longer scanned.
+remove_retired "xremap runs root's copy in /etc/xremap and vekrona-keybindings reads the checkout" \
+  "$HOME/.config/xremap/config.yml"
+remove_retired_dir_if_empty "it held only the retired config.yml link" "$HOME/.config/xremap"
 
 ensure_symlink "$VEKRONA_ROOT/config/fontconfig/conf.d/50-vekrona-fonts.conf" "$HOME/.config/fontconfig/conf.d/50-vekrona-fonts.conf"
 fc-cache -f >/dev/null

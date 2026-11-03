@@ -9,8 +9,8 @@ That user is in the `input` group and reads the keyboards and writes `/dev/uinpu
 group**, so no program you run can log raw key events, and `/dev/uinput` is closed to the seat's user as well
 (`etc/udev/rules.d/70-vekrona-uinput.rules`). xremap's config is root's copy, `/etc/xremap/config.yml`, installed from
 `config/xremap/config.yml` by `./install.sh 40`: edit the checkout, run the stage, and the service restarts. (A config the user
-could write would run commands as the xremap user.) `~/.config/xremap/config.yml` stays a link to the checkout for
-`vekrona-keybindings` and the validation.
+could write would run commands as the xremap user.) `vekrona-keybindings` reads `config/xremap/config.yml` of the checkout
+it runs from, found through its own real path, so there is no `~/.config/xremap` link; stage 50 removes the one older installs made.
 
 `xremap.path` starts the service when a Wayland socket (`/run/user/UID/wayland-N`) appears. Before it starts, a root step
 (`libexec/vekrona-xremap-access`) finds the socket Sway listens on, gives the xremap user an ACL on the socket and on the
@@ -200,7 +200,7 @@ in the config, and renders them in a `rofi -dmenu` list (through
 Alternative chords (`h` / `Left`) and the workspace 1..10 bindings (Cmd to switch, Hyper to move) are
 collapsed into single rows; picking a Sway row runs its command through
 `swaymsg`. It also lists the xremap Caps Lock and Cmd-layer remaps
-(`config/xremap/config.yml`), informational only. `vekrona-keybindings --list` prints the same rows as
+(`config/xremap/config.yml` of the checkout), informational only. `vekrona-keybindings --list` prints the same rows as
 plain text and `--check` fails if any `bindsym` in the Sway config is
 missing its `#:` description, or if a `cmd-layer` remap shadows a Sway
 `Mod4` or `Mod4+Shift` binding (xremap sees keys before Sway, so that binding

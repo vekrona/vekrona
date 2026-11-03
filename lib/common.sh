@@ -649,7 +649,7 @@ prune_vekrona_links() {
 vekrona_link_dirs() {
   local d
   printf '%s\n' \
-    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/xremap" "$HOME/.config/autostart" \
+    "$HOME/.config/sway" "$HOME/.config/environment.d" "$HOME/.config/autostart" \
     "$HOME/.config/systemd/user" "$HOME/.config/fontconfig/conf.d" \
     "$HOME/.config/quickshell" \
     "$HOME/.local/share/fonts/vekrona" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps" "$HOME/.local/bin" \
@@ -982,6 +982,25 @@ remove_retired() {
       log "absent: $retired"
     fi
   done
+}
+
+# Whether $1 is a directory, not a link to one, with nothing in it. A directory that cannot be listed is an error, not "not empty".
+dir_is_empty() {
+  local first
+  [[ -d "$1" && ! -L "$1" ]] || return 1
+  first="$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" || die "cannot list $1"
+  [[ -z "$first" ]]
+}
+
+# Removes the directory $2 that held only retired paths, once it is empty; one that holds anything else stays. $1 is why.
+remove_retired_dir_if_empty() {
+  local reason="$1" dir="$2"
+  if dir_is_empty "$dir"; then
+    log "removing empty: $dir ($reason)"
+    rmdir -- "$dir" || die "cannot remove $dir"
+  else
+    log "absent or not empty, kept: $dir"
+  fi
 }
 
 # Sets the array named $1 to the paths under ~/.config/systemd/user that keep the user unit $2 installed: its unit file or link

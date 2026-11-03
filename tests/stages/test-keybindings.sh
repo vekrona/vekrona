@@ -3,16 +3,22 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
-tool="$ROOT/bin/vekrona-keybindings"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
-# vekrona-keybindings reads $HOME/.config/{sway,xremap}; point it at the repo's config.
+# vekrona-keybindings reads the Sway config from $HOME/.config/sway and the xremap config from the checkout it runs from
+# (found through its own real path). The home has no ~/.config/xremap. The bin runs from a scratch tree with the real
+# vekrona-rofi-menu, a stub theme renderer, and rofi, swaymsg and error reporter stubs.
 mkdir -p "$scratch/home/.config"
 ln -s "$ROOT/config/sway" "$scratch/home/.config/sway"
-mkdir "$scratch/home/.config/xremap"
-cp "$ROOT/config/xremap/config.yml" "$scratch/home/.config/xremap/config.yml"
+tree="$scratch/tree"
+mkdir -p "$tree/bin" "$tree/config/xremap" "$scratch/stubs"
+cp -r "$ROOT/lib" "$tree/"
+cp "$ROOT/bin/vekrona-keybindings" "$ROOT/bin/vekrona-rofi-menu" "$tree/bin/"
+cp "$ROOT/config/xremap/config.yml" "$tree/config/xremap/config.yml"
+tool="$tree/bin/vekrona-keybindings"
+xremap_config="$tree/config/xremap/config.yml"
 
 run_check() { HOME="$scratch/home" "$tool" --check 2>"$scratch/stderr"; }
 
@@ -27,20 +33,15 @@ tab_rows="$(grep -c '^Cmd + Tab ' <<<"$list" || (($? == 1)))"
 log "ok: --list shows Cmd + Tab once"
 
 # Sway binds Mod4+q (kill), so remapping Super-q in xremap shadows it.
-sed -i 's/^      Super-c: C-c$/&\n      Super-q: C-q/' "$scratch/home/.config/xremap/config.yml"
-grep -qxF '      Super-q: C-q' "$scratch/home/.config/xremap/config.yml" || die "test setup: Super-q was not added to cmd-layer"
+sed -i 's/^      Super-c: C-c$/&\n      Super-q: C-q/' "$xremap_config"
+grep -qxF '      Super-q: C-q' "$xremap_config" || die "test setup: Super-q was not added to cmd-layer"
 if run_check; then
   die "--check accepted a xremap Super-q remap that shadows the Sway Mod4+q binding"
 fi
 grep -q 'can never fire.*Mod4+q' "$scratch/stderr" || die "--check failed for the wrong reason: $(cat "$scratch/stderr")"
 log "ok: --check rejects a xremap remap that shadows a Sway binding"
 
-# The menu: the bin runs from a scratch tree with the real vekrona-rofi-menu, a stub theme renderer, and rofi, swaymsg and error
-# reporter stubs.
-tree="$scratch/tree"
-mkdir -p "$tree/bin" "$scratch/stubs"
-cp -r "$ROOT/lib" "$tree/"
-cp "$tool" "$ROOT/bin/vekrona-rofi-menu" "$tree/bin/"
+# The menu.
 printf '#!/bin/sh\necho "* {}"\n' > "$tree/bin/vekrona-render-theme"
 printf '#!/bin/sh\ncat >/dev/null\n[ -z "$ROFI_STDERR" ] || echo "$ROFI_STDERR" >&2\n[ -z "$ROFI_OUT" ] || echo "$ROFI_OUT"\nexit "${ROFI_STATUS:-0}"\n' > "$scratch/stubs/rofi"
 printf '#!/bin/sh\necho "$*" >> "%s/swaymsg.log"\n' "$scratch" > "$scratch/stubs/swaymsg"
@@ -48,13 +49,13 @@ printf '#!/bin/sh\necho "$*" >> "%s/reported"\n' "$scratch" > "$scratch/stubs/re
 chmod +x "$tree/bin/vekrona-render-theme" "$scratch/stubs"/*
 export VEKRONA_ERROR_REPORTER="$scratch/stubs/reporter"
 # Rewrite the menu's config back to the repo's: the shadowing remap above was only for --check.
-cp "$ROOT/config/xremap/config.yml" "$scratch/home/.config/xremap/config.yml"
+cp "$ROOT/config/xremap/config.yml" "$xremap_config"
 export ROFI_STDERR="" ROFI_OUT="" ROFI_STATUS=0
 
 run_menu() {
   rm -f "$scratch/swaymsg.log" "$scratch/reported"
   rc=0
-  HOME="$scratch/home" PATH="$scratch/stubs:$PATH" "$tree/bin/vekrona-keybindings" menu >/dev/null 2>"$scratch/stderr" || rc=$?
+  HOME="$scratch/home" PATH="$scratch/stubs:$PATH" "$tool" menu >/dev/null 2>"$scratch/stderr" || rc=$?
 }
 
 ROFI_STATUS=1 run_menu

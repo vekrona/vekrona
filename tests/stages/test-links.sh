@@ -75,6 +75,36 @@ for kept in new-alive foreign-dangling lookalike-dangling; do
 done
 log "ok: prune_vekrona_links removes only stale links into a vekrona root"
 
+# A retired link into the checkout is live, so prune_vekrona_links keeps it; remove_retired takes the link away and leaves
+# the checkout's file alone.
+mkdir -p "$HOME/.config/retired"
+ln -s "$VEKRONA_ROOT/config/a" "$HOME/.config/retired/a"
+prune_vekrona_links "$HOME/.config/retired" 2>/dev/null
+[[ -L "$HOME/.config/retired/a" ]] || die "test setup: prune_vekrona_links must keep a live link into the checkout"
+remove_retired "test" "$HOME/.config/retired/a" 2>/dev/null
+[[ ! -L "$HOME/.config/retired/a" ]] || die "remove_retired left a retired link"
+[[ "$(<"$VEKRONA_ROOT/config/a")" == new ]] || die "remove_retired removed or changed the file the link pointed to"
+log "ok: remove_retired drops a live link into the checkout and keeps its target"
+
+# The directory that held only a retired link goes once it is empty; one that holds anything else stays.
+remove_retired_dir_if_empty "test" "$HOME/.config/retired" 2>/dev/null
+[[ ! -e "$HOME/.config/retired" ]] || die "remove_retired_dir_if_empty left an empty directory"
+mkdir -p "$HOME/.config/kept"
+echo mine >"$HOME/.config/kept/own.yml"
+remove_retired_dir_if_empty "test" "$HOME/.config/kept" 2>/dev/null
+[[ "$(<"$HOME/.config/kept/own.yml")" == mine ]] || die "remove_retired_dir_if_empty removed a directory that held the user's file"
+remove_retired_dir_if_empty "test" "$HOME/.config/never-was" 2>/dev/null
+mkdir "$HOME/.config/target"
+ln -s "$HOME/.config/target" "$HOME/.config/linked"
+remove_retired_dir_if_empty "test" "$HOME/.config/linked" 2>/dev/null
+[[ -L "$HOME/.config/linked" && -d "$HOME/.config/target" ]] || die "remove_retired_dir_if_empty followed a link to an empty directory"
+if [[ "$(id -u)" != 0 ]]; then # root lists any directory
+  mkdir -m 0 "$HOME/.config/unlistable"
+  if (remove_retired_dir_if_empty "test" "$HOME/.config/unlistable") 2>/dev/null; then die "a directory that cannot be listed was taken for empty or not empty without an error"; fi
+  chmod 0755 "$HOME/.config/unlistable"
+fi
+log "ok: remove_retired_dir_if_empty removes an empty directory, keeps one with files, a link and a missing one, and fails on one it cannot list"
+
 # Tree linking: git-ignored build junk is never linked, untracked files that are not ignored are, and a link an
 # earlier run made to a file that is now ignored is pruned.
 mkdir -p "$VEKRONA_ROOT/bin/__pycache__" "$HOME/.local/bin/__pycache__"

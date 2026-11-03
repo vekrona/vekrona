@@ -514,9 +514,8 @@ def main():
     if [args.menu is not None, args.list, args.check].count(True) != 1:
         parser.error("give exactly one of: menu, --list, --check")
 
-    home = os.path.expanduser("~")
-    sway_main_path = os.path.join(home, ".config", "sway", "config")
-    xremap_path = os.path.join(home, ".config", "xremap", "config.yml")
+    sway_main_path = os.path.join(os.path.expanduser("~"), ".config", "sway", "config")
+    xremap_path = os.path.join(vekrona_cli.repo_root(__file__), "config", "xremap", "config.yml")
     if not os.path.isfile(sway_main_path):
         die(f"sway config not found: {sway_main_path}")
 

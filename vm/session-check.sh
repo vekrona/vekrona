@@ -16,6 +16,6 @@ session_export_wayland_display || fail "could not find the sway session's WAYLAN
 
 session_wait_until 30 qs -c vekrona-shell ipc show || fail "qs -c vekrona-shell ipc show failed"
 
-xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml" || fail "xremap config failed to validate"
+xremap-wlroots --validate-config /etc/xremap/config.yml || fail "xremap config failed to validate"
 
 echo "session-check OK"

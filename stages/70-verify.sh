@@ -587,7 +587,8 @@ if ran 50-user; then
   check assert "sway config validates" with_scratch_dir sway_config_validates
   check assert "sway panel scale drop-in present iff an internal panel is connected" present_iff has_internal_panel file_exists "$SWAY_PANEL_SCALE_DROPIN"
   check assert "system X11 keymap converts to Sway's XKB environment" vekrona-xkb-env
-  check assert "xremap config validates" xremap-wlroots --validate-config "$HOME/.config/xremap/config.yml"
+  check assert "the retired ~/.config/xremap/config.yml link is gone (xremap runs /etc/xremap, vekrona-keybindings reads the checkout)" path_absent "$HOME/.config/xremap/config.yml"
+  check assert "no empty ~/.config/xremap is left behind by the retired link" not dir_is_empty "$HOME/.config/xremap"
   check assert "sway keybindings all described" vekrona-keybindings --check
   check assert "vekrona-keybindings --list has workspace 10 bindings" bash -c "vekrona-keybindings --list | grep -qF 'workspace 1…10'"
   check assert "vekrona-keybindings --list has the help binding" bash -c "vekrona-keybindings --list | grep -qF 'Show keybindings help'"
