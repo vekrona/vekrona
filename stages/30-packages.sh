@@ -92,6 +92,8 @@ done
 ensure_pkg "${desktop_pkgs_except_pinned[@]}"
 # After sway is installed: ensure_pkg_absent finds the protected wlroots package through it.
 ensure_unwanted_pkgs_absent
+# Removing a package does not stop what sway's XDG autostart already started from it (nm-applet, blueman-applet).
+stop_orphaned_autostart_units
 ensure_1password_repo_file
 
 # The repo directory and its metadata must exist before dnf reads the repo file, or every dnf run fails on it.

@@ -316,6 +316,7 @@ if ran 30-packages; then
   for p in "${unwanted_pkgs[@]}"; do
     check assert "rpm -q $p finds nothing (unwanted)" pkg_absent "$p"
   done
+  check assert "no XDG autostart app runs without its desktop entry" no_orphaned_autostart_units
   check assert "command -v dms fails" bash -c "! command -v dms"
   check assert "versionlock has no dms" not versionlock_has dms
   check assert "repo not enabled: $VEKRONA_RETIRED_MISE_REPO_ID (retired)" not_repo_enabled "$VEKRONA_RETIRED_MISE_REPO_ID"

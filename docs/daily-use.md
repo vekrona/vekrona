@@ -71,9 +71,11 @@ the `ssh` service of the zone ([development](development.md)).
 Stage `30-packages` removes what a Fedora Workstation install carries and vekrona never uses (`VEKRONA_UNWANTED_PKGS`,
 `lib/common.sh`; stage 70 checks each one is gone): the crash reporter (`abrt`), `avahi`, printing and scanning (`cups`,
 `cups-browsed`, `cups-filters`, `hplip`, `gutenprint`, `system-config-printer`, `ipp-usb`, `sane-backends`), mobile broadband and DSL
-(`ModemManager`, `NetworkManager-wwan`, `NetworkManager-adsl`), `sssd`, `PackageKit`, `rsyslog`, `nfs-utils` and `at`, and with them
-whatever requires them. Losing `NetworkManager-bluetooth` ends Bluetooth tethering (PAN and DUN); pairing a phone, headset or
-keyboard is `bluez` and is unaffected, and a Wi-Fi hotspot on the phone is the usual way to share its connection. The machine does
+(`ModemManager`, `NetworkManager-wwan`, `NetworkManager-adsl`), `blueman` and `network-manager-applet` (the shell has its own network and Bluetooth panels), `sssd`, `PackageKit`, `rsyslog`, `nfs-utils` and `at`, and with them
+whatever requires them. Losing `NetworkManager-bluetooth` ends Bluetooth tethering (PAN and DUN); headsets and other Just Works
+devices still pair from the shell, but a device that asks for a PIN or passkey (a keyboard, some phones) needs `bluetoothctl` until the
+shell registers its own pairing agent (`blueman` provided the only one): run `bluetoothctl`, then `agent on`, `default-agent` and
+`pair <MAC>`. A Wi-Fi hotspot on the phone is the usual way to share its connection. The machine does
 not print: there is no CUPS. `iscsi-initiator-utils` stays because `libvirt-daemon-kvm` requires it; its sockets start only on use.
 
 ### Kernel hardening

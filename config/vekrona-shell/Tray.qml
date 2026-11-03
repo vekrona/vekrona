@@ -11,9 +11,7 @@ Row {
             id: item
 
             required property SystemTrayItem modelData
-            readonly property bool hiddenDuplicate: modelData.id === "nm-applet" || modelData.id.startsWith("blueman")
 
-            visible: !hiddenDuplicate
             width: VekronaTheme.iconS + 2 * VekronaTheme.space2
             height: VekronaTheme.sizeTarget
 

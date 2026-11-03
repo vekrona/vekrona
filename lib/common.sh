@@ -817,6 +817,124 @@ ensure_user_unit_stopped() {
   done
 }
 
+# Sets the array named $1 to the user units of XDG autostart apps that run although their .desktop entry is gone (LoadState
+# not-found): sway started the app at login, then its package was removed under it. systemd's generator makes these units from the
+# .desktop files, so the user manager first reloads: a package that ships no user unit of its own (network-manager-applet) triggers
+# no reload when it goes, and the listing would still show its unit loaded. The reload only reruns the generators. Columns of the
+# plain listing: unit, load, active, sub, description.
+# A failing reload or lister dies here, because stage 70's check calls this inside an `if`, where set -e is off and a failure
+# would otherwise read as "no orphans".
+read_orphaned_autostart_units() {
+  local -n out="$1"
+  local listing
+  systemctl --user daemon-reload || die "cannot reload the user manager"
+  listing="$(systemctl --user list-units --all --plain --no-legend 'app-*@autostart.service')" || die "cannot list the user's autostart units"
+  mapfile -t out < <(awk '$2 == "not-found" && $3 == "active" { print $1 }' <<<"$listing")
+}
+
+no_orphaned_autostart_units() {
+  local -a orphans
+  read_orphaned_autostart_units orphans
+  ((${#orphans[@]} == 0))
+}
+
+# Like read_orphaned_autostart_units, these set the variable named $1 instead of printing, so that a die ends the caller too and not
+# a $( ) subshell. The user manager (user@UID.service) has a cgroup directory, and under it every user unit one of its own name.
+read_user_manager_cgroup_dir() {
+  local -n out="$1"
+  local cgroup
+  cgroup="$(systemctl show -p ControlGroup --value "user@$(id -u).service")" || die "cannot read the cgroup of user@$(id -u).service"
+  [[ -n "$cgroup" ]] || die "user@$(id -u).service has no cgroup"
+  out="$(vekrona_sysfs)/fs/cgroup$cgroup"
+}
+
+# The cgroup directory of the user unit $2, whichever slice it runs in.
+read_user_unit_cgroup_dir() {
+  local -n out="$1"
+  local unit="$2" manager candidate
+  local -a found=()
+  read_user_manager_cgroup_dir manager
+  for candidate in "$manager"/*/"$unit"; do
+    if [[ -d "$candidate" ]]; then found+=("$candidate"); fi
+  done
+  ((${#found[@]} == 1)) || die "expected one cgroup named $unit under $manager, found ${#found[@]}"
+  out="${found[0]}"
+}
+
+CGROUP_EMPTY_TIMEOUT_SEC="${CGROUP_EMPTY_TIMEOUT_SEC:-10}"
+
+# Blocks until the cgroup directory $1 holds no process. The kernel modifies cgroup.events when "populated" flips, which wakes
+# inotifywait; its 1 s cap only re-checks a flip that happened between the check and the watch. systemd removes the directory once
+# it is empty, so a read or watch that fails on a directory that is gone ends the wait; on a directory that is there, it is an error.
+# grep and inotifywait run in $( ), so that their stderr reaches the user only inside the die that names the failure.
+wait_until_cgroup_empty() {
+  local events="$1/cgroup.events" deadline status cause
+  deadline=$((SECONDS + CGROUP_EMPTY_TIMEOUT_SEC))
+  while true; do
+    status=0
+    cause="$(grep -qx 'populated 0' "$events" 2>&1)" || status=$?
+    case "$status" in
+      0) return 0 ;;
+      1) ;;
+      *) [[ ! -e "$events" ]] || die "cannot read $events: $cause"; return 0 ;;
+    esac
+    ((SECONDS < deadline)) || die "processes in $1 survived cgroup.kill for $CGROUP_EMPTY_TIMEOUT_SEC s"
+    status=0
+    cause="$(inotifywait -qq -t 1 -e modify,delete_self "$events" 2>&1)" || status=$?
+    case "$status" in
+      0 | 2) ;;
+      *) [[ ! -e "$events" ]] || die "inotifywait failed (status $status) on $events: $cause"; return 0 ;;
+    esac
+  done
+}
+
+# Kills every process of the cgroup directory $1 at once (cgroup.kill also catches a fork in flight) and waits until it is empty.
+# systemd removes the directory of a unit that stopped, so one that is gone, before or during the kill, is the state we want.
+kill_cgroup() {
+  local dir="$1" procs cause pid cmdline
+  local -a pids
+  if [[ ! -d "$dir" ]]; then
+    log "$dir is already gone"
+    return 0
+  fi
+  if ! procs="$(cat "$dir/cgroup.procs" 2>&1)"; then
+    [[ -d "$dir" ]] || { log "$dir is already gone"; return 0; }
+    die "cannot read $dir/cgroup.procs: $procs"
+  fi
+  read -r -a pids <<<"${procs//$'\n'/ }"
+  for pid in "${pids[@]}"; do
+    if cmdline="$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline")"; then
+      log "killing pid $pid: $cmdline"
+    else
+      log "pid $pid already exited"
+    fi
+  done
+  if ! cause="$(printf 1 2>&1 >"$dir/cgroup.kill")"; then
+    [[ -d "$dir" ]] || { log "$dir is already gone"; return 0; }
+    die "cannot write $dir/cgroup.kill: $cause"
+  fi
+  wait_until_cgroup_empty "$dir"
+}
+
+# Kills the orphans through their cgroups, not through systemctl: once the user manager has re-executed, it holds such a unit as
+# not loaded, and `systemctl --user stop` and `kill` both refuse it. Autostart units are generated, never enabled, so there is
+# nothing to disable.
+stop_orphaned_autostart_units() {
+  local orphan cgroup_dir
+  local -a orphans
+  read_orphaned_autostart_units orphans
+  if ((${#orphans[@]} == 0)); then
+    log "no autostart app runs without its desktop entry"
+    return 0
+  fi
+  require_cmd inotifywait
+  for orphan in "${orphans[@]}"; do
+    log "killing orphaned autostart unit: $orphan"
+    read_user_unit_cgroup_dir cgroup_dir "$orphan"
+    kill_cgroup "$cgroup_dir"
+  done
+}
+
 # A path an earlier vekrona left behind: $1 is why it is retired, the rest are the paths.
 remove_retired() {
   local reason="$1" retired
@@ -1857,6 +1975,8 @@ VEKRONA_UNWANTED_PKGS=(
   cups cups-browsed cups-filters hplip gutenprint system-config-printer ipp-usb sane-backends
   # Mobile broadband and DSL.
   ModemManager NetworkManager-wwan NetworkManager-adsl
+  # Pulled in by the swaywm group; they duplicate the shell's network and Bluetooth UI.
+  blueman network-manager-applet
   # sssd (the authselect profile derives from `local`: no sss in nsswitch or PAM), PackageKit (updates go through
   # vekrona-update), rsyslog (the journal is the log), NFS and at.
   sssd-kcm sssd-common sssd-client PackageKit rsyslog nfs-utils at
