@@ -4,4 +4,8 @@ Description=Install updates now
 [Service]
 Type=oneshot
 Environment=HOME=/root
+# The start never times out: the run installs the packages now (dnf upgrade, akmods, flatpak update), and a timeout would stop
+# dnf in the middle of its RPM transaction. Its downloads give up when they stall, and the steps that wait for the update lock
+# give up after UPDATE_LOCK_WAIT_SECONDS.
+TimeoutStartSec=infinity
 ExecStart=/usr/local/lib/vekrona/libexec/vekrona-update-apply --online

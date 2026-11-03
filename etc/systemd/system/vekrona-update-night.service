@@ -7,6 +7,10 @@ ConditionACPower=true
 [Service]
 Type=oneshot
 Environment=HOME=/root
+# The run downloads the updates and stores dnf's offline transaction, which runs in the next boot, so no RPM transaction is cut short; even several GiB over a slow link and an NVIDIA module build
+# end well inside two hours, and a hung dnf would otherwise keep the unit activating for ever, with every later update step
+# (update_lock waits UPDATE_LOCK_WAIT_SECONDS = the same two hours) and the vekrona-update client queued behind it.
+TimeoutStartSec=2h
 # network-online.target stays reached across a suspend, so a wake from sleep waits for the connection itself.
 ExecStartPre=/usr/bin/nm-online --quiet --timeout=60
 ExecStart=/usr/local/lib/vekrona/libexec/vekrona-update-night

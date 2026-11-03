@@ -45,17 +45,17 @@ update_promote_newest_kernel() {
 
 update_skipped_today() { [[ -f "$VEKRONA_UPDATE_SKIP_FILE" && "$(<"$VEKRONA_UPDATE_SKIP_FILE")" == "$(date +%F)" ]]; }
 
-update_night_armed() { [[ "$(systemctl is-active "$VEKRONA_NIGHT_TIMER" 2>/dev/null || true)" == active ]]; }
-
-# The night timer runs when something is pending and tonight was not skipped.
+# Brings the night timer to ARMED (true or false). --no-block: the job is queued and systemctl returns, so a PID 1 that is busy
+# or re-executing cannot hold the check unit; the caller therefore takes ARMED as the state, not `systemctl is-active`, which
+# can still say inactive while the queued start has not run.
 update_sync_night_timer() {
-  local pending="$1"
-  if [[ "$pending" == true ]] && ! update_skipped_today; then
+  local armed="$1"
+  if [[ "$armed" == true ]]; then
     log "arming $VEKRONA_NIGHT_TIMER"
-    systemctl start "$VEKRONA_NIGHT_TIMER"
+    systemctl --no-block start "$VEKRONA_NIGHT_TIMER"
   else
     log "disarming $VEKRONA_NIGHT_TIMER"
-    systemctl stop "$VEKRONA_NIGHT_TIMER"
+    systemctl --no-block stop "$VEKRONA_NIGHT_TIMER"
   fi
 }
 
@@ -79,13 +79,14 @@ update_seed_json() {
   log "seeded $VEKRONA_UPDATES_JSON"
 }
 
-# Reads the groups array on stdin, brings the night timer in line with it and writes updates.json.
+# Reads the groups array on stdin, arms the night timer when something is pending and tonight was not skipped, disarms it
+# otherwise, and writes updates.json.
 update_publish() {
   local checked="$1" groups pending armed=false
   groups="$(cat)"
   pending="$(jq 'length > 0' <<<"$groups")"
-  update_sync_night_timer "$pending"
-  if update_night_armed; then armed=true; fi
+  if [[ "$pending" == true ]] && ! update_skipped_today; then armed=true; fi
+  update_sync_night_timer "$armed"
   jq --arg checked "$checked" --argjson armed "$armed" "$UPDATE_STATE_JQ" <<<"$groups" | update_write_json
   log "wrote $VEKRONA_UPDATES_JSON: pending=$pending night_armed=$armed"
 }

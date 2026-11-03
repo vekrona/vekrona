@@ -54,6 +54,8 @@ log "ok: updates.json groups dnf, Flatpak and Proton updates, newest installed v
 night_timer_active || die "pending updates did not arm the night timer"
 [[ "$(sed -n 1p "$FAKE_LOG")" == "vekrona-proton stage" ]] || die "the Proton repo was not staged first: $(cat "$FAKE_LOG")"
 log "ok: pending is true, the night timer is armed, the file is world-readable, whole, and Proton was staged first"
+grep -qxF 'systemctl --no-block start vekrona-update-night.timer' "$FAKE_LOG" || die "the night timer start waits for its job, which hangs the check if PID 1 does: $(cat "$FAKE_LOG")"
+log "ok: arming the night timer queues the job instead of waiting for it"
 
 # A Proton feed that cannot be read must not stop the check for everything else, and must still be told to the user.
 printf '#!/bin/sh\necho "$*" >> "%s/reported"\n' "$work" > "$work/reporter"
@@ -76,6 +78,8 @@ check
 night_timer_active && die "an armed night timer survived a check that found nothing"
 [[ "$(field .night_armed)" == false ]] || die "night_armed is not false: $(field .)"
 log "ok: a check that finds everything installed disarms a timer armed earlier"
+grep -qxF 'systemctl --no-block stop vekrona-update-night.timer' "$FAKE_LOG" || die "the night timer stop waits for its job: $(cat "$FAKE_LOG")"
+log "ok: disarming the night timer queues the job instead of waiting for it"
 
 reset; updates; date +%F >"$VEKRONA_STATE_DIR/update-skip"
 check

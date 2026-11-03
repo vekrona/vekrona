@@ -39,6 +39,14 @@ for option in '--proto =https ' '--proto-redir =https ' '--globoff '; do
 done
 log "ok: a download is https only, also after a redirect, and takes the URL literally"
 
+# A server that stops sending mid-download must not hang the stage for ever, and a total --max-time would kill a slow download that
+# still makes progress, so curl gets a stall detector: below 1 KiB/s for 60 s in a row it gives up and --retry tries again.
+for option in '--speed-limit 1024 ' '--speed-time 60 '; do
+  [[ "$argv" == *"$option"* ]] || die "curl was not given ${option% }: $argv"
+done
+[[ "$argv" != *--max-time* ]] || die "a total --max-time kills slow downloads that make progress: $argv"
+log "ok: a stalled download is abandoned and retried, a slow one that progresses is not"
+
 out="$(FAKE_CURL_FAIL=1 download_file "https://example.invalid/b.rpm" "$work/b.rpm" 2>&1)" && die "download_file succeeded though curl failed"
 [[ "$out" == *"download failed: https://example.invalid/b.rpm"* ]] || die "failure does not name the URL: $out"
 log "ok: a failed download dies naming the URL"

@@ -1286,6 +1286,18 @@ wait_for_running_akmods() {
 AKMODS_LOCK="${AKMODS_LOCK:-/run/akmods/akmods.lock}"
 FLOCK_TIMEOUT_STATUS=1 # flock -w exits 1 on timeout, so any other status is a different failure
 
+# The one bounded-lock chokepoint: takes the flock on the open file descriptor FD, waiting at most SECONDS, and dies naming
+# the lock (NAME, its LOCK_FILE) and why its holder is suspected stuck (WHY) when the time runs out.
+flock_or_die() {
+  local fd="$1" seconds="$2" name="$3" lock_file="$4" why="$5" lock_status=0
+  flock -w "$seconds" "$fd" || lock_status=$?
+  case "$lock_status" in
+    0) ;;
+    "$FLOCK_TIMEOUT_STATUS") die "timed out after $seconds s waiting for the $name lock $lock_file ($why)" ;;
+    *) die "flock on $lock_file failed with status $lock_status" ;;
+  esac
+}
+
 # Returns once no akmods build runs: waits for its process, then for the lock it holds, instead of queueing a redundant
 # rebuild behind it.
 wait_for_akmods_idle() {
@@ -1350,13 +1362,19 @@ root_owned_copy() {
   printf '%s\n' "$copy"
 }
 
-# The one download chokepoint. Retries transient failures (DNS, connect, 5xx): redirectors such as
+# A transfer slower than DOWNLOAD_STALL_BYTES_PER_SECOND for DOWNLOAD_STALL_SECONDS in a row counts as stalled and is retried. A
+# total --max-time would also kill a slow link that still makes progress, which for an RPM of hundreds of MiB is a working download.
+DOWNLOAD_STALL_BYTES_PER_SECOND=1024
+DOWNLOAD_STALL_SECONDS=60
+
+# The one download chokepoint. Retries transient failures (DNS, connect, 5xx, a stalled transfer): redirectors such as
 # mirrors.rpmfusion.org hand out a different mirror per request, so a retry usually lands on a healthy one.
 download_file() {
   local url="$1" dest="$2"
   require_cmd curl
   curl --fail --silent --show-error --location --proto =https --proto-redir =https --globoff \
     --retry 5 --retry-all-errors --connect-timeout 20 \
+    --speed-limit "$DOWNLOAD_STALL_BYTES_PER_SECOND" --speed-time "$DOWNLOAD_STALL_SECONDS" \
     --output "$dest" "$url" || die "download failed: $url"
 }
 
@@ -1519,16 +1537,21 @@ ensure_repo_key() {
 }
 
 VEKRONA_UPDATE_LOCK="${VEKRONA_UPDATE_LOCK:-/run/vekrona-update.lock}"
+# Two hours is the TimeoutStartSec of vekrona-update-now.service and vekrona-update-night.service: a holder that outlives it has been
+# killed by systemd, so a waiter that started later gets the lock before it gives up, and only a holder outside those units (an
+# installer, a hand-run step) can still make it time out.
+UPDATE_LOCK_WAIT_SECONDS="${UPDATE_LOCK_WAIT_SECONDS:-7200}"
 
 # Holds the update lock until the process exits, so a check, an apply and a stage that changes the system's tools never
-# run at the same time. The lock is read-only opened, so the installer can take it as a user; root creates the file.
+# run at the same time. The lock is read-only opened, so the installer can take it as a user; root creates the file. A
+# holder that never lets go fails the waiter after UPDATE_LOCK_WAIT_SECONDS instead of blocking every later step forever.
 update_lock() {
   require_cmd flock
   [[ -e "$VEKRONA_UPDATE_LOCK" ]] || root install -m 0644 /dev/null "$VEKRONA_UPDATE_LOCK"
   exec {VEKRONA_UPDATE_LOCK_FD}<"$VEKRONA_UPDATE_LOCK"
   if ! flock --nonblock "$VEKRONA_UPDATE_LOCK_FD"; then
     log "another update step holds $VEKRONA_UPDATE_LOCK, waiting for it"
-    flock "$VEKRONA_UPDATE_LOCK_FD"
+    flock_or_die "$VEKRONA_UPDATE_LOCK_FD" "$UPDATE_LOCK_WAIT_SECONDS" update "$VEKRONA_UPDATE_LOCK" "another update step is stuck?"
   fi
 }
 
@@ -1794,17 +1817,12 @@ KERNEL_LOCK_WAIT_SECONDS="${KERNEL_LOCK_WAIT_SECONDS:-600}"
 # KERNEL_LOCK_WAIT_SECONDS instead of hanging boot-time akmods.service. Like update_lock, the file is opened read-only
 # and created by root, so the installer can take the lock as a user.
 with_kernel_lock() {
-  local fd lock_status=0 status
+  local fd status
   if [[ -n "${KERNEL_LOCK_HELD:-}" ]]; then "$@"; return; fi
   require_cmd flock
   [[ -e "$VEKRONA_KERNEL_LOCK" ]] || root install -m 0644 /dev/null "$VEKRONA_KERNEL_LOCK"
   exec {fd}<"$VEKRONA_KERNEL_LOCK" || die "cannot open $VEKRONA_KERNEL_LOCK"
-  flock -w "$KERNEL_LOCK_WAIT_SECONDS" "$fd" || lock_status=$?
-  case "$lock_status" in
-    0) ;;
-    "$FLOCK_TIMEOUT_STATUS") die "timed out after $KERNEL_LOCK_WAIT_SECONDS s waiting for the kernel lock $VEKRONA_KERNEL_LOCK (another initramfs pass is stuck?)" ;;
-    *) die "flock on $VEKRONA_KERNEL_LOCK failed with status $lock_status" ;;
-  esac
+  flock_or_die "$fd" "$KERNEL_LOCK_WAIT_SECONDS" kernel "$VEKRONA_KERNEL_LOCK" "another initramfs pass is stuck?"
   KERNEL_LOCK_HELD=1
   # Not "$@" || status=$?: a command list would switch errexit off for everything "$@" runs. With errexit on, a failure
   # ends the shell here, which releases the lock too.

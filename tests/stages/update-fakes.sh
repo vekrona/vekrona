@@ -68,6 +68,7 @@ F
   cat >"$w/bin/systemctl" <<'F'
 #!/usr/bin/env bash
 echo "systemctl $*" >>"$FAKE_WORLD/log"
+[[ "$1" == --no-block ]] && shift
 case "$1" in
   is-active) if [[ -e "$FAKE_WORLD/units/$2.active" ]]; then echo active; else echo inactive; exit 3; fi ;;
   start) touch "$FAKE_WORLD/units/$2.active" ;;

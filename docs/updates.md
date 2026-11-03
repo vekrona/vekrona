@@ -97,6 +97,13 @@ run to its end. The unit runs `vekrona-update-apply --online`: `vekrona-proton s
 `updates.json`. Each tool's own output is shown, and the pre-snapshot number comes with a `vekrona-rollback <N>` hint at
 the end.
 
+Every wait in the update path but one is bounded. A download that moves less than 1 KiB/s for 60 s is abandoned and retried (`download_file`),
+a step that cannot get `/run/vekrona-update.lock` within two hours (`UPDATE_LOCK_WAIT_SECONDS`) fails naming it, and
+`vekrona-update-night.service`, which only stores dnf's offline transaction, stops after `TimeoutStartSec=2h`. `vekrona-update-now.service`
+has no start timeout, because it runs dnf's RPM transaction itself and a timeout would kill dnf halfway through it; a dnf that hangs
+there keeps the unit, and the `vekrona-update` client following it, waiting until somebody stops it. The night timer is switched with
+`systemctl --no-block`, so a busy PID 1 cannot hold the check, and `updates.json` takes `night_armed` from that decision.
+
 Every step is non-interactive: `dnf upgrade -y` and `flatpak update --system -y --noninteractive` need no
 confirmation. `flatpak update` runs
 `--system -y --noninteractive` because stage `30-packages` only adds the
