@@ -18,8 +18,8 @@ sway_has() { vekrona-dev sh bash -c "swaymsg -t get_config | jq -er .config | gr
 sway_lacks() { ! sway_has "$1"; }
 # The shell logs a change it does not act on, and a config that sway rejects as an error.
 shell_logged() { vekrona-dev sh bash -c "journalctl --user --no-pager -o cat --after-cursor '$JOURNAL_CURSOR' -t vekrona-shell | grep -qF '$1'"; }
-rejection_recorded() { vekrona-dev sh bash -c "vekrona-error list --all | grep -qF 'sway rejects it'"; }
-export -f sway_has sway_lacks shell_logged rejection_recorded
+REJECTION_TITLE='sway rejects it'
+export -f sway_has sway_lacks shell_logged
 
 # Writes in place, so the restore is itself a plain edit; the shell reloads Sway for it as it does for any edit.
 restore_config() { vekrona-dev run bash -c "[[ ! -e $SWAY_CONFIG_ORIGINAL ]] || { cat $SWAY_CONFIG_ORIGINAL >\"\$(readlink -f $SWAY_CONFIG)\" && rm $SWAY_CONFIG_ORIGINAL; }"; }
@@ -28,10 +28,7 @@ edit_in_place() { vekrona-dev run bash -c "[[ -e $SWAY_CONFIG_ORIGINAL ]] || cp 
 replace_by_rename() { vekrona-dev run bash -c "target=\"\$(readlink -f $SWAY_CONFIG)\" && cp \"\$target\" \"\$target.new\" && printf '%s\n' '$1' >>\"\$target.new\" && mv \"\$target.new\" \"\$target\""; }
 
 # The rejection this scenario provokes is recorded in the error store, and goes again so that it does not stay unread for the next one.
-forget_rejection() {
-  vekrona-dev run bash -c 'vekrona-error list --all | grep -F "sway rejects it" | while read -r id _; do vekrona-error rm "$id"; done'
-  vekrona-dev run vekrona-error refresh-unread
-}
+forget_rejection() { error_titled_remove "$REJECTION_TITLE"; }
 
 trap 'run_cleanups restore_config forget_rejection' EXIT
 
@@ -69,7 +66,7 @@ edit_in_place "$INVALID_LINE"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shell_logged 'sway rejects it' || die "the shell must log a config that sway rejects"
 sway_has "$WRITE_BACK_MARKER" || die "sway must keep the config it runs when the edit is rejected"
 sway_lacks "$INVALID_LINE" || die "sway must not load a config that it rejects"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- rejection_recorded || die "the rejected config must be recorded as an error"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- error_titled_listed "$REJECTION_TITLE" || die "the rejected config must be recorded as an error"
 log "ok: a config that sway rejects is logged, recorded and not reloaded"
 
 restore_config

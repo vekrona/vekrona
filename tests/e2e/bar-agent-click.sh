@@ -25,7 +25,6 @@ DANGER_HEX="$(vekrona_token_get color danger dark)"
 BAR_HEIGHT_PX=$(($(vekrona_token_get size size-bar) - $(vekrona_token_get border border-hair)))
 ICON_S_PX="$(vekrona_token_get size size-icon-s)"
 
-error_listed() { vekrona-dev run bash -c "vekrona-error list | grep -qF '$1'"; }
 # The watcher stores an error's context just before it would send a notification for it, if it did.
 context_stored() { vekrona-dev run bash -c "test -f $ERRORS_DIR/$1/context.txt"; }
 error_status_is() {
@@ -48,7 +47,7 @@ agent_started_for() { vekrona-dev run pgrep -f -- "vekrona-agent --pic[k] --erro
 agent_started_plain() { vekrona-dev run pgrep -f -- "vekrona-agent --pic[k]$" >/dev/null; }
 picker_open() { vekrona-dev run pgrep -x rofi >/dev/null; }
 picker_closed() { absent picker_open; }
-export -f error_listed context_stored error_status_is unread_count unread_is monitor_saw agent_mode_shows selected_is filtered_to agent_started_for agent_started_plain picker_open picker_closed
+export -f context_stored error_status_is unread_count unread_is monitor_saw agent_mode_shows selected_is filtered_to agent_started_for agent_started_plain picker_open picker_closed
 export ROOT DANGER_HEX BAR_HEIGHT_PX
 ERRORS_DIR='$HOME/.local/state/vekrona/errors'
 MUTE_FILE='$HOME/.config/vekrona/errors-mute'
@@ -126,10 +125,7 @@ clear_notifications
 vekrona-dev spawn "$NOTIFY_LOG" -- dbus-monitor --session
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- monitor_saw NameLost
 vekrona-dev sh systemctl --user start vekrona-errors.service
-for title in "$TITLE_TYPED" "$TITLE_KEYBOARD"; do
-  vekrona-dev run vekrona-error report --title "$title" --summary 'raised by an e2e scenario'
-  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- error_listed "$title"
-done
+for title in "$TITLE_TYPED" "$TITLE_KEYBOARD"; do error_watcher_sync "$title"; done
 ID_KEYBOARD="$(error_id "$TITLE_KEYBOARD")"
 ID_TYPED="$(error_id "$TITLE_TYPED")"
 for id in "$ID_KEYBOARD" "$ID_TYPED"; do

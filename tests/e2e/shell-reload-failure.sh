@@ -28,12 +28,7 @@ export ROOT DANGER_HEX BAR_HEIGHT_PX BROKEN_TYPE
 # Both write the file in place, since the shell does not notice a file that is replaced by a rename, as sed -i and git do.
 restore_bar() { vekrona-dev run bash -c "[[ ! -e $BAR_QML_ORIGINAL ]] || { cat $BAR_QML_ORIGINAL >$BAR_QML && rm $BAR_QML_ORIGINAL; }"; }
 break_bar() { vekrona-dev run bash -c "cp $BAR_QML $BAR_QML_ORIGINAL && sed 's/^        Tray {}\$/        $BROKEN_TYPE {}\n&/' $BAR_QML_ORIGINAL >$BAR_QML"; }
-remove_broken_records() {
-  local id
-  for id in $(vekrona-dev run bash -c "vekrona-error list --all | grep -F '$BROKEN_TYPE is not a type' | awk '{print \$1}'"); do
-    vekrona-dev run vekrona-error rm "$id"
-  done
-}
+remove_broken_records() { error_titled_remove "$BROKEN_TYPE is not a type"; }
 remove_dot_files() { rm -f "$DOT_FILE" "$DOT_STATES"; }
 
 DOT_FILE="$(mktemp)"

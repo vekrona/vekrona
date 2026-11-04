@@ -5,24 +5,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=90
-RESTART_RECORD_REGEX="WirePlumber stopped reacting to devices and was restarted"
+RESTART_RECORD_TITLE="WirePlumber stopped reacting to devices and was restarted"
 GUEST_SCRIPT_DIR='$HOME/.local/share/wireplumber/scripts'
 GUEST_CONF_DIR='$HOME/.config/wireplumber/wireplumber.conf.d'
 
-restart_recorded() { vekrona-dev run vekrona-error list --all | grep -q "$RESTART_RECORD_REGEX"; }
-export -f restart_recorded
-export RESTART_RECORD_REGEX
-
 restart_wireplumber() { vekrona-dev run systemctl --user restart wireplumber.service; }
 
-# The restart record this scenario provokes goes again, so that it does not stay unread in the store for the next one.
-forget_restart_records() {
-  vekrona-dev run bash -c 'vekrona-error list --all | grep "$1" | while read -r id _; do vekrona-error rm "$id"; done' _ "$RESTART_RECORD_REGEX"
-  vekrona-dev run vekrona-error refresh-unread
-}
-
 cleanup() {
-  forget_restart_records || warn "could not remove the restart record this scenario made"
+  # The restart record this scenario provokes goes again, so that it does not stay unread in the store for the next one.
+  error_titled_remove "$RESTART_RECORD_TITLE" || warn "could not remove the restart record this scenario made"
   vekrona-dev run bash -c "rm -f $GUEST_SCRIPT_DIR/vekrona-test-wedge.lua $GUEST_CONF_DIR/zz-vekrona-test-wedge.conf" || warn "could not remove the wedge script from the guest"
   restart_wireplumber || warn "could not restart WirePlumber in the guest"
   audio_teardown
@@ -44,7 +35,7 @@ log "ok: the USB card is the default and the stream plays on it"
 
 # The unplug is the event whose hook never completes: from here on WirePlumber ignores every device that comes or goes.
 usb_audio_del
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- restart_recorded || die "WirePlumber was wedged by the unplug and no restart was recorded"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- error_titled_listed "$RESTART_RECORD_TITLE" || die "WirePlumber was wedged by the unplug and no restart was recorded"
 log "ok: the wedge was noticed, WirePlumber was restarted and the restart was recorded"
 
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- audio_graph_is "$FALLBACK_SINK" \
