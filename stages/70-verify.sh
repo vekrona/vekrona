@@ -608,6 +608,10 @@ if ran 50-user; then
   check assert "vekrona-keybindings --list has the help binding" bash -c "vekrona-keybindings --list | grep -qF 'Show keybindings help'"
   check assert "syncthing.service enabled" user_unit_enabled syncthing
   check assert "syncthing waits for the network before it starts (nm-online drop-in linked and loaded)" contains "nm-online" "$(systemctl --user show syncthing.service -p ExecStartPre --value)"
+  check assert "vekrona-sync.service linked" file_exists "$HOME/.config/systemd/user/vekrona-sync.service"
+  check assert "vekrona-sync.service enabled (wanted by syncthing.service)" user_unit_enabled vekrona-sync.service
+  check assert "vekrona-sync.service active while syncthing runs" unit_is_active vekrona-sync.service --user
+  check assert "vekrona-sync resolves on PATH" bash -c "command -v vekrona-sync >/dev/null"
   check assert "the retired vekrona-app-switch Quickshell config is gone" path_absent "$HOME/.config/quickshell/vekrona-app-switch"
   check assert "vekrona-shell Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-shell")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-shell")"
   check assert "vekrona-shell reaches the shared Vekrona module" file_exists "$HOME/.config/quickshell/vekrona-shell/Vekrona/qmldir"

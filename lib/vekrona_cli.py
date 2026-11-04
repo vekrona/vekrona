@@ -1,8 +1,10 @@
 import argparse
+import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def sibling_bin(script_file, name):
@@ -30,12 +32,31 @@ def xdg_config_home():
     return xdg_dir("XDG_CONFIG_HOME", (".config",))
 
 
+def xdg_data_home():
+    return xdg_dir("XDG_DATA_HOME", (".local", "share"))
+
+
 def vekrona_state_dir():
     return os.path.join(xdg_state_home(), "vekrona")
 
 
 def vekrona_config_dir():
     return os.path.join(xdg_config_home(), "vekrona")
+
+
+def write_json_atomically(path, data):
+    """Replaces path with data as JSON through a temp file and a rename, so a reader never sees half a file."""
+    directory, name = os.path.split(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(dir=directory, prefix=f".{name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+            f.write("\n")
+        os.replace(temp_path, path)
+    except BaseException:
+        os.unlink(temp_path)
+        raise
 
 
 def run_quietly(argv):
