@@ -613,8 +613,9 @@ if ran 50-user; then
   check assert "vekrona-keybindings --list has the help binding" bash -c "vekrona-keybindings --list | grep -qF 'Show keybindings help'"
   check assert "syncthing.service enabled" user_unit_enabled syncthing
   check assert "syncthing waits for the network before it starts (nm-online drop-in linked and loaded)" contains "nm-online" "$(systemctl --user show syncthing.service -p ExecStartPre --value)"
-  check assert "syncthing's GUI address in config.xml is the socket $(syncthing_gui_socket)" eq "$(syncthing_gui_address)" "$(syncthing_gui_socket)"
-  check assert "syncthing's config.xml holds no GUI login (the OS user is the authentication)" not syncthing_gui_login_set
+  check assert "syncthing's GUI address in config.xml is the socket $(syncthing_gui_socket)" eq "$(syncthing_gui_address "$(syncthing_config_file)")" "$(syncthing_gui_socket)"
+  check assert "syncthing's config.xml holds no GUI login (the OS user is the authentication)" not syncthing_gui_login_set "$(syncthing_config_file)"
+  check assert "syncthing's GUI is plain HTTP on its socket (vekrona-sync speaks no TLS)" not syncthing_gui_tls_set "$(syncthing_config_file)"
   check assert "syncthing's socket directory is the unit's RuntimeDirectory (drop-in linked and loaded)" eq "$(systemctl --user show syncthing.service -p RuntimeDirectory --value)" syncthing
   check assert "syncthing's socket directory is readable by the user alone" eq "$(systemctl --user show syncthing.service -p RuntimeDirectoryMode --value)" 0700
   check assert "nothing listens on TCP port 8384 (syncthing's old GUI port)" not tcp_port_listening 8384

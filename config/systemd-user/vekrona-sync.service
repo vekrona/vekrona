@@ -3,12 +3,19 @@ Description=Vekrona Syncthing watcher: the bar's Sync state, pairing requests, o
 # It follows syncthing.service: started with it, stopped and restarted with it (also when Syncthing restarts itself).
 PartOf=syncthing.service
 After=syncthing.service
-# A watcher that cannot reach Syncthing for five minutes fails, and is tried again for as long as Syncthing runs.
+# A watcher that cannot reach Syncthing exits and is started again, for as long as Syncthing runs.
 StartLimitIntervalSec=0
 
 [Service]
 ExecStart=%h/.local/bin/vekrona-sync watch
-Restart=on-failure
+# However the watcher ends, the bar must not go on showing what it last saw.
+ExecStopPost=%h/.local/bin/vekrona-sync offline
+# 75: Syncthing did not answer, which is no failure (it is starting, or restarting), only a reason to ask again later, each
+# time after a longer wait than the one before, so that a Syncthing that stays away costs no wakeups to speak of. 78:
+# Syncthing's configuration is wrong, which asking again does not mend; the watcher has reported it.
+Restart=always
+SuccessExitStatus=75
+RestartPreventExitStatus=78
 RestartSec=1
 RestartSteps=6
 RestartMaxDelaySec=60

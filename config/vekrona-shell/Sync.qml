@@ -7,12 +7,14 @@ BarPill {
     id: root
 
     required property var bar
-    // The icon of each state of sync.json.
+    // The icon of each state of sync.json: a check, circling arrows, an exclamation mark and arrows struck through. They are as
+    // tall as the other bar icons and nearly square, which the cloud glyphs (11 px tall, 17 px wide) are not, so the bar
+    // scenarios, which tell an icon from a text by its ink box, take them for pictograms.
     readonly property var icons: ({
-            idle: "cloud_done",
-            syncing: "sync",
-            problem: "sync_problem",
-            offline: "cloud_off"
+            idle: "check_circle",
+            syncing: "autorenew",
+            problem: "error",
+            offline: "sync_disabled"
         })
     // What the pill shows while sync.json is missing, unreadable or malformed (vekrona-sync is not running, or Syncthing is
     // not): the pill stays in the bar, since every bar slot is always there, and says so.

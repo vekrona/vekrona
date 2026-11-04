@@ -8,11 +8,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 # shellcheck source=lib/sync-peer.sh
 source "$ROOT/tests/e2e/lib/sync-peer.sh"
+# shellcheck source=lib/bar-widget.sh
+source "$ROOT/tests/e2e/lib/bar-widget.sh"
 
 STEP_TIMEOUT_SEC=90
 SHARE_NAME=e2e-sync-share
 SHARED_ID=
-export SHARE_NAME
+# state_is and folder_offered_to_peer run in the child bash of `vekrona-dev until`, which sees only what is exported.
+export SHARE_NAME SHARED_ID
 
 state_json() { vekrona-dev run bash -c 'cat "$HOME/.local/state/vekrona/sync.json"'; }
 # Whether sync.json satisfies a jq test; a state file that is not there yet is a no.
@@ -23,10 +26,14 @@ folder_offered_to_peer() { [[ "$(peer_rest GET /rest/cluster/pending/folders | j
 peer_has() { peer test -f "$PEER_HOME/Sync/$SHARE_NAME/$1"; }
 invocation() { vekrona-dev sh systemctl --user show -p InvocationID --value vekrona-sync.service; }
 started_again() { [[ "$(invocation)" != "$1" ]]; }
-export -f state_json state_is watcher_active accept_button folder_offered_to_peer peer_has invocation started_again
+popout_shows_up_to_date() { text_shown 'Up to date'; }
+export -f state_json state_is watcher_active accept_button folder_offered_to_peer peer_has invocation started_again popout_shows_up_to_date
 
 remove_share() { vekrona-dev run bash -c 'rm -rf "$HOME/$1"' _ "$SHARE_NAME"; }
-cleanup() { run_cleanups close_notification_centre peer_stop main_forget_peer remove_share; }
+# A click on the pill toggles the popout, so the one a failed run left open is closed by the same click.
+click_sync_pill() { local x y; read -r x y <<<"$(bar_widget center sync)"; [[ -n "${x:-}" ]] || die "the bar must show the sync icon"; vekrona-dev click "$x" "$y"; }
+close_popout() { absent popout_shows_up_to_date || click_sync_pill; }
+cleanup() { run_cleanups close_popout close_notification_centre peer_stop main_forget_peer remove_share; }
 
 vekrona-dev session
 trap cleanup EXIT
@@ -65,6 +72,13 @@ log "ok: after Join the folder's file arrives at ~/Sync/<label>"
 
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.state == "idle" and (.folders | any(.[]; .id == $id and .state == "idle" and .progress == 100))'
 log "ok: sync.json shows the folder up to date"
+
+click_sync_pill
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- popout_shows_up_to_date
+log "ok: a click on the Sync pill opens the popout, which lists the folder as Up to date"
+click_sync_pill
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'Up to date'
+log "ok: a second click on the Sync pill closes it"
 
 before="$(invocation)"
 vekrona-dev sh systemctl --user restart syncthing.service

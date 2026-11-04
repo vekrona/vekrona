@@ -1082,11 +1082,24 @@ retire_webapp_profile() {
   if [[ -f "$ini" ]] && grep -qxF "Name=$profile" "$ini"; then
     log "removing the profiles.ini entry of the retired Firefox profile $profile"
     kept="$(awk -v name="$profile" '
-      function flush() { if (section != "" && !drop) printf "%s", section; section = ""; drop = 0 }
-      /^\[/ { flush() }
-      { section = section $0 "\n" }
-      $0 == "Name=" name { drop = 1 }
-      END { flush() }' "$ini")" || die "cannot read $ini"
+      /^\[/ { count++; head[count] = $0 }
+      { body[count] = body[count] $0 "\n" }
+      $0 == "Name=" name { drop[count] = 1 }
+      /^Path=/ { path[count] = substr($0, 6) }
+      /^Default=/ { default_path[count] = substr($0, 9) }
+      END {
+        for (i = 1; i <= count; i++) if (drop[i]) removed = path[i]
+        printf "%s", body[0]
+        for (i = 1; i <= count; i++) {
+          if (drop[i]) continue
+          # Firefox starts the profile list over at the first missing [ProfileN], and an [Install...] whose Default is the
+          # removed profile would keep pointing at it.
+          if (head[i] ~ /^\[Install/ && removed != "" && default_path[i] == removed) continue
+          text = body[i]
+          if (head[i] ~ /^\[Profile[0-9]+\]$/) sub(/^\[Profile[0-9]+\]/, "[Profile" next_index++ "]", text)
+          printf "%s", text
+        }
+      }' "$ini")" || die "cannot read $ini"
     write_file_atomic "$ini" "$kept"$'\n'
     ! grep -qxF "Name=$profile" "$ini" || die "failed to remove $profile from $ini"
   else
@@ -1109,44 +1122,99 @@ syncthing_config_file() {
   awk '/^Configuration file:/ { getline; sub(/^[ \t]+/, ""); print; exit }' <<<"$paths"
 }
 
-# The <gui> element of the config file $1; nothing when the file or the element is missing.
-syncthing_gui_xml() {
-  if [[ -f "$1" ]]; then sed -n '/<gui[ >]/,/<\/gui>/p' "$1"; fi
+# The one reader and writer of the <gui> element of Syncthing's config.xml, so that what is checked and what is edited are the same
+# parse of the file, however it is laid out (Syncthing indents, a hand edit may not). `syncthing_gui_py MODE FILE [SOCKET]`:
+#   address, login (yes or no: a user or a password is set), tls (yes or no)  print the answer for FILE; a missing file or a config
+#                                                                              without <gui> answers "" or "no"
+#   edit      prints FILE with its <gui> on SOCKET: the address set (added when there is none), no user, no password, tls off
+# A file that is not XML, or has no <gui> to edit, is an error.
+syncthing_gui_py() {
+  python3 -I - "$@" <<'PYEOF'
+import os
+import sys
+import xml.etree.ElementTree as ET
+
+mode, path, *rest = sys.argv[1:]
+if mode != "edit" and not os.path.exists(path):
+    print("" if mode == "address" else "no")
+    raise SystemExit(0)
+try:
+    tree = ET.parse(path)
+except ET.ParseError as error:
+    raise SystemExit(f"{path} is not valid XML: {error}")
+gui = tree.getroot().find("gui")
+if mode == "edit":
+    if gui is None:
+        raise SystemExit(f"{path} has no <gui> element")
+    address = gui.find("address")
+    if address is None:
+        address = ET.SubElement(gui, "address")
+    address.text = rest[0]
+    for name in ("user", "password"):
+        for element in gui.findall(name):
+            gui.remove(element)
+    gui.set("tls", "false")
+    ET.indent(tree)
+    print(ET.tostring(tree.getroot(), encoding="unicode"))
+elif gui is None:
+    print("" if mode == "address" else "no")
+elif mode == "address":
+    address = gui.find("address")
+    print("" if address is None else (address.text or ""))
+elif mode == "login":
+    print("yes" if any(e.text for name in ("user", "password") for e in gui.findall(name)) else "no")
+elif mode == "tls":
+    print("yes" if gui.get("tls") == "true" else "no")
+else:
+    raise SystemExit(f"unknown mode {mode}")
+PYEOF
 }
 
-# The <address> of the daemon's <gui> element; nothing when there is none.
-syncthing_gui_address() {
-  local gui
-  gui="$(syncthing_gui_xml "$(syncthing_config_file)")"
-  sed -n 's|.*<address>\([^<]*\)</address>.*|\1|p;T;q' <<<"$gui"
-}
+# The <address> of the <gui> element of the config file $1; nothing when there is none.
+syncthing_gui_address() { syncthing_gui_py address "$1" || die "cannot read the GUI address of $1"; }
 
-# Whether the daemon's config.xml demands a GUI login (Syncthing authenticates only when it holds a user and a password).
+# Whether the config file $1 demands a GUI login (Syncthing authenticates only when it holds a user and a password).
 syncthing_gui_login_set() {
-  local gui
-  gui="$(syncthing_gui_xml "$(syncthing_config_file)")"
-  grep -Eq '<(user|password)>[^<]+</(user|password)>' <<<"$gui"
+  local answer
+  answer="$(syncthing_gui_py login "$1")" || die "cannot read the GUI login of $1"
+  [[ "$answer" == yes ]]
+}
+
+# Whether the GUI of the config file $1 is served over TLS, which a client that speaks plain HTTP on the socket cannot use.
+syncthing_gui_tls_set() {
+  local answer
+  answer="$(syncthing_gui_py tls "$1")" || die "cannot read the GUI TLS setting of $1"
+  [[ "$answer" == yes ]]
+}
+
+# Whether the config file $1 puts the GUI on the socket $2 with plain HTTP and no login.
+syncthing_gui_on_socket() {
+  [[ "$(syncthing_gui_address "$1")" == "$2" ]] && ! syncthing_gui_login_set "$1" && ! syncthing_gui_tls_set "$1"
 }
 
 # Puts the GUI on its socket and takes any login out of the config, unless that is so already. `syncthing generate` skips an
 # empty user and password, so it cannot clear a login, and a running daemon overwrites an edit of its config, so the daemon
-# stops before the edit; the caller starts it again. The password an earlier install kept goes with the login it belonged to.
+# stops before the edit; the caller starts it again. The edit is made on a copy that replaces the config only once it is
+# checked, since a config with a login and no address would start a GUI on TCP without one. The password an earlier install
+# kept goes with the login it belonged to.
 ensure_syncthing_gui_socket() {
-  local config socket
+  local config socket edited
   require_cmd syncthing
   config="$(syncthing_config_file)"
   socket="$(syncthing_gui_socket)"
-  if [[ "$(syncthing_gui_address)" == "$socket" ]] && ! syncthing_gui_login_set; then
+  if syncthing_gui_on_socket "$config" "$socket"; then
     log "syncthing GUI already on $socket without a login"
   else
     systemctl --user stop syncthing.service || die "cannot stop syncthing.service to move its GUI to a socket"
     if [[ ! -f "$config" ]]; then
       syncthing generate >/dev/null || die "syncthing generate failed to create $config"
     fi
-    sed -i "/<gui[ >]/,/<\/gui>/{s|<address>[^<]*</address>|<address>$socket</address>|;s|<user>[^<]*</user>||;s|<password>[^<]*</password>||}" "$config" \
-      || die "cannot edit the GUI of $config"
-    [[ "$(syncthing_gui_address)" == "$socket" ]] || die "syncthing's config has no GUI address $socket after the edit"
-    ! syncthing_gui_login_set || die "syncthing's config still has a GUI login after the edit"
+    edited="$(mktemp "$config.XXXXXX")" || die "cannot create a temp file next to $config"
+    syncthing_gui_py edit "$config" "$socket" >"$edited" \
+      || { rm -f "$edited"; die "cannot move the GUI of $config to $socket"; }
+    syncthing_gui_on_socket "$edited" "$socket" \
+      || { rm -f "$edited"; die "the edited copy of $config does not put the GUI on $socket without a login or TLS, so $config stays as it was"; }
+    mv -fT "$edited" "$config" || { rm -f "$edited"; die "cannot replace $config with its edited copy"; }
     log "syncthing GUI moved to $socket without a login"
   fi
   remove_retired "Syncthing's GUI has no login since it listens on a socket" "$(retired_syncthing_gui_password_file)"

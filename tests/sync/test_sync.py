@@ -2,6 +2,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shutil
 import socketserver
 import tempfile
 import threading
@@ -76,11 +77,16 @@ class DropRuleTest(unittest.TestCase):
         self.assertEqual(sync.device_id_arg(ME), ME)
 
 
+def open_dir(path):
+    return os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+
+
 class PlacementTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.source_dir = os.path.join(self.tmp.name, "inbox")
+        self.drop = os.path.join(self.tmp.name, "drop")
+        self.source_dir = os.path.join(self.drop, "to", ME)
         self.target = os.path.join(self.tmp.name, "Downloads")
         os.makedirs(self.source_dir)
         os.makedirs(self.target)
@@ -95,24 +101,29 @@ class PlacementTest(unittest.TestCase):
         with open(os.path.join(self.target, name)) as f:
             return f.read()
 
+    def place(self, name, target_name):
+        source_fd, target_fd = open_dir(self.source_dir), open_dir(self.target)
+        self.addCleanup(os.close, source_fd)
+        self.addCleanup(os.close, target_fd)
+        return sync.place_without_overwriting(source_fd, name, target_fd, target_name)
+
     def test_a_name_that_exists_gets_a_number_before_the_extension_and_the_old_file_is_untouched(self):
         self.write(self.target, "photo.jpg", "first")
         self.write(self.target, "photo (2).jpg", "second")
-        source = self.write(self.source_dir, "photo.jpg", "third")
-        placed = sync.place_without_overwriting(source, self.target, "photo.jpg")
-        self.assertEqual(os.path.basename(placed), "photo (3).jpg")
+        self.write(self.source_dir, "photo.jpg", "third")
+        self.assertEqual(self.place("photo.jpg", "photo.jpg"), "photo (3).jpg")
         self.assertEqual((self.read("photo.jpg"), self.read("photo (2).jpg"), self.read("photo (3).jpg")),
                          ("first", "second", "third"))
 
     def test_a_name_without_an_extension_gets_the_number_at_the_end(self):
         self.write(self.target, "notes", "first")
-        source = self.write(self.source_dir, "notes", "second")
-        self.assertEqual(os.path.basename(sync.place_without_overwriting(source, self.target, "notes")), "notes (2)")
+        self.write(self.source_dir, "notes", "second")
+        self.assertEqual(self.place("notes", "notes"), "notes (2)")
 
     def test_a_dangling_link_in_the_target_counts_as_a_taken_name(self):
         os.symlink("/nonexistent", os.path.join(self.target, "a.txt"))
-        source = self.write(self.source_dir, "a.txt", "x")
-        self.assertEqual(os.path.basename(sync.place_without_overwriting(source, self.target, "a.txt")), "a (2).txt")
+        self.write(self.source_dir, "a.txt", "x")
+        self.assertEqual(self.place("a.txt", "a.txt"), "a (2).txt")
 
     def test_receiving_moves_finished_files_only(self):
         self.write(self.source_dir, "done.txt", "whole")
@@ -122,26 +133,71 @@ class PlacementTest(unittest.TestCase):
         os.symlink("/etc/passwd", os.path.join(self.source_dir, "link"))
         os.mkdir(os.path.join(self.source_dir, "subdir"))
         with mock.patch.object(sync, "downloads_dir", return_value=self.target):
-            arrivals, failures = sync.receive(self.source_dir, "Pixel")
+            arrivals, failures = sync.receive(self.drop, ME, "Pixel")
         self.assertEqual(failures, [])
         self.assertEqual(sorted(a["name"] for a in arrivals),
                          ["done.txt", "x.sync-conflict-20240101-000000-ABCDEFG.txt"])
+        self.assertEqual(sorted(a["path"] for a in arrivals), sorted(os.path.join(self.target, a["name"]) for a in arrivals))
         self.assertTrue(all(a["from"] == "Pixel" and a["unseen"] for a in arrivals))
         self.assertEqual(sorted(os.listdir(self.source_dir)),
                          [".syncthing.half.txt.tmp", "link", "subdir", "~syncthing~half.txt.tmp"])
 
     def test_receiving_from_an_inbox_that_does_not_exist_yet_moves_nothing(self):
         with mock.patch.object(sync, "downloads_dir", side_effect=AssertionError("must not look for Downloads")):
-            self.assertEqual(sync.receive(os.path.join(self.tmp.name, "missing"), "Pixel"), ([], []))
+            self.assertEqual(sync.receive(os.path.join(self.tmp.name, "missing"), ME, "Pixel"), ([], []))
+            self.assertEqual(sync.receive(self.drop, PEER, "Pixel"), ([], []))
+
+    def test_an_inbox_that_a_peer_replaced_by_a_link_is_refused_and_what_it_points_at_is_left_alone(self):
+        victims = os.path.join(self.tmp.name, "victims")
+        os.mkdir(victims)
+        self.write(victims, "private.txt", "secret")
+        os.rmdir(self.source_dir)
+        os.symlink(victims, self.source_dir)
+        with mock.patch.object(sync, "downloads_dir", return_value=self.target):
+            with self.assertRaisesRegex(sync.SyncError, "is a link"):
+                sync.receive(self.drop, ME, "Pixel")
+        self.assertEqual(os.listdir(victims), ["private.txt"])
+        self.assertEqual(os.listdir(self.target), [])
+
+    def test_a_to_directory_that_a_peer_replaced_by_a_link_is_refused_too(self):
+        victims = os.path.join(self.tmp.name, "victims")
+        os.makedirs(os.path.join(victims, ME))
+        self.write(os.path.join(victims, ME), "private.txt", "secret")
+        shutil.rmtree(os.path.join(self.drop, "to"))
+        os.symlink(victims, os.path.join(self.drop, "to"))
+        with mock.patch.object(sync, "downloads_dir", return_value=self.target):
+            with self.assertRaisesRegex(sync.SyncError, "is a link"):
+                sync.receive(self.drop, ME, "Pixel")
+        self.assertEqual(os.listdir(os.path.join(victims, ME)), ["private.txt"])
+
+    def test_delivering_into_an_inbox_that_is_a_link_is_refused(self):
+        victims = os.path.join(self.tmp.name, "victims")
+        os.mkdir(victims)
+        os.rmdir(self.source_dir)
+        os.symlink(victims, self.source_dir)
+        with self.assertRaisesRegex(sync.SyncError, "is a link"):
+            with sync.open_inbox(self.drop, ME, create=True):
+                self.fail("the inbox must not open")
+        self.assertEqual(os.listdir(victims), [])
 
     def test_delivering_leaves_no_temp_file_and_never_overwrites(self):
-        original = self.write(self.source_dir, "report.pdf", "v1")
-        sync.deliver(original, self.target)
+        original = self.write(self.tmp.name, "report.pdf", "v1")
+        inbox = open_dir(self.source_dir)
+        self.addCleanup(os.close, inbox)
+        sync.deliver(original, inbox)
         with open(original, "w") as f:
             f.write("v2")
-        sync.deliver(original, self.target)
-        self.assertEqual(sorted(os.listdir(self.target)), ["report (2).pdf", "report.pdf"])
-        self.assertEqual((self.read("report.pdf"), self.read("report (2).pdf")), ("v1", "v2"))
+        sync.deliver(original, inbox)
+        self.assertEqual(sorted(os.listdir(self.source_dir)), ["report (2).pdf", "report.pdf"])
+        with open(os.path.join(self.source_dir, "report.pdf")) as f1, open(os.path.join(self.source_dir, "report (2).pdf")) as f2:
+            self.assertEqual((f1.read(), f2.read()), ("v1", "v2"))
+
+    def test_delivering_a_file_that_cannot_be_read_is_an_error_that_leaves_nothing_behind(self):
+        inbox = open_dir(self.source_dir)
+        self.addCleanup(os.close, inbox)
+        with self.assertRaises(sync.SyncError):
+            sync.deliver(os.path.join(self.tmp.name, "missing.txt"), inbox)
+        self.assertEqual(os.listdir(self.source_dir), [])
 
 
 def folder(folder_id, label="Notes", path="/home/u/Sync/Notes", devices=(ME,), **extra):
@@ -198,15 +254,24 @@ class AssembleTest(unittest.TestCase):
         view = sync.assemble(snapshot(pending_devices={THIRD: {"name": "", "address": "1.2.3.4:22000"}}))
         self.assertEqual(view["pendingDevices"], [{"id": THIRD, "name": "CCCC-CCC", "code": "CCCC-CCC"}])
 
-    def test_offers_name_the_offering_device_and_leave_out_the_drop_that_is_taken_automatically(self):
+    def test_offers_name_the_offering_device(self):
         view = sync.assemble(snapshot(pending_folders={
             "p1": {"offeredBy": {PEER: {"label": "Photos"}}},
-            "p2": {"offeredBy": {PEER: {"label": ""}}},
-            DROP: {"offeredBy": {PEER: {"label": "vekrona drop"}}},
-            sync.drop_folder_id(PEER, THIRD): {"offeredBy": {PEER: {"label": "vekrona drop"}}}}))
+            "p2": {"offeredBy": {PEER: {"label": ""}}}}))
         self.assertEqual([(o["folder"], o["label"], o["device"], o["deviceName"]) for o in view["offers"]],
-                         [("p1", "Photos", PEER, "Pixel"), ("p2", "p2", PEER, "Pixel"),
-                          (sync.drop_folder_id(PEER, THIRD), "vekrona drop", PEER, "Pixel")])
+                         [("p1", "Photos", PEER, "Pixel"), ("p2", "p2", PEER, "Pixel")])
+
+    def test_no_drop_is_ever_offered_to_join_not_even_one_a_third_device_made_up(self):
+        view = sync.assemble(snapshot(pending_folders={
+            DROP: {"offeredBy": {PEER: {"label": "vekrona drop"}}},
+            sync.drop_folder_id(PEER, THIRD): {"offeredBy": {THIRD: {"label": "vekrona drop"}}},
+            sync.drop_folder_id(ME, THIRD): {"offeredBy": {PEER: {"label": "vekrona drop"}}},
+            "vekrona-drop-lizard": {"offeredBy": {PEER: {"label": "vekrona drop"}}}}))
+        self.assertEqual(view["offers"], [])
+
+    def test_a_folder_that_started_syncing_after_an_error_has_zero_progress_not_a_missing_key(self):
+        view = sync.assemble(snapshot(statuses={"f1": {"state": "syncing", "error": None}}))
+        self.assertEqual((view["state"], view["folders"][0]["progress"]), ("syncing", 0))
 
 
 class StateStoreTest(unittest.TestCase):
@@ -216,7 +281,8 @@ class StateStoreTest(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {"XDG_STATE_HOME": self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.store = sync.StateStore()
+        self.reports = []
+        self.store = sync.StateStore(self.reports.append)
 
     def arrival(self, name):
         return {"name": name, "path": f"/d/{name}", "from": "Pixel", "unseen": True}
@@ -232,6 +298,20 @@ class StateStoreTest(unittest.TestCase):
         self.store.mark_seen()
         self.assertIsNone(self.store.read())
 
+    def test_seen_when_everything_is_seen_does_not_rewrite_the_file(self):
+        self.store.publish(sync.assemble(snapshot()), [self.arrival("a")])
+        self.store.mark_seen()
+        before = os.stat(self.store.path)
+        self.store.mark_seen()
+        after = os.stat(self.store.path)
+        self.assertEqual((before.st_ino, before.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
+
+    def test_publishing_what_the_file_says_already_does_not_rewrite_it(self):
+        self.store.publish(sync.assemble(snapshot()), [])
+        before = os.stat(self.store.path)
+        self.store.publish(sync.assemble(snapshot()), [])
+        self.assertEqual(before.st_ino, os.stat(self.store.path).st_ino)
+
     def test_new_arrivals_come_first_and_only_the_last_twenty_stay(self):
         self.store.publish(sync.assemble(snapshot()), [self.arrival(f"old{i}") for i in range(15)])
         self.store.mark_seen()
@@ -241,31 +321,51 @@ class StateStoreTest(unittest.TestCase):
         self.assertEqual(arrivals[0]["name"], "new0")
         self.assertEqual([a["unseen"] for a in arrivals], [True] * 10 + [False] * 10)
 
-    def test_an_outage_is_written_as_offline_and_keeps_the_arrivals(self):
+    def test_the_offline_view_says_so_in_plain_words_and_keeps_the_arrivals(self):
         self.store.publish(sync.assemble(snapshot()), [self.arrival("a")])
-        sync.Outage(self.store).began(sync.Unreachable("no socket"))
+        self.store.publish(sync.offline_view(), [])
         state = self.store.read()
-        self.assertEqual((state["state"], state["problem"], state["folders"]), ("offline", "no socket", []))
+        self.assertEqual((state["state"], state["problem"], state["folders"]),
+                         ("offline", "Syncthing is not running", []))
         self.assertEqual([a["name"] for a in state["arrivals"]], ["a"])
 
-    def test_a_state_file_that_is_not_json_is_an_error(self):
+    def test_a_state_file_that_is_not_json_is_reported_once_and_replaced_by_the_next_state(self):
         os.makedirs(os.path.dirname(self.store.path))
         with open(self.store.path, "w") as f:
             f.write("not json")
-        with self.assertRaises(sync.SyncError):
-            self.store.mark_seen()
+        self.store.publish(sync.assemble(snapshot()), [])
+        self.assertEqual(len(self.reports), 1)
+        self.assertIn(self.store.path, self.reports[0])
+        self.assertEqual(self.store.read()["state"], "idle")
+        self.assertEqual(len(self.reports), 1)
+
+    def test_a_state_file_of_the_wrong_shape_is_replaced_the_same_way(self):
+        os.makedirs(os.path.dirname(self.store.path))
+        for content in ("[]", "{}", '{"arrivals": 3}'):
+            with self.subTest(content=content):
+                with open(self.store.path, "w") as f:
+                    f.write(content)
+                self.reports.clear()
+                self.store.publish(sync.assemble(snapshot()), [])
+                self.assertEqual(len(self.reports), 1)
+                self.assertEqual(self.store.read()["arrivals"], [])
 
 
 class FakeSyncthing(sync.Syncthing):
-    def __init__(self, answers):
+    def __init__(self, answers, statuses=None):
         super().__init__("/nonexistent", "key")
         self.answers = answers
+        self.statuses = statuses or {}
         self.writes = []
+        self.requests = []
 
     def request(self, method, path, query=None, body=None, timeout=None):
+        self.requests.append((method, path))
         if method != "GET":
             self.writes.append((method, path, body))
             return None
+        if path == "/rest/db/status":
+            return self.statuses[query["folder"]]
         return self.answers[path]
 
 
@@ -300,23 +400,46 @@ class WatcherTest(unittest.TestCase):
         os.makedirs(self.inbox)
         self.notifier = Recorder()
         self.reports = []
-        self.store = sync.StateStore()
+        self.store = sync.StateStore(self.reports.append)
         self.watcher = sync.Watcher(self.store, self.notifier, self.reports.append)
 
-    def api(self, pending_folders=None, pending_devices=None, drop_devices=(ME, PEER)):
+    def api(self, pending_folders=None, pending_devices=None, drop_devices=(ME, PEER), notes_status=None):
+        config_folders = [folder(DROP, "vekrona drop", self.drop_path, devices=drop_devices)]
+        if notes_status is not None:
+            config_folders.append(folder("f1"))
         return FakeSyncthing({
             "/rest/system/status": {"myID": ME},
-            "/rest/config": {"folders": [folder(DROP, "vekrona drop", self.drop_path, devices=drop_devices)],
+            "/rest/config": {"folders": config_folders,
                              "devices": [{"deviceID": ME, "name": "this"}, {"deviceID": PEER, "name": "Pixel"}]},
-            "/rest/config/folders": [folder(DROP, "vekrona drop", self.drop_path, devices=drop_devices)],
+            "/rest/config/folders": config_folders,
             "/rest/system/connections": {"connections": {PEER: {"connected": True}}},
             "/rest/cluster/pending/devices": pending_devices or {},
             "/rest/cluster/pending/folders": pending_folders or {},
-            "/rest/config/defaults/folder": {"id": "", "devices": []}})
+            "/rest/config/defaults/folder": {"id": "", "devices": []}},
+            statuses={"f1": notes_status} if notes_status is not None else {})
 
     def refresh(self, api, scan_all, finished=()):
         self.watcher.api = api
-        self.watcher.refresh(ME, scan_all=scan_all, finished=set(finished))
+        self.watcher.snapshot = sync.read_snapshot(api, ME)
+        self.watcher.refresh(scan_all=scan_all, finished=set(finished))
+
+    def follow(self, api, *batches):
+        """Follows api through the batches of events, then until Syncthing stops answering."""
+        remaining = list(batches)
+        polls = []
+
+        def events(since, limit=None, timeout_sec=0):
+            polls.append(since)
+            if limit is not None:
+                return []
+            if not remaining:
+                raise sync.Unreachable("stopped")
+            return remaining.pop(0)
+
+        api.events = events
+        with self.assertRaises(sync.Unreachable):
+            self.watcher.follow(api)
+        return polls
 
     def put(self, name):
         with open(os.path.join(self.inbox, name), "w") as f:
@@ -343,10 +466,10 @@ class WatcherTest(unittest.TestCase):
         self.put("b.txt")
         real_place = sync.place_without_overwriting
 
-        def place(source, directory, name):
+        def place(source_fd, source_name, directory_fd, name):
             if name == "a.txt":
                 raise OSError("disk full")
-            return real_place(source, directory, name)
+            return real_place(source_fd, source_name, directory_fd, name)
 
         with mock.patch.object(sync, "place_without_overwriting", place):
             self.refresh(self.api(), scan_all=True)
@@ -371,6 +494,36 @@ class WatcherTest(unittest.TestCase):
                          ("POST", "/rest/config/folders", DROP, "sendreceive", [ME, PEER]))
         self.assertTrue(body["path"].startswith(os.path.join(self.tmp.name, "data")))
 
+    def test_a_drop_offered_by_a_third_device_is_not_shown_taken_or_notified_and_is_logged_once(self):
+        spoof = sync.drop_folder_id(ME, THIRD)
+        api = self.api(pending_folders={spoof: {"offeredBy": {PEER: {"label": "vekrona drop"}}},
+                                        DROP: {"offeredBy": {THIRD: {"label": "vekrona drop"}}}})
+        with mock.patch("sys.stderr") as stderr:
+            self.refresh(api, scan_all=True)
+            self.refresh(api, scan_all=True)
+        self.assertEqual(api.writes, [])
+        self.assertEqual(self.store.read()["offers"], [])
+        self.assertEqual(self.notifier.calls, [])
+        logged = "".join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertEqual(logged.count("ignoring the offer"), 2)
+
+    def test_a_drop_that_a_third_device_shares_is_refused_for_receiving_and_reported_once(self):
+        self.put("planted.txt")
+        api = self.api(drop_devices=(ME, PEER, THIRD))
+        self.refresh(api, scan_all=True)
+        self.refresh(api, scan_all=True)
+        self.assertEqual(os.listdir(self.inbox), ["planted.txt"])
+        self.assertEqual(len(self.reports), 1)
+        self.assertIn(THIRD, self.reports[0])
+
+    def test_a_drop_that_a_third_device_shares_is_not_taken_over_when_its_other_party_offers_it_again(self):
+        api = self.api(pending_folders={DROP: {"offeredBy": {PEER: {"label": "vekrona drop"}}}},
+                       drop_devices=(ME, THIRD))
+        self.refresh(api, scan_all=True)
+        self.assertEqual(api.writes, [])
+        self.assertEqual(len(self.reports), 1)
+        self.assertIn(THIRD, self.reports[0])
+
     def test_each_pairing_request_and_offer_is_notified_once_until_it_is_gone(self):
         pending = {"pending_devices": {THIRD: {"name": "Laptop"}},
                    "pending_folders": {"p1": {"offeredBy": {PEER: {"label": "Photos"}}}}}
@@ -381,38 +534,50 @@ class WatcherTest(unittest.TestCase):
         self.refresh(self.api(**pending), scan_all=False)
         self.assertEqual(len(self.notifier.calls), 4)
 
-    def test_following_refreshes_at_start_and_then_only_for_events_that_matter(self):
+    def test_following_reads_everything_at_start_and_after_a_jump_in_the_ids_and_looks_into_a_drop_where_a_file_finished(self):
         elsewhere = {"id": 1, "type": "ItemFinished", "data": {"folder": "f1", "error": None}}
         in_drop = {"id": 2, "type": "ItemFinished", "data": {"folder": DROP, "error": None}}
-        dropped = {"id": 9, "type": "StateChanged", "data": {"folder": "f1"}}
+        dropped = {"id": 9, "type": "StateChanged", "data": {"folder": "f1", "to": "idle"}}
         api = self.api()
-        batches = [[elsewhere], [in_drop], [dropped]]
-        polls = []
-
-        def events(since, limit=None, timeout_sec=0):
-            polls.append(since)
-            if limit is not None:
-                return []
-            if not batches:
-                raise sync.Unreachable("stopped")
-            return batches.pop(0)
-
-        api.events = events
         self.put("sent.txt")
-        configs = []
-        original = api.request
-
-        def counting(method, path, query=None, body=None, timeout=None):
-            if path == "/rest/config" and method == "GET":
-                configs.append(1)
-            return original(method, path, query, body, timeout)
-
-        api.request = counting
-        with self.assertRaises(sync.Unreachable):
-            self.watcher.follow(api, lambda: None)
+        polls = self.follow(api, [elsewhere], [in_drop], [dropped])
         self.assertEqual(polls, [0, 0, 1, 2, 9])
-        # The start, the finished file in the drop, and the batch with the jump from 2 to 9.
-        self.assertEqual(len(configs), 3)
+        self.assertEqual(os.listdir(self.downloads), ["sent.txt"])
+        # The start and the batch with the jump from 2 to 9; the finished file in the drop needs no configuration.
+        self.assertEqual(api.requests.count(("GET", "/rest/config")), 2)
+
+    def test_a_folder_summary_updates_the_progress_without_asking_syncthing_about_the_folder(self):
+        api = self.api(notes_status={"state": "idle", "globalBytes": 100, "needBytes": 0})
+        summary = {"id": 1, "type": "FolderSummary",
+                   "data": {"folder": "f1", "summary": {"state": "syncing", "globalBytes": 100, "needBytes": 40}}}
+        self.follow(api, [summary])
+        state = self.store.read()
+        self.assertEqual((state["state"], state["folders"][0]["progress"]), ("syncing", 60))
+        self.assertEqual(api.requests.count(("GET", "/rest/db/status")), 1)
+
+    def test_a_state_change_updates_the_state_without_asking_syncthing_about_the_folder(self):
+        api = self.api(notes_status={"state": "idle", "globalBytes": 100, "needBytes": 0})
+        failing = {"id": 1, "type": "StateChanged",
+                   "data": {"folder": "f1", "from": "idle", "to": "error", "error": "folder path missing"}}
+        self.follow(api, [failing])
+        state = self.store.read()
+        self.assertEqual((state["state"], state["problem"]), ("problem", "folder path missing"))
+        self.assertEqual(api.requests.count(("GET", "/rest/db/status")), 1)
+
+    def test_a_device_coming_and_going_updates_who_is_connected_without_reading_the_configuration(self):
+        api = self.api()
+        api.answers["/rest/system/connections"] = {"connections": {}}
+        gone = {"id": 1, "type": "DeviceConnected", "data": {"id": PEER}}
+        self.follow(api, [gone])
+        self.assertEqual(self.store.read()["devices"], [{"id": PEER, "name": "Pixel", "connected": True}])
+        self.assertEqual(api.requests.count(("GET", "/rest/config")), 1)
+
+    def test_a_saved_configuration_and_a_change_of_what_is_pending_read_everything_again(self):
+        for event_type in ("ConfigSaved", "PendingDevicesChanged", "PendingFoldersChanged"):
+            with self.subTest(event_type=event_type):
+                api = self.api()
+                self.follow(api, [{"id": 1, "type": event_type, "data": {}}])
+                self.assertEqual(api.requests.count(("GET", "/rest/config")), 2)
 
     def test_events_that_cannot_change_the_view_are_skipped(self):
         finished_elsewhere = {"type": "ItemFinished", "data": {"folder": "f1", "error": None}}
@@ -422,6 +587,139 @@ class WatcherTest(unittest.TestCase):
         self.assertTrue(sync.matters(finished_in_drop))
         self.assertTrue(sync.matters({"type": "StateChanged", "data": {"folder": "f1"}}))
         self.assertEqual(sync.finished_drops([finished_elsewhere, finished_in_drop, failed_in_drop]), {DROP})
+
+
+class NotifierTest(unittest.TestCase):
+    def test_a_notification_tool_that_cannot_be_started_is_reported_not_raised_in_its_thread(self):
+        reports = []
+        sync.DesktopNotifier(reports.append).wait_for_answer(["/nonexistent/vekrona-update-ask"], {})
+        self.assertEqual(len(reports), 1)
+        self.assertIn("cannot run /nonexistent/vekrona-update-ask", reports[0])
+
+
+class CommandTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {"XDG_STATE_HOME": os.path.join(self.tmp.name, "state"),
+                                               "XDG_DATA_HOME": os.path.join(self.tmp.name, "data")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.reports = []
+        patcher = mock.patch.object(sync, "report_failure", self.reports.append)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def watch_ending_with(self, exc):
+        with mock.patch.object(sync.Syncthing, "from_config", side_effect=exc):
+            with self.assertRaises(SystemExit) as raised:
+                sync.command_watch(None)
+        return raised.exception.code
+
+    def test_a_syncthing_that_does_not_answer_ends_the_watcher_with_the_status_that_asks_for_a_later_retry(self):
+        with mock.patch("sys.stderr"):
+            self.assertEqual(self.watch_ending_with(sync.Unreachable("no socket")), 75)
+        self.assertEqual(self.reports, [])
+
+    def test_a_configuration_that_cannot_work_is_reported_and_ends_the_watcher_with_the_status_that_asks_for_no_retry(self):
+        self.assertEqual(self.watch_ending_with(sync.ConfigError("the GUI address is not a unix socket")), 78)
+        self.assertEqual(self.reports, ["the GUI address is not a unix socket"])
+
+    def test_another_failure_is_no_reason_to_stop_retrying(self):
+        with self.assertRaises(sync.SyncError):
+            with mock.patch.object(sync.Syncthing, "from_config", side_effect=sync.SyncError("HTTP 500")):
+                sync.command_watch(None)
+
+    def test_the_offline_command_writes_the_offline_view_and_keeps_the_arrivals(self):
+        store = sync.StateStore(self.reports.append)
+        store.publish(sync.assemble(snapshot()), [{"name": "a", "path": "/d/a", "from": "Pixel", "unseen": True}])
+        sync.command_offline(None)
+        state = store.read()
+        self.assertEqual(state["state"], "offline")
+        self.assertEqual([a["name"] for a in state["arrivals"]], ["a"])
+
+
+class JoinAndSendTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        home = os.path.join(self.tmp.name, "home")
+        os.makedirs(home)
+        for name, value in (("HOME", home), ("XDG_DATA_HOME", os.path.join(self.tmp.name, "data"))):
+            patcher = mock.patch.dict(os.environ, {name: value})
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.home = home
+
+    def api(self, pending_folders=None, drop_devices=None):
+        folders = [] if drop_devices is None else [folder(DROP, "vekrona drop", os.path.join(self.tmp.name, "drop"),
+                                                          devices=drop_devices)]
+        return FakeSyncthing({
+            "/rest/system/status": {"myID": ME},
+            "/rest/cluster/pending/folders": pending_folders or {},
+            "/rest/config/folders": folders,
+            "/rest/config/devices": [{"deviceID": ME}, {"deviceID": PEER}],
+            "/rest/config/defaults/folder": {"id": "", "devices": []}})
+
+    def test_a_drop_cannot_be_joined_not_even_when_a_device_offers_it(self):
+        for offered in (DROP, sync.drop_folder_id(ME, THIRD), "vekrona-drop-lizard"):
+            with self.subTest(offered=offered):
+                api = self.api(pending_folders={offered: {"offeredBy": {THIRD: {"label": "x"}}}})
+                with self.assertRaisesRegex(sync.SyncError, "is a drop"):
+                    sync.join(api, offered, None)
+                self.assertEqual(api.writes, [])
+
+    def test_a_folder_is_joined_into_a_directory_named_after_its_label(self):
+        api = self.api(pending_folders={"p1": {"offeredBy": {PEER: {"label": "Photos"}}}})
+        sync.join(api, "p1", None)
+        self.assertTrue(os.path.isdir(os.path.join(self.home, "Sync", "Photos")))
+        self.assertEqual(api.writes[0][1], "/rest/config/folders")
+
+    def test_a_link_where_the_folder_would_go_is_refused_whatever_it_points_at(self):
+        os.makedirs(os.path.join(self.home, "Sync"))
+        elsewhere = os.path.join(self.tmp.name, "elsewhere")
+        os.mkdir(elsewhere)
+        os.symlink(elsewhere, os.path.join(self.home, "Sync", "Photos"))
+        api = self.api(pending_folders={"p1": {"offeredBy": {PEER: {"label": "Photos"}}}})
+        with self.assertRaisesRegex(sync.SyncError, "not an empty directory"):
+            sync.join(api, "p1", None)
+        self.assertEqual(api.writes, [])
+
+    def test_a_directory_that_cannot_be_reached_is_a_sync_error_not_a_traceback(self):
+        blocker = os.path.join(self.home, "Sync")
+        with open(blocker, "w") as f:
+            f.write("a file where the directory should be")
+        api = self.api(pending_folders={"p1": {"offeredBy": {PEER: {"label": "Photos"}}}})
+        with self.assertRaisesRegex(sync.SyncError, "cannot look at"):
+            sync.join(api, "p1", None)
+        self.assertEqual(api.writes, [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root creates directories anywhere")
+    def test_a_directory_that_cannot_be_created_is_a_sync_error_not_a_traceback(self):
+        os.makedirs(os.path.join(self.home, "Sync"), mode=0o500)
+        api = self.api(pending_folders={"p1": {"offeredBy": {PEER: {"label": "Photos"}}}})
+        with self.assertRaisesRegex(sync.SyncError, "cannot create"):
+            sync.join(api, "p1", None)
+        self.assertEqual(api.writes, [])
+
+    def test_sending_through_a_drop_that_a_third_device_shares_is_refused_and_sends_nothing(self):
+        file = os.path.join(self.tmp.name, "a.txt")
+        with open(file, "w") as f:
+            f.write("a")
+        api = self.api(drop_devices=(ME, PEER, THIRD))
+        with self.assertRaisesRegex(sync.SyncError, "no party to it"):
+            sync.send(api, PEER, [file])
+        self.assertEqual(api.writes, [])
+        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "drop", "to")))
+
+    def test_sending_puts_the_file_in_the_inbox_of_the_other_device(self):
+        file = os.path.join(self.tmp.name, "a.txt")
+        with open(file, "w") as f:
+            f.write("a")
+        api = self.api(drop_devices=(ME,))
+        sync.send(api, PEER, [file])
+        self.assertEqual(os.listdir(os.path.join(self.tmp.name, "drop", "to", PEER)), ["a.txt"])
+        self.assertEqual(api.writes[0][0], "PATCH")
 
 
 class UnixHandler(BaseHTTPRequestHandler):

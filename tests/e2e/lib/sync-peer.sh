@@ -74,13 +74,22 @@ main_dials_peer() {
   main_rest PATCH "/rest/config/devices/$PEER_ID" "$(jq -nc --arg addr "tcp://$PEER_LISTEN" '{addresses: [$addr]}')" >/dev/null
   vekrona-dev until --timeout 90 -- devices_connected
 }
-# Puts the guest's Syncthing back: the other device and every folder that is shared with it are removed.
+# Puts the guest's Syncthing back, whatever step a failed run stopped at: every folder that is shared with the other device, the
+# device itself once it is accepted, and what the other device offered or asked while it was still pending, are removed.
 main_forget_peer() {
   [[ -n "${PEER_ID:-}" ]] || return 0
   local folder
   for folder in $(main_rest GET /rest/config/folders | jq -r --arg id "$PEER_ID" '.[] | select(any(.devices[]; .deviceID == $id)) | .id'); do
     main_rest DELETE "/rest/config/folders/$folder" >/dev/null
   done
-  main_rest DELETE "/rest/config/devices/$PEER_ID" >/dev/null
+  if device_known_on_main; then
+    main_rest DELETE "/rest/config/devices/$PEER_ID" >/dev/null
+  fi
+  for folder in $(main_rest GET /rest/cluster/pending/folders | jq -r --arg id "$PEER_ID" 'to_entries[] | select(.value.offeredBy | has($id)) | .key'); do
+    main_rest DELETE "/rest/cluster/pending/folders?folder=$folder&device=$PEER_ID" >/dev/null
+  done
+  if device_pending_on_main; then
+    main_rest DELETE "/rest/cluster/pending/devices?device=$PEER_ID" >/dev/null
+  fi
 }
 export -f peer_asks_main main_dials_peer main_forget_peer
