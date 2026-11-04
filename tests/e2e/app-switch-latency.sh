@@ -32,7 +32,7 @@ trap cleanup EXIT
 
 explain_missing_focus() {
   warn "$1 never took focus; focused app: $(focused_app_id)"
-  warn "session locked: $(vekrona-dev sh busctl get-property org.freedesktop.login1 /org/freedesktop/login1/session/auto org.freedesktop.login1.Session LockedHint)"
+  warn "session locked: $(session_locked_hint)"
   warn "windows: $(vekrona-dev sh bash -c "swaymsg -t get_tree | jq -c '[recurse(.nodes[]?, .floating_nodes[]?) | select(.pid != null) | {app_id, focused}]'")"
   warn "$1 log: $(vekrona-dev run cat "/tmp/vekrona-e2e-$1.log")"
   exit 1

@@ -30,8 +30,8 @@ for required in "${REQUIRED_UNITS[@]}"; do
 done
 log "units to stop before the session: ${units[*]}"
 
-display_session="$(vekrona-dev run bash -c 'loginctl show-user "$(id -un)" -p Display --value')"
-[[ -n "$display_session" ]] || die "the guest user has no display session, so there is no scope to compare with"
+sway_session="$(sway_session_id)"
+[[ -n "$sway_session" ]] || die "sway runs in no login session, so there is no scope to compare with"
 error_watcher_sync "$SENTINEL"
 store_before="$(error_store_without "$SENTINEL")"
 
@@ -48,8 +48,8 @@ matches=(SYSLOG_IDENTIFIER=e2e-session-teardown +)
 for unit in "${units[@]}"; do
   matches+=("USER_UNIT=$unit")
 done
-matches+=(+ "UNIT=session-$display_session.scope")
-vekrona-dev run sudo journalctl -b -1 --no-pager -o json "${matches[@]}" | python3 -I "$ROOT/tests/e2e/session-teardown-order.py" "$marker" "$display_session" "${units[@]}"
+matches+=(+ "UNIT=session-$sway_session.scope")
+vekrona-dev run sudo journalctl -b -1 --no-pager -o json "${matches[@]}" | python3 -I "$ROOT/tests/e2e/session-teardown-order.py" "$marker" "$sway_session" "${units[@]}"
 log "ok: the session's units stopped before its scope began to stop"
 
 vekrona-dev session

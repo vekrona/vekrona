@@ -24,7 +24,7 @@ lock_screen() {
 }
 
 unlock_with_password() {
-  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bash -c '[[ "$(vekrona-dev sh loginctl show-session auto -p LockedHint --value)" == yes ]]'
+  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- session_locked
   vekrona-dev type --enter "$GUEST_PASSWORD"
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- lock_inactive
 }

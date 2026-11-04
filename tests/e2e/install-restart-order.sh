@@ -11,8 +11,7 @@ LOCK_CHORD=super-ctrl-alt-esc
 
 shell_property() { vekrona-dev sh systemctl --user show vekrona-shell -p "$1" --value; }
 shell_active() { [[ "$(shell_property ActiveState)" == active ]]; }
-locked_hint() { [[ "$(vekrona-dev sh loginctl show-session auto -p LockedHint --value)" == yes ]]; }
-export -f shell_property shell_active locked_hint
+export -f shell_property shell_active
 
 vekrona-dev session
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- shell_active
@@ -37,7 +36,7 @@ log "ok: the shell is active after install and has not restarted by itself"
 
 vekrona-dev key "$LOCK_CHORD"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- lock_active
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- locked_hint
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- session_locked
 log "ok: the lock key binding locks the screen after install"
 
 vekrona-dev type --enter "$GUEST_PASSWORD"

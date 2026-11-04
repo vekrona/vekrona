@@ -606,7 +606,14 @@ key_watcher_running() { vekrona-dev sh pgrep -f fido-keys.sh >/dev/null; }
 LOCK_TEXT_BOTTOM_PERCENT=55
 lock_text_shown() { text_shown --bottom "$LOCK_TEXT_BOTTOM_PERCENT" "$1"; }
 lock_text_absent() { absent lock_text_shown "$1"; }
-export -f lock_active lock_inactive key_watcher_running lock_text_shown lock_text_absent
+# The id of the login session that sway runs in. logind's "auto" session is the caller's own, and a command run through
+# vekrona-dev is in vekrona-dev's ssh login, which is never locked; the user's Display session is that ssh login too when it
+# started before sway, as after a reboot.
+sway_session_id() { vekrona-dev run bash -c 'set -o pipefail; ps -o lsession= -p "$(pgrep -xu "$(id -u)" sway)" | tr -d " "'; }
+# The LockedHint (yes or no) of the sway session.
+session_locked_hint() { vekrona-dev run loginctl show-session "$(sway_session_id)" -p LockedHint --value; }
+session_locked() { [[ "$(session_locked_hint)" == yes ]]; }
+export -f lock_active lock_inactive key_watcher_running lock_text_shown lock_text_absent sway_session_id session_locked_hint session_locked
 export LOCK_TEXT_BOTTOM_PERCENT
 
 # Reboots. An unreachable guest answers nothing, which must not count as a new boot.

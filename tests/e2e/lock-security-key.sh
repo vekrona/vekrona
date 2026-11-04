@@ -13,7 +13,6 @@ password_shown() { lock_text_shown 'password'; }
 # pam_u2f asks for the PIN first (pinverification=1), and the lock screen tells how to answer it; the touch comes after.
 key_prompt_shown() { lock_text_shown 'enter security key pin'; }
 key_prompt_hidden() { lock_text_absent 'enter security key pin'; }
-locked_hint() { vekrona-dev sh loginctl show-session auto -p LockedHint --value; }
 export -f password_shown key_prompt_shown key_prompt_hidden
 
 lock_screen() {
@@ -28,7 +27,7 @@ unlock_with_password() {
   if key_prompt_shown; then vekrona-dev key tab; fi
   vekrona-dev type --enter "$GUEST_PASSWORD"
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- lock_inactive
-  [[ "$(locked_hint)" == no ]] || die "after the password unlock, logind LockedHint must be no, but it is $(locked_hint)"
+  [[ "$(session_locked_hint)" == no ]] || die "after the password unlock, logind LockedHint must be no, but it is $(session_locked_hint)"
 }
 
 detach_key() {

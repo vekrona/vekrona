@@ -16,7 +16,7 @@ vekrona-dev session
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- idle_active
 log "ok: swayidle runs as vekrona-idle.service"
 
-SESSION_ID="$(vekrona-dev run loginctl show-user vekrona -p Display --value)"
+SESSION_ID="$(sway_session_id)"
 [[ -n "$SESSION_ID" ]] || die "the sway session id is unknown"
 export SESSION_ID
 
