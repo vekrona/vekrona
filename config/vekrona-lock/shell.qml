@@ -43,13 +43,13 @@ ShellRoot {
         onStarted: launched = true
         onExited: exitCode => {
             if (exitCode !== 0)
-                console.error("vekrona-lock:", command.join(" "), "exited with", exitCode);
+                console.error(command.join(" "), "exited with", exitCode);
         }
         onRunningChanged: {
             if (running)
                 return;
             if (!launched)
-                console.error("vekrona-lock:", command.join(" "), "could not start");
+                console.error(command.join(" "), "could not start");
             launched = false;
             finished();
         }
@@ -75,7 +75,7 @@ ShellRoot {
         id: hintDeadline
         interval: root.hintDeadlineMs
         onTriggered: {
-            console.error("vekrona-lock: vekrona-session-hint locked no did not end within", interval / 1000, "s; quitting with sway's session still marked locked");
+            console.error("vekrona-session-hint locked no did not end within", interval / 1000, "s; quitting with sway's session still marked locked");
             Qt.quit();
         }
     }
@@ -255,7 +255,7 @@ ShellRoot {
                 quickFailures++;
                 retry.restart();
             } else if (root.keyCount > 0) {
-                console.error("vekrona-lock: the security key failed", quickFailures, "times before the touch cue; waiting for a replug:", message);
+                console.error("the security key failed", quickFailures, "times before the touch cue; waiting for a replug:", message);
             }
         }
     }
@@ -267,7 +267,7 @@ ShellRoot {
         interval: root.stallTimeoutMs
         running: u2f.active && u2f.touched
         onTriggered: {
-            console.error("vekrona-lock: the security key gave no result", interval / 1000, "s after the touch cue; waiting for a replug");
+            console.error("the security key gave no result", interval / 1000, "s after the touch cue; waiting for a replug");
             u2f.stalled = true;
             stallReport.running = true;
         }
@@ -280,7 +280,7 @@ ShellRoot {
         command: [Quickshell.shellPath("u2f-stall-report.sh")]
         onExited: exitCode => {
             if (exitCode !== 0)
-                console.error("vekrona-lock: u2f-stall-report.sh exited with", exitCode);
+                console.error("u2f-stall-report.sh exited with", exitCode);
             if (u2f.stalled && u2f.active)
                 u2f.abort();
         }
@@ -300,7 +300,7 @@ ShellRoot {
             onRead: line => {
                 const count = parseInt(line);
                 if (isNaN(count))
-                    console.error("vekrona-lock: fido-keys.sh printed", line);
+                    console.error("fido-keys.sh printed", line);
                 else
                     root.keyCount = count;
             }
@@ -308,7 +308,7 @@ ShellRoot {
         onExited: exitCode => {
             if (root.unlocking)
                 return;
-            console.error("vekrona-lock: fido-keys.sh exited with", exitCode);
+            console.error("fido-keys.sh exited with", exitCode);
             root.keyWatcherFailed = true;
             root.keyCount = 0;
         }
@@ -338,7 +338,7 @@ ShellRoot {
             if (exitCode !== 0) {
                 // No reader is a normal machine, not a failure.
                 if (!fprintList.text.includes("No devices available"))
-                    console.error("vekrona-lock: fprintd-list exited with", exitCode, fprintList.text.trim(), "; no fingerprint unlock");
+                    console.error("fprintd-list exited with", exitCode, fprintList.text.trim(), "; no fingerprint unlock");
                 return;
             }
             root.fprintEnrolled = root.hasEnrolledFingers(fprintList.text);
@@ -377,7 +377,7 @@ ShellRoot {
                 setHint.running = true;
                 notifyReady.running = true;
             } else if (!root.unlocking) {
-                console.error("vekrona-lock: the compositor ended the session lock");
+                console.error("the compositor ended the session lock");
                 Qt.exit(1);
             }
         }

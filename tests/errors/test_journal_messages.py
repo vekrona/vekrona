@@ -17,6 +17,11 @@ class JournalMessagesTest(SandboxTestCase):
         self.assertEqual(record["title"], "vekrona-shell: Weather.qml:42: TypeError: Cannot read property 'weather_code' of null")
         self.assertEqual(record["summary"], "Weather.qml:42: TypeError: Cannot read property 'weather_code' of null")
 
+    def test_a_qml_error_of_the_lock_screen_is_recorded(self):
+        self.sandbox.watch([journal_entry(SYSLOG_IDENTIFIER="vekrona-lock", PRIORITY="6",
+                                          MESSAGE="\x1b[31m ERROR\x1b[97m qml\x1b[0m: vekrona-session-hint locked no could not start")])
+        self.assertEqual(self.recorded()["title"], "vekrona-lock: vekrona-session-hint locked no could not start")
+
     def test_a_qml_error_arriving_as_a_byte_array_is_recorded(self):
         self.sandbox.watch([journal_entry(SYSLOG_IDENTIFIER="vekrona-shell", PRIORITY="6",
                                           MESSAGE=list(QML_ERROR.encode()))])

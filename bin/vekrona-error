@@ -417,6 +417,8 @@ ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 # quickshell logs console.error as "<ESC>[31m ERROR<ESC>[97m qml<ESC>[0m: text" at journal priority 6 (info),
 # so the level marker in the text is the only signal that a QML error happened.
 QML_ERROR_RE = re.compile(r'\s*ERROR\s+qml: (.*)', re.DOTALL)
+# The Quickshell programs of vekrona, by the SyslogIdentifier of their units.
+QUICKSHELL_SYSLOG_IDS = {"vekrona-shell", "vekrona-lock"}
 # The kernel logs a refused fork() at journal priority 6 (info), so only the text tells that a cgroup hit its pids.max.
 FORK_REJECTED_RE = re.compile(r'cgroup: fork rejected by pids controller in (/\S*)')
 
@@ -559,7 +561,7 @@ def classify(entry, unit_exits):
     except (TypeError, ValueError):
         priority = 6
 
-    qml_error = QML_ERROR_RE.fullmatch(ANSI_RE.sub("", message)) if syslog_id == "vekrona-shell" else None
+    qml_error = QML_ERROR_RE.fullmatch(ANSI_RE.sub("", message)) if syslog_id in QUICKSHELL_SYSLOG_IDS else None
     if qml_error:
         message, priority = qml_error.group(1), 3
 

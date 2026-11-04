@@ -46,3 +46,8 @@ done
   || die "the locker waited for its deadline on a hint helper that never started"
 log "ok: both failed starts are logged as QML errors, and the unlock did not wait for the deadline"
 
+# The error pipeline records both failed starts (tests/errors covers that the lock screen's QML errors are records); they were
+# on purpose, so they go once the watcher has handled the journal up to now.
+sentinel="$(sentinel_title)"
+error_watcher_sync "$sentinel"
+for title in "$sentinel" "vekrona-lock: vekrona-session-hint locked"; do error_titled_remove "$title"; done
