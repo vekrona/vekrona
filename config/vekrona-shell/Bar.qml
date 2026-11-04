@@ -82,6 +82,10 @@ PanelWindow {
             bar: root
         }
 
+        Sync {
+            bar: root
+        }
+
         Battery {}
 
         Agent {

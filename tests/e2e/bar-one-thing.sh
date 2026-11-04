@@ -9,9 +9,9 @@ source "$ROOT/tests/e2e/lib/bar-widget.sh"
 
 STEP_TIMEOUT_SEC=60
 # Every widget of the bar is one thing, a pictogram (P) or a text (T), never both. From the right edge the bar of the VM
-# shows: the clock, the bell, the agent, the network and the sound icons, then the keyboard layout, the load icon (a
+# shows: the clock, the bell, the agent, the sync, the network and the sound icons, then the keyboard layout, the load icon (a
 # CPU and a memory bar) and the weather. A widget that shows an icon next to its value adds a pictogram before its text.
-EXPECTED_ENDING=TPTPPPPT
+EXPECTED_ENDING=TPTPPPPPT
 SINK_NAME=VekronaTestSink
 
 kinds() { bar_widget kinds; }
@@ -35,5 +35,5 @@ vekrona-dev sh wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0
 set_layouts us,ua
 settled_bar_left_edge >/dev/null
 
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bar_ends_as_expected || die "the bar must end with $EXPECTED_ENDING (text, icon, text, icon, icon, icon, icon, text), but its widgets are $(kinds)"
-log "ok: the weather, layout and clock show text only; the load, sound, network, agent and bell show an icon only"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- bar_ends_as_expected || die "the bar must end with $EXPECTED_ENDING (text, icon, text, icon, icon, icon, icon, icon, text), but its widgets are $(kinds)"
+log "ok: the weather, layout and clock show text only; the load, sound, network, sync, agent and bell show an icon only"
