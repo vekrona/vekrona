@@ -182,6 +182,7 @@ for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
   ensure_symlink "$appdir/icon.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/$profile.svg"
 done
 shopt -u nullglob
+for retired_webapp in "${VEKRONA_RETIRED_WEBAPPS[@]}"; do retire_webapp_profile "$retired_webapp"; done
 # Old installs linked chrome/userChrome.css into the checkout (possibly a legacy root); the renderer writes a real file there.
 while IFS= read -r profiledir; do
   userchrome="$profiledir/chrome/userChrome.css"
@@ -214,9 +215,10 @@ systemctl --user daemon-reload
 session_services=(vekrona-lid vekrona-idle vekrona-lock-listen vekrona-session-teardown vekrona-cliphist vekrona-shell vekrona-errors vekrona-audio-watchdog)
 session_triggers=(vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path)
 ensure_user_unit_enabled "${session_services[@]/%/.service}" "${session_triggers[@]}" vekrona-update-notify.service syncthing.service
-# The syncthing webapp talks to this daemon, so it must not wait for the next login. A GUI login goes in while the daemon is stopped.
-ensure_syncthing_gui_auth
-systemctl --user start syncthing.service || die "syncthing.service failed to start"
+# The daemon must not wait for the next login. Its GUI moves to a socket while it is stopped, and a restart (not a start) makes a
+# daemon that kept running read the drop-ins linked and the config written above.
+ensure_syncthing_gui_socket
+systemctl --user restart syncthing.service || die "syncthing.service failed to start"
 # Enabling only wires a unit into the next login; a live session needs it running now, on the files linked above.
 if [[ -n "$(sway_socket)" ]]; then
   for unit in pipewire wireplumber "${session_services[@]}"; do

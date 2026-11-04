@@ -15,8 +15,7 @@ log "ok: managed settings force the subscription login and switch bypass-permiss
 
 denied() { jq -e --arg rule "$1" '.permissions.deny | index($rule) != null' "$settings" >/dev/null; }
 for rule in 'Read(~/.ssh/**)' 'Read(~/.gnupg/**)' 'Read(~/.local/share/keyrings/**)' 'Read(~/.config/vdirsyncer/config)' \
-  'Read(~/.claude/.credentials.json)' 'Read(~/.codex/auth.json)' 'Read(~/.local/state/syncthing/config.xml)' \
-  'Read(~/.local/state/vekrona/syncthing-gui-password)'; do
+  'Read(~/.claude/.credentials.json)' 'Read(~/.codex/auth.json)' 'Read(~/.local/state/syncthing/config.xml)'; do
   denied "$rule" || die "the secret is not denied: $rule"
 done
 log "ok: the secrets the repo knows about are denied"

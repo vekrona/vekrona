@@ -13,9 +13,9 @@ Vekrona installs a curated set of applications via the following channels:
 - **Zed**: Flathub Flatpak `dev.zed.Zed` (system-wide install, requires hardware Vulkan driver; Fedora-built RPMs freeze on F44 due to GCC 16/LLVM ABI bug rhbz#2464281, unresolved; updates via `flatpak update`)
 - **Spotify**: Firefox webapp with Widevine (replaces the `com.spotify.Client` Flatpak; downloads the Widevine CDM on first launch)
 - **Signal, OBS Studio, Obsidian**: Flathub Flatpaks (system-wide install, `VEKRONA_FLATPAKS`; Obsidian is closed source but has no web version and works on local vault files)
-- **Syncthing**: Fedora repository (the `syncthing` RPM runs as your user service `syncthing.service`; its web GUI at `http://127.0.0.1:8384/` is the Firefox webapp below, behind a login that stage 50 generates: user `vekrona`, password in `~/.local/state/vekrona/syncthing-gui-password`, which you save in the webapp's Firefox once)
+- **Syncthing**: Fedora repository (the `syncthing` RPM runs as your user service `syncthing.service`; it has no web GUI and no TCP GUI port: its GUI and REST API listen on the unix socket `/run/user/<uid>/syncthing/gui.sock`, which only your user can open, so you need no login)
 - **Proton Mail (with Calendar), Pass and Authenticator**: native apps from Proton's own feeds (see [updates](updates.md))
-- **Telegram, Discord, SoundCloud, YouTube, WhatsApp, Syncthing GUI**: Firefox webapps (Spotify above; `vekrona-webapp <app>` starts one, the full list is under Daily operations)
+- **Telegram, Discord, SoundCloud, YouTube, WhatsApp**: Firefox webapps (Spotify above; `vekrona-webapp <app>` starts one, the full list is under Daily operations)
 - **Steam**: RPM Fusion (already installed; stage 60 sets Steam Play preset to `proton_experimental` for all titles)
 - **Tailscale**: Fedora `updates` repository (no vendor repo needed; `tailscaled` enabled and active, you are operator: `tailscale up` without sudo; shields up and Tailscale SSH off, so nothing on the tailnet can connect in (what this breaks: another node cannot start a Syncthing connection to this one, receive a Taildrop file here, or open a Steam Remote Play session to this machine over the tailnet; connections this machine starts work as before): stage 40 sets them and a `tailscaled` drop-in sets them again at every start, because tailscaled keeps no setting across a restart until the node is logged in; so the first login is `tailscale up --shields-up --ssh=false` (without the flags it refuses, because they differ from the defaults); no tray icon: manage it from the CLI with `tailscale status`, `tailscale up` and `tailscale down`)
 - **btop**: Fedora repository
@@ -47,7 +47,7 @@ nothing is pending the items are not there.
 Stage `30-packages` installs `firewalld` and stage `40-system` enables and starts it, then `ensure_default_zone` (`lib/firewall.sh`)
 makes `public` the default zone. Fedora Workstation's own default, `FedoraWorkstation`, accepts every TCP and UDP port from 1025 up
 from the local network. `public` holds exactly what vekrona runs and nothing else, services all of them and no port: `dhcpv6-client`,
-`syncthing` (22000/tcp and udp, 21027/udp for local discovery; its web GUI stays on 127.0.0.1), `steam-streaming` and
+`syncthing` (22000/tcp and udp, 21027/udp for local discovery; its GUI is a unix socket, no port), `steam-streaming` and
 `steam-lan-transfer` (Steam is installed by stage 30: Remote Play and local game transfer). Whatever else the zone holds, stock
 `ssh` and `mdns`, a port opened by hand or by an earlier vekrona (AirPlay's 6001-6010), a protocol, source port, forward port,
 rich rule, masquerading or a target other than `default`, the stage removes again, and it reloads firewalld when the running
@@ -209,7 +209,6 @@ vekrona-webapp spotify
 vekrona-webapp soundcloud
 vekrona-webapp telegram
 vekrona-webapp discord
-vekrona-webapp syncthing
 ```
 
 Snapshots:

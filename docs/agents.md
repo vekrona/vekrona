@@ -32,8 +32,8 @@ safety policy for Claude Code, and no project or user setting can loosen it:
   unchecked. The launcher likewise passes no auto-approve flag.
 - `permissions.deny` keeps Claude's file tools away from secrets: `~/.ssh`,
   `~/.gnupg`, the login keyring, the vdirsyncer config (calendar URLs),
-  the agent credential files, Syncthing's config, keys and generated GUI
-  password, and Firefox's saved logins and cookies. The `pam_u2f` key mapping
+  the agent credential files, Syncthing's config and keys, and Firefox's saved
+  logins and cookies. The `pam_u2f` key mapping
   needs no rule: it is `/etc/u2f_mappings`, owned by root.
 
 The deny rules are Claude Code's `Read` and `Edit` rules: they cover its own

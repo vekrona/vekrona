@@ -156,6 +156,12 @@ authselect_selection_ok() {
   [[ "$have" == "$want" ]]
 }
 not() { if "$@"; then return 1; fi; }
+# Whether anything listens on TCP port $1, on any address.
+tcp_port_listening() {
+  local listeners
+  listeners="$(ss -Hltn "sport = :$1")" || die "ss failed to list the listening TCP sockets"
+  [[ -n "$listeners" ]]
+}
 present_iff() {
   local applicable="$1"; shift
   if "$applicable"; then "$@"; else not "$@"; fi
@@ -438,7 +444,6 @@ if ran 40-system; then
   geoclue_have="$(root cat /etc/geoclue/conf.d/90-vekrona.conf)"
   check assert "geoclue lists the uid of $VEKRONA_USER and nobody else" eq "$geoclue_want" "$geoclue_have"
   check assert "Firefox's policies.json matches the checkout" root_files_equal "$VEKRONA_ROOT/config/firefox/policies.json" /usr/lib64/firefox/distribution/policies.json
-  check assert "syncthing GUI requires a login" syncthing_gui_user_set
   check assert "/etc/systemd/system/NetworkManager.service.d/vekrona-shutdown-order.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/systemd/system/NetworkManager.service.d/vekrona-shutdown-order.conf" /etc/systemd/system/NetworkManager.service.d/vekrona-shutdown-order.conf
   check assert "NetworkManager stops before wpa_supplicant" contains wpa_supplicant.service "$(systemctl show NetworkManager -p After --value)"
   check assert "no nm-dispatcher --persist drop-in from an earlier install" path_absent /etc/systemd/system/NetworkManager-dispatcher.service.d/vekrona-persist.conf
@@ -608,6 +613,16 @@ if ran 50-user; then
   check assert "vekrona-keybindings --list has the help binding" bash -c "vekrona-keybindings --list | grep -qF 'Show keybindings help'"
   check assert "syncthing.service enabled" user_unit_enabled syncthing
   check assert "syncthing waits for the network before it starts (nm-online drop-in linked and loaded)" contains "nm-online" "$(systemctl --user show syncthing.service -p ExecStartPre --value)"
+  check assert "syncthing's GUI address in config.xml is the socket $(syncthing_gui_socket)" eq "$(syncthing_gui_address)" "$(syncthing_gui_socket)"
+  check assert "syncthing's config.xml holds no GUI login (the OS user is the authentication)" not syncthing_gui_login_set
+  check assert "syncthing's socket directory is the unit's RuntimeDirectory (drop-in linked and loaded)" eq "$(systemctl --user show syncthing.service -p RuntimeDirectory --value)" syncthing
+  check assert "syncthing's socket directory is readable by the user alone" eq "$(systemctl --user show syncthing.service -p RuntimeDirectoryMode --value)" 0700
+  check assert "nothing listens on TCP port 8384 (syncthing's old GUI port)" not tcp_port_listening 8384
+  check assert "the retired syncthing GUI password file is gone" path_absent "$(retired_syncthing_gui_password_file)"
+  for retired_webapp in "${VEKRONA_RETIRED_WEBAPPS[@]}"; do
+    check assert "the retired $retired_webapp webapp has no entry in Firefox's profiles.ini" not grep -sqxF "Name=vekrona-$retired_webapp" "$(firefox_profile_root)/profiles.ini"
+    check assert "the retired $retired_webapp webapp has no profile directory" path_absent "$(firefox_profile_root)/vekrona-$retired_webapp"
+  done
   check assert "the retired vekrona-app-switch Quickshell config is gone" path_absent "$HOME/.config/quickshell/vekrona-app-switch"
   check assert "vekrona-shell Quickshell config linked into ~/.config/quickshell" eq "$(readlink -f "$HOME/.config/quickshell/vekrona-shell")" "$(readlink -f "$VEKRONA_ROOT/config/vekrona-shell")"
   check assert "vekrona-shell reaches the shared Vekrona module" file_exists "$HOME/.config/quickshell/vekrona-shell/Vekrona/qmldir"

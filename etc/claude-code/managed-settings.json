@@ -13,7 +13,6 @@
       "Read(~/.local/state/syncthing/config.xml)",
       "Read(~/.local/state/syncthing/*.pem)",
       "Read(~/.config/syncthing/**)",
-      "Read(~/.local/state/vekrona/syncthing-gui-password)",
       "Read(~/.config/mozilla/**/logins.json)",
       "Read(~/.config/mozilla/**/key4.db)",
       "Read(~/.config/mozilla/**/cookies.sqlite)",
