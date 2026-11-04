@@ -18,6 +18,9 @@ forget_position() { rm -f "$POSITION_FILE"; }
 trap 'run_cleanups forget_position weather_fixture_restore' EXIT
 
 vekrona-dev session
+# The shell starts a unit at most once in ten minutes and keeps that in memory, so a popout opened by an earlier scenario
+# (bar-weather opens the weather popout) would leave nothing to start: a restarted shell has started nothing yet.
+restart_shell
 CLOCK_WEEKDAY="$(vekrona-dev run date +%a)"
 export CLOCK_WEEKDAY
 vekrona-dev move 600 500
