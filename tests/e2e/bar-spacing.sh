@@ -9,10 +9,13 @@ STEP_TIMEOUT_SEC=90
 # Two widgets sit two BarPill paddings (2 * space-2) apart, plus the padding of the 24-unit pictogram grid on both facing sides:
 # 4 of 24 units each (the bell is the narrowest glyph), at size-icon-s px.
 GLYPH_BEARING_PX=$(((ICON_S_PX * 4 + 23) / 24))
-# A text widget is centered in a slot as wide as its widest value ("-88°C"), so a narrower value adds half of the difference,
-# one digit at most, to the gap on each side.
-TEXT_SLACK_PX=4
-MAX_GAP_PX=$((2 * GROUP_JOIN_PX + 2 * GLYPH_BEARING_PX + TEXT_SLACK_PX))
+# A text widget is centered in a slot as wide as its widest value, so a narrower value adds half of the difference to the
+# gap on each side. The weather's is the largest: a one-digit temperature ("8°C") lacks a minus and a tabular figure of
+# its widest value ("-88°C"), together 1.1 em of the label face (14 px at 13 px, measured in the VM), so 0.55 em a side.
+LABEL_PX="$(jq -er '.type.groups[].styles[] | select(.name == "label") | .fontSize | sub("px$"; "")' "$ROOT/config/tokens.json")"
+TEXT_SLACK_PX=$(((LABEL_PX * 11 + 19) / 20))
+# A gap beside a text widget is measured less its slack. The gaps differ by the pictograms' own side bearings.
+MAX_GAP_PX=$((2 * GROUP_JOIN_PX + 2 * GLYPH_BEARING_PX))
 MAX_GAP_SPREAD_PX=6
 GAPS="$ROOT/tests/e2e/bar-gaps.py"
 SEPARATOR="$ROOT/tests/e2e/bar-separator.py"
@@ -23,16 +26,18 @@ SEPARATOR_TOKEN_CONTRAST="$(python3 "$ROOT/tests/e2e/screen_colors.py" contrast 
 SEPARATOR_MIN_CONTRAST=$((SEPARATOR_TOKEN_CONTRAST / 2))
 
 bar_spacing_ok() {
-  python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$GROUP_JOIN_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$ICON_S_PX" >/dev/null
+  python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$GROUP_JOIN_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$ICON_S_PX" "$TEXT_SLACK_PX" >/dev/null
 }
 export -f bar_spacing_ok
-export ROOT BAR_HEIGHT_PX GROUP_JOIN_PX MAX_GAP_PX MAX_GAP_SPREAD_PX ICON_S_PX GAPS
+export ROOT BAR_HEIGHT_PX GROUP_JOIN_PX MAX_GAP_PX MAX_GAP_SPREAD_PX ICON_S_PX TEXT_SLACK_PX GAPS
 
 # The clock pill is as wide as its widest date, so the gap before it depends on the date. On a Wednesday in August its
 # words are the widest and the tallest ("Aug" has a descender), which is the worst case for the gap and for telling
 # the clock's text from a pictogram.
 WORST_CASE_DATE="2026-08-26 22:22:00"
 WORST_CASE_MONTH=Aug
+# The live forecast changes the weather's slack from run to run: pin the narrowest temperature, one digit, the largest slack.
+WORST_CASE_CELSIUS=8
 # Both dots show, so the check covers the pills that carry one: a dot hangs over its pill's padding and widens no gap.
 UNREAD_COUNT=1
 # The bar the user sees: one tray icon (a fake 1Password), the weather, the load (a pictogram of two bars),
@@ -47,7 +52,7 @@ export GUEST_LOG
 # The clock goes first: a pinned clock is what every later scenario would meet.
 unload_sink() { vekrona-dev sh pactl unload-module "$sink_module"; }
 restore() {
-  run_cleanups clock_restore unread_restore 'kill_guest -f "[b]ar-spacing/fake-sni.py"' "set_layouts us" unload_sink
+  run_cleanups clock_restore unread_restore weather_fixture_restore 'kill_guest -f "[b]ar-spacing/fake-sni.py"' "set_layouts us" unload_sink
 }
 
 vekrona-dev session
@@ -59,6 +64,7 @@ vekrona-dev sh swaymsg 'input type:keyboard xkb_layout "us,ua"' >/dev/null
 unread_stash
 clock_pin "$WORST_CASE_DATE"
 unread_set "$UNREAD_COUNT"
+weather_fixture_apply "$WORST_CASE_CELSIUS"
 # The shell forgets the tray icons it was started without, so the fake one starts after the clock pin restarted it.
 vekrona-dev run mkdir -p "$GUEST_DIR"
 for file in "$ROOT/tests/e2e/fake-sni.py" "$ROOT/tests/e2e/png_rows.py" "$ROOT/tests/fixtures/tray/1password.png"; do
@@ -76,7 +82,7 @@ fi
 
 kinds="$(bar_widget kinds)"
 [[ "$kinds" == *"$EXPECTED_KINDS" ]] || die "the bar must end with the widgets $EXPECTED_KINDS (P icon, T text), but they are $kinds"
-python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$GROUP_JOIN_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$ICON_S_PX" || die "the right-side bar widgets must be evenly spaced at most $MAX_GAP_PX px apart, see the measurement above"
+python3 "$GAPS" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$GROUP_JOIN_PX" "$MAX_GAP_PX" "$MAX_GAP_SPREAD_PX" "$ICON_S_PX" "$TEXT_SLACK_PX" || die "the right-side bar widgets must be evenly spaced at most $MAX_GAP_PX px apart, a text widget's slack aside, see the measurement above"
 log "ok: every right-side bar widget, the tray icons and the text ones included, is separated by a similar, tight gap"
 
 python3 "$SEPARATOR" "$(vekrona-dev shot)" "$BAR_HEIGHT_PX" "$SEPARATOR_MIN_HEIGHT_PX" "$SEPARATOR_MIN_CONTRAST" || die "the bar must show a visible separator line after the workspaces, see the measurement above"

@@ -5,9 +5,9 @@ not broken by a gap of SECTION_BREAK px or more. Each cluster is a pictogram or 
 at least icon_size * 2 // 3 px tall (no wider than 1.5 times its height); the tallest text, a word with an ascender and a
 descender such as "Aug", is 12 px tall but at least 24 px wide. Every widget is one thing: a pictogram, or a run of text.
 Text clusters closer than word_join px are one run of text (a value, or the words of the clock); a pictogram is a run
-of its own. Text is right-aligned in a slot as wide as the widest value, so a text widget's right edge is what stays put,
-and its left edge moves with its value. Unread dots hang over the right padding of their pill by design: their pixels
-are not measured as ink, so they neither make a widget nor widen one."""
+of its own. Text is centered in a slot as wide as the widest value, so a narrower value moves both of its edges inwards.
+Unread dots hang over the right padding of their pill by design: their pixels are not measured as ink, so they neither
+make a widget nor widen one."""
 
 from png_rows import read_png_rows
 
