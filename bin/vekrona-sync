@@ -13,11 +13,17 @@ from the same file. A failure exits 1 with Syncthing's message on stderr.
   reject DEVICE           forget a device's request to connect
   send DEVICE [FILE...]   drop files into DEVICE's ~/Downloads, now or when it is next online (no FILE: the portal)
   seen                    mark every received file as seen
-  watch                   the service: follow Syncthing's events, write sync.json, notify, receive dropped files
+  watch                   the service: follow Syncthing's events, write sync.json, notify, receive dropped files; exits
+                          75 when Syncthing does not answer (systemd starts it again, later each time) and 78 when
+                          Syncthing's configuration is wrong (systemd does not start it again)
+  offline                 write sync.json as "Syncthing is not running"; the service's ExecStopPost
 
 A drop is a folder vekrona-drop-<a>-<b> (the full IDs of the two devices, sorted) that only those two share. The sender
-puts files in to/<receiver>/, and the receiver's watch moves them out into ~/Downloads, which syncs the deletion back."""
+puts files in to/<receiver>/, and the receiver's watch moves them out into ~/Downloads, which syncs the deletion back. A peer
+controls what its drop folders hold, so every step into to/<receiver>/ refuses a link, and a drop folder that a third
+device shares is neither used nor offered."""
 import argparse
+import contextlib
 import dataclasses
 import errno
 import fcntl
@@ -31,10 +37,9 @@ import secrets
 import shutil
 import socket
 import subprocess
+import stat
 import sys
-import tempfile
 import threading
-import time
 import unicodedata
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -50,12 +55,16 @@ REQUEST_TIMEOUT_SEC = 30
 # The events long-poll returns an empty list after this long; the HTTP timeout must outlast it.
 EVENT_POLL_SEC = 3600
 EVENT_SLACK_SEC = 60
-# What `watch` waits for Syncthing to come up (or back) before it fails and systemd restarts it.
-OUTAGE_GIVE_UP_SEC = 300
-OUTAGE_RETRY_SEC = 1
+# What `watch` exits with, which vekrona-sync.service maps: Syncthing does not answer (a success to systemd, which starts
+# the watcher again with growing delays, so that Syncthing's start is no failure), or Syncthing's configuration is wrong
+# (a failure that systemd does not retry).
+EXIT_UNREACHABLE = 75
+EXIT_CONFIG = 78
 # The events that can change what sync.json shows, or deliver a file.
 EVENT_TYPES = ("ConfigSaved", "StateChanged", "FolderSummary", "DeviceConnected", "DeviceDisconnected",
                "PendingDevicesChanged", "PendingFoldersChanged", "ItemFinished")
+# What these events change is not in their data: the whole snapshot is read again.
+REREAD_EVENTS = frozenset({"ConfigSaved", "PendingDevicesChanged", "PendingFoldersChanged"})
 NOTIFY_TIMEOUT_SEC = 3600
 MAX_ARRIVALS = 20
 
@@ -74,6 +83,10 @@ class SyncError(Exception):
 
 class Unreachable(SyncError):
     """Syncthing does not answer on its socket (not running yet, restarting, or gone)."""
+
+
+class ConfigError(SyncError):
+    """Syncthing's configuration cannot be used however often it is read again."""
 
 
 def device_id_arg(text):
@@ -146,31 +159,95 @@ def candidate_names(name):
         yield f"{stem} ({number}){extension}"
 
 
-def place_without_overwriting(source, directory, name):
-    """Links source into directory as name, or as `name (2)`, `name (3)` before the extension while those exist, and
-    returns the new path. The source stays. A directory on another filesystem gets a copy, made under a temp name first."""
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def open_subdir(parent_fd, name, create):
+    """The fd of the directory `name` in parent_fd, never through a link; None when it is missing and create is false."""
     try:
-        return link_unused(source, directory, name)
+        return os.open(name, DIR_FLAGS, dir_fd=parent_fd)
+    except FileNotFoundError:
+        if not create:
+            return None
+    try:
+        os.mkdir(name, 0o700, dir_fd=parent_fd)
+    except FileExistsError:
+        pass
+    return os.open(name, DIR_FLAGS, dir_fd=parent_fd)
+
+
+@contextlib.contextmanager
+def open_inbox(drop_path, device_id, create):
+    """Yields the fd of drop_path/to/device_id, or None when it is missing and create is false. A peer controls what a drop
+    folder holds, so "to" and the device's directory are opened one at a time with O_NOFOLLOW: a link in their place is
+    an error, and never a way to reach files outside the drop. Everything in the inbox is then reached through the fd."""
+    try:
+        if create:
+            os.makedirs(drop_path, exist_ok=True)
+        fd = os.open(drop_path, DIR_FLAGS)
+    except FileNotFoundError:
+        fd = None
+    except OSError as exc:
+        raise SyncError(f"cannot open the drop folder {drop_path}: {exc}")
+    try:
+        for name in ("to", device_id):
+            if fd is None:
+                break
+            try:
+                child = open_subdir(fd, name, create)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise SyncError(f"{name} in the drop folder {drop_path} is a link or not a directory, which only another "
+                                    f"device can have made of it, so nothing is moved through it")
+                raise SyncError(f"cannot open {name} in the drop folder {drop_path}: {exc}")
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def place_without_overwriting(source_fd, source_name, directory_fd, name):
+    """Links the file source_name of source_fd into directory_fd as name, or as `name (2)`, `name (3)` before the extension
+    while those exist, and returns the name it got. The source stays. A directory on another filesystem gets a copy, made
+    under a temp name first."""
+    try:
+        return link_unused(source_fd, source_name, directory_fd, name)
     except OSError as exc:
         if exc.errno != errno.EXDEV:
             raise
-    fd, staged = tempfile.mkstemp(dir=directory, prefix=".vekrona-sync.", suffix=".tmp")
-    os.close(fd)
+    staged = f".vekrona-sync.{secrets.token_hex(4)}.tmp"
+    with os.fdopen(os.open(source_name, FILE_FLAGS, dir_fd=source_fd), "rb") as source:
+        stage_copy(source, directory_fd, staged)
     try:
-        shutil.copy2(source, staged)
-        return link_unused(staged, directory, name)
+        return link_unused(directory_fd, staged, directory_fd, name)
     finally:
-        os.unlink(staged)
+        os.unlink(staged, dir_fd=directory_fd)
 
 
-def link_unused(source, directory, name):
+def link_unused(source_fd, source_name, directory_fd, name):
     for candidate in candidate_names(name):
-        path = os.path.join(directory, candidate)
         try:
-            os.link(source, path, follow_symlinks=False)
+            os.link(source_name, candidate, src_dir_fd=source_fd, dst_dir_fd=directory_fd, follow_symlinks=False)
         except FileExistsError:
             continue
-        return path
+        return candidate
+
+
+def stage_copy(source, directory_fd, name):
+    """Copies the open file `source` to the new file `name` of directory_fd, with its mode and times."""
+    info = os.fstat(source.fileno())
+    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=directory_fd)
+    try:
+        with os.fdopen(fd, "wb") as target:
+            shutil.copyfileobj(source, target)
+            os.fchmod(fd, stat.S_IMODE(info.st_mode))
+        os.utime(name, ns=(info.st_atime_ns, info.st_mtime_ns), dir_fd=directory_fd, follow_symlinks=False)
+    except BaseException:
+        os.unlink(name, dir_fd=directory_fd)
+        raise
 
 
 def drops_root():
@@ -221,14 +298,14 @@ def gui_endpoint(config_file):
     except FileNotFoundError as exc:
         raise Unreachable(f"Syncthing has not written {config_file} yet") from exc
     except (OSError, ET.ParseError) as exc:
-        raise SyncError(f"cannot read {config_file}: {exc}")
+        raise ConfigError(f"cannot read {config_file}: {exc}")
     address = gui.findtext("address") if gui is not None else None
     api_key = gui.findtext("apikey") if gui is not None else None
     if not address or not api_key:
-        raise SyncError(f"{config_file} has no <gui> address and apikey")
+        raise ConfigError(f"{config_file} has no <gui> address and apikey")
     path = address.removeprefix("unix://").split("?", 1)[0]
     if not os.path.isabs(path):
-        raise SyncError(f"{config_file}: the GUI address {address!r} is not a unix socket (stage 50 sets one)")
+        raise ConfigError(f"{config_file}: the GUI address {address!r} is not a unix socket (stage 50 sets one)")
     return path, api_key
 
 
@@ -341,6 +418,22 @@ def read_snapshot(api, my_id):
                   if not is_drop(folder["id"]) and not folder.get("paused", False)})
 
 
+def apply_event(snapshot, event):
+    """Brings the snapshot up to date with an event whose data says all there is to know. A folder's summary and state
+    changes come in the events, so a folder is asked about once, when the snapshot is read."""
+    data = event["data"]
+    if event["type"] == "DeviceConnected":
+        snapshot.connected.add(data["id"])
+    elif event["type"] == "DeviceDisconnected":
+        snapshot.connected.discard(data["id"])
+    elif data.get("folder") in snapshot.statuses:
+        status = snapshot.statuses[data["folder"]]
+        if event["type"] == "FolderSummary":
+            snapshot.statuses[data["folder"]] = data["summary"]
+        elif event["type"] == "StateChanged":
+            snapshot.statuses[data["folder"]] = {**status, "state": data["to"], "error": data.get("error")}
+
+
 def folder_view(folder, status):
     path = os.path.expanduser(folder["path"])
     view = {"id": folder["id"], "label": folder.get("label") or os.path.basename(path.rstrip("/")) or folder["id"],
@@ -352,7 +445,7 @@ def folder_view(folder, status):
         return {**view, "state": "problem", "progress": 0,
                 "problem": status.get("error") or "Syncthing reports an error for this folder"}
     if state in BUSY_STATES:
-        total, needed = status["globalBytes"], status["needBytes"]
+        total, needed = status.get("globalBytes", 0), status.get("needBytes", 0)
         progress = 0 if total <= 0 else max(0, min(100, int(100 * (total - needed) / total)))
         return {**view, "state": "syncing", "progress": progress}
     if state != "idle":
@@ -378,11 +471,12 @@ def assemble(snapshot):
     folders = [folder_view(folder, snapshot.statuses.get(folder["id"])) for folder in snapshot.folders
                if not is_drop(folder["id"])]
     state, problem = overall(folders)
+    # A drop is never offered for a click: the one of the other party is taken without asking, and any other is a device
+    # pretending to be one.
     offers = [{"folder": folder_id, "label": offer.get("label") or folder_id, "device": device_id,
                "deviceName": names.get(device_id, short_code(device_id))}
-              for folder_id, entry in snapshot.pending_folders.items()
-              for device_id, offer in entry["offeredBy"].items()
-              if not auto_accepts(folder_id, device_id, snapshot.my_id)]
+              for folder_id, entry in snapshot.pending_folders.items() if not is_drop(folder_id)
+              for device_id, offer in entry["offeredBy"].items()]
     return {
         "state": state, "problem": problem, "folders": folders, "offers": offers,
         "pendingDevices": [{"id": device_id, "name": device_name(device_id, info.get("name")),
@@ -392,26 +486,34 @@ def assemble(snapshot):
                     for device_id, name in names.items() if device_id != snapshot.my_id]}
 
 
-def offline_view(reason):
-    return {"state": "offline", "problem": reason, "folders": [], "offers": [], "pendingDevices": [], "devices": []}
+def offline_view():
+    return {"state": "offline", "problem": "Syncthing is not running", "folders": [], "offers": [], "pendingDevices": [],
+            "devices": []}
 
 
 class StateStore:
     """sync.json. The watcher and `seen` both rewrite it, so every change is a locked read-modify-write."""
 
-    def __init__(self):
+    def __init__(self, report):
         directory = vekrona_cli.vekrona_state_dir()
         self.path = os.path.join(directory, "sync.json")
         self.lock_path = os.path.join(directory, "sync.json.lock")
+        self.report = report
 
     def read(self):
+        """The file's content, None when there is none or it is not a sync.json (reported, since the next write replaces it)."""
         try:
             with open(self.path) as f:
-                return json.load(f)
+                current = json.load(f)
         except FileNotFoundError:
             return None
         except (OSError, ValueError) as exc:
-            raise SyncError(f"cannot read {self.path}: {exc}")
+            self.report(f"cannot read {self.path}, which is replaced by the next state: {exc}")
+            return None
+        if not isinstance(current, dict) or not isinstance(current.get("arrivals"), list):
+            self.report(f"{self.path} is no sync.json, which is replaced by the next state")
+            return None
+        return current
 
     def update(self, change):
         """Writes what change(current or None) returns, unless it returns None."""
@@ -425,12 +527,13 @@ class StateStore:
     def publish(self, view, new_arrivals):
         def change(current):
             old = [] if current is None else current["arrivals"]
-            return {**view, "arrivals": (new_arrivals + old)[:MAX_ARRIVALS]}
+            state = {**view, "arrivals": (new_arrivals + old)[:MAX_ARRIVALS]}
+            return None if state == current else state
         self.update(change)
 
     def mark_seen(self):
         def change(current):
-            if current is None:
+            if current is None or not any(arrival["unseen"] for arrival in current["arrivals"]):
                 return None
             return {**current, "arrivals": [{**arrival, "unseen": False} for arrival in current["arrivals"]]}
         self.update(change)
@@ -438,36 +541,47 @@ class StateStore:
 
 # ---- Receiving -----------------------------------------------------------------------------------------------------
 
-def finished_files(inbox):
+def finished_files(inbox_fd):
     try:
-        entries = list(os.scandir(inbox))
-    except FileNotFoundError:
-        return []
+        with os.scandir(inbox_fd) as entries:
+            # Syncthing writes a file under a temp name and renames it when it is whole, so a name that is no temp name is a
+            # file that finished. Links and directories are not files that someone sent.
+            return sorted(entry.name for entry in entries
+                          if entry.is_file(follow_symlinks=False) and not is_syncthing_temp(entry.name))
     except OSError as exc:
-        raise SyncError(f"cannot list {inbox}: {exc}")
-    # Syncthing writes a file under a temp name and renames it when it is whole, so a name that is no temp name is a file
-    # that finished. Links and directories are not files that someone sent.
-    return sorted(entry.path for entry in entries
-                  if entry.is_file(follow_symlinks=False) and not is_syncthing_temp(entry.name))
+        raise SyncError(f"cannot list the inbox of a drop folder: {exc}")
 
 
-def receive(inbox, sender):
-    """Moves the finished files of an inbox into Downloads and returns (arrivals, failures)."""
-    files = finished_files(inbox)
-    if not files:
-        return [], []
-    downloads = downloads_dir()
-    os.makedirs(downloads, exist_ok=True)
-    arrivals, failures = [], []
-    for source in files:
+def receive(drop_path, my_id, sender):
+    """Moves the finished files of the inbox of drop_path into Downloads and returns (arrivals, failures)."""
+    with open_inbox(drop_path, my_id, create=False) as inbox:
+        names = [] if inbox is None else finished_files(inbox)
+        if not names:
+            return [], []
+        downloads = downloads_dir()
         try:
-            path = place_without_overwriting(source, downloads, os.path.basename(source))
-            os.unlink(source)
+            os.makedirs(downloads, exist_ok=True)
+            downloads_fd = os.open(downloads, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         except OSError as exc:
-            failures.append(f"cannot move {source} to {downloads}: {exc}")
-        else:
-            arrivals.append({"name": os.path.basename(path), "path": path, "from": sender, "unseen": True})
-    return arrivals, failures
+            raise SyncError(f"cannot use {downloads} for received files: {exc}")
+        try:
+            arrivals, failures = [], []
+            for name in names:
+                try:
+                    placed = place_without_overwriting(inbox, name, downloads_fd, name)
+                    # The file may have become a link between the listing and the move, and a link must not land in Downloads.
+                    if not stat.S_ISREG(os.stat(placed, dir_fd=downloads_fd, follow_symlinks=False).st_mode):
+                        os.unlink(placed, dir_fd=downloads_fd)
+                        raise OSError(errno.EMLINK, f"{name} became a link while it was moved")
+                    os.unlink(name, dir_fd=inbox)
+                except OSError as exc:
+                    failures.append(f"cannot move {name} of the drop folder {drop_path} to {downloads}: {exc}")
+                else:
+                    arrivals.append({"name": placed, "path": os.path.join(downloads, placed), "from": sender,
+                                     "unseen": True})
+            return arrivals, failures
+        finally:
+            os.close(downloads_fd)
 
 
 # ---- Notifications ---------------------------------------------------------------------------------------------------
@@ -506,7 +620,11 @@ class DesktopNotifier:
                          daemon=True).start()
 
     def wait_for_answer(self, argv, actions):
-        result = subprocess.run(argv, capture_output=True, text=True)
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True)
+        except OSError as exc:
+            self.report(f"cannot run {argv[0]}: {exc}")
+            return
         if result.returncode != 0:
             self.report(f"{os.path.basename(argv[0])} exited with status {result.returncode}: {result.stderr.strip()}")
             return
@@ -525,6 +643,14 @@ def other_devices(api, my_id):
     return [device for device in api.request("GET", "/rest/config/devices") if device["deviceID"] != my_id]
 
 
+def refuse_third_devices(folder, my_id, other_id):
+    """A drop that a third device shares is neither sent through nor received from: what is in it goes to that device too."""
+    foreign = {device["deviceID"] for device in folder["devices"]} - {my_id, other_id}
+    if foreign:
+        raise SyncError(f"the drop folder {folder['id']} is shared with {', '.join(sorted(foreign))}, which is no party to "
+                        f"it: remove them from it in Syncthing, nothing is sent or received through it until then")
+
+
 def ensure_drop_folder(api, my_id, other_id):
     """Makes sure the drop of this device and other_id exists and is shared with it, and returns its directory."""
     folder_id = drop_folder_id(my_id, other_id)
@@ -532,9 +658,11 @@ def ensure_drop_folder(api, my_id, other_id):
     if existing is None:
         path = os.path.join(drops_root(), folder_id)
         for device_id in (my_id, other_id):
-            os.makedirs(os.path.join(path, "to", device_id), exist_ok=True)
+            with open_inbox(path, device_id, create=True):
+                pass
         api.add_folder(folder_id, DROP_LABEL, path, [my_id, other_id])
         return path
+    refuse_third_devices(existing, my_id, other_id)
     api.share_folder_with(existing, other_id)
     return os.path.expanduser(existing["path"])
 
@@ -554,6 +682,8 @@ def share(api, path):
 
 
 def join(api, folder_id, path):
+    if is_drop(folder_id):
+        raise SyncError(f"{folder_id} is a drop, which is taken from the other device of the drop without asking and never joined")
     offer = api.request("GET", "/rest/cluster/pending/folders").get(folder_id)
     if offer is None:
         raise SyncError(f"no device offers the folder {folder_id}")
@@ -562,10 +692,20 @@ def join(api, folder_id, path):
         raise SyncError(f"the folder {folder_id} is joined already")
     label = next(iter(offer["offeredBy"].values())).get("label", "")
     target = os.path.abspath(os.path.expanduser(path)) if path else os.path.join(sync_root(), sanitize_label(label, folder_id))
-    if os.path.exists(target) and (not os.path.isdir(target) or os.listdir(target)):
+    try:
+        existing = os.lstat(target)
+    except FileNotFoundError:
+        existing = None
+    except OSError as exc:
+        raise SyncError(f"cannot look at {target}: {exc}")
+    # lstat: a link is no directory to take, whatever it points at.
+    if existing is not None and (not stat.S_ISDIR(existing.st_mode) or os.listdir(target)):
         raise SyncError(f"{target} exists and is not an empty directory; pass another path")
     my_id = api.my_id()
-    os.makedirs(target, exist_ok=True)
+    try:
+        os.makedirs(target, exist_ok=True)
+    except OSError as exc:
+        raise SyncError(f"cannot create {target}: {exc}")
     api.add_folder(folder_id, label or folder_id, target,
                    [my_id, *(device["deviceID"] for device in other_devices(api, my_id))])
 
@@ -596,21 +736,24 @@ def send(api, device_id, files):
     for file in files:
         if not os.path.isfile(file):
             raise SyncError(f"{file} is not a file")
-    inbox = os.path.join(ensure_drop_folder(api, my_id, device_id), "to", device_id)
-    os.makedirs(inbox, exist_ok=True)
-    for file in files:
-        deliver(file, inbox)
+    drop = ensure_drop_folder(api, my_id, device_id)
+    with open_inbox(drop, device_id, create=True) as inbox:
+        for file in files:
+            deliver(file, inbox)
 
 
-def deliver(file, inbox):
+def deliver(file, inbox_fd):
     """The file appears in the inbox whole or not at all: Syncthing ignores the temp name it is copied under."""
-    fd, staged = tempfile.mkstemp(dir=inbox, prefix=".syncthing.", suffix=".tmp")
-    os.close(fd)
+    staged = f".syncthing.{secrets.token_hex(4)}.tmp"
     try:
-        shutil.copy2(file, staged)
-        place_without_overwriting(staged, inbox, os.path.basename(file))
-    finally:
-        os.unlink(staged)
+        with open(file, "rb") as source:
+            stage_copy(source, inbox_fd, staged)
+        try:
+            place_without_overwriting(inbox_fd, staged, inbox_fd, os.path.basename(file))
+        finally:
+            os.unlink(staged, dir_fd=inbox_fd)
+    except OSError as exc:
+        raise SyncError(f"cannot deliver {file} into the drop folder: {exc}")
 
 
 # ---- The file chooser portal -----------------------------------------------------------------------------------------
@@ -687,39 +830,24 @@ def matters(event):
     return event["type"] != "ItemFinished" or is_drop(event["data"]["folder"])
 
 
-class Outage:
-    """How long Syncthing has been unreachable. Past the limit the watcher fails, which systemd restarts with a delay."""
-
-    def __init__(self, store):
-        self.store = store
-        self.since = None
-
-    def began(self, exc):
-        if self.since is None:
-            self.since = time.monotonic()
-            self.store.publish(offline_view(str(exc)), [])
-        elif time.monotonic() - self.since > OUTAGE_GIVE_UP_SEC:
-            raise SyncError(f"Syncthing has been unreachable for {OUTAGE_GIVE_UP_SEC} s: {exc}")
-
-    def ended(self):
-        self.since = None
-
-
 class Watcher:
     def __init__(self, store, notifier, report):
         self.store = store
         self.notifier = notifier
         self.report = report
         self.api = None
+        self.snapshot = None
         self.notified = set()
+        self.reported = set()
+        self.ignored_offers = set()
 
-    def follow(self, api, connected):
+    def follow(self, api):
         """Follows Syncthing until it stops answering (Unreachable)."""
         self.api = api
         my_id = api.my_id()
-        connected()
         latest = api.latest_event_id()
-        self.refresh(my_id, scan_all=True, finished=set())
+        self.snapshot = read_snapshot(api, my_id)
+        self.refresh(scan_all=True, finished=set())
         while True:
             batch = api.events(latest)
             if not batch:
@@ -727,32 +855,65 @@ class Watcher:
             # The IDs of one subscription follow each other, so a jump means events were dropped: look at everything.
             gap = batch[0]["id"] != latest + 1
             latest = batch[-1]["id"]
-            if gap or any(matters(event) for event in batch):
-                self.refresh(my_id, scan_all=gap, finished=finished_drops(batch))
+            if gap or any(event["type"] in REREAD_EVENTS for event in batch):
+                self.snapshot = read_snapshot(api, my_id)
+                self.refresh(scan_all=gap, finished=finished_drops(batch))
+            elif any(matters(event) for event in batch):
+                for event in batch:
+                    apply_event(self.snapshot, event)
+                self.refresh(scan_all=False, finished=finished_drops(batch))
 
-    def refresh(self, my_id, scan_all, finished):
-        snapshot = read_snapshot(self.api, my_id)
-        self.accept_drops(snapshot)
-        arrivals = self.receive(snapshot, scan_all, finished)
-        view = assemble(snapshot)
+    def refresh(self, scan_all, finished):
+        self.accept_drops()
+        arrivals = self.receive(scan_all, finished)
+        view = assemble(self.snapshot)
         self.store.publish(view, arrivals)
         self.notify(view, arrivals)
 
-    def accept_drops(self, snapshot):
-        for folder_id, entry in snapshot.pending_folders.items():
-            for device_id in entry["offeredBy"]:
-                if auto_accepts(folder_id, device_id, snapshot.my_id):
-                    ensure_drop_folder(self.api, snapshot.my_id, device_id)
+    def problem(self, message):
+        """Reports a problem that stays until someone fixes it, once, not at every event."""
+        if message not in self.reported:
+            self.reported.add(message)
+            self.report(message)
 
-    def receive(self, snapshot, scan_all, finished):
+    def accept_drops(self):
+        snapshot = self.snapshot
+        for folder_id, entry in snapshot.pending_folders.items():
+            if not is_drop(folder_id):
+                continue
+            for device_id in entry["offeredBy"]:
+                if not auto_accepts(folder_id, device_id, snapshot.my_id):
+                    self.ignore_offer(folder_id, device_id)
+                    continue
+                try:
+                    ensure_drop_folder(self.api, snapshot.my_id, device_id)
+                except Unreachable:
+                    raise
+                except SyncError as exc:
+                    self.problem(str(exc))
+
+    def ignore_offer(self, folder_id, device_id):
+        """A drop that no other party to it offers can only be a device trying to get files from this one or into it."""
+        if (folder_id, device_id) not in self.ignored_offers:
+            self.ignored_offers.add((folder_id, device_id))
+            vekrona_cli.print_failure(PROG, f"ignoring the offer of the drop {folder_id} by the device {device_id}, "
+                                            f"which is not a party to it")
+
+    def receive(self, scan_all, finished):
+        snapshot = self.snapshot
         names = {device["deviceID"]: device_name(device["deviceID"], device.get("name")) for device in snapshot.devices}
         arrivals = []
         for folder in snapshot.folders:
             partner = drop_partner(folder["id"], snapshot.my_id)
             if partner is None or not (scan_all or folder["id"] in finished):
                 continue
-            inbox = os.path.join(os.path.expanduser(folder["path"]), "to", snapshot.my_id)
-            received, failures = receive(inbox, names.get(partner, short_code(partner)))
+            try:
+                refuse_third_devices(folder, snapshot.my_id, partner)
+                received, failures = receive(os.path.expanduser(folder["path"]), snapshot.my_id,
+                                             names.get(partner, short_code(partner)))
+            except SyncError as exc:
+                self.problem(str(exc))
+                continue
             arrivals += received
             for failure in failures:
                 self.report(failure)
@@ -774,17 +935,6 @@ class Watcher:
                 self.notifier.offer(offer, lambda offer=offer: join(api, offer["folder"], None))
         for arrival in arrivals:
             self.notifier.arrival(arrival)
-
-
-def watch(store, notifier, report):
-    outage = Outage(store)
-    watcher = Watcher(store, notifier, report)
-    while True:
-        try:
-            watcher.follow(Syncthing.from_config(), outage.ended)
-        except Unreachable as exc:
-            outage.began(exc)
-            time.sleep(OUTAGE_RETRY_SEC)
 
 
 # ---- Command line ----------------------------------------------------------------------------------------------------
@@ -817,15 +967,29 @@ def command_send(args):
         send(Syncthing.from_config(), args.device, files)
 
 
+def report_failure(message):
+    vekrona_cli.surface_failure(PROG, message, __file__)
+
+
 def command_seen(args):
-    StateStore().mark_seen()
+    StateStore(report_failure).mark_seen()
+
+
+def command_offline(args):
+    StateStore(report_failure).publish(offline_view(), [])
 
 
 def command_watch(args):
-    def report(msg):
-        vekrona_cli.surface_failure(PROG, msg, __file__)
-
-    watch(StateStore(), DesktopNotifier(report), report)
+    watcher = Watcher(StateStore(report_failure), DesktopNotifier(report_failure), report_failure)
+    try:
+        watcher.follow(Syncthing.from_config())
+    except Unreachable as exc:
+        # The unit's ExecStopPost writes the offline sync.json, and systemd starts the watcher again after a growing delay.
+        vekrona_cli.print_failure(PROG, str(exc))
+        sys.exit(EXIT_UNREACHABLE)
+    except ConfigError as exc:
+        report_failure(str(exc))
+        sys.exit(EXIT_CONFIG)
 
 
 def parse_args(argv):
@@ -839,6 +1003,7 @@ def parse_args(argv):
             ("reject", command_reject, [("device", {"type": device_id_arg})]),
             ("send", command_send, [("device", {"type": device_id_arg}), ("files", {"nargs": "*"})]),
             ("seen", command_seen, []),
+            ("offline", command_offline, []),
             ("watch", command_watch, [])):
         subparser = commands.add_parser(name)
         subparser.set_defaults(handler=handler)

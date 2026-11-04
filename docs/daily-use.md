@@ -319,10 +319,13 @@ vekrona-sync send DEVICE_ID photo.jpg report.pdf
 Sending needs both devices to run vekrona. Under the hood the two devices share a hidden folder, `vekrona-drop-<id>-<id>`, in
 `~/.local/share/vekrona-sync/drops/`, which each accepts from the other without asking; it holds the files that are on their way, and
 a file leaves it once it is in Downloads. Another Syncthing client (Android, macOS) sees that folder as an ordinary shared folder
-and never empties it, so a file sent to such a device stays in the folder's `to/<device ID>/` directory.
+and never empties it, so a file sent to such a device stays in the folder's `to/<device ID>/` directory. A device that is not one of
+the two cannot join the folder: its offer of a drop is ignored (a line in the journal of `vekrona-sync.service`), and a drop folder
+that a third device shares in Syncthing is neither sent through nor received from until you remove that device from it.
 
-What the icon shows: idle, syncing, or a problem (the list gives the reason in words). `vekrona-sync watch` is the service behind it
-(`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change.
+What the icon shows: idle, syncing, a problem (the list gives the reason in words), or offline (Syncthing is not running). `vekrona-sync watch`
+is the service behind it (`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change, and while Syncthing
+does not answer it is started again after a longer wait each time, up to a minute.
 
 ## The Desktops widget
 
