@@ -721,6 +721,13 @@ unit_state() {
 # unit_is_active|unit_is_enabled <unit> [systemctl flags, e.g. --user]
 unit_is_active() { local state; unit_state state is-active "$@"; [[ "$state" == active ]]; }
 unit_is_enabled() { local state; unit_state state is-enabled "$@"; [[ "$state" == enabled ]]; }
+# systemctl show prints a LoadState for any unit name, known or not, so a failing show is systemctl itself failing (an unreachable
+# bus, for one) and dies; as with unit_state, the caller's shell must run this, not a $(...) subshell.
+unit_is_loaded() {
+  local state
+  state="$(systemctl show -p LoadState --value "$@")" || die "systemctl show -p LoadState $* failed (its stderr is above)"
+  [[ "$state" == loaded ]]
+}
 
 unit_matches_state() {
   local current

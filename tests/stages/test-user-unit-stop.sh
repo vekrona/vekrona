@@ -130,3 +130,16 @@ log "ok: a retired unit is killed and its unit file and every *.wants link, dang
 reset
 retire_user_unit old.service
 log "ok: retiring a unit that is already gone succeeds"
+
+# unit_is_loaded: stage 70's check that a unit is loaded.
+reset
+unit_is_loaded old.service --user || die "a loaded unit must read as loaded"
+touch "$scratch/missing"
+if unit_is_loaded old.service --user; then die "a unit without a file must not read as loaded"; fi
+log "ok: only LoadState loaded counts as loaded"
+
+reset
+touch "$scratch/no-bus-for-enablement"
+if out="$( (unit_is_loaded old.service --user) 2>&1)"; then die "a systemctl that cannot show the LoadState must fail"; fi
+[[ "$out" == *"systemctl show -p LoadState old.service --user failed"* ]] || die "a failing systemctl show must stop the check with its cause, not read as not loaded: $out"
+log "ok: a systemctl show that fails is an error, not a unit that is not loaded"

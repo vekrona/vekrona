@@ -64,15 +64,15 @@ gsettings_eq() { [[ "$(user_gsettings get "$1" "$2")" == "'$3'" ]]; }
 repo_key_target_root_0644() { [[ "$(stat -L -c '%U %a' "$VEKRONA_REPO_KEY_DIR/$(repo_key_name "$1")")" == "root 644" ]]; }
 not_repo_enabled() { ! repo_enabled "$1"; }
 copr_enabled() { repo_enabled "$(copr_id "$1")"; }
-unit_enabled() { eq "$(systemctl is-enabled "$1" 2>/dev/null || true)" enabled; }
-unit_active() { eq "$(systemctl is-active "$1" 2>/dev/null || true)" active; }
+unit_enabled() { unit_is_enabled "$1"; }
+unit_active() { unit_is_active "$1"; }
 user_unit_enabled() { unit_is_enabled "$1" --user; }
 user_unit_not_installed() {
   local -a paths
   read_user_unit_install_paths paths "$1"
   ((${#paths[@]} == 0))
 }
-user_unit_loaded() { eq "$(systemctl --user show -p LoadState --value "$1" 2>/dev/null || true)" loaded; }
+user_unit_loaded() { unit_is_loaded "$1" --user; }
 # rpm -q exits 1 for an absent package and for a broken rpm database alike, so only its "is not installed" answer counts.
 pkg_absent() { [[ "$(LC_ALL=C rpm -q "$1" 2>&1 || true)" == "package $1 is not installed" ]]; }
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
@@ -149,7 +149,7 @@ present_iff() {
 
 sway_runs() { [[ -n "$(sway_socket)" ]]; }
 system_unit_active_when_sway_runs() { ! sway_runs || unit_active "$1"; }
-active_when_sway_runs() { ! sway_runs || systemctl --user is-active --quiet "$1"; }
+active_when_sway_runs() { ! sway_runs || unit_is_active "$1" --user; }
 runs_when_sway_runs() { ! sway_runs || systemctl --user start "$1"; }
 session_teardown_holds_shutdown_lock() {
   systemd-inhibit --list --no-legend --no-pager | awk '$1 == "vekrona" && $NF == "delay" { for (i = 2; i < NF; i++) if ($i == "shutdown") found = 1 } END { exit !found }'
