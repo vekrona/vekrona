@@ -72,3 +72,10 @@ grep -qF "timeout 300 'vekrona-lock start'" "$units/vekrona-idle.service" || die
 grep -qx 'ExecStart=%h/.local/bin/vekrona-lock listen' "$units/vekrona-lock-listen.service" || die "logind's lock request must be taken by vekrona-lock listen"
 grep -qx 'WantedBy=sway-session.target' "$units/vekrona-lock-listen.service" || die "vekrona-lock-listen.service must start with the sway session"
 log "ok: swayidle names the verb of vekrona-lock, and vekrona-lock-listen.service takes logind's lock request for sway's session"
+
+# The Sync watcher lives and dies with Syncthing, whose socket it needs, and starts with it at login (no session target: Syncthing runs under linger).
+for line in 'PartOf=syncthing.service' 'After=syncthing.service' 'WantedBy=syncthing.service' 'ExecStart=%h/.local/bin/vekrona-sync watch'; do
+  grep -qx "$line" "$units/vekrona-sync.service" || die "vekrona-sync.service must have the line $line"
+done
+! grep -q 'sway-session.target' "$units/vekrona-sync.service" || die "vekrona-sync.service must not wait for the sway session: Syncthing starts at boot, and so must its watcher"
+log "ok: vekrona-sync.service follows syncthing.service"

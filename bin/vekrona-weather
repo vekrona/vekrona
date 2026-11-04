@@ -11,7 +11,6 @@ import datetime
 import json
 import os
 import sys
-import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -130,20 +129,6 @@ def previous_output(path):
         die(f"cannot read the previous output {path}: {exc}")
 
 
-def write_atomically(path, data):
-    directory = os.path.dirname(path)
-    os.makedirs(directory, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".weather.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-            f.write("\n")
-        os.replace(temp_path, path)
-    except BaseException:
-        os.unlink(temp_path)
-        raise
-
-
 def main():
     vekrona_cli.require_run_verb(PROG, __doc__)
     output_path = os.path.join(vekrona_cli.vekrona_state_dir(), "weather.json")
@@ -159,7 +144,7 @@ def main():
     except Surfaced as exc:
         result["error"] = str(exc)
         print(f"{PROG}: {exc}", file=sys.stderr)
-    write_atomically(output_path, result)
+    vekrona_cli.write_json_atomically(output_path, result)
 
 
 main()

@@ -1,0 +1,17 @@
+[Unit]
+Description=Vekrona Syncthing watcher: the bar's Sync state, pairing requests, offers and files sent to this computer
+# It follows syncthing.service: started with it, stopped and restarted with it (also when Syncthing restarts itself).
+PartOf=syncthing.service
+After=syncthing.service
+# A watcher that cannot reach Syncthing for five minutes fails, and is tried again for as long as Syncthing runs.
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=%h/.local/bin/vekrona-sync watch
+Restart=on-failure
+RestartSec=1
+RestartSteps=6
+RestartMaxDelaySec=60
+
+[Install]
+WantedBy=syncthing.service

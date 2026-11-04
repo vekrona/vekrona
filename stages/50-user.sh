@@ -228,3 +228,7 @@ if [[ -n "$(sway_socket)" ]]; then
   log "starting the triggers (${session_triggers[*]}) for the running sway session"
   systemctl --user start "${session_triggers[@]}" || die "the triggers (${session_triggers[*]}) failed to start"
 fi
+# The Sync watcher follows syncthing.service (PartOf, WantedBy), which is running by now; enabling alone would leave it down until
+# Syncthing next starts.
+ensure_user_unit_enabled vekrona-sync.service
+systemctl --user start vekrona-sync.service || die "vekrona-sync.service failed to start"

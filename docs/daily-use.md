@@ -275,6 +275,55 @@ scb -- %command%
 MangoHud toggle in-game: Shift_R+F12 (`config/mangohud/MangoHud.conf`,
 `toggle_hud=Shift_R+F12`).
 
+## Sync
+
+Sync keeps folders the same on all your devices, and sends a file to one of them. It is Syncthing underneath, but there is no web
+page and no folder IDs to handle: the bar's Sync icon opens the list, and the commands below do the same from a terminal. Everything
+is between devices you accepted yourself; there is no server.
+
+**Add a device.** On the other device, add this computer in its Syncthing, using this computer's device ID, which `vekrona-sync id`
+prints. This computer then shows a notification, "<name> wants to connect", with a short code: check that the code starts the same
+as the device ID on the other device, then press Accept. The device is now one of *your devices*: every folder you share goes to all
+of them, and a folder you join is shared on with all of them. Ignoring the notification adds nothing, and Reject only clears the
+request: a device that keeps trying asks again.
+
+```
+vekrona-sync id
+vekrona-sync accept DEVICE_ID
+vekrona-sync reject DEVICE_ID
+```
+
+**Share a folder.** "Share a folder…" in the Sync list opens a folder chooser. The folder then shows up on your other devices as an
+offer, and stays where it is on this computer.
+
+```
+vekrona-sync share ~/Documents/notes
+```
+
+**Join a folder.** A folder another device shares shows under "Offered to you" and in a notification. Join puts it at
+`~/Sync/<its name>`. Join refuses a folder that would land in a directory that already has files; give it another path then.
+
+```
+vekrona-sync join FOLDER_ID ~/somewhere/else
+```
+
+**Send a file.** "Send file…" on a device's row opens a file chooser. The file lands in that device's Downloads folder with a
+notification, right away if the device is online, otherwise as soon as it is. A name that is taken there gets a number: `photo.jpg`
+becomes `photo (2).jpg`, and nothing is ever overwritten. This computer does the same for files that arrive: they go to your Downloads
+folder (the one `xdg-user-dir DOWNLOAD` names), with a notification, and the Sync icon shows a dot until you open the list.
+
+```
+vekrona-sync send DEVICE_ID photo.jpg report.pdf
+```
+
+Sending needs both devices to run vekrona. Under the hood the two devices share a hidden folder, `vekrona-drop-<id>-<id>`, in
+`~/.local/share/vekrona-sync/drops/`, which each accepts from the other without asking; it holds the files that are on their way, and
+a file leaves it once it is in Downloads. Another Syncthing client (Android, macOS) sees that folder as an ordinary shared folder
+and never empties it, so a file sent to such a device stays in the folder's `to/<device ID>/` directory.
+
+What the icon shows: idle, syncing, or a problem (the list gives the reason in words). `vekrona-sync watch` is the service behind it
+(`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change.
+
 ## The Desktops widget
 
 The shell's Desktops widget (`config/vekrona-shell/Desktops.qml`) always shows
