@@ -9,13 +9,13 @@ usage: bar-widget.py SCREENSHOT.png BAR_HEIGHT ICON_S GROUP_JOIN_PX COMMAND [NAM
   gauge       print the fill of the load widget's two halves as "CPU MEMORY", each 0 to 100
 
 The widgets are named by their place from the right edge, on the bar of the VM, which has no battery: the clock, the
-notification bell, the agent, the network and the sound icon. The load widget is found by its shape, one frame split by a single line,
+notification bell, the agent, the sync, the network and the sound icon. The load widget is found by its shape, one frame split by a single line,
 because the caffeine and tray pictograms may sit left of it. Exits 1 when the bar has fewer widgets than the name needs."""
 import sys
 
 from bar_widgets import PICTOGRAM, find_widgets, gauge_fills, ink_mass
 
-FROM_RIGHT = ["clock", "bell", "agent", "network", "sound"]
+FROM_RIGHT = ["clock", "bell", "agent", "sync", "network", "sound"]
 LOAD = "load"
 
 

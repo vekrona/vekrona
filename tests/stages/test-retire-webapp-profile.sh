@@ -34,8 +34,9 @@ retire_webapp_profile syncthing >/dev/null 2>&1
 [[ ! -e "$root/vekrona-syncthing" ]] || die "the retired profile directory is still there"
 log "ok: the profile's entry and directory go"
 
-grep -qx 'Name=default' "$ini" && grep -qx 'Name=vekrona-youtube' "$ini" && grep -qx 'StartWithLastProfile=1' "$ini" \
-  || die "the other profiles and the general section must stay: $(<"$ini")"
+for kept in Name=default Name=vekrona-youtube StartWithLastProfile=1; do
+  grep -qx "$kept" "$ini" || die "the other profiles and the general section must stay, $kept is gone: $(<"$ini")"
+done
 [[ -d "$root/vekrona-youtube" && -d "$root/a.default" ]] || die "another profile's directory was removed"
 log "ok: no other profile or setting is touched"
 
@@ -61,7 +62,8 @@ log "ok: a Firefox with no profiles.ini is left alone"
 
 write_profiles
 if (PGREP_STATUS=0 retire_webapp_profile syncthing) >/dev/null 2>&1; then die "a profile a running Firefox holds must not be removed"; fi
-[[ -d "$root/vekrona-syncthing" ]] && grep -q 'vekrona-syncthing' "$ini" || die "the profile was touched although a Firefox runs it"
+[[ -d "$root/vekrona-syncthing" ]] || die "the profile directory was removed although a Firefox runs it"
+grep -q 'vekrona-syncthing' "$ini" || die "the profile left profiles.ini although a Firefox runs it"
 grep -qF -- '-P vekrona-syncthing ' "$scratch/pgrep-calls" || die "pgrep must look for the profile by its name: $(<"$scratch/pgrep-calls")"
 log "ok: a running Firefox on the profile stops the retirement"
 

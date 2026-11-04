@@ -1122,60 +1122,74 @@ syncthing_config_file() {
   awk '/^Configuration file:/ { getline; sub(/^[ \t]+/, ""); print; exit }' <<<"$paths"
 }
 
-# The <gui> element of the config file $1 (its start tag included); nothing when the file or the element is missing.
-syncthing_gui_xml() {
-  if [[ -f "$1" ]]; then sed -n '/<gui[ >]/,/<\/gui>/p' "$1"; fi
+# The one reader and writer of the <gui> element of Syncthing's config.xml, so that what is checked and what is edited are the same
+# parse of the file, however it is laid out (Syncthing indents, a hand edit may not). `syncthing_gui_py MODE FILE [SOCKET]`:
+#   address, login (yes or no: a user or a password is set), tls (yes or no)  print the answer for FILE; a missing file or a config
+#                                                                              without <gui> answers "" or "no"
+#   edit      prints FILE with its <gui> on SOCKET: the address set (added when there is none), no user, no password, tls off
+# A file that is not XML, or has no <gui> to edit, is an error.
+syncthing_gui_py() {
+  python3 -I - "$@" <<'PYEOF'
+import os
+import sys
+import xml.etree.ElementTree as ET
+
+mode, path, *rest = sys.argv[1:]
+if mode != "edit" and not os.path.exists(path):
+    print("" if mode == "address" else "no")
+    raise SystemExit(0)
+try:
+    tree = ET.parse(path)
+except ET.ParseError as error:
+    raise SystemExit(f"{path} is not valid XML: {error}")
+gui = tree.getroot().find("gui")
+if mode == "edit":
+    if gui is None:
+        raise SystemExit(f"{path} has no <gui> element")
+    address = gui.find("address")
+    if address is None:
+        address = ET.SubElement(gui, "address")
+    address.text = rest[0]
+    for name in ("user", "password"):
+        for element in gui.findall(name):
+            gui.remove(element)
+    gui.set("tls", "false")
+    ET.indent(tree)
+    print(ET.tostring(tree.getroot(), encoding="unicode"))
+elif gui is None:
+    print("" if mode == "address" else "no")
+elif mode == "address":
+    address = gui.find("address")
+    print("" if address is None else (address.text or ""))
+elif mode == "login":
+    print("yes" if any(e.text for name in ("user", "password") for e in gui.findall(name)) else "no")
+elif mode == "tls":
+    print("yes" if gui.get("tls") == "true" else "no")
+else:
+    raise SystemExit(f"unknown mode {mode}")
+PYEOF
 }
 
 # The <address> of the <gui> element of the config file $1; nothing when there is none.
-syncthing_gui_address() {
-  local gui
-  gui="$(syncthing_gui_xml "$1")"
-  sed -n 's|.*<address>\([^<]*\)</address>.*|\1|p;T;q' <<<"$gui"
-}
+syncthing_gui_address() { syncthing_gui_py address "$1" || die "cannot read the GUI address of $1"; }
 
 # Whether the config file $1 demands a GUI login (Syncthing authenticates only when it holds a user and a password).
 syncthing_gui_login_set() {
-  local gui
-  gui="$(syncthing_gui_xml "$1")"
-  grep -Eq '<(user|password)>[^<]+</(user|password)>' <<<"$gui"
+  local answer
+  answer="$(syncthing_gui_py login "$1")" || die "cannot read the GUI login of $1"
+  [[ "$answer" == yes ]]
 }
 
 # Whether the GUI of the config file $1 is served over TLS, which a client that speaks plain HTTP on the socket cannot use.
 syncthing_gui_tls_set() {
-  local gui
-  gui="$(syncthing_gui_xml "$1")"
-  grep -Eq '<gui[^>]* tls="true"' <<<"$gui"
+  local answer
+  answer="$(syncthing_gui_py tls "$1")" || die "cannot read the GUI TLS setting of $1"
+  [[ "$answer" == yes ]]
 }
 
 # Whether the config file $1 puts the GUI on the socket $2 with plain HTTP and no login.
 syncthing_gui_on_socket() {
   [[ "$(syncthing_gui_address "$1")" == "$2" ]] && ! syncthing_gui_login_set "$1" && ! syncthing_gui_tls_set "$1"
-}
-
-# Prints the config file $1 with its <gui> on the socket $2: the address set (added when there is none), no user and no
-# password, tls off.
-syncthing_config_with_gui_socket() {
-  python3 -I - "$1" "$2" <<'PYEOF'
-import sys
-import xml.etree.ElementTree as ET
-
-path, socket = sys.argv[1:]
-tree = ET.parse(path)
-gui = tree.getroot().find("gui")
-if gui is None:
-    raise SystemExit(f"{path} has no <gui> element")
-address = gui.find("address")
-if address is None:
-    address = ET.SubElement(gui, "address")
-address.text = socket
-for name in ("user", "password"):
-    for element in gui.findall(name):
-        gui.remove(element)
-gui.set("tls", "false")
-ET.indent(tree)
-print(ET.tostring(tree.getroot(), encoding="unicode"))
-PYEOF
 }
 
 # Puts the GUI on its socket and takes any login out of the config, unless that is so already. `syncthing generate` skips an
@@ -1196,7 +1210,7 @@ ensure_syncthing_gui_socket() {
       syncthing generate >/dev/null || die "syncthing generate failed to create $config"
     fi
     edited="$(mktemp "$config.XXXXXX")" || die "cannot create a temp file next to $config"
-    syncthing_config_with_gui_socket "$config" "$socket" >"$edited" \
+    syncthing_gui_py edit "$config" "$socket" >"$edited" \
       || { rm -f "$edited"; die "cannot move the GUI of $config to $socket"; }
     syncthing_gui_on_socket "$edited" "$socket" \
       || { rm -f "$edited"; die "the edited copy of $config does not put the GUI on $socket without a login or TLS, so $config stays as it was"; }

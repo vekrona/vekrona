@@ -35,11 +35,11 @@ if [[ "$*" == '--user stop syncthing.service' ]]; then
   if [[ -f "$SCRATCH/config.xml" ]]; then cp "$SCRATCH/config.xml" "$SCRATCH/config-at-stop.xml"; else rm -f "$SCRATCH/config-at-stop.xml"; fi
 fi
 F
-# python3 does the XML edit. BAD_EDIT=1 makes it print the config unchanged, as an edit that did not work would.
+# python3 reads and edits the XML. BAD_EDIT=1 makes its `edit` print the config unchanged, as an edit that did not work would.
 real_python="$(command -v python3)"
 write_fake "$scratch/stubs/python3" <<F
 #!/usr/bin/env bash
-if [[ "\${BAD_EDIT:-}" == 1 ]]; then cat "\$SCRATCH/config.xml"; else exec "$real_python" "\$@"; fi
+if [[ "\${BAD_EDIT:-}" == 1 && "\$3" == edit ]]; then cat "\$SCRATCH/config.xml"; else exec "$real_python" "\$@"; fi
 F
 export PATH="$scratch/stubs:$PATH"
 
@@ -79,6 +79,13 @@ printf '<configuration><gui><password>$2a$10$h</password></gui></configuration>\
 syncthing_gui_login_set "$config" || die "a password alone is a login to remove"
 printf '<configuration><gui><address>a</address></gui><ldap><user>x</user></ldap></configuration>\n' >"$config"
 ! syncthing_gui_login_set "$config" || die "a user outside <gui> is not a GUI login"
+printf '<configuration>\n    <gui enabled="true">\n        <address>a</address>\n    </gui>\n    <ldap>\n        <user>x</user>\n        <address>other</address>\n    </ldap>\n</configuration>\n' >"$config"
+! syncthing_gui_login_set "$config" || die "a user outside <gui> is not a GUI login, in a config laid out over many lines"
+[[ "$(syncthing_gui_address "$config")" == a ]] || die "the address of another element leaked into the GUI's: '$(syncthing_gui_address "$config")'"
+printf '<configuration>\n    <gui enabled="true" tls="true">\n        <address>a</address>\n    </gui>\n    <options tls="true">\n        <user>x</user>\n    </options>\n</configuration>\n' >"$config"
+syncthing_gui_tls_set "$config" || die "tls=\"true\" on <gui> is a TLS GUI in a config laid out over many lines"
+printf '<configuration><gui><address>a</address>\n' >"$config"
+if (syncthing_gui_login_set "$config") >/dev/null 2>&1; then die "a config that is not XML cannot be read, and must be an error rather than no login"; fi
 printf '<configuration><gui enabled="true" tls="true"><address>a</address></gui></configuration>\n' >"$config"
 syncthing_gui_tls_set "$config" || die "tls=\"true\" is a TLS GUI"
 printf '<configuration><gui enabled="true" tls="false"><address>a</address></gui></configuration>\n' >"$config"
