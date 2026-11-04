@@ -831,14 +831,21 @@ ensure_user_unit_enabled() {
 }
 
 # Stops a user unit that is not inactive and disables it only when it is enabled (a vendor unit that was never enabled needs no
-# disable, and `disable` fails on a unit whose file is gone, which counts as not enabled).
+# disable, and `disable` fails on a unit whose file is gone, which counts as not enabled). A running unit whose file is gone
+# (LoadState not-found) is killed through its cgroup: once the user manager has re-executed, it refuses to stop or kill it.
 ensure_user_unit_stopped() {
-  local u active enabled
+  local u active enabled load_state
   for u in "$@"; do
     unit_state active is-active --user "$u"
     if [[ "$active" != inactive ]]; then
-      log "stopping: $u"
-      systemctl --user stop "$u" || die "cannot stop $u"
+      load_state="$(systemctl show -p LoadState --value --user "$u")" || die "systemctl show -p LoadState --user $u failed (its stderr is above)"
+      if [[ "$load_state:$active" == not-found:active ]]; then
+        log "$u runs although its unit file is gone"
+        kill_user_unit_cgroups "$u"
+      else
+        log "stopping: $u"
+        systemctl --user stop "$u" || die "cannot stop $u"
+      fi
     fi
     unit_state enabled is-enabled --user "$u"
     if [[ "$enabled" == enabled ]]; then
@@ -949,23 +956,28 @@ kill_cgroup() {
   wait_until_cgroup_empty "$dir"
 }
 
-# Kills the orphans through their cgroups, not through systemctl: once the user manager has re-executed, it holds such a unit as
-# not loaded, and `systemctl --user stop` and `kill` both refuse it. Autostart units are generated, never enabled, so there is
-# nothing to disable.
+# Kills each running user unit named here through its cgroup, not through systemctl: once the user manager has re-executed, it
+# holds a unit whose file is gone as not loaded, and `systemctl --user stop` and `kill` both refuse it.
+kill_user_unit_cgroups() {
+  local unit cgroup_dir
+  require_cmd inotifywait
+  for unit in "$@"; do
+    log "killing user unit $unit through its cgroup"
+    read_user_unit_cgroup_dir cgroup_dir "$unit"
+    kill_cgroup "$cgroup_dir"
+  done
+}
+
+# Autostart units are generated, never enabled, so there is nothing to disable.
 stop_orphaned_autostart_units() {
-  local orphan cgroup_dir
   local -a orphans
   read_orphaned_autostart_units orphans
   if ((${#orphans[@]} == 0)); then
     log "no autostart app runs without its desktop entry"
     return 0
   fi
-  require_cmd inotifywait
-  for orphan in "${orphans[@]}"; do
-    log "killing orphaned autostart unit: $orphan"
-    read_user_unit_cgroup_dir cgroup_dir "$orphan"
-    kill_cgroup "$cgroup_dir"
-  done
+  log "autostart apps run without their desktop entries: ${orphans[*]}"
+  kill_user_unit_cgroups "${orphans[@]}"
 }
 
 # A path an earlier vekrona left behind: $1 is why it is retired, the rest are the paths.
@@ -1978,11 +1990,12 @@ VEKRONA_DESKTOP_PKGS=(
 # shellcheck disable=SC2034
 VEKRONA_RETIRED_PKGS=(dms dms-cli dgop danksearch matugen mise)
 
-# The user units a past vekrona installed and no longer ships. tailscale-systray was the tray client of Tailscale (22 MiB resident),
-# which is managed from its CLI; vekrona-app-switch became part of vekrona-shell, and stopping its unit also runs its
-# `swaymsg mode default`.
+# The user units a past vekrona installed or enabled and no longer ships. tailscale-systray was the tray client of Tailscale (22 MiB
+# resident), which is managed from its CLI; vekrona-app-switch became part of vekrona-shell, and stopping its unit also runs its
+# `swaymsg mode default`; dms.service was DankMaterialShell, which vekrona-shell replaced; xremap.service is xremap's old user
+# unit, now a system service of the same name.
 # shellcheck disable=SC2034
-VEKRONA_RETIRED_USER_UNITS=(tailscale-systray.service vekrona-app-switch.service)
+VEKRONA_RETIRED_USER_UNITS=(tailscale-systray.service vekrona-app-switch.service dms.service xremap.service)
 
 # What mise and the coding agents (Claude Code, Codex, OpenCode, Pi, Cursor) left behind; stage 30 removes them.
 # /etc/claude-code/managed-settings.json stays: it is the login-method policy, installed by stage 40.

@@ -60,6 +60,7 @@ quickshell_vendor="$(rpm -q --qf '%{VENDOR}' quickshell)"
 [[ "$quickshell_vendor" != *agaspar* ]] || die "quickshell still built by agaspar/omedora: $quickshell_vendor"
 log "ok: quickshell vendor is $quickshell_vendor"
 
+# The running shell goes before its package does; stage 50 retires the unit's links (VEKRONA_RETIRED_USER_UNITS).
 ensure_user_unit_stopped dms.service
 ensure_pkg_absent "${VEKRONA_RETIRED_PKGS[@]}"
 versionlock_absent "${VEKRONA_RETIRED_PKGS[@]}"

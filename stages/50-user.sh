@@ -53,15 +53,14 @@ else
 fi
 "$VEKRONA_ROOT/bin/vekrona-render-theme" all
 
-ensure_user_unit_stopped dms.service
+# User units an earlier vekrona installed and the checkout no longer ships: stopped, disabled, and their unit files and *.wants links removed.
+for retired_unit in "${VEKRONA_RETIRED_USER_UNITS[@]}"; do retire_user_unit "$retired_unit"; done
 
 for skills_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.agents/skills"; do
   ensure_symlink "$VEKRONA_ROOT/config/agents/skills/vekrona-diagnose" "$skills_dir/vekrona-diagnose"
 done
 
 remove_retired "left by DankMaterialShell, which vekrona-shell replaced" \
-  "$HOME/.config/systemd/user/sway-session.target.wants/dms.service" \
-  "$HOME/.config/systemd/user/graphical-session.target.wants/dms.service" \
   "$HOME/.config/systemd/user/dms.service.d" \
   "$HOME/.config/DankMaterialShell" "$HOME/.local/state/DankMaterialShell" "$HOME/.cache/DankMaterialShell" \
   "$HOME/.config/gtk-3.0/dank-colors.css" "$HOME/.config/gtk-4.0/dank-colors.css" \
@@ -70,8 +69,6 @@ remove_retired "left by DankMaterialShell, which vekrona-shell replaced" \
 remove_retired "the weather and calendar timers now start with the sway session" \
   "$HOME/.config/systemd/user/timers.target.wants/vekrona-weather.timer" \
   "$HOME/.config/systemd/user/timers.target.wants/vekrona-calendar.timer"
-# User units an earlier vekrona installed and the checkout no longer ships: stopped, disabled, and their unit files and *.wants links removed.
-for retired_unit in "${VEKRONA_RETIRED_USER_UNITS[@]}"; do retire_user_unit "$retired_unit"; done
 remove_retired "the app switcher is part of vekrona-shell now" "$HOME/.config/quickshell/vekrona-app-switch"
 # A live link into the checkout, so prune_vekrona_links (stale links only) would keep it, and its directory is no longer scanned.
 remove_retired "xremap runs root's copy in /etc/xremap and vekrona-keybindings reads the checkout" \

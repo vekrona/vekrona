@@ -592,7 +592,6 @@ if ran 50-user; then
   check assert "sway keybindings all described" vekrona-keybindings --check
   check assert "vekrona-keybindings --list has workspace 10 bindings" bash -c "vekrona-keybindings --list | grep -qF 'workspace 1…10'"
   check assert "vekrona-keybindings --list has the help binding" bash -c "vekrona-keybindings --list | grep -qF 'Show keybindings help'"
-  check assert "the old xremap user service is not enabled (xremap is a system service now)" not user_unit_enabled xremap
   check assert "syncthing.service enabled" user_unit_enabled syncthing
   check assert "syncthing waits for the network before it starts (nm-online drop-in linked and loaded)" contains "nm-online" "$(systemctl --user show syncthing.service -p ExecStartPre --value)"
   check assert "the retired vekrona-app-switch Quickshell config is gone" path_absent "$HOME/.config/quickshell/vekrona-app-switch"

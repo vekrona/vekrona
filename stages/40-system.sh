@@ -96,8 +96,8 @@ root udevadm trigger --settle --sysname-match=uinput
 # The seat ACL that 00-xremap-input.rules' uaccess tag gave /dev/uinput stays until it is removed by hand.
 root setfacl -b /dev/uinput
 
-# xremap runs as a system service of its own (the user systemd service it was is stopped); it starts when a Wayland
-# socket appears. Its config is root's copy: a file the user can write would run commands (launch:) as the xremap user.
+# xremap runs as a system service of its own; it starts when a Wayland socket appears. The user unit it was is stopped first, since
+# two xremaps would grab the keyboards, and stage 50 retires its links (VEKRONA_RETIRED_USER_UNITS). Its config is root's copy: a file the user can write would run commands (launch:) as the xremap user.
 ensure_user_unit_stopped xremap.service
 ensure_system_unit_file "$VEKRONA_ROOT/etc/systemd/system/xremap.service"
 with_scratch_dir install_xremap_path_unit
