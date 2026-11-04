@@ -7,9 +7,9 @@ source "$ROOT/tests/e2e/lib/bar-widget.sh"
 
 STEP_TIMEOUT_SEC=60
 PLAYER_BUS_NAME=org.mpris.MediaPlayer2.vekronatest
-# The windows are foot terminals: Ghostty's GL renderer crashes on the guest's llvmpipe while the popout covers it.
-PLAYER_APP_ID=vekrona-media-player
-OTHER_APP_ID=vekrona-media-other
+# The windows are Ghostty terminals, each its own process, whose app id is a GTK application id (two dot-separated parts).
+PLAYER_APP_ID=vekrona.media-player
+OTHER_APP_ID=vekrona.media-other
 TRACK_REGEX="Lighthouse ?Signal"
 ARTIST_REGEX="Quiet ?Harbor"
 IDENTITY_REGEX="Test ?Player"
@@ -49,7 +49,7 @@ await() {
 }
 
 start_terminal() {
-  vekrona-dev spawn "$GUEST_DIR/$1.log" -- foot --app-id="$1" "${@:2}"
+  vekrona-dev spawn "$GUEST_DIR/$1.log" -- ghostty --gtk-single-instance=false --class="$1" "${@:2}"
 }
 
 vekrona-dev session
@@ -59,7 +59,7 @@ vekrona-dev move "$PARK_X" "$PARK_Y"
 # The VM has no sound card: the test brings its own output.
 module="$(vekrona-dev sh pactl load-module module-null-sink "sink_name=$SINK_NAME" "sink_properties=device.description=$SINK_NAME")"
 cleanup() {
-  kill_guest -f -- "--app-id=vekrona-media-"
+  kill_guest -f -- "--class=vekrona[.]media-"
   vekrona-dev run rm -rf "$GUEST_DIR" || warn "could not remove $GUEST_DIR in the guest"
   vekrona-dev sh pactl unload-module "$module" || warn "could not unload the null sink module $module"
 }
@@ -76,7 +76,7 @@ read -r pill_x pill_y <<<"$(bar_widget center sound)"
 log "ok: the sound pill is at $pill_x,$pill_y"
 
 # The player runs in its own terminal, so the window that owns it is an ancestor of the process that owns the bus name.
-start_terminal "$PLAYER_APP_ID" python3 "$GUEST_PLAYER" "$ART_RGB"
+start_terminal "$PLAYER_APP_ID" -e python3 "$GUEST_PLAYER" "$ART_RGB"
 await "no window $PLAYER_APP_ID appeared" window_open "$PLAYER_APP_ID"
 await "the fake player never took $PLAYER_BUS_NAME on the session bus" player_on_bus
 start_terminal "$OTHER_APP_ID"

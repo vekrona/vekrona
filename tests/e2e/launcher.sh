@@ -5,8 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
-# The searched application is a foot window: Ghostty's GL renderer crashes on the guest's llvmpipe. Entries that run in
-# a terminal open in the shell's own terminal, which is Ghostty (Exec.qml), so the btop steps still need it.
+# The searched application is foot, not the shell's own terminal: entries that run in a terminal (the btop steps) open in
+# Ghostty (Exec.qml), so the searched application's windows and processes stay apart from theirs.
 SEARCHED_APP=foot
 SHELL_TERMINAL=ghostty
 
