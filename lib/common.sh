@@ -882,29 +882,30 @@ ensure_user_unit_stopped() {
   done
 }
 
-# Sets the array named $1 to the user units of XDG autostart apps that run although their .desktop entry is gone (LoadState
-# not-found): sway started the app at login, then its package was removed under it. systemd's generator makes these units from the
-# .desktop files, so the user manager first reloads: a package that ships no user unit of its own (network-manager-applet) triggers
-# no reload when it goes, and the listing would still show its unit loaded. The reload only reruns the generators. Columns of the
+# Sets the array named $1 to the user units of XDG autostart apps whose .desktop entry is gone (LoadState not-found) and whose
+# ActiveState is $2: "active" for an app that sway started at login and that outlives its removed package, "failed" for one that
+# was killed (a unit that failed keeps that state until it is reset). systemd's generator makes these units from the .desktop
+# files, so the user manager first reloads: a package that ships no user unit of its own (network-manager-applet) triggers no
+# reload when it goes, and the listing would still show its unit loaded. The reload only reruns the generators. Columns of the
 # plain listing: unit, load, active, sub, description.
 # A failing reload or lister dies here, because stage 70's check calls this inside an `if`, where set -e is off and a failure
 # would otherwise read as "no orphans".
-read_orphaned_autostart_units() {
+read_gone_autostart_units() {
   local -n units_out="$1"
-  local listing
+  local state="$2" listing
   systemctl --user daemon-reload || die "cannot reload the user manager"
   listing="$(systemctl --user list-units --all --plain --no-legend 'app-*@autostart.service')" || die "cannot list the user's autostart units"
   # shellcheck disable=SC2034 # a nameref: this write sets the caller's variable
-  mapfile -t units_out < <(awk '$2 == "not-found" && $3 == "active" { print $1 }' <<<"$listing")
+  mapfile -t units_out < <(awk -v state="$state" '$2 == "not-found" && $3 == state { print $1 }' <<<"$listing")
 }
 
 no_orphaned_autostart_units() {
   local -a orphans
-  read_orphaned_autostart_units orphans
+  read_gone_autostart_units orphans active
   ((${#orphans[@]} == 0))
 }
 
-# Like read_orphaned_autostart_units, these set the variable named $1 instead of printing, so that a die ends the caller too and not
+# Like read_gone_autostart_units, these set the variable named $1 instead of printing, so that a die ends the caller too and not
 # a $( ) subshell. The user manager (user@UID.service) has a cgroup directory, and under it every user unit one of its own name.
 read_user_manager_cgroup_dir() {
   local -n manager_dir_out="$1"
@@ -996,16 +997,25 @@ kill_user_unit_cgroups() {
   done
 }
 
-# Autostart units are generated, never enabled, so there is nothing to disable.
+# Autostart units are generated, never enabled, so there is nothing to disable. The cgroup kill leaves each killed unit failed
+# and not-found, which makes the user manager degraded; so does a unit that an earlier run killed. Both are reset by name: a
+# blanket reset-failed would also hide a real failure from stage 70.
 stop_orphaned_autostart_units() {
-  local -a orphans
-  read_orphaned_autostart_units orphans
+  local -a orphans to_reset
+  read_gone_autostart_units orphans active
   if ((${#orphans[@]} == 0)); then
     log "no autostart app runs without its desktop entry"
+  else
+    log "autostart apps run without their desktop entries: ${orphans[*]}"
+    kill_user_unit_cgroups "${orphans[@]}"
+  fi
+  read_gone_autostart_units to_reset failed
+  to_reset+=("${orphans[@]}")
+  if ((${#to_reset[@]} == 0)); then
     return 0
   fi
-  log "autostart apps run without their desktop entries: ${orphans[*]}"
-  kill_user_unit_cgroups "${orphans[@]}"
+  log "resetting the failed state of: ${to_reset[*]}"
+  systemctl --user reset-failed "${to_reset[@]}" || die "cannot reset the failed state of ${to_reset[*]}"
 }
 
 # A path an earlier vekrona left behind: $1 is why it is retired, the rest are the paths.

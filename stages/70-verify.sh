@@ -124,7 +124,15 @@ resolved_global_status() {
 }
 # The state systemd reports: running, degraded (a unit failed), starting, ... `is-system-running` exits non-zero for all but running.
 system_state() { systemctl is-system-running || true; }
-failed_units() { systemctl --failed --plain --no-legend | awk '{ print $1 }' | paste -sd' '; }
+# The failed units of the manager that `systemctl` selects with its arguments ("--user" for the user manager, none for the system one).
+failed_units() { systemctl "$@" --failed --plain --no-legend | awk '{ print $1 }' | paste -sd' '; }
+# A user manager that is not reachable prints no state; dying here keeps that from reading as "not degraded".
+user_manager_not_degraded() {
+  local state
+  state="$(systemctl --user is-system-running || true)"
+  [[ -n "$state" ]] || die "systemctl --user is-system-running printed no state (its stderr is above)"
+  [[ "$state" != degraded ]]
+}
 module_built_for_running_kernel() { modinfo -k "$(uname -r)" "$1" >/dev/null 2>&1; }
 nvidia_module_present_for() { modinfo -k "$1" nvidia >/dev/null 2>&1; }
 root_files_equal() { root cmp -s "$1" "$2"; }
@@ -854,5 +862,6 @@ fi
 
 state="$(system_state)"
 check assert "systemd is not degraded (failed units: $(failed_units))" not_contains degraded "$state"
+check assert "the user manager is not degraded (failed units: $(failed_units --user))" user_manager_not_degraded
 
 log "verify summary: ok=$ok_count warn=$warn_count"

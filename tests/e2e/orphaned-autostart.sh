@@ -43,7 +43,7 @@ start_applet() {
 }
 
 # stages_kill_applet PACKAGE UNIT GONE: runs stages 30 and 70, which must leave PACKAGE removed, kill the applet, leave UNIT
-# inactive and check that no orphan runs.
+# inactive, the user manager without a failed unit, and check that no orphan runs.
 stages_kill_applet() {
   local package="$1" unit="$2" gone="$3"
   vekrona-dev sh timeout "$INSTALL_TIMEOUT_SEC" bash -c 'cd "$HOME/$1" && ./install.sh 30-packages 70-verify' _ "$GUEST_CHECKOUT_SUBPATH" >"$install_log" 2>&1 \
@@ -56,6 +56,9 @@ $(tail -n 40 "$install_log")"
   log "ok: stage 30 killed $package's orphaned applet"
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- unit_inactive "$unit" || die "stage 30 killed $package's applet but $unit is still active"
   log "ok: $unit is no longer active"
+  failed_units="$(vekrona-dev sh systemctl --user --failed --no-legend)"
+  [[ -z "$failed_units" ]] || die "stage 30 killed $package's applet but left the user manager with failed units, which makes it degraded: $failed_units"
+  log "ok: the user manager has no failed unit"
   grep -q 'ok: no XDG autostart app runs without its desktop entry' "$install_log" || die "stage 70 did not check for orphaned autostart apps:
 $(tail -n 40 "$install_log")"
   log "ok: stage 70 checked that no autostart app runs without its desktop entry"
