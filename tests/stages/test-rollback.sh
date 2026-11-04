@@ -27,7 +27,6 @@ export PATH="$stubs:$PATH" TOP="$scratch/top" FAIL_MV_DONE="$scratch/mv-failed"
 fresh_top() {
   rm -rf "$TOP" "$FAIL_MV_DONE"
   mkdir -p "$TOP/root/.snapshots/5/snapshot/etc" "$TOP/root/.snapshots/5/snapshot/.snapshots" "$TOP/root/etc"
-  echo "/nix btrfs" > "$TOP/root/.snapshots/5/snapshot/etc/fstab"
   echo old > "$TOP/root/.snapshots/5/snapshot/etc/state"
   echo new > "$TOP/root/etc/state"
 }

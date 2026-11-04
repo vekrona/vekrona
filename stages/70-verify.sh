@@ -99,16 +99,6 @@ mounted_with_options() {
 }
 # /tmp is not the subvolume yet, and stage 20 left it for the next boot: a running tmpfs, or a plain directory.
 tmp_awaits_subvolume() { ! mountpoint -q /tmp || [[ "$(findmnt -no FSTYPE /tmp)" == tmpfs ]]; }
-# The fstab line of MOUNTPOINT names the btrfs subvolume SUBVOL on the device /home is on.
-check_subvolume_fstab() {
-  local mountpoint="$1" subvol="$2" line home_line device options home_device
-  line="$(fstab_line_for_mountpoint "$mountpoint")" || die "no fstab entry for $mountpoint"
-  home_line="$(fstab_line_for_mountpoint /home)" || die "no fstab entry for /home"
-  read -r device _ _ options _ _ <<<"$line"
-  read -r home_device _ <<<"$home_line"
-  check assert "fstab $mountpoint options contain subvol=$subvol" contains "subvol=$subvol" "$options"
-  check assert "fstab $mountpoint device matches /home device" eq "$device" "$home_device"
-}
 # The kernel lists the algorithms of a zram device and brackets the one in use.
 zram_algorithm() { sed -E 's/.*\[([^]]+)\].*/\1/' /sys/block/zram0/comp_algorithm; }
 module_loaded() { [[ -d "/sys/module/$1" ]]; }
@@ -282,14 +272,12 @@ if ran 20-snapper; then
   check assert "the dnf snapshot script is in the root-owned copy" file_executable "$VEKRONA_SYSTEM_DIR/libexec/vekrona-snapper-snapshot"
   check assert "the snapper actions file runs that script before and after each transaction" root_files_equal "$VEKRONA_ROOT/etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions" /etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions
 
-  check assert "/nix mounted from subvolume nix" btrfs_subvolume_mounted /nix nix
-
-  check_subvolume_fstab /nix nix
-
-  check assert "/nix migration marker present" file_exists /nix/.vekrona-migrated
-  check assert "/nix.pre-vekrona backup absent" path_absent /nix.pre-vekrona
-
-  check_subvolume_fstab /tmp tmp
+  tmp_fstab_line="$(fstab_line_for_mountpoint /tmp)" || die "no fstab entry for /tmp"
+  home_fstab_line="$(fstab_line_for_mountpoint /home)" || die "no fstab entry for /home"
+  read -r tmp_device _ _ tmp_options _ _ <<<"$tmp_fstab_line"
+  read -r home_device _ <<<"$home_fstab_line"
+  check assert "fstab /tmp options contain subvol=tmp" contains "subvol=tmp" "$tmp_options"
+  check assert "fstab /tmp device matches /home device" eq "$tmp_device" "$home_device"
   if tmp_awaits_subvolume; then
     warn_check "/tmp is not the tmp subvolume yet (a tmpfs or a plain directory), it mounts at the next boot" false
   else
@@ -464,10 +452,8 @@ if ran 40-system; then
   check assert "xremap.service runs as the xremap user" eq "$(systemctl show xremap.service -p User --value)" xremap
   check assert "xremap.service is active while sway runs" system_unit_active_when_sway_runs xremap.service
 
-  for u in tailscaled nix-daemon.service; do
-    check assert "$u enabled" unit_enabled "$u"
-    check assert "$u active" unit_active "$u"
-  done
+  check assert "tailscaled enabled" unit_enabled tailscaled
+  check assert "tailscaled active" unit_active tailscaled
 
   tailscale_state="$(tailscale_prefs)" || die "cannot read the tailscale preferences"
   if tailscale_logged_out "$tailscale_state"; then
@@ -745,11 +731,8 @@ assert isinstance(d.get("metrics"), dict), "metrics"
 
   user_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p')"
   warn_check "$HOME/.local/bin in systemd user PATH" contains "$HOME/.local/bin" "$user_path"
-  warn_check "$HOME/.nix-profile/bin in systemd user PATH" contains "$HOME/.nix-profile/bin" "$user_path"
   user_editor="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^EDITOR=//p')"
   warn_check "EDITOR=rune in the systemd user environment (a login after this install picks it up)" eq "$user_editor" rune
-
-  check assert "devbox runs" "$HOME/.nix-profile/bin/devbox" version
 fi
 
 if ran 60-gaming; then

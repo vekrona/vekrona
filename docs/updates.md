@@ -142,7 +142,6 @@ Updates flow through multiple channels:
 
 - **dnf upgrade** covers all system packages: Fedora, RPM Fusion, COPRs, and vendor repos (1Password, Proton VPN). This is protected by snapper pre/post snapshots created by the actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`), so any dnf transaction is automatically rolled back on failure via `vekrona-rollback`.
 - **flatpak update** covers Flatpak apps: currently Zed, Signal and OBS Studio.
-- **nix profile upgrade --all** covers devbox (installed through `nix profile`). Nothing runs it: devbox is still updated by hand (see [TODO.md](../TODO.md)).
 
 The versionlocked set, applied by the stage that installs each package and
 recorded in `/etc/dnf/versionlock.toml`:

@@ -18,8 +18,8 @@ Prerequisites:
   `20-snapper` and `bin/vekrona-rollback` assume btrfs and snapper.
   The root subvolume must be named `root` (`vekrona-rollback` renames and
   replaces it), and `/home` must be a subvolume on the same Btrfs filesystem
-  (stage `20-snapper` mounts the `nix` and `tmp` subvolumes from the device
-  `/home` uses, with its mount options).
+  (stage `20-snapper` mounts the `tmp` subvolume from the device `/home`
+  uses, with its mount options).
 - A user account with sudo access. `install.sh` refuses to run as root
   itself; stages call `sudo` where they need it.
 - `git`, installed by hand, since no stage can install its own bootstrap

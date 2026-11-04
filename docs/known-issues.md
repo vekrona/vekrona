@@ -4,7 +4,6 @@ Open problems and deliberate trade-offs, with their workarounds.
 
 - **Zed requires a hardware Vulkan driver** and will not start in the VM or on machines with only software-rendered Vulkan. Tested on the real machine with an NVIDIA RTX 4090.
 - **Spotify on first launch downloads the Widevine CDM** into `~/.cache/` to enable DRM-protected content playback. This download takes a few seconds; wait for it to complete before playing a track.
-- **Pre-migration snapshots lack the /nix fstab line**: if you rolled back to a snapshot taken before stage 20 set up the `/nix` subvolume, `vekrona-rollback` will warn you to re-run `./install.sh 20` after the reboot. This re-mounts the untouched `/nix` subvolume and restores the fstab entry.
 - Sway/wlroots and Quickshell are both pre-1.0 software, stacked on top of each other and on top of the proprietary NVIDIA driver. Snapshot before touching any of them.
 - wlroots can flicker in fullscreen games under NVIDIA. Running a game through `scb` (gamescope) isolates it from wlroots' own compositing and works around this.
 - Gamescope's `-e` (Steam integration) must not be used while it runs nested in Sway: with `-e` the game renders and plays sound but gamescope never maps a window (verified 2026-10-02 with gamescope 3.16.29, NVIDIA 615.71.09: the same args with and without `-e` differ only in that). ScopeBuddy's default `SCB_STEAMARGIGNORE=1` only filters flags from Steam's launch line, not `SCB_GAMESCOPE_ARGS`, so an `-e` in `scb.conf` does reach gamescope.

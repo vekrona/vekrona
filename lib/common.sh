@@ -1229,17 +1229,6 @@ ensure_target_kernel_devel() {
   ensure_pkg "kernel-devel-$(newest_installed_kver)"
 }
 
-# Dies listing the processes (PID and command) with their working directory, executable or an open file under $1.
-# lsof +D is the exact check: fuser -m would report every process on the whole filesystem $1 lives on.
-die_if_path_in_use() {
-  local dir="$1" status=0 raw users
-  require_cmd lsof
-  raw="$(root lsof -w -F pc +D "$dir")" || status=$?
-  ((status <= 1)) || die "lsof failed with status $status while checking whether $dir is in use"
-  users="$(awk '/^p/ { pid = substr($0, 2) } /^c/ { print pid, substr($0, 2) }' <<<"$raw" | sort -u)"
-  [[ -z "$users" ]] || die "$dir is in use by:"$'\n'"$users"
-}
-
 AKMODS_WAIT_SECONDS=900
 
 # An akmod-* RPM's posttrans starts a background akmods that takes its lock only after its init, so the lock alone
@@ -1960,7 +1949,7 @@ VEKRONA_DESKTOP_PKGS=(
   dconf ffmpeg firefox firewalld flatpak gamemode gamescope ghostty
   geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver irqbalance
   jq kanshi khal
-  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 nix nix-daemon openh264 perl-interpreter pipewire pipewire-pulseaudio pipewire-utils playerctl polkit
+  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 openh264 perl-interpreter pipewire pipewire-pulseaudio pipewire-utils playerctl polkit
   proton-vpn-cli proton-vpn-gtk-app python3 python3-gobject python3-pyyaml python3-vdf qalculate qt6ct quickshell ripgrep rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd swayidle syncthing tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots
@@ -2217,7 +2206,7 @@ ensure_fstab_entry() {
 require_btrfs_root() {
   local fs
   fs="$(findmnt -no FSTYPE /)" || die "could not determine the root filesystem type (findmnt failed)"
-  [[ "$fs" == btrfs ]] || die "the root filesystem is ${fs:-unknown}, but vekrona needs btrfs (snapper snapshots of /, the /nix subvolume); reinstall Fedora with a btrfs root (the default layout)"
+  [[ "$fs" == btrfs ]] || die "the root filesystem is ${fs:-unknown}, but vekrona needs btrfs (snapper snapshots of /); reinstall Fedora with a btrfs root (the default layout)"
 }
 
 root_btrfs_device() {
@@ -2295,15 +2284,6 @@ ensure_btrfs_subvolume_fstab_entry() {
   root systemctl daemon-reload
 }
 
-# ensure_btrfs_subvolume_fstab_entry, then the mount.
-mount_btrfs_subvolume() {
-  local path="$1" subvol="$2"
-  ensure_btrfs_subvolume_fstab_entry "$@"
-  root mount "$path"
-  btrfs_subvolume_mounted "$path" "$subvol" || die "$path not mounted from subvolume $subvol after mount"
-  root restorecon -R "$path"
-}
-
 # Runs with the top-level volume at TOP. The root of the tmp subvolume is the /tmp the system boots with, so it gets /tmp's owner, mode and
 # SELinux label here, on every run: a fresh subvolume is 0755 and unlabeled, and restorecon through TOP would match the path under TOP, not /tmp.
 ensure_tmp_subvolume_root() {
@@ -2328,28 +2308,4 @@ ensure_tmp_subvolume() {
   with_btrfs_top_level ensure_tmp_subvolume_root
   ensure_btrfs_subvolume_fstab_entry /tmp tmp nodev,nosuid
   ((on_subvolume)) || log "/tmp subvolume takes effect at the next boot"
-}
-
-btrfs_migrate_dir_into_subvolume() {
-  local subvol="$1" src="${2:-}"
-  local marker="$subvol/.vekrona-migrated"
-
-  if btrfs_subvolume_exists "$subvol"; then
-    [[ -e "$marker" ]] || die "subvolume exists without migration marker (interrupted migration?): $subvol — inspect it, delete it with 'sudo btrfs subvolume delete <path>' (mount the top-level subvolume with subvolid=5 to reach it), then re-run ./install.sh 20; the source directory, if present, is untouched"
-    log "subvolume already migrated: $subvol"
-    return 0
-  fi
-
-  btrfs_create_subvolume "$subvol"
-
-  if [[ -n "$src" ]]; then
-    [[ -d "$src" ]] || die "source directory missing: $src"
-    log "migrating $src into $subvol"
-    root cp -a --reflink=always "$src/." "$subvol/"
-    local diff_out diff_rc=0
-    diff_out="$(root diff -rq --no-dereference "$src" "$subvol" 2>&1)" || diff_rc=$?
-    [[ $diff_rc -eq 0 ]] || die "migration verification failed for $subvol (diff exit $diff_rc): $diff_out"
-  fi
-
-  root touch "$marker"
 }

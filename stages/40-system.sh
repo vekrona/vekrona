@@ -112,8 +112,8 @@ for dropin in NetworkManager.service.d/vekrona-shutdown-order.conf tailscaled.se
 done
 ensure_nm_dispatcher_not_persistent
 
-ensure_system_unit enabled tailscaled nix-daemon.service
-ensure_system_unit_active tailscaled nix-daemon.service
+ensure_system_unit enabled tailscaled
+ensure_system_unit_active tailscaled
 
 # Before the tailscale step, which dies on a logged-out node: the firewall does not depend on a Tailscale login.
 ensure_root_file_absent /etc/ssh/sshd_config.d/10-vekrona.conf # no RPM owns it, so it outlives openssh-server

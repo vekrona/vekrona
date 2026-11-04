@@ -225,14 +225,3 @@ if [[ -n "$(sway_socket)" ]]; then
   log "starting the triggers (${session_triggers[*]}) for the running sway session"
   systemctl --user start "${session_triggers[@]}" || die "the triggers (${session_triggers[*]}) failed to start"
 fi
-
-# A floating nixpkgs#devbox would install whatever the registry resolves to that day. To update devbox, bump this to a nixpkgs commit that has the version you want.
-DEVBOX_NIXPKGS_REV=b6c8664de9b6cc07fe5666a29f91884ba81197c4 # devbox 0.17.5
-require_cmd nix
-if nix profile list --json | jq -e '.elements | has("devbox")' >/dev/null; then
-  log "devbox already installed via nix profile"
-else
-  log "installing devbox via nix profile (nixpkgs $DEVBOX_NIXPKGS_REV)"
-  nix profile install "github:NixOS/nixpkgs/$DEVBOX_NIXPKGS_REV#devbox"
-fi
-assert "devbox runs" "$HOME/.nix-profile/bin/devbox" version

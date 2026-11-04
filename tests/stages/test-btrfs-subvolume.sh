@@ -50,7 +50,7 @@ VEKRONA_FSTAB="$work/fstab"
 calls() { grep -c "^$1 " "$STUB_LOG" || [[ $? -eq 1 ]]; }
 
 HOME_LINE='UUID=abc /home btrfs subvol=home,compress=zstd:1 0 0'
-[[ "$(retarget_fstab_line "$HOME_LINE" /nix nix)" == 'UUID=abc /nix btrfs subvol=nix,compress=zstd:1 0 0' ]] \
+[[ "$(retarget_fstab_line "$HOME_LINE" /tmp tmp)" == 'UUID=abc /tmp btrfs subvol=tmp,compress=zstd:1 0 0' ]] \
   || die "the subvolume and the mount point were not swapped"
 [[ "$(retarget_fstab_line "$HOME_LINE" /tmp tmp nodev,nosuid)" == 'UUID=abc /tmp btrfs subvol=tmp,compress=zstd:1,nodev,nosuid 0 0' ]] \
   || die "the extra options were not appended"
@@ -62,17 +62,16 @@ done
 log "ok: a line with no subvol= option, or two, is an error"
 
 FINDMNT_ANSWER='/dev/vda3[/tmp]' btrfs_subvolume_mounted /tmp tmp || die "a mount from subvolume tmp was not recognised"
-for answer in '/dev/vda3[/tmpfoo]' '/dev/vda3[/nix]' 'tmpfs' ''; do
+for answer in '/dev/vda3[/tmpfoo]' '/dev/vda3[/home]' 'tmpfs' ''; do
   if FINDMNT_ANSWER="$answer" btrfs_subvolume_mounted /tmp tmp; then die "'$answer' was taken for a mount from subvolume tmp"; fi
 done
 log "ok: only a mount from exactly that subvolume counts, and an unmounted path does not"
 
 ensure_btrfs_subvolume tmp "$work/volume" 2>/dev/null
 [[ -e "$work/volume/tmp/.is-subvolume" ]] || die "the subvolume was not created"
-[[ ! -e "$work/volume/tmp/.vekrona-migrated" ]] || die "a subvolume with nothing to migrate got a migration marker (systemd-tmpfiles would clean it out of /tmp)"
 ensure_btrfs_subvolume tmp "$work/volume" 2>/dev/null
 [[ "$(grep -c '^btrfs subvolume create' "$STUB_LOG")" -eq 1 ]] || die "an existing subvolume was created again"
-log "ok: a subvolume is created once, without a migration marker"
+log "ok: a subvolume is created once"
 
 mkdir "$work/volume/plain"
 if (ensure_btrfs_subvolume plain "$work/volume") 2>/dev/null; then die "a plain directory was taken for a subvolume"; fi
@@ -90,10 +89,6 @@ if out="$(STAT_ERROR=1 ensure_btrfs_subvolume unreadable "$work/volume" 2>&1)"; 
 [[ "$out" != *"not a btrfs subvolume"* ]] || die "a failed examination was reported as 'not a subvolume': $out"
 [[ "$(calls btrfs)" -eq 0 ]] || die "a subvolume was created over a path that could not be examined"
 log "ok: a path that cannot be examined stops with the real cause instead of reading as no subvolume"
-
-btrfs_migrate_dir_into_subvolume "$work/volume/nix" 2>/dev/null
-[[ -e "$work/volume/nix/.vekrona-migrated" ]] || die "a migrated subvolume got no marker"
-log "ok: the migration of /nix still marks its subvolume"
 
 : > "$STUB_LOG"
 used="$work/used"
