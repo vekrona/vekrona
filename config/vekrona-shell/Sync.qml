@@ -14,9 +14,20 @@ BarPill {
             problem: "sync_problem",
             offline: "cloud_off"
         })
-    // What vekrona-sync watch wrote; null until it has written once.
+    // What the pill shows while sync.json is missing, unreadable or malformed (vekrona-sync is not running, or Syncthing is
+    // not): the pill stays in the bar, since every bar slot is always there, and says so.
+    readonly property var offlineReport: ({
+            state: "offline",
+            problem: null,
+            folders: [],
+            offers: [],
+            pendingDevices: [],
+            devices: [],
+            arrivals: []
+        })
+    // What vekrona-sync watch wrote, or offlineReport.
     readonly property var report: file.value
-    readonly property int unseenArrivals: report ? report.arrivals.filter(arrival => arrival.unseen).length : 0
+    readonly property int unseenArrivals: report.arrivals.filter(arrival => arrival.unseen).length
     // Why the last command of the popout failed, "" while none did.
     property string failure: ""
 
@@ -47,15 +58,15 @@ BarPill {
         Exec.detached(["xdg-open", path], Exec.home);
     }
 
-    visible: report !== null
-    icon: report ? icons[report.state] : ""
-    badgeCount: report ? report.offers.length + report.pendingDevices.length + unseenArrivals : 0
-    ariaName: "Sync, " + (report?.state ?? "")
+    icon: icons[report.state]
+    badgeCount: report.offers.length + report.pendingDevices.length + unseenArrivals
+    ariaName: "Sync, " + report.state
     onClicked: bar.togglePopout(popout)
 
     StateFile {
         id: file
         path: StateDir.path + "/sync.json"
+        absent: root.offlineReport
         parse: text => {
             const next = JSON.parse(text);
             if (!(next.state in root.icons))
@@ -83,21 +94,21 @@ BarPill {
             spacing: 0
 
             Label {
-                visible: root.report !== null && (root.report.problem !== null || root.report.state === "offline")
+                visible: root.report.problem !== null || root.report.state === "offline"
                 Layout.fillWidth: true
                 Layout.leftMargin: VekronaTheme.space2
                 wrapMode: Text.Wrap
                 color: VekronaTheme.c.dangerInk
                 style: VekronaTheme.type.body
-                text: root.report?.problem ?? "Syncthing is not reachable"
+                text: root.report.problem ?? "Syncthing is not reachable"
             }
 
             SyncSection {
                 title: "Folders"
-                visible: root.report !== null && root.report.folders.length > 0
+                visible: root.report.folders.length > 0
 
                 Repeater {
-                    model: root.report?.folders ?? []
+                    model: root.report.folders
 
                     ColumnLayout {
                         required property var modelData
@@ -129,10 +140,10 @@ BarPill {
 
             SyncSection {
                 title: "Offered to you"
-                visible: root.report !== null && root.report.offers.length > 0
+                visible: root.report.offers.length > 0
 
                 Repeater {
-                    model: root.report?.offers ?? []
+                    model: root.report.offers
 
                     SyncRow {
                         required property var modelData
@@ -152,10 +163,10 @@ BarPill {
 
             SyncSection {
                 title: "New devices"
-                visible: root.report !== null && root.report.pendingDevices.length > 0
+                visible: root.report.pendingDevices.length > 0
 
                 Repeater {
-                    model: root.report?.pendingDevices ?? []
+                    model: root.report.pendingDevices
 
                     SyncRow {
                         required property var modelData
@@ -181,10 +192,10 @@ BarPill {
 
             SyncSection {
                 title: "My devices"
-                visible: root.report !== null && root.report.devices.length > 0
+                visible: root.report.devices.length > 0
 
                 Repeater {
-                    model: root.report?.devices ?? []
+                    model: root.report.devices
 
                     SyncRow {
                         required property var modelData
@@ -204,10 +215,10 @@ BarPill {
 
             SyncSection {
                 title: "Received"
-                visible: root.report !== null && root.report.arrivals.length > 0
+                visible: root.report.arrivals.length > 0
 
                 Repeater {
-                    model: root.report?.arrivals ?? []
+                    model: root.report.arrivals
 
                     BarPill {
                         required property var modelData
