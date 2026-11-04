@@ -104,7 +104,8 @@ absent_ignored() { absent device_ignored_on_main "$PEER_ID"; }
 export -f absent_ignored
 click_word '^another$'
 click_word '^Paste$'
-vekrona-dev type "$(tr 'A-Z' 'a-z' <<<"${PEER_ID//-/}")"
+TYPED_ID="${PEER_ID//-/}"
+vekrona-dev type "${TYPED_ID,,}"
 snap typed-id
 vekrona-dev key enter
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.devices | any(.[]; .id == $peer)'

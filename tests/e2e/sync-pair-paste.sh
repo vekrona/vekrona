@@ -52,7 +52,8 @@ only_this_computer || die "an ID with a wrong check digit must add no device"
 log "ok: an ID with a wrong check digit is refused, and adds nothing"
 
 vekrona-dev key ctrl-a
-vekrona-dev type "$(tr 'A-Z' 'a-z' <<<"${PEER_ID//-/}")"
+TYPED_ID="${PEER_ID//-/}"
+vekrona-dev type "${TYPED_ID,,}"
 vekrona-dev key tab
 vekrona-dev key enter
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.devices | any(.[]; .id == $peer)'
