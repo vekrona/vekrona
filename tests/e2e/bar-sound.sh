@@ -75,3 +75,18 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- launcher_closed || die "openi
 log "ok: opening a popout closes the open launcher"
 vekrona-dev click "$PILL_X" "$y"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sink_hidden
+
+# Far from the popout, which hangs under the pill at the right of the bar.
+DESKTOP_CLICK_X=200
+DESKTOP_CLICK_Y=500
+vekrona-dev click "$PILL_X" "$y"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sink_listed
+vekrona-dev click "$DESKTOP_CLICK_X" "$DESKTOP_CLICK_Y"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sink_hidden
+log "ok: clicking the desktop outside the popout closes it"
+
+vekrona-dev click "$PILL_X" "$y"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sink_listed
+log "ok: the sound pill opens the popout again after an outside click closed it"
+vekrona-dev click "$PILL_X" "$y"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- sink_hidden
