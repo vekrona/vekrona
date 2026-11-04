@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Sets logind's hints on the login session sway runs in: `vekrona-session-hint idle|locked yes|no`. swayidle's idle hint
+# and vekrona-lock's locked hint come from services of the user manager, which are in no session, so logind's own choice
+# for them (swayidle's `idlehint`, the "auto" session) is the user's Display session, and that is a text or ssh login when
+# one started before sway, as after a reboot. `locked no` also tells logind's Unlock listeners, as `loginctl
+# unlock-session` does. When sway's session cannot be found nothing is set, so no other session is marked unlocked.
+set -euo pipefail
+shopt -s inherit_errexit
+
+# shellcheck source=../lib/common.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh"
+
+PROG="vekrona-session-hint"
+
+usage() { refuse "usage: $PROG idle|locked yes|no"; }
+
+[[ $# -eq 2 ]] || usage
+case "$1" in
+  idle) method=SetIdleHint ;;
+  locked) method=SetLockedHint ;;
+  *) usage ;;
+esac
+case "$2" in
+  yes) value=true ;;
+  no) value=false ;;
+  *) usage ;;
+esac
+
+path="$(sway_session_path)"
+busctl --system call org.freedesktop.login1 "$path" org.freedesktop.login1.Session "$method" b "$value" \
+  || die "$PROG: logind refused $method $value on sway's session $path"
+if [[ "$1 $2" == "locked no" ]]; then
+  busctl --system call org.freedesktop.login1 "$path" org.freedesktop.login1.Session Unlock \
+    || die "$PROG: logind refused to signal the unlock of sway's session $path"
+fi

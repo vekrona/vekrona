@@ -605,6 +605,7 @@ if ran 50-user; then
   done
   check assert "vekrona-cliphist.service enabled" user_unit_enabled vekrona-cliphist.service
   check assert "vekrona-idle.service enabled" user_unit_enabled vekrona-idle.service
+  check assert "vekrona-lock-listen.service enabled (it locks when logind asks sway's session to lock)" user_unit_enabled vekrona-lock-listen.service
   check assert "vekrona-lid.service enabled (the lid switch and the sleep key are Sway's, which locks before it suspends)" user_unit_enabled vekrona-lid.service
   check assert "vekrona-lock-guard.service loaded (vekrona-lock holds it while the screen is unlocked, and a missing unit would let the machine suspend unlocked)" user_unit_loaded vekrona-lock-guard.service
   check assert "vekrona-session-teardown.service enabled" user_unit_enabled vekrona-session-teardown.service

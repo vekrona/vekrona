@@ -64,7 +64,10 @@ log "ok: the weather and calendar polls are hourly"
 # A lock that fails before suspend must end the session, so swayidle must call the fail-closed mode.
 grep -qF "before-sleep 'vekrona-lock --before-sleep'" "$units/vekrona-idle.service" || die "before-sleep must run vekrona-lock --before-sleep"
 log "ok: swayidle locks before sleep in the fail-closed mode"
-# A bare vekrona-lock is refused, so the idle timeout and logind's lock request must name the verb.
+# A bare vekrona-lock is refused, so the idle timeout must name the verb. logind's lock request for sway's session is
+# vekrona-lock-listen.service's: swayidle's own lock event listens on logind's auto session, which is not sway's after a reboot.
 grep -qF "timeout 300 'vekrona-lock start'" "$units/vekrona-idle.service" || die "the idle timeout must run vekrona-lock start"
-grep -qF " lock 'vekrona-lock start'" "$units/vekrona-idle.service" || die "logind's lock request must run vekrona-lock start"
-log "ok: swayidle names the verb of vekrona-lock"
+! grep -qE " lock '" "$units/vekrona-idle.service" || die "swayidle must not take logind's lock request: its lock event listens on logind's auto session, not sway's"
+grep -qx 'ExecStart=%h/.local/bin/vekrona-lock listen' "$units/vekrona-lock-listen.service" || die "logind's lock request must be taken by vekrona-lock listen"
+grep -qx 'WantedBy=sway-session.target' "$units/vekrona-lock-listen.service" || die "vekrona-lock-listen.service must start with the sway session"
+log "ok: swayidle names the verb of vekrona-lock, and vekrona-lock-listen.service takes logind's lock request for sway's session"

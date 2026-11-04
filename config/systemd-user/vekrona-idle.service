@@ -6,7 +6,7 @@ After=sway-session.target
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/bin/swayidle -w timeout 300 'vekrona-lock start' timeout 600 'swaymsg "output * dpms off"' resume 'swaymsg "output * dpms on"' timeout 300 'vekrona-idlehint yes' resume 'vekrona-idlehint no' before-sleep 'vekrona-lock --before-sleep' lock 'vekrona-lock start'
+ExecStart=/usr/bin/swayidle -w timeout 300 'vekrona-lock start' timeout 600 'swaymsg "output * dpms off"' resume 'swaymsg "output * dpms on"' timeout 300 'vekrona-session-hint idle yes' resume 'vekrona-session-hint idle no' before-sleep 'vekrona-lock --before-sleep'
 Restart=on-failure
 RestartSec=1
 RestartSteps=6

@@ -92,8 +92,23 @@ sway_socket() {
     pid="${pid##*.}"
     [[ -d "/proc/$pid" ]] && running+=("$socket")
   done
-  ((${#running[@]} <= 1)) || die "more than one running sway session, cannot tell which to reload: ${running[*]}"
+  ((${#running[@]} <= 1)) || die "more than one running sway session, cannot tell which is the user's: ${running[*]}"
   ((${#running[@]} == 0)) || printf '%s\n' "${running[0]}"
+}
+
+# Prints the D-Bus object path of the logind session that sway runs in, the one its screen and its lock belong to. A service
+# of the user manager is in no session, so logind's "auto" session is the user's Display session for it, and that is a text
+# or ssh login when one started before sway, as after a reboot. Dies when no sway runs or logind names no session for it.
+sway_session_path() {
+  local socket pid reply
+  socket="$(sway_socket)"
+  [[ -n "$socket" ]] || die "no sway session runs, so there is no login session of sway to address"
+  pid="${socket%.sock}"
+  pid="${pid##*.}"
+  reply="$(busctl --system call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager GetSessionByPID u "$pid")" \
+    || die "logind names no login session for sway (PID $pid, socket $socket)"
+  [[ "$reply" =~ ^o\ \"(/org/freedesktop/login1/session/[A-Za-z0-9_]+)\"$ ]] || die "logind answered GetSessionByPID for sway (PID $pid) with '$reply', not a session path"
+  printf '%s\n' "${BASH_REMATCH[1]}"
 }
 
 # The sway config is symlinked into the checkout, so a running session keeps the old one until it is told to reload.
@@ -760,7 +775,10 @@ ensure_system_unit_active() {
 }
 
 # Prints "UID NAME" for each logind session of a user on Wayland that is the active session of its seat. With "awake"
-# only the sessions where somebody is at the keyboard: not locked and not idle.
+# only the sessions where somebody may be at the keyboard, which is every one but a session that logind marks locked or idle
+# while the user's lock screen (vekrona-lock.service) runs. A hint alone is not enough: a hint that failed to clear stays yes
+# while the user works (the lock screen quits after a hint step that hung, and swayidle's resume can fail), and a session taken
+# for away is updated and rebooted without being asked. swayidle starts the lock screen at the same timeout that sets the idle hint.
 wayland_sessions() {
   local awake="${1:-}" ids id props key value
   local -A session=()
@@ -770,8 +788,8 @@ wayland_sessions() {
     session=()
     while IFS='=' read -r key value; do session[$key]=$value; done <<<"$props"
     [[ "${session[Type]-}" == wayland && "${session[Active]-}" == yes ]] || continue
-    if [[ "$awake" == awake ]]; then
-      [[ "${session[LockedHint]-}" == no && "${session[IdleHint]-}" == no ]] || continue
+    if [[ "$awake" == awake && ("${session[LockedHint]-}" == yes || "${session[IdleHint]-}" == yes) ]]; then
+      ! unit_is_active vekrona-lock.service --user --machine="${session[Name]}@.host" || continue
     fi
     printf '%s %s\n' "${session[User]}" "${session[Name]}"
   done

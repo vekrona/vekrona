@@ -39,10 +39,12 @@ next boot                       vekrona-update-post.service: report the result, 
   any login session), may start exactly the `now`, `reboot`, `poweroff` and `skip` units without a password
   (`etc/polkit-1/rules.d/50-vekrona-update.rules`), and nothing else.
 - **Midnight** (`libexec/vekrona-update-night`) has `WakeSystem=true`, so a sleeping machine wakes for it. It checks
-  again first. A user at the keyboard is a logind session with `Type=wayland`, `Active=yes`, `LockedHint=no` and
-  `IdleHint=no`; that user is asked through `bin/vekrona-update-ask`, for `VEKRONA_UPDATE_ASK_TIMEOUT` seconds (600).
+  again first. A user who may be at the keyboard is a logind session with `Type=wayland` and `Active=yes`, unless
+  logind marks it locked or idle (`LockedHint=yes` or `IdleHint=yes`) while the user's `vekrona-lock.service` runs: a hint
+  that failed to clear stays yes while the user works, so a hint without the lock screen counts as somebody there. That
+  user is asked through `bin/vekrona-update-ask`, for `VEKRONA_UPDATE_ASK_TIMEOUT` seconds (600).
   A timeout, a closed notification or [Skip tonight] skips the night and the machine goes back to sleep through
-  logind's `IdleAction`. A locked or idle session, or none, installs without asking. If anything holds a `block`
+  logind's `IdleAction`. A locked or idle session behind the lock screen, or none, installs without asking. If anything holds a `block`
   inhibitor on shutdown (systemd 257 applies those to root too), the unit fails and names the holder, instead of
   forcing a reboot over it.
 - **Update and restart / Update and shut down** in the launcher power menu start `vekrona-update-reboot.service` and

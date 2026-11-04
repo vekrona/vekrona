@@ -5,7 +5,7 @@
 #
 #   sessions/ID          logind session ID, "Key=Value" lines (add_session)
 #   inhibitors           what `systemd-inhibit --list` prints (systemd-inhibit's table rows)
-#   units/UNIT.active    exists while the unit is active
+#   units/UNIT.active    exists while the unit is active; a user unit (--user --machine=NAME@.host) is the same for every user
 #   dnf.json, dnf.rc     what `dnf5 check-upgrade --json` prints, and the exit status of check-upgrade: 0 nothing,
 #                        100 updates (plain output only; --json exits 0 then, as dnf5 does), anything else a failure
 #   upgrade.rc           exit status of `dnf5 upgrade`
@@ -224,6 +224,9 @@ add_session() {
   shift
   printf '%s\n' Type=wayland Active=yes LockedHint=no IdleHint=no Name=someone User=1000 "$@" >"$FAKE_WORLD/sessions/$id"
 }
+
+# lock_screen_runs: the user's vekrona-lock.service is active.
+lock_screen_runs() { touch "$FAKE_WORLD/units/vekrona-lock.service.active"; }
 
 # add_nvidia_machine KVER...: akmod-nvidia is installed with these kernels, oldest first, none with a module or an image.
 # The oldest is the GRUB default, as it stays while a newer kernel is not ready (UPDATEDEFAULT=no).

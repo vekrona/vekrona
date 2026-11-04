@@ -210,7 +210,7 @@ prune_vekrona_links "${link_dirs[@]}"
 prune_dead_quickshell_instances "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell"
 systemctl --user daemon-reload
 # The units the sway session runs, in restart order, and the timers and watcher that trigger the others.
-session_services=(vekrona-lid vekrona-idle vekrona-session-teardown vekrona-cliphist vekrona-shell vekrona-errors vekrona-audio-watchdog)
+session_services=(vekrona-lid vekrona-idle vekrona-lock-listen vekrona-session-teardown vekrona-cliphist vekrona-shell vekrona-errors vekrona-audio-watchdog)
 session_triggers=(vekrona-weather.timer vekrona-calendar.timer vekrona-update-notify.path)
 ensure_user_unit_enabled "${session_services[@]/%/.service}" "${session_triggers[@]}" vekrona-update-notify.service syncthing.service
 # The syncthing webapp talks to this daemon, so it must not wait for the next login. A GUI login goes in while the daemon is stopped.

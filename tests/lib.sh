@@ -159,15 +159,15 @@ ssh_sessions_relogin() {
 }
 
 # The guest's vekrona-idle.service with its own ExecStart and only the idle hint shortened to $1 seconds (a drop-in under
-# $XDG_RUNTIME_DIR, so the scenario fails when the unit has no `timeout 300 'vekrona-idlehint yes'`). The caller reloads and restarts the unit.
+# $XDG_RUNTIME_DIR, so the scenario fails when the unit has no `timeout 300 'vekrona-session-hint idle yes'`). The caller reloads and restarts the unit.
 IDLE_UNIT_DROPIN_SUBDIR=systemd/user/vekrona-idle.service.d
 shorten_idlehint() {
   vekrona-dev sh bash -c '
     set -euo pipefail
     dir="$XDG_RUNTIME_DIR/$1"
     exec_start="$(systemctl --user cat vekrona-idle.service | grep "^ExecStart=")"
-    shortened="$(sed "s/timeout 300 \(.vekrona-idlehint yes.\)/timeout $2 \1/" <<<"$exec_start")"
-    [[ "$shortened" != "$exec_start" ]] || { echo "vekrona-idle.service has no timeout 300 for vekrona-idlehint" >&2; exit 1; }
+    shortened="$(sed "s/timeout 300 \(.vekrona-session-hint idle yes.\)/timeout $2 \1/" <<<"$exec_start")"
+    [[ "$shortened" != "$exec_start" ]] || { echo "vekrona-idle.service has no timeout 300 for vekrona-session-hint idle" >&2; exit 1; }
     mkdir -p "$dir"
     printf "[Service]\nExecStart=\n%s\n" "$shortened" >"$dir/zz-test.conf"
   ' _ "$IDLE_UNIT_DROPIN_SUBDIR" "$1"

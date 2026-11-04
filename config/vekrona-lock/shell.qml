@@ -25,15 +25,32 @@ ShellRoot {
     readonly property string touchPrompt: "Touch your security key"
     // The lock is always dark, in both themes (VekronaTheme.dark).
 
-    // ---- Unlock sequence: loginctl unlock-session, LockedHint=false, unlock, quit.
+    // ---- Unlock sequence: unlock, LockedHint=false and logind's Unlock on sway's session, quit.
+    // vekrona-session-hint addresses sway's own login session: this service is in none, and logind's
+    // "auto" session would be the user's Display session, a text or ssh login when one started first.
+    // Neither locking nor unlocking waits for the hint, and a hint that cannot be set is an error record.
+    // The process quits only after the hint step ended, so the unit stays active until the hint is clear;
+    // a hint step that hangs is cut off after hintDeadlineMs, since an active unit swallows the next lock.
     property bool unlocking: false
+    readonly property int hintDeadlineMs: 3000
 
+    // `finished` comes once per run, also when the command could not start: Quickshell then emits no
+    // `exited`, only `runningChanged` without a `started` before it.
     component CommandStep: Process {
         signal finished
+        property bool launched: false
 
+        onStarted: launched = true
         onExited: exitCode => {
             if (exitCode !== 0)
                 console.error("vekrona-lock:", command.join(" "), "exited with", exitCode);
+        }
+        onRunningChanged: {
+            if (running)
+                return;
+            if (!launched)
+                console.error("vekrona-lock:", command.join(" "), "could not start");
+            launched = false;
             finished();
         }
     }
@@ -45,20 +62,20 @@ ShellRoot {
 
     CommandStep {
         id: setHint
-        command: ["busctl", "call", "org.freedesktop.login1", "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session", "SetLockedHint", "b", "true"]
-    }
-
-    CommandStep {
-        id: unlockSession
-        command: ["loginctl", "unlock-session"]
-        onFinished: clearHint.running = true
+        command: ["vekrona-session-hint", "locked", "yes"]
     }
 
     CommandStep {
         id: clearHint
-        command: ["busctl", "call", "org.freedesktop.login1", "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session", "SetLockedHint", "b", "false"]
-        onFinished: {
-            lock.locked = false;
+        command: ["vekrona-session-hint", "locked", "no"]
+        onFinished: Qt.quit()
+    }
+
+    Timer {
+        id: hintDeadline
+        interval: root.hintDeadlineMs
+        onTriggered: {
+            console.error("vekrona-lock: vekrona-session-hint locked no did not end within", interval / 1000, "s; quitting with sway's session still marked locked");
             Qt.quit();
         }
     }
@@ -70,7 +87,9 @@ ShellRoot {
         password.abort();
         u2f.abort();
         fprint.abort();
-        unlockSession.running = true;
+        lock.locked = false;
+        hintDeadline.start();
+        clearHint.running = true;
     }
 
     // ---- Status line. A PAM error wins over the hint of what to do.

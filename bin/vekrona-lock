@@ -22,6 +22,12 @@
 # --before-sleep is swayidle's safety net for suspends that did not come from
 # vekrona-suspend. It retries within logind's InhibitDelayMaxSec (15 s,
 # etc/systemd/logind.conf.d).
+#
+# `listen` (vekrona-lock-listen.service) locks whenever logind asks sway's login
+# session to lock (`loginctl lock-session ID`, `loginctl lock-sessions`).
+# swayidle's own lock event listens on logind's "auto" session, which for a
+# service of the user manager is the user's Display session: a text or ssh
+# login when one started before sway, as after a reboot.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -63,11 +69,23 @@ lock_before_sleep() {
   die "$PROG: cannot lock the screen before suspend (${err:-no answer within $ATTEMPT_TIMEOUT_SEC s}); this suspend is already under way, later ones stay blocked until the screen is locked"
 }
 
-usage() { refuse "usage: $PROG start | --before-sleep"; }
+listen() {
+  local path line
+  path="$(sway_session_path)"
+  while IFS= read -r line; do
+    [[ "$line" == "$path: org.freedesktop.login1.Session.Lock ()" ]] || continue
+    # A failed lock is already an error record and holds the suspend block; the next request tries again.
+    (lock_once) || warn "$PROG: logind asked to lock sway's session $path, and the screen could not be locked"
+  done < <(gdbus monitor --system --dest org.freedesktop.login1 --object-path "$path")
+  die "$PROG: the monitor of logind's lock requests for sway's session $path ended"
+}
+
+usage() { refuse "usage: $PROG start | --before-sleep | listen"; }
 
 [[ $# -eq 1 ]] || usage
 case "$1" in
   start) lock_once ;;
   --before-sleep) lock_before_sleep ;;
+  listen) listen ;;
   *) usage ;;
 esac

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # swayidle sets the logind idle hint on the sway session, also when a text or ssh login came before it: a service of
 # the user manager has no session of its own, so swayidle's own `idlehint` goes to the user's Display session, which
-# logind refuses it; vekrona-idlehint names the sway session. The ssh session vekrona-dev works through is such a login. The idle hint is shortened to
+# logind refuses it; vekrona-session-hint names the sway session. The ssh session vekrona-dev works through is such a login. The idle hint is shortened to
 # IDLEHINT_SEC with a drop-in.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

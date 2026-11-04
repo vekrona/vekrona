@@ -6,7 +6,7 @@ source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=60
 
-idle_active() { [[ "$(vekrona-dev sh systemctl --user is-active vekrona-idle.service)" == active ]]; }
+idle_active() { [[ "$(vekrona-dev sh systemctl --user is-active vekrona-idle.service vekrona-lock-listen.service)" == $'active\nactive' ]]; }
 locked_hint() { vekrona-dev run loginctl show-session "$SESSION_ID" -p LockedHint --value; }
 locked() { [[ "$(locked_hint)" == yes ]]; }
 unlocked() { [[ "$(locked_hint)" == no ]]; }
@@ -14,7 +14,7 @@ export -f idle_active locked_hint locked unlocked
 
 vekrona-dev session
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- idle_active
-log "ok: swayidle runs as vekrona-idle.service"
+log "ok: swayidle runs as vekrona-idle.service, and vekrona-lock-listen.service runs"
 
 SESSION_ID="$(sway_session_id)"
 [[ -n "$SESSION_ID" ]] || die "the sway session id is unknown"
@@ -22,7 +22,7 @@ export SESSION_ID
 
 vekrona-dev run loginctl lock-session "$SESSION_ID"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- locked
-log "ok: a logind lock request reaches swayidle, which runs vekrona-lock"
+log "ok: a logind lock request for sway's session reaches vekrona-lock-listen, which runs vekrona-lock"
 
 vekrona-dev session
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- unlocked

@@ -30,7 +30,7 @@ export VEKRONA_UPDATE_CHECK="$work/check" VEKRONA_UPDATE_APPLY="$work/apply"
 
 # scenario NAME: a clean machine with nothing pending and nobody logged in.
 scenario() {
-  rm -f "$work"/sessions/* "$work/pending" "$work/check.fails"
+  rm -f "$work"/sessions/* "$work"/units/* "$work/pending" "$work/check.fails"
   : >"$work/inhibitors"
   echo timeout >"$work/answer"
   : >"$FAKE_LOG"
@@ -54,7 +54,7 @@ did_not '^runuser' || die "asked about updates when there are none"
 did_not '^apply' || die "nothing pending still installed"
 log "ok: nothing to install and somebody at the machine leaves it on"
 
-scenario; add_session 1 LockedHint=yes
+scenario; add_session 1 LockedHint=yes; lock_screen_runs
 night
 ran '^systemctl suspend$' || die "a locked session counted as somebody at the machine"
 log "ok: a locked session is nobody at the machine"
@@ -97,12 +97,22 @@ did_not '^runuser' || die "asked when nobody is there"
 log "ok: pending updates with nobody there install without asking"
 
 for state in LockedHint=yes IdleHint=yes; do
-  scenario; touch "$work/pending"; add_session 1 "$state"
+  scenario; touch "$work/pending"; add_session 1 "$state"; lock_screen_runs
   night
   ran '^apply --offline$' || die "a session with $state did not install"
   did_not '^runuser' || die "asked a session with $state"
+  ran '^systemctl is-active vekrona-lock.service --user --machine=someone@.host$' || die "the lock screen was not looked up in the user's own manager"
 done
-log "ok: a locked or idle session is not asked"
+log "ok: a locked or idle session is not asked while its lock screen runs"
+
+# A hint that failed to clear (the lock screen quit after its hint step hung, swayidle's resume failed) stays yes while the user works.
+for state in LockedHint=yes IdleHint=yes; do
+  scenario; touch "$work/pending"; add_session 1 "$state"
+  night
+  ran '^runuser' || die "a session with $state but no lock screen running was not asked"
+  did_not '^apply' || die "installed under a session with $state but no lock screen running, without asking"
+done
+log "ok: a locked or idle hint without a running lock screen is somebody at the machine, who is asked"
 
 scenario; touch "$work/pending"; add_session 1 Active=no
 night

@@ -23,8 +23,10 @@ grep -qx 'runuser -u dee -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/100
 [[ "$(notifications)" -eq 2 ]] || die "notified users without an active Wayland session: $(cat "$FAKE_LOG")"
 log "ok: every active Wayland session's user is notified on that user's bus, nobody else"
 
+lock_screen_runs
 [[ "$(wayland_sessions awake)" == "1001 ann" ]] || die "awake sessions: $(wayland_sessions awake)"
 log "ok: awake leaves out idle sessions"
+rm "$work/units/vekrona-lock.service.active"
 
 rm "$work"/sessions/*; : >"$FAKE_LOG"
 if notify_user "Title" 2>"$work/err"; then die "notify_user succeeded with nobody to tell"; fi
