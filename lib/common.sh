@@ -1082,11 +1082,24 @@ retire_webapp_profile() {
   if [[ -f "$ini" ]] && grep -qxF "Name=$profile" "$ini"; then
     log "removing the profiles.ini entry of the retired Firefox profile $profile"
     kept="$(awk -v name="$profile" '
-      function flush() { if (section != "" && !drop) printf "%s", section; section = ""; drop = 0 }
-      /^\[/ { flush() }
-      { section = section $0 "\n" }
-      $0 == "Name=" name { drop = 1 }
-      END { flush() }' "$ini")" || die "cannot read $ini"
+      /^\[/ { count++; head[count] = $0 }
+      { body[count] = body[count] $0 "\n" }
+      $0 == "Name=" name { drop[count] = 1 }
+      /^Path=/ { path[count] = substr($0, 6) }
+      /^Default=/ { default_path[count] = substr($0, 9) }
+      END {
+        for (i = 1; i <= count; i++) if (drop[i]) removed = path[i]
+        printf "%s", body[0]
+        for (i = 1; i <= count; i++) {
+          if (drop[i]) continue
+          # Firefox starts the profile list over at the first missing [ProfileN], and an [Install...] whose Default is the
+          # removed profile would keep pointing at it.
+          if (head[i] ~ /^\[Install/ && removed != "" && default_path[i] == removed) continue
+          text = body[i]
+          if (head[i] ~ /^\[Profile[0-9]+\]$/) sub(/^\[Profile[0-9]+\]/, "[Profile" next_index++ "]", text)
+          printf "%s", text
+        }
+      }' "$ini")" || die "cannot read $ini"
     write_file_atomic "$ini" "$kept"$'\n'
     ! grep -qxF "Name=$profile" "$ini" || die "failed to remove $profile from $ini"
   else
