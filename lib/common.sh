@@ -1122,44 +1122,85 @@ syncthing_config_file() {
   awk '/^Configuration file:/ { getline; sub(/^[ \t]+/, ""); print; exit }' <<<"$paths"
 }
 
-# The <gui> element of the config file $1; nothing when the file or the element is missing.
+# The <gui> element of the config file $1 (its start tag included); nothing when the file or the element is missing.
 syncthing_gui_xml() {
   if [[ -f "$1" ]]; then sed -n '/<gui[ >]/,/<\/gui>/p' "$1"; fi
 }
 
-# The <address> of the daemon's <gui> element; nothing when there is none.
+# The <address> of the <gui> element of the config file $1; nothing when there is none.
 syncthing_gui_address() {
   local gui
-  gui="$(syncthing_gui_xml "$(syncthing_config_file)")"
+  gui="$(syncthing_gui_xml "$1")"
   sed -n 's|.*<address>\([^<]*\)</address>.*|\1|p;T;q' <<<"$gui"
 }
 
-# Whether the daemon's config.xml demands a GUI login (Syncthing authenticates only when it holds a user and a password).
+# Whether the config file $1 demands a GUI login (Syncthing authenticates only when it holds a user and a password).
 syncthing_gui_login_set() {
   local gui
-  gui="$(syncthing_gui_xml "$(syncthing_config_file)")"
+  gui="$(syncthing_gui_xml "$1")"
   grep -Eq '<(user|password)>[^<]+</(user|password)>' <<<"$gui"
+}
+
+# Whether the GUI of the config file $1 is served over TLS, which a client that speaks plain HTTP on the socket cannot use.
+syncthing_gui_tls_set() {
+  local gui
+  gui="$(syncthing_gui_xml "$1")"
+  grep -Eq '<gui[^>]* tls="true"' <<<"$gui"
+}
+
+# Whether the config file $1 puts the GUI on the socket $2 with plain HTTP and no login.
+syncthing_gui_on_socket() {
+  [[ "$(syncthing_gui_address "$1")" == "$2" ]] && ! syncthing_gui_login_set "$1" && ! syncthing_gui_tls_set "$1"
+}
+
+# Prints the config file $1 with its <gui> on the socket $2: the address set (added when there is none), no user and no
+# password, tls off.
+syncthing_config_with_gui_socket() {
+  python3 -I - "$1" "$2" <<'PYEOF'
+import sys
+import xml.etree.ElementTree as ET
+
+path, socket = sys.argv[1:]
+tree = ET.parse(path)
+gui = tree.getroot().find("gui")
+if gui is None:
+    raise SystemExit(f"{path} has no <gui> element")
+address = gui.find("address")
+if address is None:
+    address = ET.SubElement(gui, "address")
+address.text = socket
+for name in ("user", "password"):
+    for element in gui.findall(name):
+        gui.remove(element)
+gui.set("tls", "false")
+ET.indent(tree)
+print(ET.tostring(tree.getroot(), encoding="unicode"))
+PYEOF
 }
 
 # Puts the GUI on its socket and takes any login out of the config, unless that is so already. `syncthing generate` skips an
 # empty user and password, so it cannot clear a login, and a running daemon overwrites an edit of its config, so the daemon
-# stops before the edit; the caller starts it again. The password an earlier install kept goes with the login it belonged to.
+# stops before the edit; the caller starts it again. The edit is made on a copy that replaces the config only once it is
+# checked, since a config with a login and no address would start a GUI on TCP without one. The password an earlier install
+# kept goes with the login it belonged to.
 ensure_syncthing_gui_socket() {
-  local config socket
+  local config socket edited
   require_cmd syncthing
   config="$(syncthing_config_file)"
   socket="$(syncthing_gui_socket)"
-  if [[ "$(syncthing_gui_address)" == "$socket" ]] && ! syncthing_gui_login_set; then
+  if syncthing_gui_on_socket "$config" "$socket"; then
     log "syncthing GUI already on $socket without a login"
   else
     systemctl --user stop syncthing.service || die "cannot stop syncthing.service to move its GUI to a socket"
     if [[ ! -f "$config" ]]; then
       syncthing generate >/dev/null || die "syncthing generate failed to create $config"
     fi
-    sed -i "/<gui[ >]/,/<\/gui>/{s|<address>[^<]*</address>|<address>$socket</address>|;s|<user>[^<]*</user>||;s|<password>[^<]*</password>||}" "$config" \
-      || die "cannot edit the GUI of $config"
-    [[ "$(syncthing_gui_address)" == "$socket" ]] || die "syncthing's config has no GUI address $socket after the edit"
-    ! syncthing_gui_login_set || die "syncthing's config still has a GUI login after the edit"
+    edited="$(mktemp "$config.XXXXXX")" || die "cannot create a temp file next to $config"
+    syncthing_config_with_gui_socket "$config" "$socket" >"$edited" \
+      || { rm -f "$edited"; die "cannot move the GUI of $config to $socket"; }
+    syncthing_gui_on_socket "$edited" "$socket" \
+      || { rm -f "$edited"; die "the edited copy of $config does not put the GUI on $socket without a login or TLS, so $config stays as it was"; }
+    mv -fT "$edited" "$config" || { rm -f "$edited"; die "cannot replace $config with its edited copy"; }
     log "syncthing GUI moved to $socket without a login"
   fi
   remove_retired "Syncthing's GUI has no login since it listens on a socket" "$(retired_syncthing_gui_password_file)"
