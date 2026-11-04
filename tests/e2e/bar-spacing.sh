@@ -43,8 +43,8 @@ WORST_CASE_CELSIUS=8
 # Both dots show, so the check covers the pills that carry one: a dot hangs over its pill's padding and widens no gap.
 UNREAD_COUNT=1
 # The bar the user sees: one tray icon (a fake 1Password), the weather, the load (a pictogram of two bars),
-# a second keyboard layout, the sound and network icons, the agent and the bell with their dots, the clock. A battery shows on laptops only.
-EXPECTED_KINDS=PTPTPPPPT
+# a second keyboard layout, the sound, network and sync icons, the agent and the bell with their dots, the clock. A battery shows on laptops only.
+EXPECTED_KINDS=PTPTPPPPPT
 SINK_NAME=VekronaTestSink
 GUEST_DIR=/tmp/bar-spacing
 GUEST_LOG=/tmp/bar-spacing-fake-sni.log

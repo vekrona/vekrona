@@ -20,6 +20,9 @@ singleton Wireless 1.0 Wireless.qml
 Battery 1.0 Battery.qml
 TintedIcon 1.0 TintedIcon.qml
 Weather 1.0 Weather.qml
+Sync 1.0 Sync.qml
+SyncRow 1.0 SyncRow.qml
+SyncSection 1.0 SyncSection.qml
 Calendar 1.0 Calendar.qml
 MonthGrid 1.0 MonthGrid.qml
 LauncherButton 1.0 LauncherButton.qml
