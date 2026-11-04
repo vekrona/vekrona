@@ -7,29 +7,28 @@ source "$ROOT/tests/lib.sh"
 
 STEP_TIMEOUT_SEC=90
 
-# The GUI has a login (stage 50), so the request signs in with the stored password.
-syncthing_gui_answers() { vekrona-dev run bash -c 'curl -fsS -u "vekrona:$(<"$HOME/.local/state/vekrona/syncthing-gui-password")" http://127.0.0.1:8384/ | grep -q Syncthing'; }
-export -f syncthing_gui_answers
+# The daemon's REST API listens on a unix socket with no login (stage 50); the API key in config.xml is what its REST calls carry.
+syncthing_answers() {
+  vekrona-dev run bash -c '
+config="$(syncthing paths | awk "/^Configuration file:/ { getline; print \$1; exit }")"
+key="$(sed -n "s|.*<apikey>\(.*\)</apikey>.*|\1|p" "$config")"
+curl -fsS --unix-socket "/run/user/$(id -u)/syncthing/gui.sock" -H "X-API-Key: $key" http://localhost/rest/system/ping | grep -q pong'
+}
+export -f syncthing_answers
 
 obsidian_stopped() { flatpak_stopped md.obsidian.Obsidian; }
 export -f obsidian_stopped
-# The windows this scenario opens go again, so the next scenario starts on an empty desktop.
+# The window this scenario opens goes again, so the next scenario starts on an empty desktop.
 close_windows() {
-  if ! window_closed vekrona-syncthing; then vekrona-dev sh swaymsg '[app_id="vekrona-syncthing"] kill' >/dev/null; fi
   obsidian_stopped || vekrona-dev run flatpak kill md.obsidian.Obsidian
-  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- window_closed vekrona-syncthing
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- obsidian_stopped
 }
 
 vekrona-dev session
 trap close_windows EXIT
 
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- syncthing_gui_answers
-log "ok: the Syncthing daemon serves its GUI on 127.0.0.1:8384"
-
-vekrona-dev sh swaymsg exec vekrona-webapp syncthing >/dev/null
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- window_open vekrona-syncthing
-log "ok: the Syncthing webapp opens its own window"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- syncthing_answers
+log "ok: the Syncthing daemon answers its REST API on its socket"
 
 vekrona-dev sh swaymsg exec "flatpak run md.obsidian.Obsidian" >/dev/null
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- window_open md.obsidian.Obsidian

@@ -28,8 +28,9 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
   plain text; a terminal app, so it needs no webapp sandbox and has no web
   version; sha256-pinned in `lib/common.sh`, bumped by hand, see
   `docs/updates.md`).
-- Daemon plus webapp: Syncthing (Fedora RPM user service for file access; its
-  GUI at `127.0.0.1:8384` is a webapp behind a generated login, see
+- Daemon plus vekrona-shell UI: Syncthing (Fedora RPM user service for file
+  access; no web GUI: its GUI and REST API listen on a unix socket in a 0700
+  runtime directory, so the OS user is the authentication, see
   `docs/threat-model.md`).
 - Webapp: Telegram and Discord (proprietary and tracking, so a browser
   sandbox contains them), Spotify, SoundCloud, YouTube, WhatsApp.

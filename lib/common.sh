@@ -1065,11 +1065,43 @@ retire_user_unit() {
   remove_retired "the user unit $unit is retired" "${paths[@]}"
 }
 
-# The Syncthing GUI and REST API listen on 127.0.0.1:8384, which every process of the machine can reach, so without a
-# login any of them could reconfigure the daemon (add a shared folder, change its peers). Syncthing hashes the password
-# before it stores it; vekrona keeps the clear text, once generated, in this file for the user to sign in with.
-SYNCTHING_GUI_USER=vekrona
-syncthing_gui_password_file() { printf '%s/syncthing-gui-password' "$(vekrona_state_dir)"; }
+# Takes the Firefox webapp $1 that an earlier vekrona installed off the machine: its profiles.ini entry and its profile
+# directory. Stage 50 retires every webapp of VEKRONA_RETIRED_WEBAPPS this way and stage 70 checks it. The links of its desktop
+# file and icon are stale once its directory left the checkout, so prune_vekrona_links takes them. Dies while a Firefox runs the
+# profile, because deleting the directory under it would corrupt what it writes back.
+retire_webapp_profile() {
+  local profile="vekrona-$1" root ini kept status=0
+  root="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"
+  ini="$root/profiles.ini"
+  pgrep -f -- "-P $profile " >/dev/null || status=$?
+  case "$status" in
+    0) die "close the Firefox webapp $1: its profile $profile is retired and about to be removed" ;;
+    1) ;;
+    *) die "pgrep failed with status $status" ;;
+  esac
+  if [[ -f "$ini" ]] && grep -qxF "Name=$profile" "$ini"; then
+    log "removing the profiles.ini entry of the retired Firefox profile $profile"
+    kept="$(awk -v name="$profile" '
+      function flush() { if (section != "" && !drop) printf "%s", section; section = ""; drop = 0 }
+      /^\[/ { flush() }
+      { section = section $0 "\n" }
+      $0 == "Name=" name { drop = 1 }
+      END { flush() }' "$ini")" || die "cannot read $ini"
+    write_file_atomic "$ini" "$kept"$'\n'
+    ! grep -qxF "Name=$profile" "$ini" || die "failed to remove $profile from $ini"
+  else
+    log "absent: the profiles.ini entry of $profile"
+  fi
+  remove_retired "the $1 webapp is retired" "$root/$profile"
+}
+
+# Syncthing's GUI and REST API listen on a unix socket in a 0700 directory of the user's runtime directory, with no login:
+# the OS user is the authentication, since only that user's processes can open the socket. The address is in config.xml, so
+# any start of the daemon (the unit without its drop-in, a manual `syncthing serve`) gets the socket, never a TCP port.
+# The directory is the unit's RuntimeDirectory (config/systemd-user/syncthing.service.d/socket.conf), under the manager's
+# /run/user/<uid>. Earlier installs set a login and kept its password in this file, which is retired.
+syncthing_gui_socket() { printf '/run/user/%s/syncthing/gui.sock' "$(id -u)"; }
+retired_syncthing_gui_password_file() { printf '%s/syncthing-gui-password' "$(vekrona_state_dir)"; }
 
 syncthing_config_file() {
   local paths
@@ -1077,30 +1109,47 @@ syncthing_config_file() {
   awk '/^Configuration file:/ { getline; sub(/^[ \t]+/, ""); print; exit }' <<<"$paths"
 }
 
-# Whether the daemon's config.xml demands a GUI login.
-syncthing_gui_user_set() {
-  local config gui
-  config="$(syncthing_config_file)"
-  [[ -f "$config" ]] || return 1
-  gui="$(sed -n '/<gui[ >]/,/<\/gui>/p' "$config")"
-  grep -q '<user>[^<][^<]*</user>' <<<"$gui"
+# The <gui> element of the config file $1; nothing when the file or the element is missing.
+syncthing_gui_xml() {
+  if [[ -f "$1" ]]; then sed -n '/<gui[ >]/,/<\/gui>/p' "$1"; fi
 }
 
-# Sets a generated GUI login unless the config has one (a login the user set themselves stays). `syncthing generate`
-# edits the config of a stopped daemon, which a running one would overwrite, so the daemon stops first; the caller starts it.
-ensure_syncthing_gui_auth() {
-  local pwfile password
-  require_cmd syncthing python3
-  pwfile="$(syncthing_gui_password_file)"
-  if syncthing_gui_user_set; then log "syncthing GUI login already set"; return 0; fi
-  password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')" || die "cannot generate a password"
-  ensure_dir "$(dirname "$pwfile")"
-  (umask 077 && write_file_atomic "$pwfile" "$password"$'\n')
-  systemctl --user stop syncthing.service || die "cannot stop syncthing.service to set its GUI login"
-  printf '%s\n' "$password" | syncthing generate --gui-user="$SYNCTHING_GUI_USER" --gui-password=- >/dev/null \
-    || die "syncthing generate failed to set the GUI login"
-  syncthing_gui_user_set || die "syncthing's config has no GUI login after generate"
-  log "syncthing GUI login set: user $SYNCTHING_GUI_USER, password in $pwfile (print it with: cat $pwfile)"
+# The <address> of the daemon's <gui> element; nothing when there is none.
+syncthing_gui_address() {
+  local gui
+  gui="$(syncthing_gui_xml "$(syncthing_config_file)")"
+  sed -n 's|.*<address>\([^<]*\)</address>.*|\1|p;T;q' <<<"$gui"
+}
+
+# Whether the daemon's config.xml demands a GUI login (Syncthing authenticates only when it holds a user and a password).
+syncthing_gui_login_set() {
+  local gui
+  gui="$(syncthing_gui_xml "$(syncthing_config_file)")"
+  grep -Eq '<(user|password)>[^<]+</(user|password)>' <<<"$gui"
+}
+
+# Puts the GUI on its socket and takes any login out of the config, unless that is so already. `syncthing generate` skips an
+# empty user and password, so it cannot clear a login, and a running daemon overwrites an edit of its config, so the daemon
+# stops before the edit; the caller starts it again. The password an earlier install kept goes with the login it belonged to.
+ensure_syncthing_gui_socket() {
+  local config socket
+  require_cmd syncthing
+  config="$(syncthing_config_file)"
+  socket="$(syncthing_gui_socket)"
+  if [[ "$(syncthing_gui_address)" == "$socket" ]] && ! syncthing_gui_login_set; then
+    log "syncthing GUI already on $socket without a login"
+  else
+    systemctl --user stop syncthing.service || die "cannot stop syncthing.service to move its GUI to a socket"
+    if [[ ! -f "$config" ]]; then
+      syncthing generate >/dev/null || die "syncthing generate failed to create $config"
+    fi
+    sed -i "/<gui[ >]/,/<\/gui>/{s|<address>[^<]*</address>|<address>$socket</address>|;s|<user>[^<]*</user>||;s|<password>[^<]*</password>||}" "$config" \
+      || die "cannot edit the GUI of $config"
+    [[ "$(syncthing_gui_address)" == "$socket" ]] || die "syncthing's config has no GUI address $socket after the edit"
+    ! syncthing_gui_login_set || die "syncthing's config still has a GUI login after the edit"
+    log "syncthing GUI moved to $socket without a login"
+  fi
+  remove_retired "Syncthing's GUI has no login since it listens on a socket" "$(retired_syncthing_gui_password_file)"
 }
 
 user_in_group() {
@@ -2054,6 +2103,11 @@ VEKRONA_RETIRED_PKGS=(dms dms-cli dgop danksearch matugen mise)
 # unit, now a system service of the same name.
 # shellcheck disable=SC2034
 VEKRONA_RETIRED_USER_UNITS=(tailscale-systray.service vekrona-app-switch.service dms.service xremap.service)
+
+# The Firefox webapps a past vekrona installed and no longer ships. syncthing was the web GUI of the Syncthing daemon, which has
+# no web GUI port now (a unix socket and vekrona-shell's own UI replace it).
+# shellcheck disable=SC2034
+VEKRONA_RETIRED_WEBAPPS=(syncthing)
 
 # What mise and the coding agents (Claude Code, Codex, OpenCode, Pi, Cursor) left behind; stage 30 removes them.
 # /etc/claude-code/managed-settings.json stays: it is the login-method policy, installed by stage 40.
