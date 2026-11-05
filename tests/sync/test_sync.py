@@ -210,7 +210,7 @@ def snapshot(**overrides):
         folders=[folder("f1"), folder(DROP, "vekrona drop", "/home/u/.local/share/vekrona-sync/drops/" + DROP)],
         devices=[{"deviceID": ME, "name": "this"}, {"deviceID": PEER, "name": "Pixel"}],
         connected={PEER}, pending_devices={}, pending_folders={},
-        statuses={"f1": {"state": "idle", "globalBytes": 10, "needBytes": 0}})
+        statuses={"f1": {"state": "idle", "globalBytes": 10, "needBytes": 0}}, discovered={}, ignored=frozenset())
     return sync.Snapshot(**{**values, **overrides})
 
 
@@ -268,6 +268,22 @@ class AssembleTest(unittest.TestCase):
             sync.drop_folder_id(ME, THIRD): {"offeredBy": {PEER: {"label": "vekrona drop"}}},
             "vekrona-drop-lizard": {"offeredBy": {PEER: {"label": "vekrona drop"}}}}))
         self.assertEqual(view["offers"], [])
+
+    def test_a_device_that_announced_itself_and_is_on_no_list_is_nearby(self):
+        view = sync.assemble(snapshot(discovered={THIRD: {"addresses": ["tcp://10.0.0.2:22000"]}}))
+        self.assertEqual(view["nearby"], [{"id": THIRD, "code": "CCCC-CCC", "addresses": ["tcp://10.0.0.2:22000"]}])
+
+    def test_this_computer_and_the_devices_of_every_list_are_not_nearby(self):
+        view = sync.assemble(snapshot(
+            discovered={d: {"addresses": []} for d in (ME, PEER, THIRD, "D" * 7 + ("-" + "D" * 7) * 7, "E" * 7 + ("-" + "E" * 7) * 7)},
+            pending_devices={THIRD: {"name": "", "address": ""}}, ignored=frozenset({"D" * 7 + ("-" + "D" * 7) * 7})))
+        self.assertEqual([device["id"] for device in view["nearby"]], ["E" * 7 + ("-" + "E" * 7) * 7])
+
+    def test_nobody_nearby_is_an_empty_list(self):
+        self.assertEqual(sync.assemble(snapshot())["nearby"], [])
+
+    def test_the_view_names_this_computer_by_its_id_and_a_code_to_compare(self):
+        self.assertEqual(sync.assemble(snapshot())["me"], {"id": ME, "code": "AAAA-AAA"})
 
     def test_a_folder_that_started_syncing_after_an_error_has_zero_progress_not_a_missing_key(self):
         view = sync.assemble(snapshot(statuses={"f1": {"state": "syncing", "error": None}}))
@@ -366,7 +382,8 @@ class FakeSyncthing(sync.Syncthing):
             return None
         if path == "/rest/db/status":
             return self.statuses[query["folder"]]
-        return self.answers[path]
+        answer = self.answers[path]
+        return answer(query) if callable(answer) else answer
 
 
 class Recorder:
@@ -409,8 +426,9 @@ class WatcherTest(unittest.TestCase):
             config_folders.append(folder("f1"))
         return FakeSyncthing({
             "/rest/system/status": {"myID": ME},
-            "/rest/config": {"folders": config_folders,
+            "/rest/config": {"folders": config_folders, "remoteIgnoredDevices": [],
                              "devices": [{"deviceID": ME, "name": "this"}, {"deviceID": PEER, "name": "Pixel"}]},
+            "/rest/system/discovery": {},
             "/rest/config/folders": config_folders,
             "/rest/system/connections": {"connections": {PEER: {"connected": True}}},
             "/rest/cluster/pending/devices": pending_devices or {},
@@ -573,11 +591,18 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(api.requests.count(("GET", "/rest/config")), 1)
 
     def test_a_saved_configuration_and_a_change_of_what_is_pending_read_everything_again(self):
-        for event_type in ("ConfigSaved", "PendingDevicesChanged", "PendingFoldersChanged"):
+        for event_type in ("ConfigSaved", "PendingDevicesChanged", "PendingFoldersChanged",
+                           "DeviceDiscovered"):
             with self.subTest(event_type=event_type):
                 api = self.api()
                 self.follow(api, [{"id": 1, "type": event_type, "data": {}}])
                 self.assertEqual(api.requests.count(("GET", "/rest/config")), 2)
+
+    def test_a_device_discovered_on_the_network_shows_up_nearby_in_the_state_file(self):
+        api = self.api()
+        api.answers["/rest/system/discovery"] = {THIRD: {"addresses": ["tcp://10.0.0.2:22000"]}}
+        self.follow(api, [{"id": 1, "type": "DeviceDiscovered", "data": {"device": THIRD, "addrs": []}}])
+        self.assertEqual([device["id"] for device in self.store.read()["nearby"]], [THIRD])
 
     def test_events_that_cannot_change_the_view_are_skipped(self):
         finished_elsewhere = {"type": "ItemFinished", "data": {"folder": "f1", "error": None}}
@@ -675,6 +700,32 @@ class JoinAndSendTest(unittest.TestCase):
         self.assertTrue(os.path.isdir(os.path.join(self.home, "Sync", "Photos")))
         self.assertEqual(api.writes[0][1], "/rest/config/folders")
 
+    def api_with_folder(self, devices, offered_by=None, path="/home/u/Sync/Photos"):
+        api = self.api(pending_folders={} if offered_by is None else {"p1": {"offeredBy": {d: {"label": "Photos"} for d in offered_by}}})
+        api.answers["/rest/config/folders"] = [folder("p1", "Photos", path, devices=devices)]
+        return api
+
+    def test_a_folder_that_is_here_gets_shared_with_the_device_that_offers_it_and_is_not_joined_again(self):
+        api = self.api_with_folder(devices=(ME,), offered_by=(PEER, THIRD))
+        sync.join(api, "p1", None)
+        self.assertEqual([(w[0], w[1]) for w in api.writes], [("PATCH", "/rest/config/folders/p1")])
+        self.assertEqual([d["deviceID"] for d in api.writes[0][2]["devices"]], [ME, PEER, THIRD])
+        self.assertFalse(os.path.exists(os.path.join(self.home, "Sync")))
+
+    def test_a_folder_that_is_here_and_shared_with_the_offering_device_needs_nothing(self):
+        for offered_by in ((PEER,), ()):
+            with self.subTest(offered_by=offered_by):
+                api = self.api_with_folder(devices=(ME, PEER), offered_by=offered_by or None)
+                sync.join(api, "p1", None)
+                self.assertEqual(api.writes, [])
+
+    def test_a_folder_that_is_here_is_not_moved_to_another_path(self):
+        api = self.api_with_folder(devices=(ME,), offered_by=(PEER,))
+        with self.assertRaisesRegex(sync.SyncError, "is here already, at /home/u/Sync/Photos"):
+            sync.join(api, "p1", "/elsewhere")
+        sync.join(api, "p1", "/home/u/Sync/Photos/")
+        self.assertEqual(len(api.writes), 1)
+
     def test_a_link_where_the_folder_would_go_is_refused_whatever_it_points_at(self):
         os.makedirs(os.path.join(self.home, "Sync"))
         elsewhere = os.path.join(self.tmp.name, "elsewhere")
@@ -720,6 +771,134 @@ class JoinAndSendTest(unittest.TestCase):
         sync.send(api, PEER, [file])
         self.assertEqual(os.listdir(os.path.join(self.tmp.name, "drop", "to", PEER)), ["a.txt"])
         self.assertEqual(api.writes[0][0], "PATCH")
+
+
+def syncthing_judging_ids(query):
+    """What Syncthing's /rest/svc/deviceid answers: the ID in its own spelling, or the reason it is no ID."""
+    spelled = query["id"].upper().replace("-", "")
+    if len(spelled) != 56:
+        return {"error": f'"{query["id"]}": device ID invalid: incorrect length'} if spelled else {"id": ""}
+    return {"id": "-".join(spelled[i:i + 7] for i in range(0, 56, 7))}
+
+
+class PairingTest(unittest.TestCase):
+    def api(self, devices=(ME,), folders=None, pending_devices=None, ignored=()):
+        self.folders = [folder("f1"), folder(DROP, "vekrona drop", "/d", devices=(ME, THIRD)), folder("f2", devices=(ME, PEER))] \
+            if folders is None else folders
+        return FakeSyncthing({
+            "/rest/system/status": {"myID": ME},
+            "/rest/svc/deviceid": syncthing_judging_ids,
+            "/rest/config": {"folders": self.folders, "remoteIgnoredDevices": [{"deviceID": d} for d in ignored]},
+            "/rest/config/devices": [{"deviceID": d} for d in devices],
+            "/rest/config/defaults/device": {"addresses": ["dynamic"], "name": ""},
+            "/rest/cluster/pending/devices": pending_devices or {}})
+
+    def posted_device(self, api):
+        return next(body for method, path, body in api.writes if (method, path) == ("POST", "/rest/config/devices"))
+
+    def test_a_device_is_paired_by_its_id_in_any_spelling_and_gets_every_folder_but_the_drops(self):
+        for typed in (THIRD, THIRD.lower(), THIRD.replace("-", ""), f"  {THIRD}\n"):
+            with self.subTest(typed=typed):
+                api = self.api()
+                sync.pair_device(api, typed, None)
+                self.assertEqual(self.posted_device(api), {"addresses": ["dynamic"], "name": "", "deviceID": THIRD})
+                shared = [(path, body["devices"][-1]["deviceID"]) for method, path, body in api.writes if method == "PATCH"]
+                self.assertEqual(shared, [("/rest/config/folders/f1", THIRD), ("/rest/config/folders/f2", THIRD)])
+
+    def test_a_name_given_is_the_name_of_the_device(self):
+        api = self.api()
+        sync.pair_device(api, THIRD, "Pixel")
+        self.assertEqual(self.posted_device(api)["name"], "Pixel")
+
+    def test_what_is_no_device_id_is_refused_with_syncthings_reason_and_nothing_is_written(self):
+        for typed, reason in (("lizard", "incorrect length"), ("", "no device ID"), ("  \n", "no device ID"),
+                              (ME[:-1], "incorrect length")):
+            with self.subTest(typed=typed):
+                api = self.api()
+                with self.assertRaisesRegex(sync.SyncError, reason):
+                    sync.pair_device(api, typed, None)
+                self.assertEqual(api.writes, [])
+
+    def test_this_computer_and_a_device_of_it_are_not_paired_again(self):
+        for typed, reason in ((ME, "own device ID"), (PEER, "one of this computer's devices already")):
+            with self.subTest(typed=typed):
+                api = self.api(devices=(ME, PEER))
+                with self.assertRaisesRegex(sync.SyncError, reason):
+                    sync.pair_device(api, typed, None)
+                self.assertEqual(api.writes, [])
+
+    def test_accepting_a_pending_device_adds_it_the_same_way(self):
+        api = self.api(pending_devices={THIRD: {"name": "Pixel"}})
+        sync.accept_device(api, THIRD)
+        self.assertEqual(self.posted_device(api), {"addresses": ["dynamic"], "name": "Pixel", "deviceID": THIRD})
+        self.assertEqual(len([w for w in api.writes if w[0] == "PATCH"]), 2)
+
+    def test_accepting_a_device_that_did_not_ask_is_an_error(self):
+        api = self.api()
+        with self.assertRaisesRegex(sync.SyncError, "has not asked"):
+            sync.accept_device(api, THIRD)
+        self.assertEqual(api.writes, [])
+
+    def test_rejecting_a_pending_device_ignores_it_for_good_and_clears_its_request(self):
+        api = self.api(pending_devices={THIRD: {"name": "Pixel", "address": "10.0.0.2:22000"}})
+        sync.reject_device(api, THIRD)
+        (put,) = [w for w in api.writes if w[0] == "PUT"]
+        self.assertEqual(put[1], "/rest/config")
+        (ignored,) = put[2]["remoteIgnoredDevices"]
+        self.assertEqual((ignored["deviceID"], ignored["name"], ignored["address"]), (THIRD, "Pixel", "10.0.0.2:22000"))
+        self.assertRegex(ignored["time"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertIn(("DELETE", "/rest/cluster/pending/devices", None), api.writes)
+
+    def test_rejecting_a_device_that_is_ignored_already_keeps_the_list_and_still_clears_the_request(self):
+        api = self.api(pending_devices={THIRD: {"name": "Pixel"}}, ignored=(THIRD,))
+        sync.reject_device(api, THIRD)
+        self.assertEqual([w[0] for w in api.writes], ["DELETE"])
+
+    def test_rejecting_a_device_that_did_not_ask_is_an_error(self):
+        api = self.api()
+        with self.assertRaisesRegex(sync.SyncError, "has not asked"):
+            sync.reject_device(api, THIRD)
+        self.assertEqual(api.writes, [])
+
+
+class QrTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {"XDG_STATE_HOME": os.path.join(self.tmp.name, "state")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def state_files(self):
+        return os.listdir(os.path.join(self.tmp.name, "state", "vekrona"))
+
+    def test_the_code_is_written_where_the_path_says_and_replaces_an_older_one(self):
+        def qrencode(argv, **kwargs):
+            self.assertEqual(argv[-1], ME)
+            with open(argv[argv.index("-o") + 1], "w") as f:
+                f.write("png of " + ME)
+            return mock.Mock(returncode=0, stderr="")
+        with mock.patch.object(sync.subprocess, "run", side_effect=qrencode):
+            sync.write_qr(ME)
+            path = sync.write_qr(ME)
+        with open(path) as f:
+            self.assertEqual(f.read(), "png of " + ME)
+        self.assertEqual(self.state_files(), ["device-id.png"])
+
+    def test_a_qrencode_that_fails_is_an_error_that_leaves_no_half_written_file(self):
+        def qrencode(argv, **kwargs):
+            with open(argv[argv.index("-o") + 1], "w") as f:
+                f.write("half")
+            return mock.Mock(returncode=1, stderr="Failed to encode")
+        with mock.patch.object(sync.subprocess, "run", side_effect=qrencode):
+            with self.assertRaisesRegex(sync.SyncError, "Failed to encode"):
+                sync.write_qr(ME)
+        self.assertEqual(self.state_files(), [])
+
+    def test_a_missing_qrencode_is_an_error_not_a_traceback(self):
+        with mock.patch.object(sync.subprocess, "run", side_effect=FileNotFoundError("qrencode")):
+            with self.assertRaisesRegex(sync.SyncError, "cannot make the QR code"):
+                sync.write_qr(ME)
 
 
 class UnixHandler(BaseHTTPRequestHandler):

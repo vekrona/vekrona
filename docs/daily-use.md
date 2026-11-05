@@ -281,14 +281,27 @@ Sync keeps folders the same on all your devices, and sends a file to one of them
 page and no folder IDs to handle: the bar's Sync icon opens the list, and the commands below do the same from a terminal. Everything
 is between devices you accepted yourself; there is no server.
 
-**Add a device.** On the other device, add this computer in its Syncthing, using this computer's device ID, which `vekrona-sync id`
-prints. This computer then shows a notification, "<name> wants to connect", with a short code: check that the code starts the same
-as the device ID on the other device, then press Accept. The device is now one of *your devices*: every folder you share goes to all
-of them, and a folder you join is shared on with all of them. Ignoring the notification adds nothing, and Reject only clears the
-request: a device that keeps trying asks again.
+**Add a device.** Three ways, all from the Sync list.
+
+- *Nearby.* A device on the same network that runs Syncthing announces itself (local discovery), and shows up under "Nearby" as
+  "Syncthing device ABCD-EFG" (its code, the first characters of its device ID). Press Pair: this computer adds it and offers it
+  every folder. It then asks on its side, "<this computer> wants to connect", and is *online* under "My devices" as soon as you
+  accept there. The list shows every device heard since Syncthing started, also one that has left since.
+- *Not nearby.* "Pair another device…" shows this computer's device ID as text (Copy ID puts it on the clipboard) and as a QR code
+  that the Syncthing app of a phone scans, and has a field for the other device's ID: paste or type it (any case, with or without
+  dashes), then Pair or Enter. A wrong ID is refused with Syncthing's reason under the field.
+- *The other device adds this computer first.* This computer then shows a notification, "<name> wants to connect", with the short
+  code, and "New devices" in the list: check that the code starts the same as the device ID on the other device, then press Accept.
+  Reject ignores the device for good, so it neither asks nor shows up under Nearby again; pairing it on purpose later (its ID in
+  the field) takes it off that list.
+
+The device is then one of *your devices*: every folder you share goes to all of them, and a folder you join is shared on with all
+of them. Ignoring a request adds nothing.
 
 ```
 vekrona-sync id
+vekrona-sync qr
+vekrona-sync pair DEVICE_ID [NAME]
 vekrona-sync accept DEVICE_ID
 vekrona-sync reject DEVICE_ID
 ```
@@ -301,7 +314,8 @@ vekrona-sync share ~/Documents/notes
 ```
 
 **Join a folder.** A folder another device shares shows under "Offered to you" and in a notification. Join puts it at
-`~/Sync/<its name>`. Join refuses a folder that would land in a directory that already has files; give it another path then.
+`~/Sync/<its name>`. Join refuses a folder that would land in a directory that already has files; give it another path then. A folder that exists on
+this computer already (the same ID) is not joined again: Join shares it with the device that offers it.
 
 ```
 vekrona-sync join FOLDER_ID ~/somewhere/else
@@ -323,7 +337,7 @@ and never empties it, so a file sent to such a device stays in the folder's `to/
 the two cannot join the folder: its offer of a drop is ignored (a line in the journal of `vekrona-sync.service`), and a drop folder
 that a third device shares in Syncthing is neither sent through nor received from until you remove that device from it.
 
-What the icon shows: idle, syncing, a problem (the list gives the reason in words), or offline (Syncthing is not running). `vekrona-sync watch`
+What the icon shows: the two round arrows of Material's `sync`, still when idle and turning in steps (four a second, only while something syncs) while syncing, with a warning mark for a problem (the list gives the reason in words), and struck through when offline (Syncthing is not running). `vekrona-sync watch`
 is the service behind it (`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change, and while Syncthing
 does not answer it is started again after a longer wait each time, up to a minute.
 

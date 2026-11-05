@@ -7,13 +7,12 @@ BarPill {
     id: root
 
     required property var bar
-    // The icon of each state of sync.json: a check, circling arrows, an exclamation mark and arrows struck through. They are as
-    // tall as the other bar icons and nearly square, which the cloud glyphs (11 px tall, 17 px wide) are not, so the bar
-    // scenarios, which tell an icon from a text by its ink box, take them for pictograms.
+    // The icon of each state of sync.json: the two round arrows of Material's `sync`, still when idle, turning while syncing,
+    // with a warning mark when a folder has a problem and struck through when Syncthing cannot be reached.
     readonly property var icons: ({
-            idle: "check_circle",
-            syncing: "autorenew",
-            problem: "error",
+            idle: "sync",
+            syncing: "sync",
+            problem: "sync_problem",
             offline: "sync_disabled"
         })
     // What the pill shows while sync.json is missing, unreadable or malformed (vekrona-sync is not running, or Syncthing is
@@ -21,8 +20,10 @@ BarPill {
     readonly property var offlineReport: ({
             state: "offline",
             problem: null,
+            me: null,
             folders: [],
             offers: [],
+            nearby: [],
             pendingDevices: [],
             devices: [],
             arrivals: []
@@ -32,6 +33,15 @@ BarPill {
     readonly property int unseenArrivals: report.arrivals.filter(arrival => arrival.unseen).length
     // Why the last command of the popout failed, "" while none did.
     property string failure: ""
+    // Whether the popout shows how to pair a device that is not nearby.
+    property bool pairing: false
+    // The PNG of this computer's device ID, "" until vekrona-sync has made it.
+    property string qrPath: ""
+    property bool copied: false
+    // The turn of the icon while syncing, in steps of a quarter of the half turn after which the glyph looks the same: one
+    // timer wakeup per step, four a second, and nothing at all while no sync runs (an animation would redraw every frame).
+    property int spinStep: 0
+    readonly property int spinSteps: 4
 
     // The folder's state in words.
     function folderStatus(folder): string {
@@ -55,15 +65,41 @@ BarPill {
         Exec.runOr(["vekrona-sync"].concat(args), stdout => {}, reason => Exec.check(["notify-send", "-a", "vekrona", "Sync", reason]));
     }
 
+    // Shows or hides the pairing section; showing it makes the QR code of this computer's device ID.
+    function setPairing(shown: bool): void {
+        pairing = shown;
+        copied = false;
+        if (shown)
+            Exec.runOr(["vekrona-sync", "qr"], stdout => qrPath = stdout.trim(), reason => failure = reason);
+    }
+
+    function pairPasted(): void {
+        failure = "";
+        Exec.runOr(["vekrona-sync", "pair", "--", pasteField.text], stdout => {
+            pasteField.text = "";
+            setPairing(false);
+        }, reason => failure = reason);
+    }
+
     function open(path: string): void {
         bar.openPopout = null;
         Exec.detached(["xdg-open", path], Exec.home);
     }
 
     icon: icons[report.state]
+    iconRotation: spinStep * 180 / spinSteps
     badgeCount: report.offers.length + report.pendingDevices.length + unseenArrivals
     ariaName: "Sync, " + report.state
     onClicked: bar.togglePopout(popout)
+
+    Timer {
+        interval: 250
+        repeat: true
+        running: root.report.state === "syncing"
+        onTriggered: root.spinStep = (root.spinStep + 1) % root.spinSteps
+        onRunningChanged: if (!running)
+            root.spinStep = 0
+    }
 
     StateFile {
         id: file
@@ -73,7 +109,7 @@ BarPill {
             const next = JSON.parse(text);
             if (!(next.state in root.icons))
                 throw new Error("unknown state " + next.state);
-            for (const key of ["folders", "offers", "pendingDevices", "devices", "arrivals"])
+            for (const key of ["folders", "offers", "nearby", "pendingDevices", "devices", "arrivals"])
                 if (!Array.isArray(next[key]))
                     throw new Error(key + " is not a list");
             return next;
@@ -87,6 +123,7 @@ BarPill {
         onDismissed: root.bar.openPopout = null
         onOpenChanged: {
             root.failure = "";
+            root.pairing = false;
             if (open)
                 Exec.check(["vekrona-sync", "seen"]);
         }
@@ -103,6 +140,80 @@ BarPill {
                 color: VekronaTheme.c.dangerInk
                 style: VekronaTheme.type.body
                 text: root.report.problem ?? "Syncthing is not reachable"
+            }
+
+            SyncSection {
+                title: "Nearby"
+                visible: root.report.nearby.length > 0
+
+                Repeater {
+                    model: root.report.nearby
+
+                    SyncRow {
+                        required property var modelData
+
+                        icon: "wifi_tethering"
+                        text: "Syncthing device " + modelData.code
+
+                        BarPill {
+                            value: "Pair"
+                            ariaName: "Pair with Syncthing device " + modelData.code
+                            onClicked: root.run(["pair", modelData.id])
+                        }
+                    }
+                }
+            }
+
+            SyncSection {
+                title: "New devices"
+                visible: root.report.pendingDevices.length > 0
+
+                Repeater {
+                    model: root.report.pendingDevices
+
+                    SyncRow {
+                        required property var modelData
+
+                        icon: "person_add"
+                        text: modelData.name
+                        detail: modelData.code
+
+                        BarPill {
+                            value: "Accept"
+                            ariaName: "Accept " + modelData.name
+                            onClicked: root.run(["accept", modelData.id])
+                        }
+
+                        BarPill {
+                            value: "Reject"
+                            ariaName: "Reject " + modelData.name
+                            onClicked: root.run(["reject", modelData.id])
+                        }
+                    }
+                }
+            }
+
+            SyncSection {
+                title: "Offered to you"
+                visible: root.report.offers.length > 0
+
+                Repeater {
+                    model: root.report.offers
+
+                    SyncRow {
+                        required property var modelData
+
+                        icon: "folder_shared"
+                        text: modelData.label
+                        detail: "from " + modelData.deviceName
+
+                        BarPill {
+                            value: "Join"
+                            ariaName: "Join " + modelData.label
+                            onClicked: root.run(["join", modelData.folder])
+                        }
+                    }
+                }
             }
 
             SyncSection {
@@ -135,58 +246,6 @@ BarPill {
                             color: VekronaTheme.c.dangerInk
                             style: VekronaTheme.type.caption
                             text: root.folderStatus(modelData)
-                        }
-                    }
-                }
-            }
-
-            SyncSection {
-                title: "Offered to you"
-                visible: root.report.offers.length > 0
-
-                Repeater {
-                    model: root.report.offers
-
-                    SyncRow {
-                        required property var modelData
-
-                        icon: "folder_shared"
-                        text: modelData.label
-                        detail: "from " + modelData.deviceName
-
-                        BarPill {
-                            value: "Join"
-                            ariaName: "Join " + modelData.label
-                            onClicked: root.run(["join", modelData.folder])
-                        }
-                    }
-                }
-            }
-
-            SyncSection {
-                title: "New devices"
-                visible: root.report.pendingDevices.length > 0
-
-                Repeater {
-                    model: root.report.pendingDevices
-
-                    SyncRow {
-                        required property var modelData
-
-                        icon: "person_add"
-                        text: modelData.name
-                        detail: modelData.code
-
-                        BarPill {
-                            value: "Accept"
-                            ariaName: "Accept " + modelData.name
-                            onClicked: root.run(["accept", modelData.id])
-                        }
-
-                        BarPill {
-                            value: "Reject"
-                            ariaName: "Reject " + modelData.name
-                            onClicked: root.run(["reject", modelData.id])
                         }
                     }
                 }
@@ -231,6 +290,89 @@ BarPill {
                         trailing: "from " + modelData.from
                         ariaName: "Open " + modelData.name + ", from " + modelData.from
                         onClicked: root.open(modelData.path)
+                    }
+                }
+            }
+
+            BarPill {
+                Layout.fillWidth: true
+                Layout.topMargin: VekronaTheme.space2
+                icon: "qr_code"
+                value: "Pair another device…"
+                emphasized: root.pairing
+                ariaName: "Pair another device"
+                onClicked: root.setPairing(!root.pairing)
+            }
+
+            ColumnLayout {
+                visible: root.pairing
+                Layout.fillWidth: true
+                spacing: 0
+
+                Label {
+                    Layout.leftMargin: VekronaTheme.space2
+                    Layout.topMargin: VekronaTheme.space2
+                    style: VekronaTheme.type.caption
+                    color: VekronaTheme.c.inkMuted
+                    text: "This computer"
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: VekronaTheme.space2
+                    Layout.rightMargin: VekronaTheme.space2
+                    style: VekronaTheme.type.mono
+                    font.family: VekronaTheme.fontMono
+                    // Eight groups of seven, four to a line.
+                    text: (root.report.me?.id ?? "").split("-").reduce((lines, group, index) => index === 4 ? lines + "\n" + group : lines + (index === 0 ? "" : "-") + group, "")
+                }
+
+                BarPill {
+                    icon: "content_copy"
+                    value: root.copied ? "Copied" : "Copy ID"
+                    widestValue: ["Copy ID", "Copied"]
+                    ariaName: "Copy this computer's device ID"
+                    onClicked: Exec.copy(root.report.me.id, () => root.copied = true)
+                }
+
+                Image {
+                    visible: root.qrPath !== ""
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: VekronaTheme.space2
+                    // The PNG has 8 pixels to a module of the code; half of it keeps every module 4 whole pixels wide.
+                    Layout.preferredWidth: implicitWidth / 2
+                    Layout.preferredHeight: implicitHeight / 2
+                    cache: false
+                    smooth: false
+                    source: root.qrPath === "" ? "" : "file://" + root.qrPath
+                    Accessible.role: Accessible.Graphic
+                    Accessible.name: "QR code of this computer's device ID"
+                }
+
+                Label {
+                    Layout.leftMargin: VekronaTheme.space2
+                    Layout.topMargin: VekronaTheme.space2
+                    style: VekronaTheme.type.caption
+                    color: VekronaTheme.c.inkMuted
+                    text: "The other device's ID"
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VekronaTheme.space1
+
+                    TextField {
+                        id: pasteField
+                        Layout.fillWidth: true
+                        placeholder: "Paste a device ID"
+                        accessibleName: "Device ID of the other device"
+                        onAccepted: root.pairPasted()
+                    }
+
+                    BarPill {
+                        value: "Pair"
+                        ariaName: "Pair with the pasted device ID"
+                        onClicked: root.pairPasted()
                     }
                 }
             }

@@ -6,11 +6,15 @@ Every call goes to Syncthing's REST API over the unix socket named by <gui><addr
 from the same file. A failure exits 1 with Syncthing's message on stderr.
 
   id                      print this computer's device ID, which another device adds to connect
+  qr                      write the device ID as a QR code (a PNG in the state directory) and print its path, for a phone
+                          to scan
+  pair DEVICE [NAME]      add a device by its ID (as typed or pasted: any case, with or without dashes) and share every
+                          folder with it; it appears under My devices as soon as it adds this computer too
   share [PATH]            share a directory with every device of this computer and print its folder ID (no PATH: the file
                           chooser portal)
   join FOLDER [PATH]      take a folder that another device offers, into PATH or ~/Sync/<its label>
   accept DEVICE           add a device that asked to connect, and share every folder with it
-  reject DEVICE           forget a device's request to connect
+  reject DEVICE           ignore a device that asked to connect, for good: it asks no more
   send DEVICE [FILE...]   drop files into DEVICE's ~/Downloads, now or when it is next online (no FILE: the portal)
   seen                    mark every received file as seen
   watch                   the service: follow Syncthing's events, write sync.json, notify, receive dropped files; exits
@@ -25,6 +29,7 @@ device shares is neither used nor offered."""
 import argparse
 import contextlib
 import dataclasses
+import datetime
 import errno
 import fcntl
 import functools
@@ -62,10 +67,12 @@ EXIT_UNREACHABLE = 75
 EXIT_CONFIG = 78
 # The events that can change what sync.json shows, or deliver a file.
 EVENT_TYPES = ("ConfigSaved", "StateChanged", "FolderSummary", "DeviceConnected", "DeviceDisconnected",
-               "PendingDevicesChanged", "PendingFoldersChanged", "ItemFinished")
+               "PendingDevicesChanged", "PendingFoldersChanged", "DeviceDiscovered", "ItemFinished")
 # What these events change is not in their data: the whole snapshot is read again.
-REREAD_EVENTS = frozenset({"ConfigSaved", "PendingDevicesChanged", "PendingFoldersChanged"})
+REREAD_EVENTS = frozenset({"ConfigSaved", "PendingDevicesChanged", "PendingFoldersChanged", "DeviceDiscovered"})
 NOTIFY_TIMEOUT_SEC = 3600
+QR_PIXELS_PER_MODULE = 8
+QR_QUIET_ZONE_MODULES = 2
 MAX_ARRIVALS = 20
 
 DEVICE_ID = r"[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}"
@@ -375,11 +382,33 @@ class Syncthing:
                       devices=[{"deviceID": device_id} for device_id in device_ids])
         self.request("POST", "/rest/config/folders", body=folder)
 
-    def share_folder_with(self, folder, device_id):
-        if any(device["deviceID"] == device_id for device in folder["devices"]):
+    def share_folder_with(self, folder, *device_ids):
+        shared = {device["deviceID"] for device in folder["devices"]}
+        added = [{"deviceID": device_id} for device_id in dict.fromkeys(device_ids) if device_id not in shared]
+        if added:
+            self.request("PATCH", f"/rest/config/folders/{urllib.parse.quote(folder['id'], safe='')}",
+                         body={"devices": [*folder["devices"], *added]})
+
+    def canonical_device_id(self, text):
+        """The ID as Syncthing writes it, from what a person typed or pasted: Syncthing is the one that knows the format (case,
+        dashes, look-alike characters, the check digits), so it is asked, and its refusal is the message."""
+        candidate = text.strip()
+        if not candidate:
+            raise SyncError("no device ID given")
+        answer = self.request("GET", "/rest/svc/deviceid", query={"id": candidate})
+        if "error" in answer:
+            raise SyncError(answer["error"])
+        return answer["id"]
+
+    def ignore_device(self, device_id, name, address):
+        """Puts the device on the list of devices whose connection attempts Syncthing drops without a word. The REST API
+        takes that list only inside the whole configuration."""
+        config = self.request("GET", "/rest/config")
+        if any(ignored["deviceID"] == device_id for ignored in config["remoteIgnoredDevices"]):
             return
-        self.request("PATCH", f"/rest/config/folders/{urllib.parse.quote(folder['id'], safe='')}",
-                     body={"devices": [*folder["devices"], {"deviceID": device_id}]})
+        config["remoteIgnoredDevices"].append({"deviceID": device_id, "name": name, "address": address,
+                                               "time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+        self.request("PUT", "/rest/config", body=config)
 
 
 # ---- What sync.json shows --------------------------------------------------------------------------------------------
@@ -393,6 +422,9 @@ class Snapshot:
     pending_devices: dict
     pending_folders: dict
     statuses: dict
+    # Local discovery's cache, by device ID: every device that announced itself on the network, configured or not.
+    discovered: dict
+    ignored: frozenset
 
 
 def folder_status(api, folder):
@@ -414,6 +446,8 @@ def read_snapshot(api, my_id):
         connected={device_id for device_id, connection in connections.items() if connection["connected"]},
         pending_devices=api.request("GET", "/rest/cluster/pending/devices"),
         pending_folders=api.request("GET", "/rest/cluster/pending/folders"),
+        discovered=api.request("GET", "/rest/system/discovery"),
+        ignored=frozenset(ignored["deviceID"] for ignored in config["remoteIgnoredDevices"]),
         statuses={folder["id"]: folder_status(api, folder) for folder in folders
                   if not is_drop(folder["id"]) and not folder.get("paused", False)})
 
@@ -471,6 +505,9 @@ def assemble(snapshot):
     folders = [folder_view(folder, snapshot.statuses.get(folder["id"])) for folder in snapshot.folders
                if not is_drop(folder["id"])]
     state, problem = overall(folders)
+    # A nearby device is one that announced itself and that no list knows yet: not this computer, not a device of it, not
+    # one that already asked (it is under New devices), and not one that was rejected.
+    known = names.keys() | snapshot.pending_devices.keys() | snapshot.ignored | {snapshot.my_id}
     # A drop is never offered for a click: the one of the other party is taken without asking, and any other is a device
     # pretending to be one.
     offers = [{"folder": folder_id, "label": offer.get("label") or folder_id, "device": device_id,
@@ -478,7 +515,10 @@ def assemble(snapshot):
               for folder_id, entry in snapshot.pending_folders.items() if not is_drop(folder_id)
               for device_id, offer in entry["offeredBy"].items()]
     return {
-        "state": state, "problem": problem, "folders": folders, "offers": offers,
+        "state": state, "problem": problem, "me": {"id": snapshot.my_id, "code": short_code(snapshot.my_id)},
+        "folders": folders, "offers": offers,
+        "nearby": [{"id": device_id, "code": short_code(device_id), "addresses": announcement["addresses"]}
+                   for device_id, announcement in sorted(snapshot.discovered.items()) if device_id not in known],
         "pendingDevices": [{"id": device_id, "name": device_name(device_id, info.get("name")),
                             "code": short_code(device_id)}
                            for device_id, info in snapshot.pending_devices.items()],
@@ -487,8 +527,8 @@ def assemble(snapshot):
 
 
 def offline_view():
-    return {"state": "offline", "problem": "Syncthing is not running", "folders": [], "offers": [], "pendingDevices": [],
-            "devices": []}
+    return {"state": "offline", "problem": "Syncthing is not running", "me": None, "folders": [], "offers": [],
+            "nearby": [], "pendingDevices": [], "devices": []}
 
 
 class StateStore:
@@ -685,11 +725,13 @@ def join(api, folder_id, path):
     if is_drop(folder_id):
         raise SyncError(f"{folder_id} is a drop, which is taken from the other device of the drop without asking and never joined")
     offer = api.request("GET", "/rest/cluster/pending/folders").get(folder_id)
+    # POST /rest/config/folders replaces a folder of the same ID, so a folder that is here already must not get there.
+    existing = next((folder for folder in api.request("GET", "/rest/config/folders") if folder["id"] == folder_id), None)
+    if existing is not None:
+        join_existing(api, existing, offer, path)
+        return
     if offer is None:
         raise SyncError(f"no device offers the folder {folder_id}")
-    # POST /rest/config/folders replaces a folder of the same ID, so a folder that is joined already must not get there.
-    if any(folder["id"] == folder_id for folder in api.request("GET", "/rest/config/folders")):
-        raise SyncError(f"the folder {folder_id} is joined already")
     label = next(iter(offer["offeredBy"].values())).get("label", "")
     target = os.path.abspath(os.path.expanduser(path)) if path else os.path.join(sync_root(), sanitize_label(label, folder_id))
     try:
@@ -710,23 +752,75 @@ def join(api, folder_id, path):
                    [my_id, *(device["deviceID"] for device in other_devices(api, my_id))])
 
 
-def accept_device(api, device_id):
+def join_existing(api, folder, offer, path):
+    """The folder is here already (the same directory was shared from both sides, or this device left it out of an earlier
+    share): what is missing is only that it is shared with the devices that offer it. Nothing is missing when no device does."""
+    if path and os.path.abspath(os.path.expanduser(path)) != os.path.abspath(os.path.expanduser(folder["path"])):
+        raise SyncError(f"the folder {folder['id']} is here already, at {folder['path']}, not at {path}")
+    if offer is not None:
+        api.share_folder_with(folder, *offer["offeredBy"])
+
+
+def add_device(api, device_id, name):
+    """The one way a device becomes one of this computer's: added with Syncthing's defaults (addresses by discovery), and
+    every folder that is not a drop shared with it. An empty name is filled in by Syncthing once the device connects."""
     config = api.request("GET", "/rest/config")
-    if any(device["deviceID"] == device_id for device in config["devices"]):
-        return
-    pending = api.request("GET", "/rest/cluster/pending/devices").get(device_id)
-    if pending is None:
-        raise SyncError(f"device {device_id} has not asked to connect")
     device = api.request("GET", "/rest/config/defaults/device")
-    device.update(deviceID=device_id, name=device_name(device_id, pending.get("name")))
+    device.update(deviceID=device_id, name=name)
     api.request("POST", "/rest/config/devices", body=device)
     for folder in config["folders"]:
         if not is_drop(folder["id"]):
             api.share_folder_with(folder, device_id)
 
 
+def known_device(api, device_id):
+    return any(device["deviceID"] == device_id for device in api.request("GET", "/rest/config/devices"))
+
+
+def accept_device(api, device_id):
+    if known_device(api, device_id):
+        return
+    pending = api.request("GET", "/rest/cluster/pending/devices").get(device_id)
+    if pending is None:
+        raise SyncError(f"device {device_id} has not asked to connect")
+    add_device(api, device_id, device_name(device_id, pending.get("name")))
+
+
+def pair_device(api, text, name):
+    device_id = api.canonical_device_id(text)
+    if device_id == api.my_id():
+        raise SyncError("that is this computer's own device ID")
+    if known_device(api, device_id):
+        raise SyncError(f"device {device_id} is one of this computer's devices already")
+    add_device(api, device_id, name or "")
+
+
 def reject_device(api, device_id):
+    pending = api.request("GET", "/rest/cluster/pending/devices").get(device_id)
+    if pending is None:
+        raise SyncError(f"device {device_id} has not asked to connect")
+    api.ignore_device(device_id, pending.get("name", ""), pending.get("address", ""))
     api.request("DELETE", "/rest/cluster/pending/devices", query={"device": device_id})
+
+
+def write_qr(device_id):
+    """A QR code of the device ID, as a PNG for the popout to show; the path comes back."""
+    directory = vekrona_cli.vekrona_state_dir()
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, "device-id.png")
+    staged = f"{path}.{secrets.token_hex(4)}.tmp"
+    try:
+        result = subprocess.run(["qrencode", "-t", "PNG", "-s", str(QR_PIXELS_PER_MODULE), "-m", str(QR_QUIET_ZONE_MODULES),
+                                 "-o", staged, "--", device_id], capture_output=True, text=True, timeout=PATHS_TIMEOUT_SEC)
+        if result.returncode != 0:
+            raise SyncError(f"qrencode exited with status {result.returncode}: {result.stderr.strip()}")
+        os.replace(staged, path)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SyncError(f"cannot make the QR code: {exc}")
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(staged)
+    return path
 
 
 def send(api, device_id, files):
@@ -953,6 +1047,14 @@ def command_join(args):
     join(Syncthing.from_config(), args.folder, args.path)
 
 
+def command_qr(args):
+    print(write_qr(Syncthing.from_config().my_id()))
+
+
+def command_pair(args):
+    pair_device(Syncthing.from_config(), args.device, args.name)
+
+
 def command_accept(args):
     accept_device(Syncthing.from_config(), args.device)
 
@@ -997,6 +1099,8 @@ def parse_args(argv):
     commands = parser.add_subparsers(dest="command", required=True)
     for name, handler, arguments in (
             ("id", command_id, []),
+            ("qr", command_qr, []),
+            ("pair", command_pair, [("device", {}), ("name", {"nargs": "?"})]),
             ("share", command_share, [("path", {"nargs": "?"})]),
             ("join", command_join, [("folder", {}), ("path", {"nargs": "?"})]),
             ("accept", command_accept, [("device", {"type": device_id_arg})]),

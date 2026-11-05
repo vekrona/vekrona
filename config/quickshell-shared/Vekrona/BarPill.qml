@@ -8,6 +8,8 @@ Item {
     property string value
     property bool emphasized: false
     property bool filled: false
+    // Turns the icon about its centre, in degrees.
+    property real iconRotation: 0
     property string ariaName
     // Unread count: any count above 0 shows a dot at the icon's top right corner, inside the pill's right padding.
     property int badgeCount: 0
@@ -66,6 +68,7 @@ Item {
             Pictogram {
                 name: root.icon
                 filled: root.filled
+                rotation: root.iconRotation
                 color: root.ink
             }
 

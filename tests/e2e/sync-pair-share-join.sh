@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Another device asks to connect and is accepted from the notification, a shared folder reaches it, and vekrona-sync follows a
-# restart of Syncthing. The other device is a second Syncthing in the guest (tests/e2e/lib/sync-peer.sh).
+# Two devices on one network find each other and share folders, through the bar's Sync popout only. The other device is a second
+# Syncthing in a network namespace of the guest (tests/e2e/lib/sync-peer.sh), connected by a veth pair, so local discovery is what
+# makes them known to each other; it acts as a phone would, and is never told the guest's device ID.
+#   - it shows up under Nearby, Pair asks it to connect, it accepts, and it is under My devices, online;
+#   - "Share a folder…" opens the portal's folder chooser, the folder is offered to the other device, which joins it, and files
+#     sync both ways;
+#   - a folder that the other device shares is under "Offered to you", Join takes it, and files sync both ways;
+#   - a restart of Syncthing restarts the watcher, and syncing and sync.json go on.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -10,81 +16,109 @@ source "$ROOT/tests/lib.sh"
 source "$ROOT/tests/e2e/lib/sync-peer.sh"
 # shellcheck source=lib/bar-widget.sh
 source "$ROOT/tests/e2e/lib/bar-widget.sh"
+# shellcheck source=lib/sync-popout.sh
+source "$ROOT/tests/e2e/lib/sync-popout.sh"
 
 STEP_TIMEOUT_SEC=90
-SHARE_NAME=e2e-sync-share
+OWN_NAME=e2e-sync-own
+PEER_NAME=e2e-sync-theirs
+PEER_ID=
 SHARED_ID=
-# state_is and folder_offered_to_peer run in the child bash of `vekrona-dev until`, which sees only what is exported.
-export SHARE_NAME SHARED_ID
+export OWN_NAME PEER_NAME PEER_ID SHARED_ID
 
-state_json() { vekrona-dev run bash -c 'cat "$HOME/.local/state/vekrona/sync.json"'; }
-# Whether sync.json satisfies a jq test; a state file that is not there yet is a no.
-state_is() { state_json 2>/dev/null | jq -e --arg id "$SHARED_ID" --arg peer "$PEER_ID" "$1" >/dev/null; }
-watcher_active() { vekrona-dev sh systemctl --user is-active --quiet vekrona-sync.service; }
-accept_button() { vekrona-dev see find '^Accept$'; }
-folder_offered_to_peer() { [[ "$(peer_rest GET /rest/cluster/pending/folders | jq --arg id "$SHARED_ID" 'has($id)')" == true ]]; }
-peer_has() { peer test -f "$PEER_HOME/Sync/$SHARE_NAME/$1"; }
-invocation() { vekrona-dev sh systemctl --user show -p InvocationID --value vekrona-sync.service; }
-started_again() { [[ "$(invocation)" != "$1" ]]; }
-popout_shows_up_to_date() { text_shown 'Up to date'; }
-export -f state_json state_is watcher_active accept_button folder_offered_to_peer peer_has invocation started_again popout_shows_up_to_date
-
-remove_share() { vekrona-dev run bash -c 'rm -rf "$HOME/$1"' _ "$SHARE_NAME"; }
-# A click on the pill toggles the popout, so the one a failed run left open is closed by the same click.
-click_sync_pill() { local x y; read -r x y <<<"$(bar_widget center sync)"; [[ -n "${x:-}" ]] || die "the bar must show the sync icon"; vekrona-dev click "$x" "$y"; }
-close_popout() { absent popout_shows_up_to_date || click_sync_pill; }
-cleanup() { run_cleanups close_popout close_notification_centre peer_stop main_forget_peer remove_share; }
+peer_has() { peer test -f "$PEER_HOME/$1"; }
+main_has() { vekrona-dev run bash -c 'test -f "$HOME/$1"' _ "$1"; }
+main_file_is() { main_has "$1" && [[ "$(vekrona-dev run bash -c 'cat "$HOME/$1"' _ "$1")" == "$2" ]]; }
+peer_file_is() { peer_has "$1" && [[ "$(peer cat "$PEER_HOME/$1")" == "$2" ]]; }
+export -f peer_has main_has main_file_is peer_file_is
+folder_id_of() { main_rest GET /rest/config/folders | jq -r --arg label "$1" '.[] | select(.label == $label) | .id'; }
+folder_exists_on_main() { [[ -n "$(folder_id_of "$1")" ]]; }
+export -f folder_id_of folder_exists_on_main
+remove_files() { vekrona-dev run bash -c 'rm -rf "$HOME/$1" "$HOME/Sync/$2"' _ "$OWN_NAME" "$PEER_NAME"; }
+cleanup() { run_cleanups close_chooser close_popout close_notification_centre peer_stop main_forget_peers remove_files; }
 
 vekrona-dev session
 trap cleanup EXIT
 clear_notifications
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watcher_active
-log "ok: vekrona-sync.service runs with the session"
-
+main_forget_peers
+main_syncthing_restart
 peer_start
-peer_asks_main
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.pendingDevices | any(.[]; .id == $peer)'
-log "ok: a device that asks to connect is in sync.json's pendingDevices"
+PEER_ID="$(peer_id)"
+export PEER_ID
+log "ok: the other device runs on its own network"
 
-open_notification_centre
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'wants to connect'
-read -r x y <<<"$(accept_button)"
-[[ -n "${x:-}" ]] || die "the pairing notification must show an Accept button, but OCR found none"
-vekrona-dev click "$x" "$y"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- device_known_on_main
-close_notification_centre
-log "ok: the Accept action of the notification adds the device"
+open_popout
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.nearby | map(.id) == [$peer]'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Syncthing device'
+snap nearby
+log "ok: the other device announces itself on the network and the popout lists it under Nearby"
 
-main_dials_peer
+click_word '^Pair$'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_has_pending_device
+log "ok: Pair makes the other device see a request from the guest, which it learned from nothing but the connection"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '(.devices | any(.[]; .id == $peer and (.connected | not))) and (.nearby == [])'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'Syncthing device'
+snap paired-waiting
+log "ok: the other device leaves Nearby for My devices, offline until it accepts"
+
+peer_accepts_pending_device
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.devices | any(.[]; .id == $peer and .connected)'
-log "ok: the accepted device is online in sync.json's devices"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Online'
+snap my-devices-online
+log "ok: once the other device accepts, My devices lists it as Online"
 
-vekrona-dev run bash -c 'mkdir -p "$HOME/$1" && echo hello >"$HOME/$1/hello.txt"' _ "$SHARE_NAME"
-SHARED_ID="$(vekrona-dev run bash -c 'vekrona-sync share "$HOME/$1"' _ "$SHARE_NAME")"
-[[ -n "$SHARED_ID" ]] || die "vekrona-sync share printed no folder ID"
+vekrona-dev run bash -c 'mkdir -p "$HOME/$1" && echo hello >"$HOME/$1/hello.txt"' _ "$OWN_NAME"
+click_word '^Share$'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- chooser_open 'Share a folder'
+snap chooser
+log "ok: Share a folder opens the portal's folder chooser"
+
+choose_in_home "^$OWN_NAME\$" alt-s
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- folder_exists_on_main "$OWN_NAME"
+SHARED_ID="$(folder_id_of "$OWN_NAME")"
 export SHARED_ID
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- folder_offered_to_peer
-log "ok: a shared folder is offered to the accepted device"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_folder_offered "$SHARED_ID"
+log "ok: the folder chosen in the portal is shared and offered to the other device"
 
-peer vekrona-sync join "$SHARED_ID"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_has hello.txt
-log "ok: after Join the folder's file arrives at ~/Sync/<label>"
+peer_joins_folder "$SHARED_ID" "$OWN_NAME"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_file_is "Sync/$OWN_NAME/hello.txt" hello
+peer bash -c 'echo back >"$1/$2"' _ "$PEER_HOME/Sync/$OWN_NAME" from-peer.txt
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- main_file_is "$OWN_NAME/from-peer.txt" back
+vekrona-dev run bash -c 'echo more >"$HOME/$1/from-guest.txt"' _ "$OWN_NAME"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_file_is "Sync/$OWN_NAME/from-guest.txt" more
+log "ok: after the other device joins, files sync both ways"
 
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.state == "idle" and (.folders | any(.[]; .id == $id and .state == "idle" and .progress == 100))'
-log "ok: sync.json shows the folder up to date"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.state == "idle" and (.folders | any(.[]; .id == $folder and .state == "idle" and .progress == 100))'
+open_popout
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown "$OWN_NAME"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Up to date'
+snap folder-up-to-date
+log "ok: the popout lists the folder as Up to date"
+
+peer bash -c 'mkdir -p "$1" && echo theirs >"$1/theirs.txt"' _ "$PEER_HOME/$PEER_NAME"
+peer_shares_folder "$PEER_NAME"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.offers | any(.[]; .label == "'"$PEER_NAME"'" and .device == $peer)'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Offered to you'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown "$PEER_NAME"
+snap offered-to-you
+log "ok: a folder that the other device shares is under Offered to you, with the device it comes from"
+
+click_word '^Join$'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- main_file_is "Sync/$PEER_NAME/theirs.txt" theirs
+peer bash -c 'echo second >"$1/second.txt"' _ "$PEER_HOME/$PEER_NAME"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- main_file_is "Sync/$PEER_NAME/second.txt" second
+vekrona-dev run bash -c 'echo reply >"$HOME/Sync/$1/reply.txt"' _ "$PEER_NAME"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_file_is "$PEER_NAME/reply.txt" reply
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'Offered to you'
+log "ok: Join takes the offered folder to ~/Sync/<label>, and files sync both ways"
 
 click_sync_pill
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- popout_shows_up_to_date
-log "ok: a click on the Sync pill opens the popout, which lists the folder as Up to date"
-click_sync_pill
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'Up to date'
-log "ok: a second click on the Sync pill closes it"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open
+log "ok: a second click on the Sync pill closes the popout"
 
-before="$(invocation)"
-vekrona-dev sh systemctl --user restart syncthing.service
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- started_again "$before"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watcher_active
-vekrona-dev run bash -c 'echo again >"$HOME/$1/after-restart.txt"' _ "$SHARE_NAME"
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_has after-restart.txt
+main_syncthing_restart
+vekrona-dev run bash -c 'echo again >"$HOME/$1/after-restart.txt"' _ "$OWN_NAME"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_file_is "Sync/$OWN_NAME/after-restart.txt" again
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.state == "idle" and (.devices | any(.[]; .id == $peer and .connected))'
 log "ok: a restart of Syncthing restarts the watcher, and syncing and sync.json go on"
