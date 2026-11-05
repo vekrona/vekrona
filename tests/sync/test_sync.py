@@ -8,6 +8,7 @@ import re
 import shutil
 import socket
 import socketserver
+import sys
 import tempfile
 import threading
 import unittest
@@ -1395,6 +1396,126 @@ class JoinAndSendTest(unittest.TestCase):
         sync.send(api, PEER, [file])
         self.assertEqual(os.listdir(os.path.join(self.tmp.name, "drop", "to", PEER)), ["a.txt"])
         self.assertEqual(api.writes[0][0], "PATCH")
+
+
+class FolderIdTest(unittest.TestCase):
+    FALLBACK = re.compile(r"[0-9a-f]{5}-[0-9a-f]{5}")
+
+    def test_a_name_becomes_lowercase_words_with_dashes(self):
+        for name, expected in (("My Notes", "my-notes"), ("notes", "notes"), ("UPPER Case", "upper-case"), ("a_b.c d", "a-b-c-d"),
+                               ("Café Menü", "cafe-menu"), ("  spaced   out  ", "spaced-out"), ("-x-", "x"), ("a--b", "a-b"),
+                               ("Notes 📒 2024", "notes-2024"), ("2024", "2024")):
+            with self.subTest(name=name):
+                self.assertEqual(sync.suggest_folder_id(f"/home/u/{name}", set()), expected)
+
+    def test_a_name_that_makes_no_id_gets_a_random_one_of_the_old_shape(self):
+        for name in ("", "  ", ".", "..", "  ..  ", "___", "📒", "Фото 2024", "日本", "Notes Фото", "vekrona drop 1", "vekrona-drop"):
+            with self.subTest(name=name):
+                self.assertRegex(sync.suggest_folder_id(f"/home/u/{name}", set()), self.FALLBACK)
+        self.assertRegex(sync.suggest_folder_id("/", set()), self.FALLBACK)
+
+    def test_a_long_name_is_cut_at_the_limit_without_a_dangling_dash(self):
+        suggestion = sync.suggest_folder_id("/home/u/" + "word " * 30, set())
+        self.assertEqual(suggestion, ("word-" * 13)[:64].rstrip("-"))
+        self.assertLessEqual(len(suggestion), 64)
+        self.assertFalse(suggestion.endswith("-"))
+
+    def test_a_name_that_a_folder_here_has_is_numbered_within_the_limit(self):
+        self.assertEqual(sync.suggest_folder_id("/home/u/My Notes", {"my-notes"}), "my-notes-2")
+        self.assertEqual(sync.suggest_folder_id("/home/u/My Notes", {"my-notes", "my-notes-2"}), "my-notes-3")
+        long_name = "x" * 64
+        numbered = sync.suggest_folder_id("/home/u/" + long_name, {long_name})
+        self.assertEqual((len(numbered), numbered.endswith("-2")), (64, True))
+
+    def test_these_ids_are_fine(self):
+        for folder_id in ("my-notes", "lizard", "a", "0", "2024", "a-1-b", "x" * 64, "vekrona-drop", "vekrona"):
+            with self.subTest(folder_id=folder_id):
+                sync.check_folder_id(folder_id, {"other"})
+
+    def test_these_ids_are_refused_with_a_reason_in_plain_words(self):
+        for folder_id, reason in (("", "is empty"), (" ", "may have only"), ("..", "may have only"), (".", "may have only"),
+                                  ("My-Notes", "may have only"), ("my_notes", "may have only"), ("my notes", "may have only"),
+                                  ("über", "may have only"), ("фото", "may have only"), ("📒", "may have only"),
+                                  ("-a", "may have only"), ("a-", "may have only"), ("a--b", "may have only"),
+                                  ("-", "may have only"), ("a\n", "may have only"), ("x" * 65, "has 65 characters, at most 64"),
+                                  ("vekrona-drop-x", "must not start with vekrona-drop-"),
+                                  (sync.drop_folder_id(ME, PEER), "must not start with vekrona-drop-"),
+                                  ("my-notes", "already has a folder with ID my-notes")):
+            with self.subTest(folder_id=folder_id):
+                with self.assertRaisesRegex(sync.SyncError, reason):
+                    sync.check_folder_id(folder_id, {"my-notes"})
+
+
+class ShareTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.notes = os.path.join(self.tmp.name, "My Notes")
+        os.mkdir(self.notes)
+
+    def api(self, folders=()):
+        return FakeSyncthing({
+            "/rest/system/status": {"myID": ME},
+            "/rest/config/folders": list(folders),
+            "/rest/config/devices": [{"deviceID": ME}, {"deviceID": PEER}, {"deviceID": THIRD}],
+            "/rest/config/defaults/folder": {"id": "", "devices": []}})
+
+    def test_a_folder_is_shared_under_the_given_id_with_every_device_and_labelled_with_its_name(self):
+        api = self.api()
+        self.assertEqual(sync.share(api, self.notes, "notes-of-mine"), "notes-of-mine")
+        body = api.writes[0][2]
+        self.assertEqual((api.writes[0][:2], body["id"], body["label"], body["path"]),
+                         (("POST", "/rest/config/folders"), "notes-of-mine", "My Notes", self.notes))
+        self.assertEqual([d["deviceID"] for d in body["devices"]], [ME, PEER, THIRD])
+
+    def test_without_an_id_the_suggestion_is_used(self):
+        api = self.api(folders=[folder("elsewhere", path="/home/u/else")])
+        self.assertEqual(sync.share(api, self.notes), "my-notes")
+        self.assertEqual(api.writes[0][2]["id"], "my-notes")
+
+    def test_an_id_that_is_taken_shares_nothing_and_says_so(self):
+        api = self.api(folders=[folder("my-notes", path="/home/u/else")])
+        with self.assertRaisesRegex(sync.SyncError, "This computer already has a folder with ID my-notes"):
+            sync.share(api, self.notes, "my-notes")
+        self.assertEqual(api.writes, [])
+
+    def test_a_bad_id_shares_nothing(self):
+        for folder_id in ("", "..", "My Notes", "x" * 65, "vekrona-drop-x", "-a", "a--b"):
+            with self.subTest(folder_id=folder_id):
+                api = self.api()
+                with self.assertRaises(sync.SyncError):
+                    sync.share(api, self.notes, folder_id)
+                self.assertEqual(api.writes, [])
+
+    def test_a_path_that_is_no_directory_or_is_shared_already_shares_nothing(self):
+        api = self.api(folders=[folder("n", path=self.notes + "/")])
+        with self.assertRaisesRegex(sync.SyncError, "is shared already"):
+            sync.share(api, self.notes, "other-id")
+        with self.assertRaisesRegex(sync.SyncError, "is not a directory"):
+            sync.share(api, os.path.join(self.tmp.name, "missing"), "other-id")
+        self.assertEqual(api.writes, [])
+
+    def run_cli(self, *argv, folders=()):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "argv", ["vekrona-sync", *argv]), \
+                mock.patch.object(sync.Syncthing, "from_config", return_value=self.api(folders)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                sync.main()
+                code = 0
+            except SystemExit as exit_:
+                code = exit_.code
+        return code, out.getvalue(), err.getvalue()
+
+    def test_the_commands_print_the_id_and_a_bad_one_is_a_nonzero_exit_with_the_reason_on_stderr(self):
+        self.assertEqual(self.run_cli("suggest-id", self.notes), (0, "my-notes\n", ""))
+        self.assertEqual(self.run_cli("share", self.notes, "--id=mine"), (0, "mine\n", ""))
+        code, out, err = self.run_cli("share", self.notes, "--id=Not Good")
+        self.assertEqual((code != 0, out), (True, ""))
+        self.assertIn("may have only lowercase letters", err)
+        code, out, err = self.run_cli("share", self.notes, "--id=-x")
+        self.assertEqual((code != 0, out), (True, ""))
+        self.assertIn("may have only lowercase letters", err)
 
 
 def syncthing_judging_ids(query):

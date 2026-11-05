@@ -4,8 +4,8 @@
 # makes them known to each other; it acts as a phone would, and is never told the guest's device ID.
 #   - it shows up under Nearby, Pair asks it to connect, it accepts, and it is under My devices, online, with the line that it
 #     shares no folder with this computer until a folder lists it;
-#   - "Share a folder…" opens the portal's folder chooser, the folder is offered to the other device, which joins it, and files
-#     sync both ways;
+#   - "Share a folder…" opens the portal's folder chooser, the popout comes back to confirm the folder's ID, Enter offers the
+#     folder to the other device, which joins it, and files sync both ways;
 #   - a folder that the other device shares is under "Offered to you", Join takes it, and files sync both ways;
 #   - a restart of Syncthing restarts the watcher, and syncing and sync.json go on.
 set -euo pipefail
@@ -79,11 +79,15 @@ snap chooser
 log "ok: Share a folder opens the portal's folder chooser"
 
 choose_in_home "^$OWN_NAME\$" alt-s
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Folder ID'
+snap confirm-id
+vekrona-dev key enter
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- folder_exists_on_main "$OWN_NAME"
 SHARED_ID="$(folder_id_of "$OWN_NAME")"
 export SHARED_ID
+[[ "$SHARED_ID" == "$OWN_NAME" ]] || die "the folder's ID must be its name in lowercase with dashes ($OWN_NAME), not $SHARED_ID"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_folder_offered "$SHARED_ID"
-log "ok: the folder chosen in the portal is shared and offered to the other device"
+log "ok: the folder chosen in the portal is shared under the ID it was suggested, and offered to the other device"
 
 peer_joins_folder "$SHARED_ID" "$OWN_NAME"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_file_is "Sync/$OWN_NAME/hello.txt" hello

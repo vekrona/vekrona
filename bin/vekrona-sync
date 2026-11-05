@@ -10,8 +10,15 @@ from the same file. A failure exits 1 with Syncthing's message on stderr.
                           to scan
   pair DEVICE [NAME]      add a device by its ID (as typed or pasted: any case, with or without dashes) and share every
                           folder with it; it appears under My devices as soon as it adds this computer too
-  share [PATH]            share a directory with every device of this computer and print its folder ID (no PATH: the file
-                          chooser portal)
+  choose-folder           open the file chooser portal and print the directory the user picks (nothing when it is cancelled)
+  suggest-id PATH         print the folder ID that share would give PATH: its name in lowercase with dashes, "my-notes" for
+                          "My Notes", with accents folded ("Café" is "cafe"); a name with letters that ASCII cannot spell
+                          ("Фото 2024") or nothing usable ("..") gets a random ID, because half a name would mislead; a name
+                          taken by a folder here gets -2, -3, ...
+  share PATH [--id ID]    share a directory with every device of this computer under the folder ID ID (lowercase letters
+                          and digits, single dashes between them, at most 64 characters) and print the ID; without --id it
+                          is the one suggest-id prints. A folder's ID cannot change once shared, and the same ID on two
+                          devices is the same folder
   join FOLDER [PATH]      take a folder that another device offers, into PATH or ~/Sync/<its label>
   accept DEVICE           add a device that asked to connect, and share every folder with it
   reject DEVICE           ignore a device that asked to connect, for good: it asks no more
@@ -122,6 +129,9 @@ class MissingTool(SyncError):
 
 # The stage that installs the desktop packages, which every external tool of vekrona-sync belongs to.
 PACKAGES_STAGE = 30
+
+FOLDER_ID_MAX = 64
+FOLDER_ID_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
 def run_tool(purpose, argv, **kwargs):
@@ -1030,15 +1040,72 @@ def ensure_drop_folder(api, my_id, other_id):
     return os.path.expanduser(existing["path"])
 
 
-def share(api, path):
+def kebab_case(name):
+    """The name in lowercase letters and digits with single dashes between the words, or None when that would not stand for it:
+    a letter or digit that ASCII cannot spell (Cyrillic, CJK) would be dropped and leave half a name, so none is made. Accents
+    are folded ("Café" is "cafe"); symbols and emoji count as a separator."""
+    words = []
+    for char in unicodedata.normalize("NFKD", name):
+        if unicodedata.combining(char):
+            continue
+        if not char.isascii() and char.isalnum():
+            return None
+        words.append(char.lower() if char.isascii() else " ")
+    kept = re.sub(r"[^a-z0-9]+", "-", "".join(words)).strip("-")[:FOLDER_ID_MAX].rstrip("-")
+    return kept or None
+
+
+def random_folder_id():
+    token = secrets.token_hex(5)
+    return f"{token[:5]}-{token[5:]}"
+
+
+def suggest_folder_id(directory, taken):
+    """The ID that a directory is shared under unless the user types another: its name in kebab-case, numbered when a folder
+    here has that ID already, and random when the name does not make one."""
+    name = kebab_case(os.path.basename(directory))
+    # "vekrona-drop" itself is a fine ID, but the second folder of that name would be vekrona-drop-2, a drop's.
+    if name is None or is_drop(f"{name}-"):
+        return random_folder_id()
+    candidate, number = name, 1
+    while candidate in taken:
+        number += 1
+        suffix = f"-{number}"
+        candidate = name[:FOLDER_ID_MAX - len(suffix)].rstrip("-") + suffix
+    return candidate
+
+
+def check_folder_id(folder_id, taken):
+    if folder_id == "":
+        raise SyncError("The folder ID is empty")
+    if is_drop(folder_id):
+        raise SyncError(f"The folder ID must not start with {DROP_PREFIX}, which is for the hidden folders of Send file")
+    if len(folder_id) > FOLDER_ID_MAX:
+        raise SyncError(f"The folder ID has {len(folder_id)} characters, at most {FOLDER_ID_MAX} are allowed")
+    if not FOLDER_ID_RE.fullmatch(folder_id):
+        raise SyncError("The folder ID may have only lowercase letters a to z and digits, with single dashes between "
+                        "them, such as my-notes")
+    if folder_id in taken:
+        raise SyncError(f"This computer already has a folder with ID {folder_id}")
+
+
+def folder_directory(path, folders):
     directory = os.path.abspath(os.path.expanduser(path))
     if not os.path.isdir(directory):
         raise SyncError(f"{directory} is not a directory")
-    if any(os.path.expanduser(folder["path"]).rstrip("/") == directory for folder in api.request("GET", "/rest/config/folders")):
+    if any(os.path.expanduser(folder["path"]).rstrip("/") == directory for folder in folders):
         raise SyncError(f"{directory} is shared already")
+    return directory
+
+
+def share(api, path, folder_id=None):
+    folders = api.request("GET", "/rest/config/folders")
+    directory = folder_directory(path, folders)
+    taken = {folder["id"] for folder in folders}
+    if folder_id is None:
+        folder_id = suggest_folder_id(directory, taken)
+    check_folder_id(folder_id, taken)
     my_id = api.my_id()
-    token = secrets.token_hex(5)
-    folder_id = f"{token[:5]}-{token[5:]}"
     api.add_folder(folder_id, os.path.basename(directory) or directory, directory,
                    [my_id, *(device["deviceID"] for device in other_devices(api, my_id))])
     return folder_id
@@ -1427,10 +1494,19 @@ def command_id(args):
     print(Syncthing.from_config().my_id())
 
 
+def command_choose_folder(args):
+    for path in choose_paths("Share a folder", directory=True):
+        print(path)
+
+
+def command_suggest_id(args):
+    api = Syncthing.from_config()
+    folders = api.request("GET", "/rest/config/folders")
+    print(suggest_folder_id(folder_directory(args.path, folders), {folder["id"] for folder in folders}))
+
+
 def command_share(args):
-    path = args.path or next(iter(choose_paths("Share a folder", directory=True)), None)
-    if path is not None:
-        print(share(Syncthing.from_config(), path))
+    print(share(Syncthing.from_config(), args.path, args.folder_id))
 
 
 def command_join(args):
@@ -1497,7 +1573,9 @@ def parse_args(argv):
             ("id", command_id, []),
             ("qr", command_qr, []),
             ("pair", command_pair, [("device", {}), ("name", {"nargs": "?"})]),
-            ("share", command_share, [("path", {"nargs": "?"})]),
+            ("choose-folder", command_choose_folder, []),
+            ("suggest-id", command_suggest_id, [("path", {})]),
+            ("share", command_share, [("path", {}), ("--id", {"dest": "folder_id"})]),
             ("join", command_join, [("folder", {}), ("path", {"nargs": "?"})]),
             ("accept", command_accept, [("device", {"type": device_id_arg})]),
             ("reject", command_reject, [("device", {"type": device_id_arg})]),

@@ -318,11 +318,24 @@ vekrona-sync accept DEVICE_ID
 vekrona-sync reject DEVICE_ID
 ```
 
-**Share a folder.** "Share a folder…" in the Sync list opens a folder chooser. The folder then shows up on your other devices as an
-offer, and stays where it is on this computer.
+**Share a folder.** "Share a folder…" in the Sync list opens a folder chooser, and then the list comes back with the folder's ID to
+confirm: Enter or Share offers the folder to your other devices, Esc or Cancel shares nothing. The folder stays where it is on this
+computer.
+
+The ID is suggested from the folder's name in lowercase with dashes (`My Notes` is `my-notes`; accents are folded, `Café` is
+`cafe`; a name that already has a folder here gets `-2`). A name with letters that ASCII cannot spell (`Фото 2024`), or none
+(`..`), gets a random ID such as `3fa9c-01b7e`, because half a name would mislead, and you can type your own. An ID has lowercase
+letters and digits with single dashes between them, at most 64 characters, and does not start with `vekrona-drop-`; a refused ID
+says why under the field.
+
+Choose the ID with care. It is fixed once the folder is shared, because Syncthing cannot rename it. The ID is how devices tell
+that they mean the same folder: when two devices share a folder under the same ID, it is one folder, and their files merge. The label (the folder's name on screen, which defaults to the directory's name) is what can differ between devices.
 
 ```
+vekrona-sync choose-folder
+vekrona-sync suggest-id ~/Documents/notes
 vekrona-sync share ~/Documents/notes
+vekrona-sync share ~/Documents/notes --id notes
 ```
 
 **Join a folder.** A folder another device shares shows under "Offered to you" and in a notification. Join puts it at

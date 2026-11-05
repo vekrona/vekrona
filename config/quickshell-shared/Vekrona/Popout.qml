@@ -9,6 +9,9 @@ PanelWindow {
 
     required property Item anchorItem
     property bool open: false
+    // Takes the keyboard without a click on it, for a popout that comes up on its own and asks for typing; by default it
+    // gets the keyboard where the user clicks it.
+    property bool exclusiveKeyboard: false
     default property alias content: body.data
 
     signal dismissed
@@ -20,7 +23,7 @@ PanelWindow {
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "vekrona-popout"
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+    WlrLayershell.keyboardFocus: exclusiveKeyboard ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.OnDemand
     anchors.top: true
     anchors.left: true
     margins.top: VekronaTheme.sizeBar

@@ -58,6 +58,11 @@ BarPill {
     // Copy ID and the field below it work without the code.
     property string qrFailure: ""
     property bool copied: false
+    // The directory that the user chose to share, "" while none waits for its folder ID to be confirmed (the popout shows the
+    // confirmation row while it is set), and why sharing it failed.
+    property string sharePath: ""
+    property string shareFailure: ""
+    readonly property string shareName: sharePath.split("/").filter(part => part !== "").pop() ?? sharePath
     // The turn of the icon while syncing, in steps of a quarter of the half turn after which the glyph looks the same: one
     // timer wakeup per step, four a second, and nothing at all while no sync runs (an animation would redraw every frame) or
     // nobody is there to see it (Presence.qml: the screen is locked or off).
@@ -110,6 +115,33 @@ BarPill {
         }, reason => failure = reason);
     }
 
+    // The portal's folder chooser, which opens over nothing, so the popout closes first. The popout then comes back for the
+    // folder ID, set directly and not toggled: it is closed now, and a click on the pill meanwhile has its own say.
+    function chooseFolder(): void {
+        bar.openPopout = null;
+        Exec.runOr(["vekrona-sync", "choose-folder"], stdout => {
+            const path = stdout.replace(/\n$/, "");
+            if (path !== "")
+                confirmShare(path);
+        }, reason => Exec.check(["notify-send", "-a", "vekrona", "Sync", reason]));
+    }
+
+    // The popout comes back with the suggested ID in the field, which has the keyboard: Enter shares and Esc cancels.
+    function confirmShare(path: string): void {
+        Exec.runOr(["vekrona-sync", "suggest-id", path], stdout => {
+            shareFailure = "";
+            sharePath = path;
+            idField.text = stdout.trim();
+            bar.openPopout = popout;
+            idField.forceActiveFocus();
+        }, reason => Exec.check(["notify-send", "-a", "vekrona", "Sync", reason]));
+    }
+
+    function shareConfirmed(): void {
+        shareFailure = "";
+        Exec.runOr(["vekrona-sync", "share", "--id=" + idField.text, sharePath], stdout => sharePath = "", reason => shareFailure = reason);
+    }
+
     function open(path: string): void {
         bar.openPopout = null;
         Exec.detached(["xdg-open", path], Exec.home);
@@ -155,9 +187,12 @@ BarPill {
         id: popout
         anchorItem: root
         open: root.bar.openPopout === popout
+        exclusiveKeyboard: root.sharePath !== ""
         onDismissed: root.bar.openPopout = null
         onOpenChanged: {
             root.failure = "";
+            if (!open)
+                root.sharePath = "";
             root.pairing = false;
             root.nearbyReachable = [];
             if (open) {
@@ -443,13 +478,67 @@ BarPill {
                 }
             }
 
+            SyncSection {
+                title: "New folder"
+                visible: root.sharePath !== ""
+
+                SyncRow {
+                    icon: "folder"
+                    text: root.shareName
+                }
+
+                Label {
+                    Layout.leftMargin: VekronaTheme.space2
+                    style: VekronaTheme.type.caption
+                    color: VekronaTheme.c.inkMuted
+                    text: "Folder ID, fixed once shared"
+                }
+
+                TextField {
+                    id: idField
+                    Layout.fillWidth: true
+                    placeholder: "Folder ID"
+                    accessibleName: "Folder ID"
+                    onAccepted: root.shareConfirmed()
+                }
+
+                Label {
+                    visible: root.shareFailure !== ""
+                    Layout.fillWidth: true
+                    Layout.leftMargin: VekronaTheme.space2
+                    Layout.topMargin: VekronaTheme.space1
+                    wrapMode: Text.Wrap
+                    color: VekronaTheme.c.dangerInk
+                    style: VekronaTheme.type.body
+                    text: root.shareFailure
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: VekronaTheme.space1
+
+                    BarPill {
+                        value: "Share"
+                        emphasized: true
+                        ariaName: "Share the folder under this ID"
+                        onClicked: root.shareConfirmed()
+                    }
+
+                    BarPill {
+                        value: "Cancel"
+                        ariaName: "Do not share the folder"
+                        onClicked: root.sharePath = ""
+                    }
+                }
+            }
+
             BarPill {
                 Layout.fillWidth: true
                 Layout.topMargin: VekronaTheme.space2
                 icon: "create_new_folder"
                 value: "Share a folder…"
                 ariaName: "Share a folder"
-                onClicked: root.runClosing(["share"])
+                onClicked: root.chooseFolder()
             }
 
             Label {
