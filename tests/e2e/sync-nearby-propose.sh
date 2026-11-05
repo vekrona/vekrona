@@ -6,7 +6,8 @@
 #   - Pair in the notification (clicked by OCR) sends the request, a notification says "Pair request sent to <code>", the other
 #     device accepts, the popout lists it Online under My devices, and a notification says that it is now one of the devices;
 #   - another device that appears and gets Not now is not proposed again when it is announced again (its Syncthing restarts,
-#     which Syncthing reports as a new discovery), and stays under Nearby with its dot until the popout is opened;
+#     which Syncthing reports as a new discovery, and the watcher's "heard" in sync.json says when it has seen that), and stays
+#     under Nearby with its dot until the popout is opened;
 #   - a third device that gets Ignore is never Nearby and never proposed again.
 set -euo pipefail
 
@@ -77,8 +78,13 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- proposed_in_centre
 click_word '^Not$'
 close_notification_centre
 clear_notifications
+HEARD_BEFORE="$(state_json | jq --arg peer "$PEER_ID" '.nearby[] | select(.id == $peer) | .heard')"
+[[ "$HEARD_BEFORE" =~ ^[0-9]+$ ]] || die "sync.json must say when the device was heard, not '$HEARD_BEFORE'"
 peer_kill syncthing
 peer_syncthing_start
+# The restarted Syncthing is a new discovery: the watcher has handled it once sync.json says it heard the device again, so the
+# window in which no question may come starts after the question would have come.
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is "any(.nearby[]; .id == \$peer and .heard > $HEARD_BEFORE)"
 open_notification_centre
 stays_absent "$RETRY_WINDOW_SEC" proposed_in_centre || die "a device that got Not now must not be proposed again when it is announced again"
 close_notification_centre
