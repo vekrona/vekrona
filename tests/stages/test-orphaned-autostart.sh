@@ -11,8 +11,8 @@ mkdir "$work/bin"
 
 # systemctl stub for the user manager. list-units prints $LISTING once daemon-reload has run (the generators rerun then and the
 # removed desktop entries turn their units not-found) and $STALE_LISTING before (the units still read loaded); LIST_FAIL and
-# RELOAD_FAIL make the lister and the reload fail. The user manager's ControlGroup is the one in $CGROUP_PATH; stop and kill fail
-# like the host's user manager did for an orphan it held as not loaded (exit 5).
+# RELOAD_FAIL make the lister and the reload fail, RESET_FAIL makes reset-failed fail. The user manager's ControlGroup is the one in
+# $CGROUP_PATH; stop and kill fail like the host's user manager did for an orphan it held as not loaded (exit 5).
 write_fake "$work/bin/systemctl" <<'FAKE'
 #!/usr/bin/env bash
 echo "systemctl $*" >> "$STUB_LOG"
@@ -21,6 +21,7 @@ case "$*" in
   "--user list-units "*)
     [[ -z "${LIST_FAIL-}" ]] || exit 1
     if [[ -e "$RELOADED" ]]; then cat "$LISTING"; else cat "$STALE_LISTING"; fi ;;
+  "--user reset-failed "*) [[ -z "${RESET_FAIL-}" ]] || exit 1 ;;
   "show -p ControlGroup --value user@"*) echo "$CGROUP_PATH" ;;
   "--user stop "* | "--user kill "*) echo "Failed to $2 unit ${*: -1}: Unit ${*: -1} not loaded." >&2; exit 5 ;;
   *) exit 2 ;;
@@ -57,16 +58,23 @@ app-com.onepassword.OnePassword@autostart.service                loaded    activ
 app-nm\x2dapplet@autostart.service                               not-found active   running app-nm\x2dapplet@autostart.service
 app-gnome\x2dkeyring\x2dssh@autostart.service                    loaded    inactive dead    SSH Key Agent
 app-vboxclient@autostart.service                                 not-found inactive dead    app-vboxclient@autostart.service
+app-sealertauto@autostart.service                                not-found failed   failed  app-sealertauto@autostart.service
+app-geoclue\x2ddemo@autostart.service                            loaded    failed   failed  Geoclue Demo agent
 LIST
 # What the manager still shows after network-manager-applet is removed without any user unit file going with it: its unit is
 # loaded until something reloads the manager. Each case below that starts without $RELOADED proves the reload.
 sed 's/ not-found / loaded    /' "$LISTING" > "$STALE_LISTING"
 
 declare -a orphans
-read_orphaned_autostart_units orphans
+read_gone_autostart_units orphans active
 [[ "$(printf '%s\n' "${orphans[@]}")" == $'app-blueman@autostart.service\napp-nm\\x2dapplet@autostart.service' ]] ||
-  die "read_orphaned_autostart_units did not list exactly the not-found active units: ${orphans[*]}"
+  die "read_gone_autostart_units did not list exactly the not-found active units: ${orphans[*]}"
 log "ok: only a not-found unit that is active is an orphan, read after the user manager reloaded"
+declare -a failed_units
+read_gone_autostart_units failed_units failed
+[[ "${failed_units[*]}" == app-sealertauto@autostart.service ]] ||
+  die "read_gone_autostart_units did not list exactly the not-found failed units: ${failed_units[*]}"
+log "ok: a failed unit whose desktop entry still exists is not listed as gone"
 
 BLUEMAN='app-blueman@autostart.service'
 NM='app-nm\x2dapplet@autostart.service'
@@ -80,6 +88,10 @@ killed app.slice "$BLUEMAN" || die "the cgroup of $BLUEMAN was not killed"
 killed app.slice "$NM" || die "the cgroup of $NM was not killed"
 [[ -z "$(<"$manager/app.slice/app-com.onepassword.OnePassword@autostart.service/cgroup.kill")" ]] || die "a unit that is not an orphan was killed"
 log "ok: every orphan's cgroup is killed and nothing else, although systemctl refuses to stop or kill an orphan"
+[[ "$(grep -c 'reset-failed' "$STUB_LOG")" == 1 ]] || die "the failed state must be reset once: $(<"$STUB_LOG")"
+grep -qxF 'systemctl --user reset-failed app-sealertauto@autostart.service app-blueman@autostart.service app-nm\x2dapplet@autostart.service' "$STUB_LOG" ||
+  die "reset-failed must name the failed gone unit and the killed orphans, and no other: $(grep reset-failed "$STUB_LOG")"
+log "ok: the units killed now and the ones an earlier run left failed are reset by name"
 
 grep -q "killing pid $$: " "$work/err" || die "the command line of an orphan's process was not logged: $(<"$work/err")"
 grep -q 'pid 999999999 already exited' "$work/err" || die "a process that is gone was not reported: $(<"$work/err")"
@@ -143,7 +155,19 @@ log "ok: a missing cgroup tree is an error"
 : > "$LISTING"
 stop_orphaned_autostart_units 2>/dev/null
 ! grep -q 'ControlGroup' "$STUB_LOG" || die "the cgroups were read with no orphan: $(<"$STUB_LOG")"
-log "ok: without an orphan nothing is read or killed"
+! grep -q 'reset-failed' "$STUB_LOG" || die "reset-failed with no unit would reset every failed unit of the manager: $(<"$STUB_LOG")"
+log "ok: without an orphan nothing is read or killed, and the failed state of no unit is reset"
+
+printf 'app-sealertauto@autostart.service not-found failed failed app-sealertauto@autostart.service\n' > "$LISTING"
+: > "$STUB_LOG"
+stop_orphaned_autostart_units 2>/dev/null
+! grep -q 'ControlGroup' "$STUB_LOG" || die "the cgroups were read with no orphan: $(<"$STUB_LOG")"
+grep -qxF 'systemctl --user reset-failed app-sealertauto@autostart.service' "$STUB_LOG" || die "a failed unit without an orphan was not reset: $(<"$STUB_LOG")"
+log "ok: a unit that an earlier run left failed is reset although no orphan runs"
+if (RESET_FAIL=1 stop_orphaned_autostart_units) 2>"$work/err"; then die "stage 30 went on while reset-failed failed"; fi
+grep -q 'cannot reset the failed state of app-sealertauto@autostart.service' "$work/err" || die "a failing reset-failed did not say so: $(<"$work/err")"
+log "ok: a failing reset-failed is an error"
+: > "$LISTING"
 
 # Stage 70 calls the check inside `if`, where set -e is off: a reload or lister failure must still end the run, not read as "no orphans".
 for failure in RELOAD_FAIL:"cannot reload the user manager" LIST_FAIL:"cannot list the user's autostart units"; do
