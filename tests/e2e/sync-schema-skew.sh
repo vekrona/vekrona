@@ -19,7 +19,6 @@ source "$ROOT/tests/e2e/lib/sync-popout.sh"
 STEP_TIMEOUT_SEC=90
 # The layout from before sync.json had a schema and a nearby list.
 OLD_LAYOUT='{"state": "idle", "problem": null, "folders": [], "offers": [], "pendingDevices": [], "devices": [], "arrivals": []}'
-export OLD_LAYOUT
 
 old_layout_written() { vekrona-dev run bash -c 'printf %s "$1" >"$HOME/.local/state/vekrona/sync.json"' _ "$OLD_LAYOUT"; }
 schema_errors() { shell_log_count 'sync.json has schema'; }
