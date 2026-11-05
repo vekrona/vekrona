@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A file sent to a device that is offline waits in their shared drop folder, and lands in that device's Downloads when it comes
 # online: the first is chosen with "Send file…" of the Sync popout in the portal's file chooser, a second of the same name becomes
-# "name (2)", and the drop folders are empty on both sides at the end. The other device is a second Syncthing in a network
+# "name (2)", and the drop folders are empty on both sides at the end, with no ignore line left in the sender's drop. The other device is a second Syncthing in a network
 # namespace of the guest (tests/e2e/lib/sync-peer.sh), paired through discovery, with its own vekrona-sync watcher.
 set -euo pipefail
 
@@ -30,7 +30,8 @@ peer_inbox_empty() { inbox_empty "$PEER_HOME" "$PEER_ID"; }
 queued_on_main() { vekrona-dev run bash -c 'shopt -s nullglob; files=("$1"/.local/share/vekrona-sync/drops/vekrona-drop-*/to/"$2"/"$3"); ((${#files[@]} == 1))' _ "$MAIN_HOME" "$PEER_ID" "$1"; }
 peer_downloaded() { [[ "$(peer cat "$PEER_HOME/Downloads/$1")" == "$2" ]]; }
 peer_state_has_arrivals() { [[ "$(peer cat "$PEER_HOME/.local/state/vekrona/sync.json" | jq -r '[.arrivals[].name] | sort | join(",")')" == "$1" ]]; }
-export -f inbox_empty main_inbox_empty peer_inbox_empty queued_on_main peer_downloaded peer_state_has_arrivals
+main_stignore_empty() { [[ -z "$(main_rest GET "/rest/db/ignores?folder=$DROP_ID" | jq -r '.ignore[]')" ]]; }
+export -f main_stignore_empty inbox_empty main_inbox_empty peer_inbox_empty queued_on_main peer_downloaded peer_state_has_arrivals
 
 write_file() { vekrona-dev run bash -c 'mkdir -p "$HOME/$1" && printf %s "$3" >"$HOME/$1/$2"' _ "$SEND_DIR" "$1" "$2"; }
 remove_files() { vekrona-dev run bash -c 'rm -rf "$HOME/$1" "$HOME/$2"' _ "$SEND_DIR" "$POPOUT_FILE"; }
@@ -90,6 +91,13 @@ log "ok: a second file of the same name lands as 'one (2).txt' and the first is 
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- main_inbox_empty
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_inbox_empty
 log "ok: the drop folders are empty on both sides"
+
+# A receiver that moves the files out gives the sender's watcher nothing to clean up that stays: whichever of the receiver's
+# deletion and the watcher's ignore line came first, no line of an ignored file is left in the end.
+DROP_ID="$(main_rest GET /rest/config/folders | jq -r '.[] | select(.id | startswith("vekrona-drop-")) | .id')"
+export DROP_ID
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- main_stignore_empty
+log "ok: the .stignore of the drop holds no line once the receiver has moved every file out"
 
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_state_has_arrivals "$POPOUT_FILE,one (2).txt,one.txt"
 open_notification_centre

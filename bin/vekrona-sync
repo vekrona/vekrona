@@ -25,9 +25,11 @@ from the same file. A failure exits 1 with Syncthing's message on stderr.
   offline                 write sync.json as "Syncthing is not running"; the service's ExecStopPost
 
 A drop is a folder vekrona-drop-<a>-<b> (the full IDs of the two devices, sorted) that only those two share. The sender
-puts files in to/<receiver>/, and the receiver's watch moves them out into ~/Downloads, which syncs the deletion back. A peer
-controls what its drop folders hold, so every step into to/<receiver>/ refuses a link, and a drop folder that a third
-device shares is neither used nor offered."""
+puts files in to/<receiver>/, and the receiver's watch moves them out into ~/Downloads, which syncs the deletion back. A receiver
+that keeps the file (Android, macOS) gets it cleaned from the sender's copy by the sender's watch instead: it ignores the path
+in the drop's .stignore, deletes the file, and drops the line when the receiver deletes its copy (see "Cleaning up what was
+sent"). A peer controls what its drop folders hold, so every step into to/<receiver>/ refuses a link, and a drop folder that a
+third device shares is neither used nor offered."""
 import argparse
 import concurrent.futures
 import contextlib
@@ -98,6 +100,10 @@ class SyncError(Exception):
 
 class Unreachable(SyncError):
     """Syncthing does not answer on its socket (not running yet, restarting, or gone)."""
+
+
+class NotFound(SyncError):
+    """Syncthing answered HTTP 404."""
 
 
 class ConfigError(SyncError):
@@ -246,12 +252,12 @@ def open_inbox(drop_path, device_id, create):
             os.close(fd)
 
 
-def place_without_overwriting(source_fd, source_name, directory_fd, name):
+def place_without_overwriting(source_fd, source_name, directory_fd, name, taken=frozenset()):
     """Links the file source_name of source_fd into directory_fd as name, or as `name (2)`, `name (3)` before the extension
-    while those exist, and returns the name it got. The source stays. A directory on another filesystem gets a copy, made
-    under a temp name first."""
+    while those exist or are in `taken` (names that must not be used although no file has them), and returns the name it got.
+    The source stays. A directory on another filesystem gets a copy, made under a temp name first."""
     try:
-        return link_unused(source_fd, source_name, directory_fd, name)
+        return link_unused(source_fd, source_name, directory_fd, name, taken)
     except OSError as exc:
         if exc.errno != errno.EXDEV:
             raise
@@ -259,13 +265,15 @@ def place_without_overwriting(source_fd, source_name, directory_fd, name):
     with os.fdopen(os.open(source_name, FILE_FLAGS, dir_fd=source_fd), "rb") as source:
         stage_copy(source, directory_fd, staged)
     try:
-        return link_unused(directory_fd, staged, directory_fd, name)
+        return link_unused(directory_fd, staged, directory_fd, name, taken)
     finally:
         os.unlink(staged, dir_fd=directory_fd)
 
 
-def link_unused(source_fd, source_name, directory_fd, name):
+def link_unused(source_fd, source_name, directory_fd, name, taken):
     for candidate in candidate_names(name):
+        if db_name(candidate) in taken:
+            continue
         try:
             os.link(source_name, candidate, src_dir_fd=source_fd, dst_dir_fd=directory_fd, follow_symlinks=False)
         except FileExistsError:
@@ -381,8 +389,9 @@ class Syncthing:
         finally:
             connection.close()
         if not 200 <= response.status < 300:
-            raise SyncError(f"Syncthing refused {method} {path} with HTTP {response.status}: "
-                            f"{data.decode(errors='replace').strip()}")
+            refusal = SyncError if response.status != 404 else NotFound
+            raise refusal(f"Syncthing refused {method} {path} with HTTP {response.status}: "
+                          f"{data.decode(errors='replace').strip()}")
         if not data.strip():
             return None
         try:
@@ -415,6 +424,32 @@ class Syncthing:
         if added:
             self.request("PATCH", f"/rest/config/folders/{urllib.parse.quote(folder['id'], safe='')}",
                          body={"devices": [*folder["devices"], *added]})
+
+    def ignore_lines(self, folder_id):
+        """The lines of the .stignore of a folder."""
+        answer = self.request("GET", "/rest/db/ignores", query={"folder": folder_id})
+        if answer["error"]:
+            raise SyncError(f"Syncthing cannot read the ignore patterns of {folder_id}: {answer['error']}")
+        return answer["ignore"] or []
+
+    def set_ignore_lines(self, folder_id, lines):
+        """Replaces the .stignore of a folder. Syncthing writes what it is given, and a line it cannot parse stops the whole
+        folder, so the answer's error is checked, and the old lines are written back when there is one."""
+        before = self.ignore_lines(folder_id)
+        answer = self.request("POST", "/rest/db/ignores", query={"folder": folder_id}, body={"ignore": lines})
+        if answer["error"]:
+            self.request("POST", "/rest/db/ignores", query={"folder": folder_id}, body={"ignore": before})
+            raise SyncError(f"Syncthing refused the ignore patterns of {folder_id}, which are as before: {answer['error']}")
+
+    def file_entry(self, folder_id, path):
+        """Syncthing's view of a file of a folder: its local and global entry, and who has the global version; None when the
+        index has no such file."""
+        try:
+            return self.request("GET", "/rest/db/file", query={"folder": folder_id, "file": path})
+        except NotFound as exc:
+            if "No such object in the index" in str(exc):
+                return None
+            raise
 
     def canonical_device_id(self, text):
         """The ID as Syncthing writes it, from what a person typed or pasted: Syncthing is the one that knows the format (case,
@@ -692,6 +727,131 @@ def receive(drop_path, my_id, sender):
             os.close(downloads_fd)
 
 
+# ---- Cleaning up what was sent ---------------------------------------------------------------------------------------
+#
+# A vekrona receiver moves a file out of to/<its ID>/ into Downloads, and Syncthing carries that deletion back to the sender,
+# which empties its copy. Android and macOS clients leave the file in the drop folder, so the sender's copy would stay for good,
+# and deleting it would delete it from the receiver too. What does not propagate is an *ignored* file: when a path matches a
+# pattern of the sender's .stignore, the scanner flags its entry of the index as ignored (FileInfo.SetIgnored: local flags and
+# no content, the version and the deleted bit are untouched, lib/protocol/bep_fileinfo.go) and sends it to the other devices as
+# invalid, and an ignored entry whose file is gone from the disk stays what it is (lib/model/folder.go,
+# scanSubdirsDeletedAndIgnored: `case fi.IsIgnored() && ignored: continue`). The receiver's valid entry stays the global one
+# (internal/db/sqlite/folderdb_update.go, recalcGlobalForFile), and a sender that has an invalid entry of the very same version
+# does not need the file. So, once the receiver has the very file that is here (it is among the devices that have the global
+# version, which is also the one this device has), the sender (1) adds the path to the .stignore of the drop, (2) deletes the
+# file once Syncthing's scan has flagged it as ignored, and (3) drops the line when the receiver has deleted the file (its
+# tombstone is the global entry), because a line that stayed would make a file of the same name, sent again, ignored at once,
+# and one that went while the receiver still has the file would delete it there. A line is dropped only for that tombstone,
+# never for a missing entry, since a receiver that is re-indexed has no entries for a while. send() skips names that have a
+# line, so the lines are the only state, and there is no file of our own to keep in step with Syncthing's.
+
+IGNORE_SPECIAL = frozenset("\\*?[]{}")
+LINE_BREAKS = frozenset("\n\r")
+
+
+def db_name(name):
+    """A file name as Syncthing keeps it in its index and matches it with a pattern: normalized to NFC on Linux."""
+    return unicodedata.normalize("NFC", name)
+
+
+def ignore_prefix(partner):
+    return f"/to/{partner}/"
+
+
+def ignore_line(partner, name):
+    """The .stignore line that matches exactly the file `name` of to/<partner>/ of a drop and nothing else: rooted, with every
+    character that Syncthing's patterns give a meaning escaped, and a whitespace at the end in brackets, since Syncthing trims
+    the lines. A line break would split the line, and no escape holds it."""
+    name = db_name(name)
+    if not name or LINE_BREAKS & set(name):
+        raise SyncError(f"{name!r} cannot be named in an ignore pattern, so it stays in the drop folder")
+    body = "".join("\\" + c if c in IGNORE_SPECIAL else c for c in name)
+    if body[-1].isspace():
+        body = f"{body[:-1]}[{body[-1]}]"
+    return ignore_prefix(partner) + body
+
+
+def ignored_name(partner, line):
+    """The file name that ignore_line made `line` of, or None when the line is none of those."""
+    if not line.startswith(ignore_prefix(partner)):
+        return None
+    rest = line[len(ignore_prefix(partner)):]
+    chars = []
+    index = 0
+    while index < len(rest):
+        c = rest[index]
+        if c == "\\" and index + 1 < len(rest):
+            chars.append(rest[index + 1])
+            index += 2
+        elif c == "[" and index == len(rest) - 3 and rest[index + 1].isspace() and rest[index + 2] == "]":
+            chars.append(rest[index + 1])
+            index += 3
+        elif c in IGNORE_SPECIAL:
+            return None
+        else:
+            chars.append(c)
+            index += 1
+    return "".join(chars) or None
+
+
+def partner_keeps(entry, partner):
+    """Whether Syncthing's entry of a file (GET /rest/db/file) says that partner has the very file that is here: it is a live
+    file here, not flagged invalid, the global version is the one here, and the partner is connected and has that version."""
+    if entry is None:
+        return False
+    here, there = entry["local"], entry["global"]
+    return (bool(here["name"]) and not here["deleted"] and not here["invalid"] and not there["deleted"]
+            and here["version"] == there["version"] and partner in {device["id"] for device in entry["availability"] or []})
+
+
+def partner_deleted(entry):
+    """Whether the global entry of a file is a deletion, which is how a device that had the file and removed it says so."""
+    return entry is None or entry["global"]["deleted"]
+
+
+def managed_lines(partner, lines):
+    """The names that have an ignore line of ours in a drop's .stignore, with their lines: files that the partner has and
+    that are no longer here."""
+    names = {}
+    for line in lines:
+        name = ignored_name(partner, line)
+        if name is not None:
+            names[name] = line
+    return names
+
+
+def tend_sent(api, folder_id, drop_path, partner):
+    """One pass over the files this device sent to partner in the drop (see above); returns what could not be done, as texts.
+    A file the partner has gets its ignore line and, on a later pass, once Syncthing has flagged it, it is deleted here; a
+    line whose file the partner has deleted goes."""
+    lines = api.ignore_lines(folder_id)
+    managed = managed_lines(partner, lines)
+    failures, added = [], []
+    with open_inbox(drop_path, partner, create=False) as inbox:
+        present = {} if inbox is None else {db_name(name): name for name in finished_files(inbox)}
+        for name, real in list(present.items()):
+            entry = api.file_entry(folder_id, f"to/{partner}/{name}")
+            if name in managed:
+                if entry is not None and entry["local"]["ignored"]:
+                    try:
+                        os.unlink(real, dir_fd=inbox)
+                    except OSError as exc:
+                        failures.append(f"cannot delete {real} of the drop folder {drop_path} after it was sent: {exc}")
+                    else:
+                        del present[name]
+            elif partner_keeps(entry, partner):
+                try:
+                    added.append(ignore_line(partner, name))
+                except SyncError as exc:
+                    failures.append(str(exc))
+    gone = {line for name, line in managed.items()
+            if name not in present and partner_deleted(api.file_entry(folder_id, f"to/{partner}/{name}"))}
+    kept = [line for line in lines if line not in gone] + added
+    if kept != lines:
+        api.set_ignore_lines(folder_id, kept)
+    return failures
+
+
 # ---- Notifications ---------------------------------------------------------------------------------------------------
 
 class DesktopNotifier:
@@ -907,19 +1067,22 @@ def send(api, device_id, files):
         if not os.path.isfile(file):
             raise SyncError(f"{file} is not a file")
     drop = ensure_drop_folder(api, my_id, device_id)
+    # A name with an ignore line is a file the receiver has and this device deleted: a new file of that name would be ignored
+    # at once and never sent, so it gets another name.
+    taken = frozenset(managed_lines(device_id, api.ignore_lines(drop_folder_id(my_id, device_id))))
     with open_inbox(drop, device_id, create=True) as inbox:
         for file in files:
-            deliver(file, inbox)
+            deliver(file, inbox, taken)
 
 
-def deliver(file, inbox_fd):
+def deliver(file, inbox_fd, taken):
     """The file appears in the inbox whole or not at all: Syncthing ignores the temp name it is copied under."""
     staged = f".syncthing.{secrets.token_hex(4)}.tmp"
     try:
         with open(file, "rb") as source:
             stage_copy(source, inbox_fd, staged)
         try:
-            place_without_overwriting(inbox_fd, staged, inbox_fd, os.path.basename(file))
+            place_without_overwriting(inbox_fd, staged, inbox_fd, os.path.basename(file), taken)
         finally:
             os.unlink(staged, dir_fd=inbox_fd)
     except OSError as exc:
@@ -995,6 +1158,13 @@ def finished_drops(events):
             if event["type"] == "ItemFinished" and event["data"]["error"] is None and is_drop(event["data"]["folder"])}
 
 
+def summarized_drops(events):
+    """The drop folders whose index changed here or at the other device, which Syncthing says with a summary of the folder:
+    a file that was sent may have reached the receiver, or been deleted there."""
+    return {event["data"]["folder"] for event in events
+            if event["type"] == "FolderSummary" and is_drop(event["data"]["folder"])}
+
+
 def matters(event):
     """Every file of every folder finishes with an ItemFinished, and only those of a drop need a look."""
     return event["type"] != "ItemFinished" or is_drop(event["data"]["folder"])
@@ -1017,7 +1187,7 @@ class Watcher:
         my_id = api.my_id()
         latest = api.latest_event_id()
         self.snapshot = read_snapshot(api, my_id)
-        self.refresh(scan_all=True, finished=set())
+        self.refresh(scan_all=True, finished=set(), summarized=set())
         while True:
             batch = api.events(latest)
             if not batch:
@@ -1027,15 +1197,16 @@ class Watcher:
             latest = batch[-1]["id"]
             if gap or any(event["type"] in REREAD_EVENTS for event in batch):
                 self.snapshot = read_snapshot(api, my_id)
-                self.refresh(scan_all=gap, finished=finished_drops(batch))
+                self.refresh(scan_all=gap, finished=finished_drops(batch), summarized=summarized_drops(batch))
             elif any(matters(event) for event in batch):
                 for event in batch:
                     apply_event(self.snapshot, event)
-                self.refresh(scan_all=False, finished=finished_drops(batch))
+                self.refresh(scan_all=False, finished=finished_drops(batch), summarized=summarized_drops(batch))
 
-    def refresh(self, scan_all, finished):
+    def refresh(self, scan_all, finished, summarized):
         self.accept_drops()
         arrivals = self.receive(scan_all, finished)
+        self.tend(scan_all, finished | summarized)
         view = assemble(self.snapshot)
         self.store.publish(view, arrivals)
         self.notify(view, arrivals)
@@ -1088,6 +1259,24 @@ class Watcher:
             for failure in failures:
                 self.report(failure)
         return arrivals
+
+    def tend(self, scan_all, touched):
+        """Cleans up what this device sent in the drops that changed (see tend_sent)."""
+        snapshot = self.snapshot
+        for folder in snapshot.folders:
+            partner = drop_partner(folder["id"], snapshot.my_id)
+            if partner is None or folder.get("paused", False) or not (scan_all or folder["id"] in touched):
+                continue
+            try:
+                refuse_third_devices(folder, snapshot.my_id, partner)
+                failures = tend_sent(self.api, folder["id"], os.path.expanduser(folder["path"]), partner)
+            except Unreachable:
+                raise
+            except SyncError as exc:
+                self.problem(str(exc))
+                continue
+            for failure in failures:
+                self.problem(failure)
 
     def notify(self, view, arrivals):
         pending = {("device", device["id"]): device for device in view["pendingDevices"]}

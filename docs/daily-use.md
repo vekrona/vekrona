@@ -334,7 +334,14 @@ vekrona-sync send DEVICE_ID photo.jpg report.pdf
 Sending needs both devices to run vekrona. Under the hood the two devices share a hidden folder, `vekrona-drop-<id>-<id>`, in
 `~/.local/share/vekrona-sync/drops/`, which each accepts from the other without asking; it holds the files that are on their way, and
 a file leaves it once it is in Downloads. Another Syncthing client (Android, macOS) sees that folder as an ordinary shared folder
-and never empties it, so a file sent to such a device stays in the folder's `to/<device ID>/` directory. A device that is not one of
+and never empties it, so a file sent to such a device stays on that device in the folder's `to/<device ID>/` directory, where
+`<device ID>` is the long ID of that device. When its Syncthing asks about the folder "vekrona drop", accept it and set its
+path to a folder you will find in the device's file app, for example `Download/vekrona-drop` on a phone: the files arrive in
+`Download/vekrona-drop/to/<the phone's ID>/`. This computer's own copy of such a file does not stay: once the device has the
+file, this watcher adds the file's path to the `.stignore` of the drop (Syncthing then keeps the device's copy and no longer
+treats this computer's as a file to sync), deletes its copy, and removes the line when the device deletes its copy. The `.stignore`
+of a drop therefore holds one line per file that a keeping device still has; a name that has a line is not reused, so sending
+`photo.jpg` again becomes `photo (2).jpg` while the device still has the first one. A device that is not one of
 the two cannot join the folder: its offer of a drop is ignored (a line in the journal of `vekrona-sync.service`), and a drop folder
 that a third device shares in Syncthing is neither sent through nor received from until you remove that device from it.
 

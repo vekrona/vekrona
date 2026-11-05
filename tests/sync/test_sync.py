@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import socket
 import socketserver
@@ -188,10 +189,10 @@ class PlacementTest(unittest.TestCase):
         original = self.write(self.tmp.name, "report.pdf", "v1")
         inbox = open_dir(self.source_dir)
         self.addCleanup(os.close, inbox)
-        sync.deliver(original, inbox)
+        sync.deliver(original, inbox, frozenset())
         with open(original, "w") as f:
             f.write("v2")
-        sync.deliver(original, inbox)
+        sync.deliver(original, inbox, frozenset())
         self.assertEqual(sorted(os.listdir(self.source_dir)), ["report (2).pdf", "report.pdf"])
         with open(os.path.join(self.source_dir, "report.pdf")) as f1, open(os.path.join(self.source_dir, "report (2).pdf")) as f2:
             self.assertEqual((f1.read(), f2.read()), ("v1", "v2"))
@@ -200,7 +201,7 @@ class PlacementTest(unittest.TestCase):
         inbox = open_dir(self.source_dir)
         self.addCleanup(os.close, inbox)
         with self.assertRaises(sync.SyncError):
-            sync.deliver(os.path.join(self.tmp.name, "missing.txt"), inbox)
+            sync.deliver(os.path.join(self.tmp.name, "missing.txt"), inbox, frozenset())
         self.assertEqual(os.listdir(self.source_dir), [])
 
 
@@ -433,6 +434,7 @@ class WatcherTest(unittest.TestCase):
             "/rest/config": {"folders": config_folders, "remoteIgnoredDevices": [],
                              "devices": [{"deviceID": ME, "name": "this"}, {"deviceID": PEER, "name": "Pixel"}]},
             "/rest/system/discovery": {},
+            "/rest/db/ignores": {"ignore": [], "expanded": [], "error": None},
             "/rest/config/folders": config_folders,
             "/rest/system/connections": {"connections": {PEER: {"connected": True}}},
             "/rest/cluster/pending/devices": pending_devices or {},
@@ -440,10 +442,10 @@ class WatcherTest(unittest.TestCase):
             "/rest/config/defaults/folder": {"id": "", "devices": []}},
             statuses={"f1": notes_status} if notes_status is not None else {})
 
-    def refresh(self, api, scan_all, finished=()):
+    def refresh(self, api, scan_all, finished=(), summarized=()):
         self.watcher.api = api
         self.watcher.snapshot = sync.read_snapshot(api, ME)
-        self.watcher.refresh(scan_all=scan_all, finished=set(finished))
+        self.watcher.refresh(scan_all=scan_all, finished=set(finished), summarized=set(summarized))
 
     def follow(self, api, *batches):
         """Follows api through the batches of events, then until Syncthing stops answering."""
@@ -475,6 +477,69 @@ class WatcherTest(unittest.TestCase):
         state = self.store.read()
         self.assertEqual([(a["name"], a["from"], a["unseen"]) for a in state["arrivals"]], [("late.txt", "Pixel", True)])
         self.assertEqual(self.notifier.calls, [("arrival", "late.txt")])
+
+    def api_with_drop(self):
+        """api() whose answers about the ignore patterns and the files of the drop come from a SyncthingDrop."""
+        api = self.api()
+        outbox = os.path.join(self.drop_path, "to", PEER)
+        os.makedirs(outbox)
+        drop = SyncthingDrop(PEER, outbox)
+        drop.sent("photo.jpg")
+        plain_request = api.request
+        api.request = lambda method, path, **kwargs: (drop.request(method, path, **kwargs)
+                                                    if path in ("/rest/db/ignores", "/rest/db/file")
+                                                    else plain_request(method, path, **kwargs))
+        return api, drop, outbox
+
+    def test_a_summary_of_a_drop_has_the_watcher_clean_up_what_it_sent_and_no_other_event_does(self):
+        api, drop, outbox = self.api_with_drop()
+        self.refresh(api, scan_all=False)
+        self.refresh(api, scan_all=False, finished={"f1"})
+        self.assertEqual(drop.lines, [])
+        self.refresh(api, scan_all=False, summarized={DROP})
+        self.assertEqual(drop.lines, [f"/to/{PEER}/photo.jpg"])
+        drop.scan()
+        self.refresh(api, scan_all=False, summarized={DROP})
+        self.assertEqual(os.listdir(outbox), [])
+
+    def test_the_startup_scan_cleans_up_a_drop_whose_receiver_has_the_files(self):
+        api, drop, outbox = self.api_with_drop()
+        self.refresh(api, scan_all=True)
+        self.assertEqual(drop.lines, [f"/to/{PEER}/photo.jpg"])
+
+    def test_a_drop_that_a_third_device_shares_is_not_cleaned_up(self):
+        api, drop, outbox = self.api_with_drop()
+        api.answers["/rest/config"]["folders"] = [folder(DROP, "vekrona drop", self.drop_path, devices=(ME, PEER, THIRD))]
+        self.refresh(api, scan_all=True)
+        self.assertEqual(drop.lines, [])
+        self.assertEqual(len(self.reports), 1)
+
+    def test_a_paused_drop_is_not_cleaned_up(self):
+        api, drop, outbox = self.api_with_drop()
+        api.answers["/rest/config"]["folders"] = [folder(DROP, "vekrona drop", self.drop_path, devices=(ME, PEER), paused=True)]
+        self.refresh(api, scan_all=True)
+        self.assertEqual(drop.lines, [])
+        self.assertEqual(self.reports, [])
+
+    def test_a_cleanup_that_fails_is_reported_once_and_the_receiving_goes_on(self):
+        api, drop, outbox = self.api_with_drop()
+        drop.sent("two\nlines.txt")
+        self.put("incoming.txt")
+        self.refresh(api, scan_all=True)
+        self.refresh(api, scan_all=True)
+        self.assertEqual(os.listdir(self.downloads), ["incoming.txt"])
+        self.assertEqual(len(self.reports), 1)
+        self.assertIn("two\\nlines.txt", self.reports[0])
+
+    def test_a_syncthing_that_stops_answering_during_the_cleanup_ends_the_watcher_pass(self):
+        api, drop, outbox = self.api_with_drop()
+
+        def gone(*args, **kwargs):
+            raise sync.Unreachable("no socket")
+
+        drop.request = gone
+        with self.assertRaises(sync.Unreachable):
+            self.refresh(api, scan_all=True)
 
     def test_an_event_batch_looks_only_into_the_drops_where_a_file_finished(self):
         self.put("a.txt")
@@ -616,6 +681,322 @@ class WatcherTest(unittest.TestCase):
         self.assertTrue(sync.matters(finished_in_drop))
         self.assertTrue(sync.matters({"type": "StateChanged", "data": {"folder": "f1"}}))
         self.assertEqual(sync.finished_drops([finished_elsewhere, finished_in_drop, failed_in_drop]), {DROP})
+        self.assertEqual(sync.summarized_drops([{"type": "FolderSummary", "data": {"folder": "f1"}},
+                                                {"type": "FolderSummary", "data": {"folder": DROP}},
+                                                {"type": "StateChanged", "data": {"folder": DROP}}]), {DROP})
+
+
+def pattern_regex(pattern):
+    """The documented syntax of a Syncthing ignore pattern (backslash escapes, * ? [] {}), as a regular expression: an
+    implementation of its own, so that the lines of vekrona-sync are judged by something other than its own parser."""
+    out, index = [], 0
+    while index < len(pattern):
+        c = pattern[index]
+        if c == "\\":
+            out.append(re.escape(pattern[index + 1]))
+            index += 2
+        elif c == "*":
+            out.append("[^/]*")
+            index += 1
+        elif c == "?":
+            out.append("[^/]")
+            index += 1
+        elif c == "[":
+            end = pattern.index("]", index)
+            out.append("[" + pattern[index + 1:end] + "]")
+            index = end + 1
+        elif c == "{":
+            end = pattern.index("}", index)
+            out.append("(?:" + "|".join(re.escape(alternative) for alternative in pattern[index + 1:end].split(",")) + ")")
+            index = end + 1
+        elif c in "]}":
+            raise ValueError(f"unbalanced {c} in {pattern!r}")
+        else:
+            out.append(re.escape(c))
+            index += 1
+    return re.compile("".join(out))
+
+
+class SyncthingDrop(sync.Syncthing):
+    """What Syncthing does with one drop folder, as far as vekrona-sync asks it: the .stignore it keeps, a scan that flags the
+    files which a line matches as ignored in the index (and keeps the flag when the file is gone), and for each path the entry
+    of this device and the global one, which is the other device's when it has a file of its own. The checks of Syncthing's
+    source that the model rests on are listed in the comment above tend_sent."""
+
+    def __init__(self, partner, directory):
+        super().__init__("/nonexistent", "key")
+        self.partner = partner
+        self.directory = directory
+        self.lines = []
+        self.theirs = {}
+        self.indexed = set()
+        self.flagged = set()
+        self.connected = True
+        self.writes = []
+        self.refuse_patterns = False
+
+    def sent(self, name, content="x", has=True):
+        """A file here, in the index, which the other device has (or not yet)."""
+        with open(os.path.join(self.directory, name), "w") as f:
+            f.write(content)
+        path = f"to/{self.partner}/{sync.db_name(name)}"
+        self.indexed.add(path)
+        if has:
+            self.theirs[path] = {"deleted": False, "version": ["S:1"]}
+        return path
+
+    def matches(self, path):
+        return any(pattern_regex(sync.db_name(line.strip()).lstrip("/")).fullmatch(path) for line in self.lines
+                   if line.strip() and not line.strip().startswith("//"))
+
+    def scan(self):
+        self.flagged |= {path for path in self.indexed if self.matches(path)}
+
+    def request(self, method, path, query=None, body=None, timeout=None):
+        if path == "/rest/db/ignores":
+            if method == "POST":
+                self.writes.append((method, path, body))
+                self.lines = list(body["ignore"])
+            error = "invalid pattern" if self.refuse_patterns and method == "POST" else None
+            return {"ignore": list(self.lines), "expanded": [], "error": error}
+        if path == "/rest/db/file":
+            return self.entry(query["file"])
+        raise AssertionError(f"unexpected {method} {path}")
+
+    def entry(self, path):
+        local_exists = path in self.indexed
+        there = self.theirs.get(path)
+        if not local_exists and there is None:
+            raise sync.NotFound("Syncthing refused GET /rest/db/file with HTTP 404: No such object in the index")
+        flagged = path in self.flagged
+        here = {"name": path if local_exists else "", "deleted": False, "invalid": flagged, "ignored": flagged,
+                "version": ["S:1"]}
+        remote = dict(here) if there is None else {"name": path, "deleted": there["deleted"], "version": there["version"]}
+        availability = [{"id": self.partner, "fromTemporary": False}] if there is not None and self.connected else None
+        return {"global": remote, "local": here, "availability": availability}
+
+
+class TendSentTest(unittest.TestCase):
+    """The sender's cleanup of a drop whose receiver keeps files (an Android or macOS client)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.drop = os.path.join(self.tmp.name, "drop")
+        self.inbox = os.path.join(self.drop, "to", PEER)
+        os.makedirs(self.inbox)
+        self.api = SyncthingDrop(PEER, self.inbox)
+
+    def tend(self):
+        return sync.tend_sent(self.api, DROP, self.drop, PEER)
+
+    def on_disk(self):
+        return sorted(os.listdir(self.inbox))
+
+    def test_a_file_the_receiver_has_is_ignored_then_deleted_here_and_the_receivers_copy_is_never_touched(self):
+        path = self.api.sent("photo.jpg")
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+        self.assertEqual(self.on_disk(), ["photo.jpg"])
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.on_disk(), ["photo.jpg"])
+        self.api.scan()
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.on_disk(), [])
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+        self.assertEqual(self.api.theirs[path], {"deleted": False, "version": ["S:1"]})
+        self.assertEqual([write[0] for write in self.api.writes], ["POST"])
+
+    def test_nothing_is_ignored_or_deleted_before_the_receiver_has_the_very_file(self):
+        self.api.sent("not-yet.txt", has=False)
+        self.api.sent("older-there.txt")
+        self.api.theirs[f"to/{PEER}/older-there.txt"]["version"] = ["S:0"]
+        self.assertEqual(self.tend(), [])
+        self.api.scan()
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.on_disk(), ["not-yet.txt", "older-there.txt"])
+        self.assertEqual(self.api.writes, [])
+
+    def test_nothing_is_ignored_or_deleted_while_the_receiver_is_not_connected(self):
+        self.api.sent("away.txt")
+        self.api.connected = False
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(self.on_disk(), ["away.txt"])
+
+    def test_a_file_that_is_not_in_the_index_yet_waits(self):
+        with open(os.path.join(self.inbox, "new.txt"), "w") as f:
+            f.write("x")
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(self.on_disk(), ["new.txt"])
+
+    def test_the_line_goes_when_the_receiver_deletes_its_copy_and_not_before(self):
+        path = self.api.sent("photo.jpg")
+        self.tend()
+        self.api.scan()
+        self.tend()
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+        self.api.theirs[path] = {"deleted": True, "version": ["S:1", "R:1"]}
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.lines, [])
+
+    def test_a_receiver_that_has_no_entry_of_the_file_does_not_end_the_line(self):
+        path = self.api.sent("photo.jpg")
+        self.tend()
+        self.api.scan()
+        self.tend()
+        del self.api.theirs[path]
+        self.tend()
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+
+    def test_a_line_whose_file_is_still_here_stays_even_when_the_receiver_deleted_its_copy(self):
+        path = self.api.sent("photo.jpg")
+        self.tend()
+        self.api.theirs[path] = {"deleted": True, "version": ["S:1", "R:1"]}
+        self.tend()
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+        self.assertEqual(self.on_disk(), ["photo.jpg"])
+
+    def test_the_lines_that_are_not_ours_are_kept_in_their_place(self):
+        self.api.lines = ["*.tmp", f"/to/{THIRD}/x.txt", "", "// by hand"]
+        self.api.sent("a.txt")
+        self.tend()
+        self.assertEqual(self.api.lines, ["*.tmp", f"/to/{THIRD}/x.txt", "", "// by hand", f"/to/{PEER}/a.txt"])
+        self.api.scan()
+        self.tend()
+        self.api.theirs[f"to/{PEER}/a.txt"] = {"deleted": True, "version": ["S:1", "R:1"]}
+        self.tend()
+        self.assertEqual(self.api.lines, ["*.tmp", f"/to/{THIRD}/x.txt", "", "// by hand"])
+
+    def test_a_name_with_characters_of_the_pattern_language_ignores_that_file_and_no_other(self):
+        names = ["a*b.txt", "[1] {x,y}.txt", "?.txt", "back\\slash", "#hash", "!bang", "(?i)Case", "trailing space ",
+                 "tab\t", "a,b", "é.txt", "emoji \U0001F600.png", "x]y", "p}q"]
+        decoys = ["aXb.txt", "1 x.txt", "x.txt", "y.txt", "Z.txt", "backslash", "hash", "bang", "case", "trailing space",
+                  "tab", "ab", "é.png", "emoji.png", "xy", "pq", "AB"]
+        for name in names:
+            self.api.sent(name)
+        for decoy in decoys:
+            self.api.sent(decoy, has=False)
+        self.tend()
+        self.api.scan()
+        self.assertEqual(self.api.flagged, {f"to/{PEER}/{sync.db_name(name)}" for name in names})
+        self.tend()
+        self.assertEqual(self.on_disk(), sorted(decoys))
+
+    def test_a_name_with_a_line_break_stays_and_is_reported_while_the_others_are_cleaned(self):
+        self.api.sent("two\nlines.txt")
+        self.api.sent("fine.txt")
+        failures = self.tend()
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/fine.txt"])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("two\\nlines.txt", failures[0])
+
+    def test_files_that_are_links_directories_or_half_written_are_left_alone(self):
+        os.mkdir(os.path.join(self.inbox, "dir"))
+        os.symlink("/etc/hostname", os.path.join(self.inbox, "link"))
+        self.api.sent(".syncthing.half.tmp")
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.writes, [])
+
+    def test_a_pattern_syncthing_refuses_is_taken_back_and_reported(self):
+        self.api.lines = ["*.tmp"]
+        self.api.sent("a.txt")
+        self.api.refuse_patterns = True
+        with self.assertRaisesRegex(sync.SyncError, "refused the ignore patterns.*as before"):
+            self.tend()
+        self.assertEqual(self.api.lines, ["*.tmp"])
+
+    def test_an_inbox_a_peer_replaced_by_a_link_is_refused_and_the_target_untouched(self):
+        victims = os.path.join(self.tmp.name, "victims")
+        os.mkdir(victims)
+        with open(os.path.join(victims, "private.txt"), "w") as f:
+            f.write("secret")
+        os.rmdir(self.inbox)
+        os.symlink(victims, self.inbox)
+        self.api.lines = [f"/to/{PEER}/private.txt"]
+        with self.assertRaisesRegex(sync.SyncError, "is a link"):
+            self.tend()
+        self.assertEqual(os.listdir(victims), ["private.txt"])
+
+    def test_a_drop_without_an_inbox_yet_has_nothing_to_clean(self):
+        shutil.rmtree(self.inbox)
+        self.assertEqual(self.tend(), [])
+
+    def test_a_file_that_cannot_be_deleted_is_reported_and_the_pass_goes_on(self):
+        self.api.sent("a.txt")
+        self.api.sent("b.txt")
+        self.tend()
+        self.api.scan()
+        real_unlink = os.unlink
+
+        def unlink(name, *args, **kwargs):
+            if name == "a.txt":
+                raise PermissionError("read-only")
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(sync.os, "unlink", unlink):
+            failures = self.tend()
+        self.assertEqual(self.on_disk(), ["a.txt"])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("a.txt", failures[0])
+
+
+class IgnoreLineTest(unittest.TestCase):
+    def test_a_line_names_its_file_back_whatever_the_characters(self):
+        for name in ("a.txt", "a*b", "[x]", "{a,b}", "back\\slash", "?", "trailing ", " leading", "tab\t", "é",
+                     "'quoted'", "\\", "x[ ]"):
+            with self.subTest(name=name):
+                self.assertEqual(sync.ignored_name(PEER, sync.ignore_line(PEER, name)), sync.db_name(name))
+
+    def test_no_character_of_the_pattern_language_is_left_bare(self):
+        self.assertEqual(sync.ignore_line(PEER, "*?[]{}\\"), f"/to/{PEER}/" + r"\*\?\[\]\{\}\\")
+
+    def test_the_lines_of_others_are_none_of_ours(self):
+        for line in ("", "*.tmp", "// /to/x", f"/to/{THIRD}/a.txt", f"/to/{PEER}/", f"/to/{PEER}/*.txt", f"/to/{PEER}/a{{b,c}}",
+                     f"/to/{PEER}/[ab]", f"/to/{PEER}/ends\\"):
+            with self.subTest(line=line):
+                self.assertIsNone(sync.ignored_name(PEER, line))
+
+    def test_names_that_no_line_can_hold_are_refused(self):
+        for name in ("", "a\nb", "a\rb"):
+            with self.subTest(name=name):
+                with self.assertRaises(sync.SyncError):
+                    sync.ignore_line(PEER, name)
+
+
+class SendAvoidsIgnoredNamesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.inbox = os.path.join(self.tmp.name, "to", PEER)
+        os.makedirs(self.inbox)
+        self.fd = os.open(self.inbox, os.O_RDONLY | os.O_DIRECTORY)
+        self.addCleanup(os.close, self.fd)
+        self.file = os.path.join(self.tmp.name, "photo.jpg")
+        with open(self.file, "w") as f:
+            f.write("new")
+
+    def test_a_file_gets_another_name_when_its_name_has_an_ignore_line(self):
+        sync.deliver(self.file, self.fd, frozenset({"photo.jpg", "photo (2).jpg"}))
+        self.assertEqual(os.listdir(self.inbox), ["photo (3).jpg"])
+
+    def test_a_name_with_an_ignore_line_is_taken_in_any_normalization(self):
+        decomposed = os.path.join(self.tmp.name, "é.txt")
+        with open(decomposed, "w") as f:
+            f.write("x")
+        sync.deliver(decomposed, self.fd, frozenset({sync.db_name("é.txt")}))
+        self.assertEqual(len(os.listdir(self.inbox)), 1)
+        self.assertNotEqual(sync.db_name(os.listdir(self.inbox)[0]), sync.db_name("é.txt"))
+
+    def test_send_asks_the_ignore_lines_of_the_drop_for_the_names_to_avoid(self):
+        api = FakeSyncthing({
+            "/rest/system/status": {"myID": ME},
+            "/rest/config/folders": [folder(DROP, "vekrona drop", os.path.join(self.tmp.name, "drop"), devices=(ME, PEER))],
+            "/rest/config/devices": [{"deviceID": ME}, {"deviceID": PEER}],
+            "/rest/db/ignores": {"ignore": [f"/to/{PEER}/photo.jpg"], "expanded": [], "error": None}})
+        sync.send(api, PEER, [self.file])
+        self.assertEqual(os.listdir(os.path.join(self.tmp.name, "drop", "to", PEER)), ["photo (2).jpg"])
 
 
 class NotifierTest(unittest.TestCase):
@@ -710,6 +1091,7 @@ class JoinAndSendTest(unittest.TestCase):
             "/rest/system/status": {"myID": ME},
             "/rest/cluster/pending/folders": pending_folders or {},
             "/rest/config/folders": folders,
+            "/rest/db/ignores": {"ignore": [], "expanded": [], "error": None},
             "/rest/config/devices": [{"deviceID": ME}, {"deviceID": PEER}],
             "/rest/config/defaults/folder": {"id": "", "devices": []}})
 
@@ -1031,6 +1413,8 @@ class UnixHandler(BaseHTTPRequestHandler):
             status = 200
         elif self.path == "/rest/empty":
             body, status = b"", 200
+        elif self.path.startswith("/rest/db/file?") and "file=known" not in self.path:
+            body, status = b"No such object in the index\n" if "folder=drop" in self.path else b"folder missing\n", 404
         else:
             body, status = b"folder is paused\n", 500
         self.send_response(status)
@@ -1064,6 +1448,11 @@ class TransportTest(unittest.TestCase):
     def test_a_refusal_carries_syncthings_message(self):
         with self.assertRaisesRegex(sync.SyncError, "HTTP 500: folder is paused"):
             self.api.request("GET", "/rest/other")
+
+    def test_a_file_the_index_does_not_have_is_none_and_any_other_refusal_is_an_error(self):
+        self.assertIsNone(self.api.file_entry("drop", "to/x/gone.txt"))
+        with self.assertRaises(sync.NotFound):
+            self.api.file_entry("nonexistent-folder", "to/x/gone.txt")
 
     def test_a_missing_socket_is_unreachable_not_a_plain_error(self):
         with self.assertRaises(sync.Unreachable):
