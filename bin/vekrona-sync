@@ -23,8 +23,8 @@ from the same file. A failure exits 1 with Syncthing's message on stderr.
   accept DEVICE           add a device that asked to connect, and share every folder with it
   reject DEVICE           ignore a device that asked to connect, for good: it asks no more
   send DEVICE [FILE...]   drop files into DEVICE's ~/Downloads, now or when it is next online (no FILE: the portal)
-  nearby                  print the device ID of each nearby device in sync.json that answers on a TCP address it announced,
-                          one per line; the popout lists only those
+  nearby                  print the device ID of each nearby device in sync.json that answers on a TCP address it announced
+                          on the local network (a private or link-local IP), one per line; the popout lists only those
   seen                    mark every received file as seen
   watch                   the service: follow Syncthing's events, write sync.json, notify, receive dropped files; exits
                           75 when Syncthing does not answer (systemd starts it again, later each time) and 78 when
@@ -88,6 +88,17 @@ NOTIFY_SEND_TIMEOUT_SEC = 5
 # A device on the same network answers a TCP connect within milliseconds; one that has left does not, and its address is
 # refused at once or the connect hangs, so this is how long the popout waits for the Nearby list when the device is gone.
 NEARBY_PROBE_TIMEOUT_SEC = 1
+# Any host of the network can announce as many devices as it likes, each with any addresses, so what one pass tries is bounded:
+# sync.json lists at most this many nearby devices, each is tried on at most NEARBY_MAX_ENDPOINTS of its addresses, and the
+# connects run on a fixed number of threads.
+NEARBY_MAX_DEVICES = 16
+NEARBY_MAX_ENDPOINTS = 4
+NEARBY_PROBE_WORKERS = 8
+# The networks a nearby device can be on: the private IPv4 ranges (RFC 1918), IPv4 link-local, IPv6 unique local and link-local.
+# Syncthing keeps an announced address as given (it puts in the sender's address only for an unspecified one), so an address
+# outside these is one that a host of the network chose to have this computer connect to: loopback, a public host, a name.
+NEARBY_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"))
 QR_PIXELS_PER_MODULE = 8
 QR_QUIET_ZONE_MODULES = 2
 MAX_ARRIVALS = 20
@@ -642,7 +653,7 @@ def assemble(snapshot):
         "state": state, "problem": problem, "me": {"id": snapshot.my_id, "code": short_code(snapshot.my_id)},
         "folders": folders, "offers": offers,
         "nearby": [{"id": device_id, "code": short_code(device_id), "addresses": announcement["addresses"]}
-                   for device_id, announcement in sorted(snapshot.discovered.items()) if device_id not in known],
+                   for device_id, announcement in sorted(snapshot.discovered.items()) if device_id not in known][:NEARBY_MAX_DEVICES],
         "pendingDevices": [{"id": device_id, "name": device_name(device_id, info.get("name")),
                             "code": short_code(device_id)}
                            for device_id, info in snapshot.pending_devices.items()],
@@ -751,23 +762,26 @@ class StateStore:
                 vekrona_cli.write_json_atomically(self.ledger_path, {**new_ledger, "version": LEDGER_VERSION})
             self.write_view(changed, current)
 
-    def publish(self, view, new_arrivals, reachable=frozenset()):
+    def publish(self, view, new_arrivals, reachable, proposal_limit):
         """Writes the view, keeping the arrivals; `reachable` are the nearby devices that answered just now. They get a dot
-        unless they were seen, and the ones never proposed are marked proposed and returned, in the order of the list: those
-        are the devices to ask the user about, once."""
-        proposals = []
+        unless they were seen. Of the ones never proposed, the first proposal_limit in the order of the list are marked proposed:
+        they are the devices to ask the user about, once. Returns them and the others, which wait for a later pass. The devices
+        proposed are never forgotten, or a host that announces many devices could have a real one asked about again; at most one
+        question at a time (Watcher.refresh) keeps that list short."""
+        proposals, deferred = [], []
 
         def change(current, ledger):
-            nonlocal proposals
+            nonlocal proposals, deferred
             old = current or {}
             unseen_before = {device["id"] for device in old.get("nearby", []) if device.get("unseen")}
             nearby = [{**device, "unseen": device["id"] in unseen_before or
                        (device["id"] in reachable and device["id"] not in ledger["seen"])} for device in view["nearby"]]
-            proposals = [device["id"] for device in nearby if device["id"] in reachable and device["id"] not in ledger["proposed"]]
-            ledger["proposed"] = remembered(ledger["proposed"] + proposals)
+            fresh = [device["id"] for device in nearby if device["id"] in reachable and device["id"] not in ledger["proposed"]]
+            proposals, deferred = fresh[:proposal_limit], fresh[proposal_limit:]
+            ledger["proposed"] = ledger["proposed"] + proposals
             return {**view, "nearby": nearby, "arrivals": (new_arrivals + old.get("arrivals", []))[:MAX_ARRIVALS]}, ledger
         self.update(change)
-        return proposals
+        return proposals, deferred
 
     def publish_offline(self):
         """Writes the view of a Syncthing that does not run, keeping the arrivals. It needs no ledger, so that a ledger that
@@ -805,20 +819,23 @@ class StateStore:
 
 # ---- Nearby ----------------------------------------------------------------------------------------------------------
 
-def tcp_endpoints(addresses):
-    """The (host, port) of each tcp://, tcp4:// and tcp6:// address with an IP and a port that a device announced. QUIC runs
-    over UDP, which a connect cannot test. A name is not tried: any device on the network can announce one, and looking it up
-    would be a request to wherever it points."""
+def lan_endpoints(addresses):
+    """The (host, port) of the first NEARBY_MAX_ENDPOINTS tcp://, tcp4:// and tcp6:// addresses that a device announced whose
+    host is an IP literal on one of NEARBY_NETWORKS. QUIC runs over UDP, which a connect cannot test. A name is not tried: looking
+    it up would be a request to wherever the announcing host points it."""
     endpoints = []
     for address in addresses:
         try:
             url = urllib.parse.urlsplit(address)
-            if url.scheme in ("tcp", "tcp4", "tcp6") and url.port:
-                ipaddress.ip_address(url.hostname)
-                endpoints.append((url.hostname, url.port))
-        except ValueError:
+            if url.scheme not in ("tcp", "tcp4", "tcp6") or not url.port:
+                continue
+            # A link-local IPv6 address carries its interface, which a URL writes as %25: tcp://[fe80::1%25eth0]:22000.
+            ip = ipaddress.ip_address(urllib.parse.unquote(url.hostname))
+        except (ValueError, TypeError):
             continue
-    return endpoints
+        if any(ip in network for network in NEARBY_NETWORKS):
+            endpoints.append((str(ip), url.port))
+    return endpoints[:NEARBY_MAX_ENDPOINTS]
 
 
 def accepts_connection(endpoint, timeout_sec):
@@ -830,18 +847,17 @@ def accepts_connection(endpoint, timeout_sec):
 
 
 def answering_nearby(nearby, timeout_sec=NEARBY_PROBE_TIMEOUT_SEC):
-    """The IDs of the devices of sync.json's nearby list that are there now. Syncthing's discovery cache never forgets a
-    device (its entries carry no time in the REST API, and none expires), so a device is there when one of its announced TCP
-    addresses accepts a connection, tried for all of them at once. A device that announced no TCP address cannot be tried and
-    stays listed, as without this check."""
-    endpoints = {device["id"]: tcp_endpoints(device["addresses"]) for device in nearby}
-    attempts = [(device_id, endpoint) for device_id, device_endpoints in endpoints.items() for endpoint in device_endpoints]
+    """The IDs of the devices of a nearby list of sync.json that are there now: one of their announced addresses on the local
+    network (lan_endpoints) accepts a TCP connection. Syncthing's discovery cache never forgets a device (its entries carry no
+    time in the REST API, and none expires), and a device can announce anything, so a device without such an address is not
+    there. The connects run NEARBY_PROBE_WORKERS at a time."""
+    attempts = [(device["id"], endpoint) for device in nearby for endpoint in lan_endpoints(device["addresses"])]
     if not attempts:
-        return [device["id"] for device in nearby]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(attempts)) as pool:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=NEARBY_PROBE_WORKERS) as pool:
         answered = pool.map(lambda attempt: accepts_connection(attempt[1], timeout_sec), attempts)
         reached = {device_id for (device_id, _), ok in zip(attempts, answered) if ok}
-    return [device["id"] for device in nearby if device["id"] in reached or not endpoints[device["id"]]]
+    return [device["id"] for device in nearby if device["id"] in reached]
 
 
 # ---- Receiving -----------------------------------------------------------------------------------------------------
@@ -1032,8 +1048,9 @@ class DesktopNotifier:
                  [("later", "Not now", None), ("join", "Join", join)])
 
     def nearby(self, device, pair, ignore):
-        self.ask(f"A Syncthing device {device['code']} is nearby", "Pair with it?",
-                 [("later", "Not now", None), ("pair", "Pair", pair), ("ignore", "Ignore", ignore)])
+        """Returns the thread that waits for the answer, None when no question could be asked."""
+        return self.ask(f"A Syncthing device {device['code']} is nearby", "Pair with it?",
+                        [("later", "Not now", None), ("pair", "Pair", pair), ("ignore", "Ignore", ignore)])
 
     def arrival(self, arrival):
         self.show("telling that a file arrived", f"{arrival['name']} received",
@@ -1056,16 +1073,19 @@ class DesktopNotifier:
             self.report(f"cannot show {title!r}: notify-send exited with status {result.returncode}: {result.stderr.strip()}")
 
     def ask(self, title, body, choices):
-        """choices: (key, label, action or None); the first is the harmless one, which vekrona-update-ask requires."""
+        """choices: (key, label, action or None); the first is the harmless one, which vekrona-update-ask requires. Returns the
+        thread that waits for the answer, None when vekrona-update-ask is missing (reported)."""
         tool = vekrona_cli.resolve_tool(__file__, "vekrona-update-ask")
         if tool is None:
             self.report("vekrona-update-ask not found, so no notification can ask a question")
-            return
+            return None
         argv = [tool, "--timeout", str(NOTIFY_TIMEOUT_SEC), "--title", title, "--body", body]
         for key, label, _ in choices:
             argv += ["--action", f"{key}={label}"]
-        threading.Thread(target=self.wait_for_answer, args=(argv, {key: action for key, _, action in choices}),
-                         daemon=True).start()
+        thread = threading.Thread(target=self.wait_for_answer, args=(argv, {key: action for key, _, action in choices}),
+                                  daemon=True)
+        thread.start()
+        return thread
 
     def wait_for_answer(self, argv, actions):
         try:
@@ -1452,6 +1472,10 @@ class Watcher:
         self.notified = set()
         self.reported = set()
         self.ignored_offers = set()
+        # The thread of the question about a nearby device that is open, and the nearby devices that answered while it was:
+        # one question at a time, so that a host that announces many devices gets no more than one notification on screen.
+        self.question = None
+        self.waiting = frozenset()
 
     def follow(self, api):
         """Follows Syncthing until it stops answering (Unreachable)."""
@@ -1485,8 +1509,13 @@ class Watcher:
         arrivals = self.receive(scan_all, finished)
         self.tend(scan_all, finished | summarized)
         view = assemble(self.snapshot)
-        reachable = frozenset(answering_nearby(view["nearby"])) if discovered else frozenset()
-        proposals = self.store.publish(view, arrivals, reachable)
+        asking = self.question is not None and self.question.is_alive()
+        # The devices that waited for the question to close are tried again once it has.
+        tried = [device["id"] for device in view["nearby"] if discovered or (not asking and device["id"] in self.waiting)]
+        reachable = frozenset(answering_nearby([device for device in view["nearby"] if device["id"] in tried]))
+        proposals, deferred = self.store.publish(view, arrivals, reachable, proposal_limit=0 if asking else 1)
+        listed = {device["id"] for device in view["nearby"]}
+        self.waiting = ((self.waiting & listed) - set(tried)) | set(deferred)
         self.notify(view, arrivals, proposals)
         if scan_all:
             connected = {**{device_id: self.device_label(device_id) for device_id in self.snapshot.connected}, **connected}
@@ -1579,8 +1608,9 @@ class Watcher:
                 offer = offers[key]
                 self.notifier.offer(offer, lambda offer=offer: join(api, offer["folder"], None))
         for device in (device for device in view["nearby"] if device["id"] in proposals):
-            self.notifier.nearby(device, lambda device=device: pair_and_confirm(api, self.store, self.notifier, device["id"], ""),
-                                 lambda device=device: ignore_nearby(api, device["id"]))
+            self.question = self.notifier.nearby(
+                device, lambda device=device: pair_and_confirm(api, self.store, self.notifier, device["id"], ""),
+                lambda device=device: ignore_nearby(api, device["id"]))
         for arrival in arrivals:
             self.notifier.arrival(arrival)
 

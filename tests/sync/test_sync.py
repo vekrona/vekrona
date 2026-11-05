@@ -25,6 +25,9 @@ loader = importlib.machinery.SourceFileLoader("vekrona_sync", SCRIPT)
 sync = importlib.util.module_from_spec(importlib.util.spec_from_loader("vekrona_sync", loader))
 loader.exec_module(sync)
 
+# The real probe, which WatcherTest replaces by the devices of a test that are "here".
+ANSWERING_NEARBY = sync.answering_nearby
+
 ME = "AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA"
 PEER = "BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB"
 THIRD = "CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC"
@@ -337,7 +340,7 @@ class StateStoreTest(unittest.TestCase):
             return json.load(f)
 
     def test_every_write_carries_the_schema(self):
-        publish = lambda: self.store.publish(sync.assemble(snapshot()), [])
+        publish = lambda: self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
         for name, write in (("publish", publish), ("seen", lambda: (publish(), self.store.mark_seen())),
                             ("offline", lambda: sync.command_offline(None))):
             with self.subTest(write=name):
@@ -356,7 +359,7 @@ class StateStoreTest(unittest.TestCase):
             json.dump({"state": "idle", "folders": [], "offers": [], "pendingDevices": [], "devices": [],
                        "arrivals": [self.arrival("old")]}, f)
         self.assertIsNone(self.store.read())
-        self.store.publish(sync.assemble(snapshot()), [])
+        self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
         self.assertEqual((self.raw()["schema"], self.raw()["arrivals"], self.reports), (sync.SCHEMA_VERSION, [], []))
 
     def write(self, path, content):
@@ -366,7 +369,7 @@ class StateStoreTest(unittest.TestCase):
 
     def test_a_sync_json_that_is_missing_garbage_or_of_another_schema_leaves_the_ledger_as_it_is(self):
         self.store.await_connection(PEER)
-        self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}})), [], reachable={THIRD})
+        self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}})), [], {THIRD}, 1)
         ledger = self.store.read_ledger()
         self.assertEqual((ledger["proposed"], ledger["awaiting"]), ([THIRD], [PEER]))
         for content in (None, "garbage", "[]", json.dumps({"schema": sync.SCHEMA_VERSION + 1, "arrivals": []}),
@@ -376,7 +379,7 @@ class StateStoreTest(unittest.TestCase):
                     os.unlink(self.store.path)
                 else:
                     self.write(self.store.path, content)
-                self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}})), [], reachable={THIRD})
+                self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}})), [], {THIRD}, 1)
                 self.assertEqual(self.store.read_ledger(), ledger)
                 self.assertEqual(self.raw()["schema"], sync.SCHEMA_VERSION)
                 self.assertNotIn("ledger", self.raw())
@@ -387,7 +390,7 @@ class StateStoreTest(unittest.TestCase):
                         json.dumps({"version": sync.LEDGER_VERSION, "proposed": [None], "seen": [], "awaiting": []})):
             with self.subTest(content=content):
                 self.write(self.store.ledger_path, content)
-                for change in (lambda: self.store.publish(sync.assemble(snapshot()), []), self.store.mark_seen,
+                for change in (lambda: self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0), self.store.mark_seen,
                                lambda: self.store.await_connection(PEER), lambda: self.store.take_awaiting({PEER})):
                     with self.assertRaisesRegex(sync.ConfigError, re.escape(self.store.ledger_path) + ".*delete it"):
                         change()
@@ -400,7 +403,7 @@ class StateStoreTest(unittest.TestCase):
         self.assertEqual(self.raw()["state"], "offline")
 
     def test_seen_marks_every_arrival_and_keeps_the_rest(self):
-        self.store.publish(sync.assemble(snapshot()), [self.arrival("a"), self.arrival("b")])
+        self.store.publish(sync.assemble(snapshot()), [self.arrival("a"), self.arrival("b")], frozenset(), 0)
         self.store.mark_seen()
         state = self.store.read()
         self.assertEqual([a["unseen"] for a in state["arrivals"]], [False, False])
@@ -411,7 +414,7 @@ class StateStoreTest(unittest.TestCase):
         self.assertIsNone(self.store.read())
 
     def test_seen_when_everything_is_seen_does_not_rewrite_the_file(self):
-        self.store.publish(sync.assemble(snapshot()), [self.arrival("a")])
+        self.store.publish(sync.assemble(snapshot()), [self.arrival("a")], frozenset(), 0)
         self.store.mark_seen()
         before = os.stat(self.store.path)
         self.store.mark_seen()
@@ -419,23 +422,23 @@ class StateStoreTest(unittest.TestCase):
         self.assertEqual((before.st_ino, before.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
 
     def test_publishing_what_the_file_says_already_does_not_rewrite_it(self):
-        self.store.publish(sync.assemble(snapshot()), [])
+        self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
         before = os.stat(self.store.path)
-        self.store.publish(sync.assemble(snapshot()), [])
+        self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
         self.assertEqual(before.st_ino, os.stat(self.store.path).st_ino)
 
     def test_new_arrivals_come_first_and_only_the_last_twenty_stay(self):
-        self.store.publish(sync.assemble(snapshot()), [self.arrival(f"old{i}") for i in range(15)])
+        self.store.publish(sync.assemble(snapshot()), [self.arrival(f"old{i}") for i in range(15)], frozenset(), 0)
         self.store.mark_seen()
-        self.store.publish(sync.assemble(snapshot()), [self.arrival(f"new{i}") for i in range(10)])
+        self.store.publish(sync.assemble(snapshot()), [self.arrival(f"new{i}") for i in range(10)], frozenset(), 0)
         arrivals = self.store.read()["arrivals"]
         self.assertEqual(len(arrivals), 20)
         self.assertEqual(arrivals[0]["name"], "new0")
         self.assertEqual([a["unseen"] for a in arrivals], [True] * 10 + [False] * 10)
 
     def test_the_offline_view_says_so_in_plain_words_and_keeps_the_arrivals(self):
-        self.store.publish(sync.assemble(snapshot()), [self.arrival("a")])
-        self.store.publish(sync.offline_view(), [])
+        self.store.publish(sync.assemble(snapshot()), [self.arrival("a")], frozenset(), 0)
+        self.store.publish_offline()
         state = self.store.read()
         self.assertEqual((state["state"], state["problem"], state["folders"]),
                          ("offline", "Syncthing is not running", []))
@@ -445,7 +448,7 @@ class StateStoreTest(unittest.TestCase):
         os.makedirs(os.path.dirname(self.store.path))
         with open(self.store.path, "w") as f:
             f.write("not json")
-        self.store.publish(sync.assemble(snapshot()), [])
+        self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
         self.assertEqual(len(self.reports), 1)
         self.assertIn(self.store.path, self.reports[0])
         self.assertEqual(self.store.read()["state"], "idle")
@@ -458,7 +461,7 @@ class StateStoreTest(unittest.TestCase):
                 with open(self.store.path, "w") as f:
                     f.write(content)
                 self.reports.clear()
-                self.store.publish(sync.assemble(snapshot()), [])
+                self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
                 self.assertEqual(len(self.reports), 1)
                 self.assertEqual(self.store.read()["arrivals"], [])
 
@@ -491,10 +494,25 @@ class FakeSyncthing(sync.Syncthing):
         return answer(query) if callable(answer) else copy.deepcopy(answer)
 
 
+class Question:
+    """The thread that waits for the answer to a question of a notification, which the test answers."""
+
+    def __init__(self):
+        self.open = True
+
+    def is_alive(self):
+        return self.open
+
+
 class Recorder:
     def __init__(self):
         self.calls = []
         self.actions = {}
+        self.questions = []
+
+    def answer_all(self):
+        for question in self.questions:
+            question.open = False
 
     def pairing(self, device, accept, reject):
         self.calls.append(("pairing", device["id"]))
@@ -508,6 +526,8 @@ class Recorder:
     def nearby(self, device, pair, ignore):
         self.calls.append(("nearby", device["id"]))
         self.actions[device["id"]] = (pair, ignore)
+        self.questions.append(Question())
+        return self.questions[-1]
 
     def pair_requested(self, code):
         self.calls.append(("pair_requested", code))
@@ -737,7 +757,7 @@ class WatcherTest(unittest.TestCase):
         api = self.nearby_api(THIRD)
         self.refresh(api, scan_all=False, discovered=True)
         self.store.mark_seen()
-        self.store.publish(sync.offline_view(), [])
+        self.store.publish_offline()
         self.assertEqual(self.store.read()["nearby"], [])
         self.refresh(api, scan_all=False, discovered=True)
         self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
@@ -747,6 +767,8 @@ class WatcherTest(unittest.TestCase):
         self.here = {THIRD, FOURTH}
         api = self.nearby_api(THIRD, FOURTH)
         self.refresh(api, scan_all=False, discovered=True)
+        self.notifier.answer_all()
+        self.refresh(api, scan_all=False, discovered=False)
         pair, _ = self.notifier.actions[THIRD]
         _, ignore = self.notifier.actions[FOURTH]
         ignore()
@@ -756,6 +778,63 @@ class WatcherTest(unittest.TestCase):
         posted = next(body for method, path, body in api.writes if (method, path) == ("PUT", f"/rest/config/devices/{THIRD}"))
         self.assertEqual(posted["deviceID"], THIRD)
         self.assertIn(("pair_requested", sync.short_code(THIRD)), self.notifier.calls)
+
+    def test_one_question_about_a_nearby_device_is_open_at_a_time_and_the_next_one_comes_after_the_answer(self):
+        self.here = {THIRD, FOURTH}
+        api = self.nearby_api(THIRD, FOURTH)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=False, discovered=False)
+        self.assertEqual(self.proposals(), [("nearby", THIRD)])
+        self.assertEqual([(device["id"], device["unseen"]) for device in self.store.read()["nearby"]], [(THIRD, True), (FOURTH, True)])
+        self.notifier.answer_all()
+        self.refresh(api, scan_all=False, discovered=False)
+        self.assertEqual(self.proposals(), [("nearby", THIRD), ("nearby", FOURTH)])
+        self.assertEqual(self.store.read_ledger()["proposed"], [THIRD, FOURTH])
+
+    def test_a_device_that_waited_for_its_question_and_left_meanwhile_is_not_proposed(self):
+        self.here = {THIRD, FOURTH}
+        api = self.nearby_api(THIRD, FOURTH)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.here = {THIRD}
+        self.notifier.answer_all()
+        self.refresh(api, scan_all=False, discovered=False)
+        self.here = {THIRD, FOURTH}
+        self.refresh(api, scan_all=False, discovered=False)
+        self.assertEqual(self.proposals(), [("nearby", THIRD)])
+
+    def test_a_flood_of_announced_devices_lists_a_few_tries_them_on_few_threads_and_asks_one_question(self):
+        threads = set()
+        fake_ids = [sync.short_code(PEER).replace("-", "") + f"{index:04d}" for index in range(1000)]
+
+        def accepts(endpoint, timeout_sec):
+            threads.add(threading.get_ident())
+            return True
+        api = self.api()
+        api.answers["/rest/system/discovery"] = {
+            device_id: {"addresses": [f"tcp://10.0.{index // 250}.{index % 250}:22000", "tcp://127.0.0.1:22000",
+                                      "tcp://8.8.8.8:22000", "tcp://evil.example:22000"]}
+            for index, device_id in enumerate(fake_ids)}
+        with mock.patch.object(sync, "answering_nearby", ANSWERING_NEARBY), mock.patch.object(sync, "accepts_connection", accepts):
+            for _ in range(3):
+                self.refresh(api, scan_all=True)
+        self.assertEqual(len(self.proposals()), 1)
+        self.assertEqual(len(self.store.read()["nearby"]), sync.NEARBY_MAX_DEVICES)
+        self.assertLessEqual(len(threads), sync.NEARBY_PROBE_WORKERS)
+
+    def test_a_device_that_was_proposed_is_never_proposed_again_however_many_were_proposed_after_it(self):
+        self.here = {THIRD}
+        self.refresh(self.nearby_api(THIRD), scan_all=True)
+        for index in range(sync.MAX_LEDGER + 5):
+            other = f"E{index}"
+            self.here = {other}
+            self.notifier.answer_all()
+            self.refresh(self.nearby_api(other), scan_all=True)
+        self.here = {THIRD}
+        self.notifier.answer_all()
+        self.refresh(self.nearby_api(THIRD), scan_all=True)
+        self.assertEqual(self.proposals().count(("nearby", THIRD)), 1)
+        self.assertEqual(len(self.proposals()), sync.MAX_LEDGER + 6)
 
     def test_the_first_connection_of_a_device_that_was_asked_to_pair_is_announced_once_with_its_name(self):
         self.here = {THIRD}
@@ -1295,24 +1374,18 @@ class CommandTest(unittest.TestCase):
 
     def test_the_nearby_command_prints_the_devices_of_the_list_that_answer_and_nothing_without_a_list(self):
         self.assertEqual(self.printed_by_nearby(), [])
-        listener = socket.socket()
-        self.addCleanup(listener.close)
-        listener.bind(("127.0.0.1", 0))
-        listener.listen()
-        there = f"tcp://127.0.0.1:{listener.getsockname()[1]}"
-        gone = socket.socket()
-        gone.bind(("127.0.0.1", 0))
-        left = f"tcp://127.0.0.1:{gone.getsockname()[1]}"
-        gone.close()
         store = sync.StateStore(self.reports.append)
-        view = sync.assemble(snapshot(discovered={THIRD: {"addresses": [there]}, FOURTH: {"addresses": [left]}}))
+        view = sync.assemble(snapshot(discovered={THIRD: {"addresses": ["tcp://10.0.0.3:22000"]},
+                                                  FOURTH: {"addresses": ["tcp://10.0.0.4:22000"]}}))
         self.assertEqual([device["id"] for device in view["nearby"]], [THIRD, FOURTH])
-        store.publish(view, [])
-        self.assertEqual(self.printed_by_nearby(), [THIRD])
+        store.publish(view, [], frozenset(), 0)
+        accepts, _ = answering(("10.0.0.3", 22000))
+        with mock.patch.object(sync, "accepts_connection", accepts):
+            self.assertEqual(self.printed_by_nearby(), [THIRD])
 
     def test_the_offline_command_writes_the_offline_view_and_keeps_the_arrivals(self):
         store = sync.StateStore(self.reports.append)
-        store.publish(sync.assemble(snapshot()), [{"name": "a", "path": "/d/a", "from": "Pixel", "unseen": True}])
+        store.publish(sync.assemble(snapshot()), [{"name": "a", "path": "/d/a", "from": "Pixel", "unseen": True}], frozenset(), 0)
         sync.command_offline(None)
         state = store.read()
         self.assertEqual(state["state"], "offline")
@@ -1832,56 +1905,89 @@ class ToolTest(unittest.TestCase):
         self.assertIn("notify-send, which is not installed", reports[0])
 
 
+def answering(*endpoints):
+    """accepts_connection of a network on which exactly these (host, port) accept a connection; it records what was tried."""
+    tried = []
+
+    def accepts(endpoint, timeout_sec):
+        tried.append(endpoint)
+        return endpoint in endpoints
+    return accepts, tried
+
+
 class NearbyTest(unittest.TestCase):
-    """Devices are on 127.0.0.1: a listener that accepts is a device that is there, a port nobody listens on is one that left."""
-
-    def setUp(self):
-        self.listener = socket.socket()
-        self.listener.bind(("127.0.0.1", 0))
-        self.listener.listen()
-        self.addCleanup(self.listener.close)
-        self.there = self.listener.getsockname()[1]
-        closed = socket.socket()
-        closed.bind(("127.0.0.1", 0))
-        self.gone = closed.getsockname()[1]
-        closed.close()
-
     def device(self, device_id, *addresses):
         return {"id": device_id, "code": sync.short_code(device_id), "addresses": list(addresses)}
 
-    def test_a_device_that_accepts_a_connection_is_there_and_one_that_refuses_has_left(self):
-        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.there}"), self.device(THIRD, f"tcp://127.0.0.1:{self.gone}")]
-        self.assertEqual(sync.answering_nearby(nearby), [PEER])
+    def answering_nearby(self, nearby, *endpoints):
+        accepts, tried = answering(*endpoints)
+        with mock.patch.object(sync, "accepts_connection", accepts):
+            return sync.answering_nearby(nearby), tried
 
-    def test_one_address_that_answers_is_enough(self):
-        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.gone}", f"quic://127.0.0.1:{self.there}",
-                              f"tcp://127.0.0.1:{self.there}")]
-        self.assertEqual(sync.answering_nearby(nearby), [PEER])
-
-    def test_a_connect_that_times_out_counts_as_gone(self):
-        nearby = [self.device(PEER, "tcp://127.0.0.1:22000")]
-        with mock.patch.object(sync.socket, "create_connection", side_effect=TimeoutError("timed out")):
-            self.assertEqual(sync.answering_nearby(nearby), [])
+    def test_a_device_is_there_when_one_of_its_addresses_on_the_local_network_accepts_a_connection(self):
+        nearby = [self.device(PEER, "tcp://192.168.1.20:22000", "quic://192.168.1.21:22000", "tcp://192.168.1.21:22000"),
+                  self.device(THIRD, "tcp://10.0.0.3:22000")]
+        self.assertEqual(self.answering_nearby(nearby, ("192.168.1.21", 22000))[0], [PEER])
 
     def test_the_list_keeps_its_order_and_an_empty_one_is_empty(self):
-        nearby = [self.device(THIRD, f"tcp://127.0.0.1:{self.there}"), self.device(PEER, f"tcp://127.0.0.1:{self.there}")]
-        self.assertEqual(sync.answering_nearby(nearby), [THIRD, PEER])
-        self.assertEqual(sync.answering_nearby([]), [])
+        nearby = [self.device(THIRD, "tcp://10.0.0.3:22000"), self.device(PEER, "tcp://10.0.0.2:22000")]
+        self.assertEqual(self.answering_nearby(nearby, ("10.0.0.2", 22000), ("10.0.0.3", 22000))[0], [THIRD, PEER])
+        self.assertEqual(self.answering_nearby([]), ([], []))
 
-    def test_a_device_with_no_address_to_try_stays_listed(self):
-        for addresses in ([], [f"quic://127.0.0.1:{self.there}"], ["tcp://example.invalid:22000"], ["tcp://127.0.0.1:0"],
-                          ["tcp://127.0.0.1:99999"], ["tcp://127.0.0.1"], ["lizard"], [""]):
+    def test_every_private_network_and_the_tcp4_and_tcp6_schemes_are_tried(self):
+        addresses = ["tcp://10.1.2.3:1", "tcp4://172.16.0.1:2", "tcp://172.31.255.254:3", "tcp://192.168.0.1:4",
+                     "tcp://169.254.7.7:5", "tcp6://[fd12::1]:6", "tcp://[fe80::1%25eth0]:7", "tcp6://[fe80::2]:8"]
+        self.assertEqual(sync.lan_endpoints(addresses[:4]), [("10.1.2.3", 1), ("172.16.0.1", 2), ("172.31.255.254", 3),
+                                                             ("192.168.0.1", 4)])
+        self.assertEqual(sync.lan_endpoints(addresses[4:]), [("169.254.7.7", 5), ("fd12::1", 6), ("fe80::1%eth0", 7),
+                                                             ("fe80::2", 8)])
+
+    def test_a_device_without_an_address_on_the_local_network_is_not_there_and_nothing_is_tried(self):
+        for addresses in ([], ["tcp://127.0.0.1:22000"], ["tcp://[::1]:22000"], ["tcp://0.0.0.0:22000"], ["tcp://[::]:22000"],
+                          ["tcp://8.8.8.8:22000"], ["tcp://[2001:db8::1]:22000"], ["tcp://172.32.0.1:22000"],
+                          ["tcp://[::ffff:10.0.0.1]:22000"], ["tcp://224.0.0.1:22000"], ["tcp://255.255.255.255:22000"],
+                          ["tcp://syncthing.lan:22000"], ["tcp://example.invalid:22000"], ["quic://10.0.0.2:22000"],
+                          ["relay://10.0.0.2:22067"], ["tcp://10.0.0.2"], ["tcp://10.0.0.2:0"], ["tcp://10.0.0.2:99999"],
+                          ["tcp://10.0.0.2:lizard"], ["tcp://[10.0.0.2:22000"], ["tcp://10.0.0.256:22000"], ["lizard"], [""],
+                          ["tcp://"], ["10.0.0.2:22000"], ["tcp://%00:1"]):
             with self.subTest(addresses=addresses):
-                self.assertEqual(sync.answering_nearby([self.device(PEER, *addresses)]), [PEER])
+                nearby = [self.device(PEER, *addresses)]
+                self.assertEqual(self.answering_nearby(nearby, ("127.0.0.1", 22000), ("8.8.8.8", 22000)), ([], []))
 
-    def test_a_device_with_no_address_to_try_stays_listed_next_to_devices_that_are_tried(self):
-        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.there}"), self.device(THIRD, f"quic://127.0.0.1:{self.there}"),
-                  self.device(FOURTH, f"tcp://127.0.0.1:{self.gone}")]
-        self.assertEqual(sync.answering_nearby(nearby), [PEER, THIRD])
+    def test_a_device_without_an_address_on_the_local_network_is_not_there_next_to_one_that_answers(self):
+        nearby = [self.device(PEER, "tcp://127.0.0.1:22000", "tcp://syncthing.lan:22000"), self.device(THIRD, "tcp://10.0.0.3:22000"),
+                  self.device(FOURTH)]
+        self.assertEqual(self.answering_nearby(nearby, ("10.0.0.3", 22000), ("127.0.0.1", 22000)), ([THIRD], [("10.0.0.3", 22000)]))
 
-    def test_ipv6_and_the_tcp4_and_tcp6_schemes_are_tried(self):
-        self.assertEqual(sync.tcp_endpoints(["tcp4://10.0.0.5:22000", "tcp6://[fe80::1%eth0]:22001", "tcp://[::1]:22002"]),
-                         [("10.0.0.5", 22000), ("fe80::1%eth0", 22001), ("::1", 22002)])
+    def test_a_device_is_tried_on_a_few_of_its_addresses_only(self):
+        addresses = [f"tcp://10.0.0.{host}:22000" for host in range(1, 100)]
+        _, tried = self.answering_nearby([self.device(PEER, *addresses)])
+        self.assertEqual(sorted(tried), [(f"10.0.0.{host}", 22000) for host in range(1, sync.NEARBY_MAX_ENDPOINTS + 1)])
+
+    def test_the_connects_run_on_a_fixed_number_of_threads_however_many_devices_announce_themselves(self):
+        threads = set()
+
+        def accepts(endpoint, timeout_sec):
+            threads.add(threading.get_ident())
+            return True
+        nearby = [self.device(f"D{index}", f"tcp://10.{index // 250}.{index % 250}.1:22000") for index in range(1000)]
+        with mock.patch.object(sync, "accepts_connection", accepts):
+            self.assertEqual(len(sync.answering_nearby(nearby)), 1000)
+        self.assertLessEqual(len(threads), sync.NEARBY_PROBE_WORKERS)
+
+    def test_a_connection_is_accepted_by_a_listener_and_not_by_a_closed_port_or_one_that_times_out(self):
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        self.addCleanup(listener.close)
+        closed = socket.socket()
+        closed.bind(("127.0.0.1", 0))
+        gone = closed.getsockname()[1]
+        closed.close()
+        self.assertTrue(sync.accepts_connection(listener.getsockname(), 1))
+        self.assertFalse(sync.accepts_connection(("127.0.0.1", gone), 1))
+        with mock.patch.object(sync.socket, "create_connection", side_effect=TimeoutError("timed out")):
+            self.assertFalse(sync.accepts_connection(("10.0.0.2", 22000), 1))
 
 
 class UnixHandler(BaseHTTPRequestHandler):
