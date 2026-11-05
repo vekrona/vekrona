@@ -50,7 +50,6 @@ click_word() {
 snap() {
   [[ -z "${SYNC_SHOTS_DIR:-}" ]] || vekrona-dev shot "$SYNC_SHOTS_DIR/$1.png" >/dev/null
 }
-# Scenarios that look at the popout call it with a jq test of sync.json and the words the popout must show for it.
 export -f snap
 
 # The file chooser of the desktop portal ("Share a folder", "Send files"), which vekrona-sync opens after the popout closed.
