@@ -1094,12 +1094,30 @@ def check_folder_id(folder_id, taken):
         raise SyncError(f"This computer already has a folder with ID {folder_id}")
 
 
+def refuse_overlap(directory, folders):
+    """Refuses a directory to sync that is, holds or sits inside a shared folder, Syncthing's own directory (its configuration,
+    keys and database) or the drops of Send file: Syncthing would sync the same files twice, or its own. Paths are compared
+    with their links resolved, so a link to a shared folder is that folder."""
+    real = os.path.realpath(directory)
+    taken = [(os.path.dirname(syncthing_config_file()), "Syncthing's own directory, with its configuration and keys", None),
+             (drops_root(), "the directory of the hidden folders that Send file uses", None)]
+    taken += [(os.path.expanduser(folder["path"]), f"the shared folder {folder.get('label') or folder['id']}", folder)
+              for folder in folders]
+    for path, what, folder in taken:
+        other = os.path.realpath(path)
+        if real == other:
+            raise SyncError(f"{directory} is shared already, as {what}" if folder else f"{directory} is {what}, which is never shared")
+        if os.path.commonpath([real, other]) == other:
+            raise SyncError(f"{directory} is inside {path}, which is {what}; Syncthing would sync its files twice")
+        if os.path.commonpath([real, other]) == real:
+            raise SyncError(f"{directory} holds {path}, which is {what}; choose a folder that does not hold it")
+
+
 def folder_directory(path, folders):
     directory = os.path.abspath(os.path.expanduser(path))
     if not os.path.isdir(directory):
         raise SyncError(f"{directory} is not a directory")
-    if any(os.path.expanduser(folder["path"]).rstrip("/") == directory for folder in folders):
-        raise SyncError(f"{directory} is shared already")
+    refuse_overlap(directory, folders)
     return directory
 
 
@@ -1121,7 +1139,8 @@ def join(api, folder_id, path):
         raise SyncError(f"{folder_id} is a drop, which is taken from the other device of the drop without asking and never joined")
     offer = api.request("GET", "/rest/cluster/pending/folders").get(folder_id)
     # POST /rest/config/folders replaces a folder of the same ID, so a folder that is here already must not get there.
-    existing = next((folder for folder in api.request("GET", "/rest/config/folders") if folder["id"] == folder_id), None)
+    folders = api.request("GET", "/rest/config/folders")
+    existing = next((folder for folder in folders if folder["id"] == folder_id), None)
     if existing is not None:
         join_existing(api, existing, offer, path)
         return
@@ -1138,6 +1157,7 @@ def join(api, folder_id, path):
     # lstat: a link is no directory to take, whatever it points at.
     if existing is not None and (not stat.S_ISDIR(existing.st_mode) or os.listdir(target)):
         raise SyncError(f"{target} exists and is not an empty directory; pass another path")
+    refuse_overlap(target, folders)
     my_id = api.my_id()
     try:
         os.makedirs(target, exist_ok=True)

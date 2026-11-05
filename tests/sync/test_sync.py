@@ -1267,16 +1267,25 @@ class CommandTest(unittest.TestCase):
         self.assertEqual([a["name"] for a in state["arrivals"]], ["a"])
 
 
+def patch_syncthing_home(test, home):
+    """Puts Syncthing's directory, which `syncthing paths` names, and the drops of Send file under home."""
+    for name, value in (("HOME", home), ("XDG_DATA_HOME", os.path.join(home, ".local", "share"))):
+        patcher = mock.patch.dict(os.environ, {name: value})
+        patcher.start()
+        test.addCleanup(patcher.stop)
+    patcher = mock.patch.object(sync, "syncthing_config_file",
+                                return_value=os.path.join(home, ".local", "state", "syncthing", "config.xml"))
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class JoinAndSendTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         home = os.path.join(self.tmp.name, "home")
         os.makedirs(home)
-        for name, value in (("HOME", home), ("XDG_DATA_HOME", os.path.join(self.tmp.name, "data"))):
-            patcher = mock.patch.dict(os.environ, {name: value})
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patch_syncthing_home(self, home)
         self.home = home
 
     def api(self, pending_folders=None, drop_devices=None):
@@ -1303,6 +1312,14 @@ class JoinAndSendTest(unittest.TestCase):
         sync.join(api, "p1", None)
         self.assertTrue(os.path.isdir(os.path.join(self.home, "Sync", "Photos")))
         self.assertEqual(api.writes[0][1], "/rest/config/folders")
+
+    def test_a_folder_is_not_joined_into_a_shared_folder(self):
+        api = self.api(pending_folders={"p1": {"offeredBy": {PEER: {"label": "Photos"}}}})
+        api.answers["/rest/config/folders"] = [folder("f1", "Notes", os.path.join(self.home, "Notes"))]
+        with self.assertRaisesRegex(sync.SyncError, "is inside .*/Notes, which is the shared folder Notes"):
+            sync.join(api, "p1", os.path.join(self.home, "Notes", "Photos"))
+        self.assertEqual(api.writes, [])
+        self.assertFalse(os.path.exists(os.path.join(self.home, "Notes", "Photos")))
 
     def api_with_folder(self, devices, offered_by=None, path="/home/u/Sync/Photos"):
         api = self.api(pending_folders={} if offered_by is None else {"p1": {"offeredBy": {d: {"label": "Photos"} for d in offered_by}}})
@@ -1431,8 +1448,11 @@ class ShareTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.notes = os.path.join(self.tmp.name, "My Notes")
-        os.mkdir(self.notes)
+        self.home = os.path.join(self.tmp.name, "home")
+        patch_syncthing_home(self, self.home)
+        self.notes = os.path.join(self.home, "My Notes")
+        for directory in (self.notes, os.path.join(self.home, ".local", "state", "syncthing"), sync.drops_root()):
+            os.makedirs(directory)
 
     def api(self, folders=()):
         return FakeSyncthing({
@@ -1470,11 +1490,38 @@ class ShareTest(unittest.TestCase):
 
     def test_a_path_that_is_no_directory_or_is_shared_already_shares_nothing(self):
         api = self.api(folders=[folder("n", path=self.notes + "/")])
-        with self.assertRaisesRegex(sync.SyncError, "is shared already"):
+        with self.assertRaisesRegex(sync.SyncError, "is shared already, as the shared folder Notes"):
             sync.share(api, self.notes, "other-id")
         with self.assertRaisesRegex(sync.SyncError, "is not a directory"):
             sync.share(api, os.path.join(self.tmp.name, "missing"), "other-id")
         self.assertEqual(api.writes, [])
+
+    def test_a_folder_that_holds_or_sits_in_a_shared_folder_syncthing_or_the_drops_is_refused_in_plain_words(self):
+        shared = os.path.join(self.home, "Documents", "Notes")
+        inside = os.path.join(shared, "drafts")
+        link = os.path.join(self.home, "link-to-notes")
+        for directory in (inside, os.path.join(self.home, "Documents", "other")):
+            os.makedirs(directory)
+        os.symlink(shared, link)
+        api = self.api(folders=[folder("notes", path=shared.replace(self.home, "~", 1))])
+        for path, reason in (("~", "holds .*syncthing, which is Syncthing's own directory"),
+                             (self.home + "/", "holds .*syncthing, which is Syncthing's own directory"),
+                             (os.path.join(self.home, "Documents"), "holds .*/Documents/Notes, which is the shared folder Notes; "
+                                                                    "choose a folder that does not hold it"),
+                             (inside, "is inside .*/Documents/Notes, which is the shared folder Notes; Syncthing would sync "
+                                      "its files twice"),
+                             (link, "is shared already, as the shared folder Notes"),
+                             (sync.drops_root(), "is the directory of the hidden folders that Send file uses, which is never shared"),
+                             (os.path.join(self.home, ".local"), "holds .*, which is Syncthing's own directory"),
+                             (os.path.join(self.home, ".local", "state", "syncthing"), "is Syncthing's own directory, with its "
+                                                                                       "configuration and keys, which is never shared")):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(sync.SyncError, reason):
+                    sync.share(api, path, "other-id")
+                with self.assertRaisesRegex(sync.SyncError, reason):
+                    sync.folder_directory(path, api.answers["/rest/config/folders"])
+        self.assertEqual(api.writes, [])
+        self.assertEqual(sync.share(api, os.path.join(self.home, "Documents", "other"), "other-id"), "other-id")
 
     def run_cli(self, *argv, folders=()):
         out, err = io.StringIO(), io.StringIO()

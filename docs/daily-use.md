@@ -320,7 +320,9 @@ vekrona-sync reject DEVICE_ID
 
 **Share a folder.** "Share a folder…" in the Sync list opens a folder chooser, and then the list comes back with the folder's ID to
 confirm: Enter or Share offers the folder to your other devices, Esc or Cancel shares nothing. The folder stays where it is on this
-computer.
+computer. A folder that holds a shared folder or sits inside one is refused, since Syncthing would sync its files twice, and so are
+your home directory and any other folder that holds Syncthing's own directory (`~/.local/state/syncthing`, with its keys) or the
+hidden folders of Send file; the same goes for the path that Join is given.
 
 The ID is suggested from the folder's name in lowercase with dashes (`My Notes` is `my-notes`; accents are folded, `Café` is
 `cafe`; a name that already has a folder here gets `-2`). A name with letters that ASCII cannot spell (`Фото 2024`), or none
