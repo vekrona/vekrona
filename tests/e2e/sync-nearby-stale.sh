@@ -46,7 +46,7 @@ export PEER_ID
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.nearby | map(.id) == [$peer]'
 nearby_is_the_peer || die "the device that runs must be among the nearby devices that answer, but the command printed: $(nearby_ids)"
 open_popout
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Syncthing device'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nearby_row_shown
 snap nearby-there
 log "ok: while the other device runs the popout lists it under Nearby"
 close_popout
@@ -59,7 +59,7 @@ open_popout
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Share a folder'
 # Syncthing's list is in sync.json before the popout opens, so a popout that showed it unchecked would show the row in the very
 # frame in which "Share a folder" is first readable.
-text_absent 'Syncthing device' || die "the popout must not list a device whose Syncthing has stopped"
+absent nearby_row_shown || die "the popout must not list a device whose Syncthing has stopped"
 snap nearby-stopped
 log "ok: a device that stopped answering stays in Syncthing's cache and is not listed under Nearby"
 close_popout
@@ -67,7 +67,7 @@ close_popout
 peer_syncthing_start
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nearby_is_the_peer
 open_popout
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Syncthing device'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nearby_row_shown
 snap nearby-back
 log "ok: when the other device is back the popout lists it again, with nothing restarted on the guest"
 close_popout
@@ -76,5 +76,5 @@ peer_net_down
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nearby_is_empty
 open_popout
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Share a folder'
-text_absent 'Syncthing device' || die "the popout must not list a device whose network is gone"
+absent nearby_row_shown || die "the popout must not list a device whose network is gone"
 log "ok: a device whose address does not answer at all is not listed either, and the command ends within $NEARBY_COMMAND_SEC s"

@@ -15,6 +15,10 @@ CHOOSER_LISTING_SEC=10
 # The popout's last row, which is always there.
 popout_open() { text_shown 'Share a folder'; }
 export -f popout_open
+# A device row under Nearby reads "Syncthing device ID7"; tesseract reads the small bold "Syncthing" as "Synething" for as long as the
+# frame stays the same, so the row is found by the words after it.
+nearby_row_shown() { text_shown 'thing device'; }
+export -f nearby_row_shown
 # Leaves the popout open. A popout that a step of the scenario left open (Accept does) stays as it is,
 # because the click that opens a closed popout would close an open one.
 open_popout() {

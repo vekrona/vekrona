@@ -50,7 +50,7 @@ log "ok: the other device runs on its own network"
 
 open_popout
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.nearby | map(.id) == [$peer]'
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Syncthing device'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nearby_row_shown
 snap nearby
 log "ok: the other device announces itself on the network and the popout lists it under Nearby"
 
@@ -58,7 +58,7 @@ click_word '^Pair$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_has_pending_device
 log "ok: Pair makes the other device see a request from the guest, which it learned from nothing but the connection"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '(.devices | any(.[]; .id == $peer and (.connected | not))) and (.nearby == [])'
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'Syncthing device'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent nearby_row_shown
 snap paired-waiting
 log "ok: the other device leaves Nearby for My devices, offline until it accepts"
 

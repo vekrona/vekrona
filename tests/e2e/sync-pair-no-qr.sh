@@ -35,7 +35,7 @@ hide_qrencode
 
 open_popout
 click_word '^another$'
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'qrencode, which is not installed'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'qrencode, which is\s+not installed'
 text_shown 'install.sh 30' || die "the message must name the stage that installs qrencode"
 text_shown 'This computer' || die "the ID of this computer must be shown without the QR code"
 text_shown 'Copy ID' || die "Copy ID must be shown without the QR code"
@@ -58,6 +58,6 @@ restore_qrencode
 click_word '^another$'
 click_word '^another$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- qr_png_exists
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'qrencode, which is not installed'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'qrencode, which is\s+not installed'
 snap pair-qr-back
 log "ok: with qrencode installed again the section makes the QR code and the message is gone"

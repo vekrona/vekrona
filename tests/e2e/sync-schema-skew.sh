@@ -22,7 +22,7 @@ OLD_LAYOUT='{"state": "idle", "problem": null, "folders": [], "offers": [], "pen
 
 old_layout_written() { vekrona-dev run bash -c 'printf %s "$1" >"$HOME/.local/state/vekrona/sync.json"' _ "$OLD_LAYOUT"; }
 schema_errors() { shell_log_count 'sync.json has schema'; }
-watcher_stopped() { absent watcher_active; }
+watcher_stopped() { inactive watcher_active; }
 export -f schema_errors watcher_stopped
 cleanup() { run_cleanups close_popout 'vekrona-dev sh systemctl --user start vekrona-sync.service'; }
 

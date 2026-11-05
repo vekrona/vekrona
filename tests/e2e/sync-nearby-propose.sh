@@ -25,7 +25,7 @@ RETRY_WINDOW_SEC=30
 PEER_ID=
 export PEER_ID
 
-proposed_in_centre() { text_shown 'is nearby'; }
+proposed_in_centre() { text_shown 'is\s+nearby'; }
 export -f proposed_in_centre
 cleanup() { run_cleanups close_popout close_notification_centre peer_stop main_forget_peers; }
 
@@ -84,7 +84,7 @@ stays_absent "$RETRY_WINDOW_SEC" proposed_in_centre || die "a device that got No
 close_notification_centre
 state_is '.nearby | any(.[]; .id == $peer and .unseen)' || die "a device that got Not now must keep its dot until the popout is opened"
 open_popout
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Syncthing device'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- nearby_row_shown
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.nearby | any(.[]; .id == $peer and (.unseen | not))'
 close_popout
 log "ok: Not now proposes it no more, it stays under Nearby with its dot, and opening the popout clears the dot"
