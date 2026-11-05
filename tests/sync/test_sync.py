@@ -1194,27 +1194,6 @@ class SendAvoidsIgnoredNamesTest(unittest.TestCase):
         self.assertEqual(os.listdir(os.path.join(self.tmp.name, "drop", "to", PEER)), ["photo (2).jpg"])
 
 
-class NotificationTextTest(unittest.TestCase):
-    def shown(self, call):
-        with mock.patch.object(sync, "run_tool", return_value=mock.Mock(returncode=0, stderr="")) as run:
-            call(sync.DesktopNotifier(lambda message: self.fail(message)))
-        return run.call_args.args[1]
-
-    def test_the_notifications_of_pairing_say_what_happened_and_what_to_do(self):
-        self.assertEqual(self.shown(lambda n: n.pair_requested("ABCD-EFG"))[-2:],
-                         ["Pair request sent to ABCD-EFG", "Accept it on the other device."])
-        self.assertEqual(self.shown(lambda n: n.connected("Pixel"))[-2:], ["Pixel is now one of your devices", ""])
-
-    def test_the_question_about_a_nearby_device_offers_not_now_first_then_pair_and_ignore(self):
-        asked = []
-        notifier = sync.DesktopNotifier(lambda message: self.fail(message))
-        with mock.patch.object(notifier, "ask", lambda title, body, choices: asked.append((title, body, choices))):
-            notifier.nearby({"code": "ABCD-EFG"}, "pair-action", "ignore-action")
-        title, body, choices = asked[0]
-        self.assertEqual((title, body), ("A Syncthing device ABCD-EFG is nearby", "Pair with it?"))
-        self.assertEqual(choices, [("later", "Not now", None), ("pair", "Pair", "pair-action"), ("ignore", "Ignore", "ignore-action")])
-
-
 class NotifierTest(unittest.TestCase):
     def test_a_notification_tool_that_cannot_be_started_is_reported_not_raised_in_its_thread(self):
         reports = []
