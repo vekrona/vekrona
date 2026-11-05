@@ -13,10 +13,15 @@ mkdir "$work/bin"
 # removed desktop entries turn their units not-found) and $STALE_LISTING before (the units still read loaded); LIST_FAIL and
 # RELOAD_FAIL make the lister and the reload fail, AFTER_KILL_LISTING replaces $LISTING from the second listing of a run on (the killed
 # unit is failed by then), RESET_FAIL makes reset-failed fail. The user manager's ControlGroup is the one in
-# $CGROUP_PATH; stop and kill fail like the host's user manager did for an orphan it held as not loaded (exit 5).
+# $CGROUP_PATH. $UNIT_STATES/<unit> holds a unit's ActiveState as systemd has it once the unit's cgroup is empty, "failed" when
+# there is no file (the kill failed it): "deactivating" (systemd has not seen the processes end yet; a stop waits for that and the
+# unit ends failed, while a reset-failed now does nothing and the unit turns failed after it) or "inactive" (systemd got rid of
+# the unit already; stop and reset-failed refuse it as not loaded, exit 5 and 1, as systemd does). is-active prints the state.
+# A reset-failed of a failed unit that has a state file makes it inactive.
 write_fake "$work/bin/systemctl" <<'FAKE'
 #!/usr/bin/env bash
 echo "systemctl $*" >> "$STUB_LOG"
+state_of() { cat "$UNIT_STATES/$1" 2>/dev/null || echo failed; }
 case "$*" in
   "--user daemon-reload") [[ -z "${RELOAD_FAIL-}" ]] || exit 1; touch "$RELOADED" ;;
   "--user list-units "*)
@@ -24,9 +29,21 @@ case "$*" in
     if [[ ! -e "$RELOADED" ]]; then cat "$STALE_LISTING"
     elif [[ -n "${AFTER_KILL_LISTING-}" && -e "$LISTED" ]]; then cat "$AFTER_KILL_LISTING"
     else cat "$LISTING"; touch "$LISTED"; fi ;;
-  "--user reset-failed "*) [[ -z "${RESET_FAIL-}" ]] || exit 1 ;;
+  "--user reset-failed "*)
+    [[ -z "${RESET_FAIL-}" ]] || exit 1
+    for unit in "${@:3}"; do
+      case "$(state_of "$unit")" in
+        inactive) echo "Failed to reset failed state of unit $unit: Unit $unit not loaded." >&2; exit 1 ;;
+        failed) if [[ -e "$UNIT_STATES/$unit" ]]; then echo inactive > "$UNIT_STATES/$unit"; fi ;;
+      esac
+    done ;;
+  "is-active --user "*) state="$(state_of "$3")"; echo "$state"; [[ "$state" == active ]] || exit 3 ;;
   "show -p ControlGroup --value user@"*) echo "$CGROUP_PATH" ;;
-  "--user stop "* | "--user kill "*) echo "Failed to $2 unit ${*: -1}: Unit ${*: -1} not loaded." >&2; exit 5 ;;
+  "--user stop "*)
+    case "$(state_of "$3")" in
+      inactive) echo "Failed to stop unit $3: Unit $3 not loaded." >&2; exit 5 ;;
+      deactivating) echo failed > "$UNIT_STATES/$3" ;;
+    esac ;;
   *) exit 2 ;;
 esac
 FAKE
@@ -40,6 +57,8 @@ if [[ -n "${REMOVE_ON_WAIT-}" ]]; then rm -r "$(dirname "${!#}")"; exit 1; fi
 exit 2
 FAKE
 export PATH="$work/bin:$PATH" STUB_LOG="$work/log" LISTING="$work/listing" STALE_LISTING="$work/stale-listing" RELOADED="$work/reloaded" LISTED="$work/listed"
+export UNIT_STATES="$work/states"
+mkdir "$UNIT_STATES"
 export VEKRONA_SYSFS_ROOT="$work/root"
 export CGROUP_PATH=/user.slice/user-1000.slice/user@1000.service
 manager="$VEKRONA_SYSFS_ROOT/sys/fs/cgroup$CGROUP_PATH"
@@ -180,6 +199,24 @@ rm -f "$LISTED"
 AFTER_KILL_LISTING="$work/after-kill-listing" stop_orphaned_autostart_units 2>/dev/null
 grep -qxF 'systemctl --user reset-failed app-blueman@autostart.service' "$STUB_LOG" || die "a killed orphan that reads as failed was not reset exactly once: $(grep reset-failed "$STUB_LOG")"
 log "ok: an orphan that the listing shows as failed after the kill is reset once"
+
+# Right after the kill systemd may not have seen the orphan's processes end: the unit still deactivates. The stop waits for that,
+# and the unit is reset once it is failed, so that the user manager is not left degraded.
+printf 'app-blueman@autostart.service not-found active running app-blueman@autostart.service\n' > "$LISTING"
+echo deactivating > "$UNIT_STATES/$BLUEMAN"
+: > "$STUB_LOG"
+stop_orphaned_autostart_units 2>/dev/null
+grep -qxF "systemctl --user stop $BLUEMAN" "$STUB_LOG" || die "an orphan that still deactivates was not waited for: $(<"$STUB_LOG")"
+[[ "$(<"$UNIT_STATES/$BLUEMAN")" == inactive ]] || die "an orphan that still deactivated after the kill was left $(<"$UNIT_STATES/$BLUEMAN")"
+log "ok: an orphan that still deactivates after the kill is waited for, then reset"
+
+# systemd may have got rid of the orphan by the time the kill is done: it is not loaded, so stop and reset-failed refuse it.
+echo inactive > "$UNIT_STATES/$BLUEMAN"
+: > "$STUB_LOG"
+(stop_orphaned_autostart_units) 2>"$work/err" || die "an orphan that systemd got rid of after the kill failed the stage: $(<"$work/err")"
+! grep -q 'reset-failed' "$STUB_LOG" || die "an orphan that is gone was reset, which systemd refuses: $(<"$STUB_LOG")"
+log "ok: an orphan that is gone after the kill is taken for stopped and not reset"
+rm "$UNIT_STATES/$BLUEMAN"
 : > "$LISTING"
 
 # Stage 70 calls the check inside `if`, where set -e is off: a reload or lister failure must still end the run, not read as "no orphans".
