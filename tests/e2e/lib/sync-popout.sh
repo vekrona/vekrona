@@ -4,27 +4,21 @@
 # the same on the file chooser of the desktop portal. SYNC_SHOTS_DIR, when set, collects a screenshot of each state a scenario
 # calls snap for.
 
-# A click on the pill toggles the popout, so the one a failed run left open is closed by the same click.
+# A click on the pill toggles the popout (the first opens it, the second closes it).
 click_sync_pill() {
   local x y
   read -r x y <<<"$(bar_widget center sync)"
   [[ -n "${x:-}" ]] || die "the bar must show the sync icon"
   vekrona-dev click "$x" "$y"
 }
-POPOUT_FIRST_CLICK_SEC=10
 CHOOSER_LISTING_SEC=10
 # The popout's last row, which is always there.
 popout_open() { text_shown 'Share a folder'; }
 export -f popout_open
-# The first click on the pill sometimes shows only its hover highlight and opens nothing (TODO.md, "Bar pills"): Esc and a pointer
-# move are what the entry there says clears it, so a second click follows them, and the scenario says that it needed one.
+# Leaves the popout open. A popout that a step of the scenario left open (Accept does) stays as it is,
+# because the click that opens a closed popout would close an open one.
 open_popout() {
-  click_sync_pill
-  vekrona-dev until --timeout "$POPOUT_FIRST_CLICK_SEC" -- popout_open && return 0
-  warn "the first click on the Sync pill opened no popout (the first-click problem of TODO.md); trying again after Esc and a pointer move"
-  vekrona-dev key esc
-  vekrona-dev move 640 400
-  click_sync_pill
+  if absent popout_open; then click_sync_pill; fi
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- popout_open
 }
 close_popout() { absent popout_open || click_sync_pill; }
