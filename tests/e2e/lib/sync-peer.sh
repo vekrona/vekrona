@@ -71,7 +71,7 @@ peer_start() {
   peer_net_up
   vekrona-dev run rm -rf "$PEER_HOME"
   vekrona-dev run mkdir -p "$PEER_HOME"
-  guest_write "$VEKRONA_ROOT/tests/e2e/sync-peer-exec.sh" "$PEER_EXEC"
+  guest_write "$VEKRONA_ROOT/tests/e2e/lib/sync-peer-exec.sh" "$PEER_EXEC"
   peer_identity
   peer_syncthing_start
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs in the guest, written there by sync-peer.sh. usage: sync-peer-exec.sh NETNS HOME PIDFILE COMMAND...
+# Runs in the guest, written there by sync-peer.sh. usage: lib/sync-peer-exec.sh NETNS HOME PIDFILE COMMAND...
 # Runs COMMAND as the desktop user inside the network namespace NETNS, with HOME as the other device's home (so that the
 # XDG directories fall under it) and the user's session bus, and records the PID of COMMAND itself in PIDFILE, so that the
 # scenario can stop that process and nothing else.
