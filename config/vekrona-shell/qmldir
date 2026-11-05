@@ -8,6 +8,7 @@ WindowTitle 1.0 WindowTitle.qml
 Agent 1.0 Agent.qml
 Tray 1.0 Tray.qml
 Perf 1.0 Perf.qml
+singleton Presence 1.0 Presence.qml
 singleton SystemLoad 1.0 SystemLoad.qml
 Sound 1.0 Sound.qml
 KeyboardLayout 1.0 KeyboardLayout.qml

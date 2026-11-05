@@ -50,7 +50,8 @@ BarPill {
     property string qrFailure: ""
     property bool copied: false
     // The turn of the icon while syncing, in steps of a quarter of the half turn after which the glyph looks the same: one
-    // timer wakeup per step, four a second, and nothing at all while no sync runs (an animation would redraw every frame).
+    // timer wakeup per step, four a second, and nothing at all while no sync runs (an animation would redraw every frame) or
+    // nobody is there to see it (Presence.qml: the screen is locked or off).
     property int spinStep: 0
     readonly property int spinSteps: 4
 
@@ -116,7 +117,7 @@ BarPill {
     Timer {
         interval: 250
         repeat: true
-        running: root.report.state === "syncing"
+        running: root.report.state === "syncing" && Presence.here
         onTriggered: root.spinStep = (root.spinStep + 1) % root.spinSteps
         onRunningChanged: if (!running)
             root.spinStep = 0

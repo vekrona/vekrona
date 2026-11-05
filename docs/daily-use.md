@@ -338,7 +338,7 @@ and never empties it, so a file sent to such a device stays in the folder's `to/
 the two cannot join the folder: its offer of a drop is ignored (a line in the journal of `vekrona-sync.service`), and a drop folder
 that a third device shares in Syncthing is neither sent through nor received from until you remove that device from it.
 
-What the icon shows: the two round arrows of Material's `sync`, still when idle and turning in steps (four a second, only while something syncs) while syncing, with a warning mark for a problem (the list gives the reason in words), and struck through when offline (Syncthing is not running). `vekrona-sync watch`
+What the icon shows: the two round arrows of Material's `sync`, still when idle and turning in steps (four a second, only while something syncs and somebody is there: it stops after 300 s without input, when the screen locks, and goes on at the next input) while syncing, with a warning mark for a problem (the list gives the reason in words), and struck through when offline (Syncthing is not running). `vekrona-sync watch`
 is the service behind it (`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change, and while Syncthing
 does not answer it is started again after a longer wait each time, up to a minute.
 
