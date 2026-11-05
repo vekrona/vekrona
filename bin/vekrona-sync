@@ -58,6 +58,7 @@ import subprocess
 import stat
 import sys
 import threading
+import time
 import unicodedata
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -628,8 +629,9 @@ def overall(folders):
     return "idle", None
 
 
-def assemble(snapshot):
-    """The sync.json of a Syncthing that answered, without its arrivals."""
+def assemble(snapshot, heard):
+    """The sync.json of a Syncthing that answered, without its arrivals. heard: device ID -> when Syncthing last reported it on
+    the network (seconds since the epoch), which orders the nearby list, the most recent first, before it is cut to its length."""
     names = {device["deviceID"]: device_name(device["deviceID"], device.get("name")) for device in snapshot.devices}
     folders = [folder_view(folder, snapshot.statuses.get(folder["id"])) for folder in snapshot.folders
                if not is_drop(folder["id"])]
@@ -652,8 +654,10 @@ def assemble(snapshot):
     return {
         "state": state, "problem": problem, "me": {"id": snapshot.my_id, "code": short_code(snapshot.my_id)},
         "folders": folders, "offers": offers,
-        "nearby": [{"id": device_id, "code": short_code(device_id), "addresses": announcement["addresses"]}
-                   for device_id, announcement in sorted(snapshot.discovered.items()) if device_id not in known][:NEARBY_MAX_DEVICES],
+        "nearby": sorted(({"id": device_id, "code": short_code(device_id), "addresses": announcement["addresses"],
+                           "heard": heard.get(device_id)}
+                          for device_id, announcement in snapshot.discovered.items() if device_id not in known),
+                         key=lambda device: (device["heard"] is None, -(device["heard"] or 0), device["id"]))[:NEARBY_MAX_DEVICES],
         "pendingDevices": [{"id": device_id, "name": device_name(device_id, info.get("name")),
                             "code": short_code(device_id)}
                            for device_id, info in snapshot.pending_devices.items()],
@@ -1451,6 +1455,11 @@ def summarized_drops(events):
             if event["type"] == "FolderSummary" and is_drop(event["data"]["folder"])}
 
 
+def discovered_in(events):
+    """The devices that Syncthing reported on the network in a batch of events."""
+    return frozenset(event["data"]["device"] for event in events if event["type"] == "DeviceDiscovered")
+
+
 def connections_in(events):
     """The devices that connected in a batch of events, by ID, with the name they gave."""
     return {event["data"]["id"]: device_name(event["data"]["id"], event["data"].get("deviceName"))
@@ -1476,6 +1485,9 @@ class Watcher:
         # one question at a time, so that a host that announces many devices gets no more than one notification on screen.
         self.question = None
         self.waiting = frozenset()
+        # When Syncthing last reported each nearby device on the network (DeviceDiscovered), which sync.json keeps as "heard"
+        # so that a restarted watcher starts from it.
+        self.heard = {}
 
     def follow(self, api):
         """Follows Syncthing until it stops answering (Unreachable)."""
@@ -1483,7 +1495,9 @@ class Watcher:
         my_id = api.my_id()
         latest = api.latest_event_id()
         self.snapshot = read_snapshot(api, my_id)
-        self.refresh(scan_all=True, finished=set(), summarized=set(), discovered=True, connected={})
+        self.heard = {device["id"]: device["heard"] for device in (self.store.read() or {}).get("nearby", [])
+                      if device.get("heard") is not None}
+        self.refresh(scan_all=True, finished=set(), summarized=set(), discovered=frozenset(), connected={})
         while True:
             batch = api.events(latest)
             if not batch:
@@ -1498,20 +1512,25 @@ class Watcher:
                     apply_event(self.snapshot, event)
             else:
                 continue
-            self.refresh(scan_all=gap, finished=finished_drops(batch), summarized=summarized_drops(batch),
-                         discovered=gap or any(event["type"] == "DeviceDiscovered" for event in batch),
+            discovered = discovered_in(batch)
+            self.heard.update(dict.fromkeys(discovered, int(time.time())))
+            self.refresh(scan_all=gap, finished=finished_drops(batch), summarized=summarized_drops(batch), discovered=discovered,
                          connected=connections_in(batch))
 
     def refresh(self, scan_all, finished, summarized, discovered, connected):
-        """discovered: Syncthing heard a device on the network (or everything is looked at again), so the nearby ones are
-        tried for an answer; connected: device ID -> name, of the devices that connected in this batch."""
+        """discovered: the devices that Syncthing reported on the network in this batch, which are tried for an answer (all
+        nearby ones are when everything is looked at again); connected: device ID -> name, of the devices that connected in this
+        batch. Syncthing reports a device when it first hears it, after 90 s of silence, or when its Syncthing restarted, so a
+        device that stays is tried once, and again whenever the popout opens (`nearby`)."""
         self.accept_drops()
         arrivals = self.receive(scan_all, finished)
         self.tend(scan_all, finished | summarized)
-        view = assemble(self.snapshot)
+        view = assemble(self.snapshot, self.heard)
+        self.heard = {device["id"]: device["heard"] for device in view["nearby"] if device["heard"] is not None}
         asking = self.question is not None and self.question.is_alive()
         # The devices that waited for the question to close are tried again once it has.
-        tried = [device["id"] for device in view["nearby"] if discovered or (not asking and device["id"] in self.waiting)]
+        tried = [device["id"] for device in view["nearby"]
+                 if scan_all or device["id"] in discovered or (not asking and device["id"] in self.waiting)]
         reachable = frozenset(answering_nearby([device for device in view["nearby"] if device["id"] in tried]))
         proposals, deferred = self.store.publish(view, arrivals, reachable, proposal_limit=0 if asking else 1)
         listed = {device["id"] for device in view["nearby"]}

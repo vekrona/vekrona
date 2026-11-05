@@ -286,8 +286,11 @@ is between devices you accepted yourself; there is no server.
 - *Nearby.* A device on the same network that runs Syncthing announces itself (local discovery), and shows up under "Nearby" as
   "Syncthing device ABCD-EFG" (its code, the first characters of its device ID). Press Pair: this computer adds it and offers it
   every folder. It then asks on its side, "<this computer> wants to connect", and is *online* under "My devices" as soon as you
-  accept there. Syncthing never forgets a device it heard, so when the list opens the shell tries the addresses that each announced
-  (one second at most, only while the list is open) and shows the ones that answer; `vekrona-sync nearby` prints them.
+  accept there. Syncthing never forgets a device it heard, so a device is nearby only while one of the addresses it announced on the
+  local network (a private or link-local IP address) accepts a connection. The watcher tries a device's addresses when Syncthing
+  reports it on the network (when it first appears, after 90 s of silence, or when its Syncthing restarts), and the shell tries
+  those of every listed device each time the list opens, one second at most, and shows the ones that answer; `vekrona-sync nearby`
+  prints them. The list holds the 16 devices that Syncthing reported last.
   You do not have to look: when such a device appears and answers, a notification asks "A Syncthing device ABCD-EFG is nearby.
   Pair with it?" with Not now, Pair and Ignore, once per device for good (a device that goes away and comes back, or a restart of
   Syncthing or of the watcher, does not ask again; the ledger is kept in `~/.local/state/vekrona/sync-ledger.json`). Not now leaves the device under Nearby,

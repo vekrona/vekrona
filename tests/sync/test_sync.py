@@ -228,14 +228,14 @@ def snapshot(**overrides):
 
 class AssembleTest(unittest.TestCase):
     def test_a_quiet_syncthing_is_idle_and_hides_drops_and_itself(self):
-        view = sync.assemble(snapshot())
+        view = sync.assemble(snapshot(), {})
         self.assertEqual((view["state"], view["problem"]), ("idle", None))
         self.assertEqual(view["folders"], [{"id": "f1", "label": "Notes", "path": "/home/u/Sync/Notes",
                                             "state": "idle", "progress": 100, "problem": None}])
         self.assertEqual(view["devices"], [{"id": PEER, "name": "Pixel", "connected": True, "sharesWithUs": False}])
 
     def shares_with_us(self, **overrides):
-        return sync.assemble(snapshot(**overrides))["devices"][0]["sharesWithUs"]
+        return sync.assemble(snapshot(**overrides), {})["devices"][0]["sharesWithUs"]
 
     def test_a_device_that_is_a_member_of_a_folder_shares_with_us(self):
         self.assertTrue(self.shares_with_us(folders=[folder("f1", devices=(ME, PEER))]))
@@ -255,41 +255,41 @@ class AssembleTest(unittest.TestCase):
         self.assertFalse(self.shares_with_us(folders=[folder("f1", devices=(ME, THIRD))]))
 
     def test_a_folder_that_is_syncing_shows_its_progress(self):
-        view = sync.assemble(snapshot(statuses={"f1": {"state": "syncing", "globalBytes": 200, "needBytes": 80}}))
+        view = sync.assemble(snapshot(statuses={"f1": {"state": "syncing", "globalBytes": 200, "needBytes": 80}}), {})
         self.assertEqual((view["state"], view["folders"][0]["progress"]), ("syncing", 60))
 
     def test_a_folder_without_bytes_has_zero_progress_not_a_division_by_zero(self):
-        view = sync.assemble(snapshot(statuses={"f1": {"state": "scanning", "globalBytes": 0, "needBytes": 0}}))
+        view = sync.assemble(snapshot(statuses={"f1": {"state": "scanning", "globalBytes": 0, "needBytes": 0}}), {})
         self.assertEqual(view["folders"][0]["progress"], 0)
 
     def test_a_problem_wins_over_syncing_and_carries_its_text(self):
         view = sync.assemble(snapshot(
             folders=[folder("f1"), folder("f2", "Other")],
             statuses={"f1": {"state": "syncing", "globalBytes": 1, "needBytes": 1},
-                      "f2": {"state": "error", "error": "folder path missing"}}))
+                      "f2": {"state": "error", "error": "folder path missing"}}), {})
         self.assertEqual((view["state"], view["problem"]), ("problem", "folder path missing"))
 
     def test_files_that_failed_to_sync_are_a_problem_of_an_idle_folder(self):
         view = sync.assemble(snapshot(statuses={"f1": {"state": "idle", "globalBytes": 1, "needBytes": 0,
-                                                        "pullErrors": 3}}))
+                                                        "pullErrors": 3}}), {})
         self.assertEqual((view["state"], view["problem"]), ("problem", "3 items could not be synced"))
 
     def test_a_paused_folder_is_a_problem(self):
-        view = sync.assemble(snapshot(folders=[folder("f1", paused=True)], statuses={}))
+        view = sync.assemble(snapshot(folders=[folder("f1", paused=True)], statuses={}), {})
         self.assertEqual((view["state"], view["problem"]), ("problem", "Paused"))
 
     def test_an_unknown_state_is_reported_not_taken_for_idle(self):
-        view = sync.assemble(snapshot(statuses={"f1": {"state": "lizard"}}))
+        view = sync.assemble(snapshot(statuses={"f1": {"state": "lizard"}}), {})
         self.assertEqual(view["state"], "problem")
 
     def test_a_pending_device_has_a_code_to_compare(self):
-        view = sync.assemble(snapshot(pending_devices={THIRD: {"name": "", "address": "1.2.3.4:22000"}}))
+        view = sync.assemble(snapshot(pending_devices={THIRD: {"name": "", "address": "1.2.3.4:22000"}}), {})
         self.assertEqual(view["pendingDevices"], [{"id": THIRD, "name": "CCCC-CCC", "code": "CCCC-CCC"}])
 
     def test_offers_name_the_offering_device(self):
         view = sync.assemble(snapshot(pending_folders={
             "p1": {"offeredBy": {PEER: {"label": "Photos"}}},
-            "p2": {"offeredBy": {PEER: {"label": ""}}}}))
+            "p2": {"offeredBy": {PEER: {"label": ""}}}}), {})
         self.assertEqual([(o["folder"], o["label"], o["device"], o["deviceName"]) for o in view["offers"]],
                          [("p1", "Photos", PEER, "Pixel"), ("p2", "p2", PEER, "Pixel")])
 
@@ -298,27 +298,35 @@ class AssembleTest(unittest.TestCase):
             DROP: {"offeredBy": {PEER: {"label": "vekrona drop"}}},
             sync.drop_folder_id(PEER, THIRD): {"offeredBy": {THIRD: {"label": "vekrona drop"}}},
             sync.drop_folder_id(ME, THIRD): {"offeredBy": {PEER: {"label": "vekrona drop"}}},
-            "vekrona-drop-lizard": {"offeredBy": {PEER: {"label": "vekrona drop"}}}}))
+            "vekrona-drop-lizard": {"offeredBy": {PEER: {"label": "vekrona drop"}}}}), {})
         self.assertEqual(view["offers"], [])
 
     def test_a_device_that_announced_itself_and_is_on_no_list_is_nearby(self):
-        view = sync.assemble(snapshot(discovered={THIRD: {"addresses": ["tcp://10.0.0.2:22000"]}}))
-        self.assertEqual(view["nearby"], [{"id": THIRD, "code": "CCCC-CCC", "addresses": ["tcp://10.0.0.2:22000"]}])
+        view = sync.assemble(snapshot(discovered={THIRD: {"addresses": ["tcp://10.0.0.2:22000"]}}), {THIRD: 1700000000})
+        self.assertEqual(view["nearby"], [{"id": THIRD, "code": "CCCC-CCC", "addresses": ["tcp://10.0.0.2:22000"],
+                                           "heard": 1700000000}])
+
+    def test_the_nearby_list_has_the_devices_heard_last_first_and_is_cut_to_its_length(self):
+        discovered = {f"D{index:03d}": {"addresses": []} for index in range(100)}
+        view = sync.assemble(snapshot(discovered=discovered), {"D050": 20, "D099": 10, "D007": 30})
+        self.assertEqual([device["id"] for device in view["nearby"]],
+                         ["D007", "D050", "D099"] + [f"D{index:03d}" for index in range(sync.NEARBY_MAX_DEVICES + 1) if index != 7][:13])
+        self.assertEqual(len(view["nearby"]), sync.NEARBY_MAX_DEVICES)
 
     def test_this_computer_and_the_devices_of_every_list_are_not_nearby(self):
         view = sync.assemble(snapshot(
             discovered={d: {"addresses": []} for d in (ME, PEER, THIRD, "D" * 7 + ("-" + "D" * 7) * 7, "E" * 7 + ("-" + "E" * 7) * 7)},
-            pending_devices={THIRD: {"name": "", "address": ""}}, ignored=frozenset({"D" * 7 + ("-" + "D" * 7) * 7})))
+            pending_devices={THIRD: {"name": "", "address": ""}}, ignored=frozenset({"D" * 7 + ("-" + "D" * 7) * 7})), {})
         self.assertEqual([device["id"] for device in view["nearby"]], ["E" * 7 + ("-" + "E" * 7) * 7])
 
     def test_nobody_nearby_is_an_empty_list(self):
-        self.assertEqual(sync.assemble(snapshot())["nearby"], [])
+        self.assertEqual(sync.assemble(snapshot(), {})["nearby"], [])
 
     def test_the_view_names_this_computer_by_its_id_and_a_code_to_compare(self):
-        self.assertEqual(sync.assemble(snapshot())["me"], {"id": ME, "code": "AAAA-AAA"})
+        self.assertEqual(sync.assemble(snapshot(), {})["me"], {"id": ME, "code": "AAAA-AAA"})
 
     def test_a_folder_that_started_syncing_after_an_error_has_zero_progress_not_a_missing_key(self):
-        view = sync.assemble(snapshot(statuses={"f1": {"state": "syncing", "error": None}}))
+        view = sync.assemble(snapshot(statuses={"f1": {"state": "syncing", "error": None}}), {})
         self.assertEqual((view["state"], view["folders"][0]["progress"]), ("syncing", 0))
 
 
@@ -340,7 +348,7 @@ class StateStoreTest(unittest.TestCase):
             return json.load(f)
 
     def test_every_write_carries_the_schema(self):
-        publish = lambda: self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
+        publish = lambda: self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0)
         for name, write in (("publish", publish), ("seen", lambda: (publish(), self.store.mark_seen())),
                             ("offline", lambda: sync.command_offline(None))):
             with self.subTest(write=name):
@@ -359,7 +367,7 @@ class StateStoreTest(unittest.TestCase):
             json.dump({"state": "idle", "folders": [], "offers": [], "pendingDevices": [], "devices": [],
                        "arrivals": [self.arrival("old")]}, f)
         self.assertIsNone(self.store.read())
-        self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0)
         self.assertEqual((self.raw()["schema"], self.raw()["arrivals"], self.reports), (sync.SCHEMA_VERSION, [], []))
 
     def write(self, path, content):
@@ -369,7 +377,7 @@ class StateStoreTest(unittest.TestCase):
 
     def test_a_sync_json_that_is_missing_garbage_or_of_another_schema_leaves_the_ledger_as_it_is(self):
         self.store.await_connection(PEER)
-        self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}})), [], {THIRD}, 1)
+        self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}}), {}), [], {THIRD}, 1)
         ledger = self.store.read_ledger()
         self.assertEqual((ledger["proposed"], ledger["awaiting"]), ([THIRD], [PEER]))
         for content in (None, "garbage", "[]", json.dumps({"schema": sync.SCHEMA_VERSION + 1, "arrivals": []}),
@@ -379,7 +387,7 @@ class StateStoreTest(unittest.TestCase):
                     os.unlink(self.store.path)
                 else:
                     self.write(self.store.path, content)
-                self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}})), [], {THIRD}, 1)
+                self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}}), {}), [], {THIRD}, 1)
                 self.assertEqual(self.store.read_ledger(), ledger)
                 self.assertEqual(self.raw()["schema"], sync.SCHEMA_VERSION)
                 self.assertNotIn("ledger", self.raw())
@@ -390,7 +398,7 @@ class StateStoreTest(unittest.TestCase):
                         json.dumps({"version": sync.LEDGER_VERSION, "proposed": [None], "seen": [], "awaiting": []})):
             with self.subTest(content=content):
                 self.write(self.store.ledger_path, content)
-                for change in (lambda: self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0), self.store.mark_seen,
+                for change in (lambda: self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0), self.store.mark_seen,
                                lambda: self.store.await_connection(PEER), lambda: self.store.take_awaiting({PEER})):
                     with self.assertRaisesRegex(sync.ConfigError, re.escape(self.store.ledger_path) + ".*delete it"):
                         change()
@@ -403,7 +411,7 @@ class StateStoreTest(unittest.TestCase):
         self.assertEqual(self.raw()["state"], "offline")
 
     def test_seen_marks_every_arrival_and_keeps_the_rest(self):
-        self.store.publish(sync.assemble(snapshot()), [self.arrival("a"), self.arrival("b")], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [self.arrival("a"), self.arrival("b")], frozenset(), 0)
         self.store.mark_seen()
         state = self.store.read()
         self.assertEqual([a["unseen"] for a in state["arrivals"]], [False, False])
@@ -414,7 +422,7 @@ class StateStoreTest(unittest.TestCase):
         self.assertIsNone(self.store.read())
 
     def test_seen_when_everything_is_seen_does_not_rewrite_the_file(self):
-        self.store.publish(sync.assemble(snapshot()), [self.arrival("a")], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [self.arrival("a")], frozenset(), 0)
         self.store.mark_seen()
         before = os.stat(self.store.path)
         self.store.mark_seen()
@@ -422,22 +430,22 @@ class StateStoreTest(unittest.TestCase):
         self.assertEqual((before.st_ino, before.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
 
     def test_publishing_what_the_file_says_already_does_not_rewrite_it(self):
-        self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0)
         before = os.stat(self.store.path)
-        self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0)
         self.assertEqual(before.st_ino, os.stat(self.store.path).st_ino)
 
     def test_new_arrivals_come_first_and_only_the_last_twenty_stay(self):
-        self.store.publish(sync.assemble(snapshot()), [self.arrival(f"old{i}") for i in range(15)], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [self.arrival(f"old{i}") for i in range(15)], frozenset(), 0)
         self.store.mark_seen()
-        self.store.publish(sync.assemble(snapshot()), [self.arrival(f"new{i}") for i in range(10)], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [self.arrival(f"new{i}") for i in range(10)], frozenset(), 0)
         arrivals = self.store.read()["arrivals"]
         self.assertEqual(len(arrivals), 20)
         self.assertEqual(arrivals[0]["name"], "new0")
         self.assertEqual([a["unseen"] for a in arrivals], [True] * 10 + [False] * 10)
 
     def test_the_offline_view_says_so_in_plain_words_and_keeps_the_arrivals(self):
-        self.store.publish(sync.assemble(snapshot()), [self.arrival("a")], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [self.arrival("a")], frozenset(), 0)
         self.store.publish_offline()
         state = self.store.read()
         self.assertEqual((state["state"], state["problem"], state["folders"]),
@@ -448,7 +456,7 @@ class StateStoreTest(unittest.TestCase):
         os.makedirs(os.path.dirname(self.store.path))
         with open(self.store.path, "w") as f:
             f.write("not json")
-        self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
+        self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0)
         self.assertEqual(len(self.reports), 1)
         self.assertIn(self.store.path, self.reports[0])
         self.assertEqual(self.store.read()["state"], "idle")
@@ -461,7 +469,7 @@ class StateStoreTest(unittest.TestCase):
                 with open(self.store.path, "w") as f:
                     f.write(content)
                 self.reports.clear()
-                self.store.publish(sync.assemble(snapshot()), [], frozenset(), 0)
+                self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0)
                 self.assertEqual(len(self.reports), 1)
                 self.assertEqual(self.store.read()["arrivals"], [])
 
@@ -555,8 +563,12 @@ class WatcherTest(unittest.TestCase):
         self.reports = []
         # The devices that answer a connect, in place of the network: the ones of a test's nearby list that are in `here`.
         self.here = set()
-        patcher = mock.patch.object(sync, "answering_nearby",
-                                    lambda nearby: [device["id"] for device in nearby if device["id"] in self.here])
+        self.tried = []
+
+        def answering_nearby(nearby):
+            self.tried.append([device["id"] for device in nearby])
+            return [device["id"] for device in nearby if device["id"] in self.here]
+        patcher = mock.patch.object(sync, "answering_nearby", answering_nearby)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.store = sync.StateStore(self.reports.append)
@@ -582,11 +594,13 @@ class WatcherTest(unittest.TestCase):
             "/rest/config/defaults/folder": {"id": "", "devices": []}},
             statuses={"f1": notes_status} if notes_status is not None else {})
 
-    def refresh(self, api, scan_all, finished=(), summarized=(), discovered=None, connected=None):
+    def refresh(self, api, scan_all, finished=(), summarized=(), discovered=False, connected=None):
+        """discovered: whether Syncthing reported every device of its discovery answer on the network in this batch."""
         self.watcher.api = api
         self.watcher.snapshot = sync.read_snapshot(api, ME)
         self.watcher.refresh(scan_all=scan_all, finished=set(finished), summarized=set(summarized),
-                             discovered=scan_all if discovered is None else discovered, connected=connected or {})
+                             discovered=frozenset(api.answers["/rest/system/discovery"]) if discovered else frozenset(),
+                             connected=connected or {})
 
     def follow(self, api, *batches):
         """Follows api through the batches of events, then until Syncthing stops answering."""
@@ -706,7 +720,7 @@ class WatcherTest(unittest.TestCase):
         restarted = sync.Watcher(sync.StateStore(self.reports.append), self.notifier, self.reports.append)
         restarted.api = api
         restarted.snapshot = sync.read_snapshot(api, ME)
-        restarted.refresh(scan_all=True, finished=set(), summarized=set(), discovered=True, connected={})
+        restarted.refresh(scan_all=True, finished=set(), summarized=set(), discovered=frozenset(), connected={})
         self.assertEqual(len(self.proposals()), 1)
 
     def test_a_device_that_does_not_answer_is_not_proposed_until_it_does(self):
@@ -835,6 +849,27 @@ class WatcherTest(unittest.TestCase):
         self.refresh(self.nearby_api(THIRD), scan_all=True)
         self.assertEqual(self.proposals().count(("nearby", THIRD)), 1)
         self.assertEqual(len(self.proposals()), sync.MAX_LEDGER + 6)
+
+    def test_a_device_that_syncthing_reports_on_the_network_is_tried_alone_and_the_list_has_it_first(self):
+        self.here = {THIRD, FOURTH}
+        api = self.nearby_api(THIRD, FOURTH)
+        heard = {"id": 1, "type": "DeviceDiscovered", "data": {"device": FOURTH, "addrs": []}}
+        quiet = {"id": 2, "type": "StateChanged", "data": {"folder": "f1", "to": "idle"}}
+        with mock.patch.object(sync.time, "time", return_value=1700000000.5):
+            self.follow(api, [heard], [quiet])
+        self.assertEqual(self.tried, [[THIRD, FOURTH], [FOURTH], []])
+        self.assertEqual([(device["id"], device["heard"]) for device in self.store.read()["nearby"]],
+                         [(FOURTH, 1700000000), (THIRD, None)])
+
+    def test_a_restarted_watcher_keeps_when_it_heard_each_device(self):
+        api = self.nearby_api(THIRD, FOURTH)
+        with mock.patch.object(sync.time, "time", return_value=1700000000):
+            self.follow(api, [{"id": 1, "type": "DeviceDiscovered", "data": {"device": FOURTH, "addrs": []}}])
+        restarted = sync.Watcher(sync.StateStore(self.reports.append), self.notifier, self.reports.append)
+        self.watcher = restarted
+        self.follow(api)
+        self.assertEqual([(device["id"], device["heard"]) for device in self.store.read()["nearby"]],
+                         [(FOURTH, 1700000000), (THIRD, None)])
 
     def test_the_first_connection_of_a_device_that_was_asked_to_pair_is_announced_once_with_its_name(self):
         self.here = {THIRD}
@@ -990,7 +1025,7 @@ class WatcherTest(unittest.TestCase):
                            "DeviceDiscovered"):
             with self.subTest(event_type=event_type):
                 api = self.api()
-                self.follow(api, [{"id": 1, "type": event_type, "data": {}}])
+                self.follow(api, [{"id": 1, "type": event_type, "data": {"device": THIRD, "addrs": []}}])
                 self.assertEqual(api.requests.count(("GET", "/rest/config")), 2)
 
     def test_a_device_discovered_on_the_network_shows_up_nearby_in_the_state_file(self):
@@ -1376,7 +1411,7 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(self.printed_by_nearby(), [])
         store = sync.StateStore(self.reports.append)
         view = sync.assemble(snapshot(discovered={THIRD: {"addresses": ["tcp://10.0.0.3:22000"]},
-                                                  FOURTH: {"addresses": ["tcp://10.0.0.4:22000"]}}))
+                                                  FOURTH: {"addresses": ["tcp://10.0.0.4:22000"]}}), {})
         self.assertEqual([device["id"] for device in view["nearby"]], [THIRD, FOURTH])
         store.publish(view, [], frozenset(), 0)
         accepts, _ = answering(("10.0.0.3", 22000))
@@ -1385,7 +1420,7 @@ class CommandTest(unittest.TestCase):
 
     def test_the_offline_command_writes_the_offline_view_and_keeps_the_arrivals(self):
         store = sync.StateStore(self.reports.append)
-        store.publish(sync.assemble(snapshot()), [{"name": "a", "path": "/d/a", "from": "Pixel", "unseen": True}], frozenset(), 0)
+        store.publish(sync.assemble(snapshot(), {}), [{"name": "a", "path": "/d/a", "from": "Pixel", "unseen": True}], frozenset(), 0)
         sync.command_offline(None)
         state = store.read()
         self.assertEqual(state["state"], "offline")
