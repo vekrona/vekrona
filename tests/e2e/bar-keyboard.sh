@@ -17,9 +17,7 @@ restore_layout() { set_layouts us; }
 trap restore_layout EXIT
 set_layouts us,ua
 
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown "EN"
-read -r PILL_X y <<<"$(vekrona-dev see find "EN")"
-[[ -n "${PILL_X:-}" && -n "${y:-}" ]] || die "the bar must show the layout code EN once the keymap has two layouts"
+find_layout_pill
 export PILL_X
 log "ok: the bar shows EN for a us,ua keymap at x=$PILL_X"
 

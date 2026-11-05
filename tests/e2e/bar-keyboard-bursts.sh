@@ -203,9 +203,7 @@ set_layouts us,ua
 vekrona-dev sh swaymsg input type:keyboard xkb_switch_layout 0
 refresh_workspace_query
 
-vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown "EN"
-read -r PILL_X y <<<"$(vekrona-dev see find "EN")"
-[[ -n "${PILL_X:-}" && -n "${y:-}" ]] || die "the bar must show the layout code EN once the keymap has two layouts"
+find_layout_pill
 export PILL_X
 
 ERRORS_BEFORE="$(shell_errors)"
