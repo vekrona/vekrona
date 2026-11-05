@@ -89,7 +89,7 @@ MAX_LEDGER = 200
 # long-running process that keeps the code it started with, while the shell reloads its QML from the checkout at once, so after
 # an update of the checkout the two can disagree for as long as the watcher is not restarted. Raise it with every change of the
 # layout that an older Sync.qml or watcher would misread.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DEVICE_ID = r"[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}"
 DEVICE_ID_RE = re.compile(DEVICE_ID)
@@ -582,6 +582,12 @@ def assemble(snapshot):
                "deviceName": names.get(device_id, short_code(device_id))}
               for folder_id, entry in snapshot.pending_folders.items() if not is_drop(folder_id)
               for device_id, offer in entry["offeredBy"].items()]
+    # A device shares with this computer when a folder of it lists the device as a member or the device offers one. Syncthing says
+    # nothing else of a device's folders, and Mac and Android clients offer none until the user shares one in them. A drop does
+    # not count: vekrona makes it for the device itself.
+    sharing = ({device["deviceID"] for folder in snapshot.folders if not is_drop(folder["id"]) for device in folder["devices"]}
+               | {device_id for folder_id, entry in snapshot.pending_folders.items() if not is_drop(folder_id)
+                  for device_id in entry["offeredBy"]})
     return {
         "state": state, "problem": problem, "me": {"id": snapshot.my_id, "code": short_code(snapshot.my_id)},
         "folders": folders, "offers": offers,
@@ -590,7 +596,8 @@ def assemble(snapshot):
         "pendingDevices": [{"id": device_id, "name": device_name(device_id, info.get("name")),
                             "code": short_code(device_id)}
                            for device_id, info in snapshot.pending_devices.items()],
-        "devices": [{"id": device_id, "name": name, "connected": device_id in snapshot.connected}
+        "devices": [{"id": device_id, "name": name, "connected": device_id in snapshot.connected,
+                     "sharesWithUs": device_id in sharing}
                     for device_id, name in names.items() if device_id != snapshot.my_id]}
 
 

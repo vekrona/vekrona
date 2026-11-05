@@ -29,7 +29,7 @@ BarPill {
             arrivals: []
         })
     // The layout of sync.json that this file reads: SCHEMA_VERSION of bin/vekrona-sync, which tests/sync checks to be this number.
-    readonly property int schemaVersion: 1
+    readonly property int schemaVersion: 2
     // What the pill shows while the watcher runs code from before an update of the checkout (its sync.json has another schema).
     readonly property var outdatedReport: Object.assign({}, offlineReport, {
         state: "problem",
@@ -296,17 +296,33 @@ BarPill {
                 Repeater {
                     model: root.report.devices
 
-                    SyncRow {
+                    ColumnLayout {
                         required property var modelData
 
-                        icon: "devices"
-                        text: modelData.name
-                        detail: modelData.connected ? "Online" : "Offline"
+                        Layout.fillWidth: true
+                        spacing: 0
 
-                        BarPill {
-                            value: "Send file…"
-                            ariaName: "Send a file to " + modelData.name
-                            onClicked: root.runClosing(["send", modelData.id])
+                        SyncRow {
+                            icon: "devices"
+                            text: modelData.name
+                            detail: modelData.connected ? "Online" : "Offline"
+
+                            BarPill {
+                                value: "Send file…"
+                                ariaName: "Send a file to " + modelData.name
+                                onClicked: root.runClosing(["send", modelData.id])
+                            }
+                        }
+
+                        Label {
+                            visible: modelData.connected && !modelData.sharesWithUs
+                            Layout.fillWidth: true
+                            Layout.leftMargin: VekronaTheme.space2
+                            Layout.rightMargin: VekronaTheme.space2
+                            wrapMode: Text.Wrap
+                            color: VekronaTheme.c.inkMuted
+                            style: VekronaTheme.type.caption
+                            text: "Shares no folders with this computer yet. Share them from its Syncthing app."
                         }
                     }
                 }

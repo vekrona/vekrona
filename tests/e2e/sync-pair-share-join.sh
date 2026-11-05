@@ -2,7 +2,8 @@
 # Two devices on one network find each other and share folders, through the bar's Sync popout only. The other device is a second
 # Syncthing in a network namespace of the guest (tests/e2e/lib/sync-peer.sh), connected by a veth pair, so local discovery is what
 # makes them known to each other; it acts as a phone would, and is never told the guest's device ID.
-#   - it shows up under Nearby, Pair asks it to connect, it accepts, and it is under My devices, online;
+#   - it shows up under Nearby, Pair asks it to connect, it accepts, and it is under My devices, online, with the line that it
+#     shares no folder with this computer until a folder lists it;
 #   - "Share a folder…" opens the portal's folder chooser, the folder is offered to the other device, which joins it, and files
 #     sync both ways;
 #   - a folder that the other device shares is under "Offered to you", Join takes it, and files sync both ways;
@@ -67,9 +68,12 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.devices | any(.[];
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Online'
 snap my-devices-online
 log "ok: once the other device accepts, My devices lists it as Online"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Shares\s+no\s+folders'
+state_is '.devices | any(.[]; .id == $peer and (.sharesWithUs | not))' || die "sync.json must say that the connected device shares nothing with this computer"
+log "ok: a connected device that shares no folder with this computer says so under its name"
 
 vekrona-dev run bash -c 'mkdir -p "$HOME/$1" && echo hello >"$HOME/$1/hello.txt"' _ "$OWN_NAME"
-click_word '^Share$'
+click_word --last '^Share$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- chooser_open 'Share a folder'
 snap chooser
 log "ok: Share a folder opens the portal's folder chooser"
@@ -93,6 +97,8 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- state_is '.state == "idle" an
 open_popout
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown "$OWN_NAME"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Up to date'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'Shares\s+no\s+folders'
+state_is '.devices | any(.[]; .id == $peer and .sharesWithUs)' || die "sync.json must say that the device shares a folder once one lists it"
 snap folder-up-to-date
 log "ok: the popout lists the folder as Up to date"
 

@@ -305,6 +305,11 @@ is between devices you accepted yourself; there is no server.
 The device is then one of *your devices*: every folder you share goes to all of them, and a folder you join is shared on with all
 of them. Ignoring a request adds nothing.
 
+Syncthing shows a device's folders only when that device offers them, and the Mac and Android apps offer none by themselves: a
+connected device that no folder of this computer lists and that offers none says "Shares no folders with this computer yet. Share them
+from its Syncthing app." under its name in My devices. Open the app on that device, share a folder with this computer, and the
+offer shows up under "Offered to you".
+
 ```
 vekrona-sync id
 vekrona-sync qr

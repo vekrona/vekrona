@@ -225,7 +225,27 @@ class AssembleTest(unittest.TestCase):
         self.assertEqual((view["state"], view["problem"]), ("idle", None))
         self.assertEqual(view["folders"], [{"id": "f1", "label": "Notes", "path": "/home/u/Sync/Notes",
                                             "state": "idle", "progress": 100, "problem": None}])
-        self.assertEqual(view["devices"], [{"id": PEER, "name": "Pixel", "connected": True}])
+        self.assertEqual(view["devices"], [{"id": PEER, "name": "Pixel", "connected": True, "sharesWithUs": False}])
+
+    def shares_with_us(self, **overrides):
+        return sync.assemble(snapshot(**overrides))["devices"][0]["sharesWithUs"]
+
+    def test_a_device_that_is_a_member_of_a_folder_shares_with_us(self):
+        self.assertTrue(self.shares_with_us(folders=[folder("f1", devices=(ME, PEER))]))
+
+    def test_a_device_that_offers_a_folder_shares_with_us(self):
+        self.assertTrue(self.shares_with_us(pending_folders={"p1": {"offeredBy": {PEER: {"label": "Photos"}}}}))
+
+    def test_a_device_that_is_in_no_folder_and_offers_none_shares_nothing_with_us(self):
+        self.assertFalse(self.shares_with_us())
+        self.assertFalse(self.shares_with_us(pending_folders={"p1": {"offeredBy": {THIRD: {"label": "Photos"}}}}))
+
+    def test_a_drop_folder_does_not_make_a_device_share_with_us(self):
+        self.assertFalse(self.shares_with_us(folders=[folder(DROP, "vekrona drop", "/d", devices=(ME, PEER))],
+                                             pending_folders={DROP: {"offeredBy": {PEER: {"label": "vekrona drop"}}}}))
+
+    def test_a_folder_of_other_devices_only_does_not_make_a_device_share_with_us(self):
+        self.assertFalse(self.shares_with_us(folders=[folder("f1", devices=(ME, THIRD))]))
 
     def test_a_folder_that_is_syncing_shows_its_progress(self):
         view = sync.assemble(snapshot(statuses={"f1": {"state": "syncing", "globalBytes": 200, "needBytes": 80}}))
@@ -830,7 +850,7 @@ class WatcherTest(unittest.TestCase):
         api.answers["/rest/system/connections"] = {"connections": {}}
         gone = {"id": 1, "type": "DeviceConnected", "data": {"id": PEER}}
         self.follow(api, [gone])
-        self.assertEqual(self.store.read()["devices"], [{"id": PEER, "name": "Pixel", "connected": True}])
+        self.assertEqual(self.store.read()["devices"], [{"id": PEER, "name": "Pixel", "connected": True, "sharesWithUs": False}])
         self.assertEqual(api.requests.count(("GET", "/rest/config")), 1)
 
     def test_a_saved_configuration_and_a_change_of_what_is_pending_read_everything_again(self):
