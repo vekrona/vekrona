@@ -1001,7 +1001,8 @@ kill_user_unit_cgroups() {
 # and not-found, which makes the user manager degraded; so does a unit that an earlier run killed. Both are reset by name: a
 # blanket reset-failed would also hide a real failure from stage 70.
 stop_orphaned_autostart_units() {
-  local -a orphans to_reset
+  local -a orphans failed to_reset
+  local orphan
   read_gone_autostart_units orphans active
   if ((${#orphans[@]} == 0)); then
     log "no autostart app runs without its desktop entry"
@@ -1009,8 +1010,11 @@ stop_orphaned_autostart_units() {
     log "autostart apps run without their desktop entries: ${orphans[*]}"
     kill_user_unit_cgroups "${orphans[@]}"
   fi
-  read_gone_autostart_units to_reset failed
-  to_reset+=("${orphans[@]}")
+  read_gone_autostart_units failed failed
+  to_reset=("${failed[@]}")
+  for orphan in "${orphans[@]}"; do
+    [[ " ${failed[*]} " == *" $orphan "* ]] || to_reset+=("$orphan")
+  done
   if ((${#to_reset[@]} == 0)); then
     return 0
   fi

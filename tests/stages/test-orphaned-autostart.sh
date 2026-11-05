@@ -11,7 +11,8 @@ mkdir "$work/bin"
 
 # systemctl stub for the user manager. list-units prints $LISTING once daemon-reload has run (the generators rerun then and the
 # removed desktop entries turn their units not-found) and $STALE_LISTING before (the units still read loaded); LIST_FAIL and
-# RELOAD_FAIL make the lister and the reload fail, RESET_FAIL makes reset-failed fail. The user manager's ControlGroup is the one in
+# RELOAD_FAIL make the lister and the reload fail, AFTER_KILL_LISTING replaces $LISTING from the second listing of a run on (the killed
+# unit is failed by then), RESET_FAIL makes reset-failed fail. The user manager's ControlGroup is the one in
 # $CGROUP_PATH; stop and kill fail like the host's user manager did for an orphan it held as not loaded (exit 5).
 write_fake "$work/bin/systemctl" <<'FAKE'
 #!/usr/bin/env bash
@@ -20,7 +21,9 @@ case "$*" in
   "--user daemon-reload") [[ -z "${RELOAD_FAIL-}" ]] || exit 1; touch "$RELOADED" ;;
   "--user list-units "*)
     [[ -z "${LIST_FAIL-}" ]] || exit 1
-    if [[ -e "$RELOADED" ]]; then cat "$LISTING"; else cat "$STALE_LISTING"; fi ;;
+    if [[ ! -e "$RELOADED" ]]; then cat "$STALE_LISTING"
+    elif [[ -n "${AFTER_KILL_LISTING-}" && -e "$LISTED" ]]; then cat "$AFTER_KILL_LISTING"
+    else cat "$LISTING"; touch "$LISTED"; fi ;;
   "--user reset-failed "*) [[ -z "${RESET_FAIL-}" ]] || exit 1 ;;
   "show -p ControlGroup --value user@"*) echo "$CGROUP_PATH" ;;
   "--user stop "* | "--user kill "*) echo "Failed to $2 unit ${*: -1}: Unit ${*: -1} not loaded." >&2; exit 5 ;;
@@ -36,7 +39,7 @@ if [[ -n "${FLIP_ON_WAIT-}" ]]; then printf 'populated 0\nfrozen 0\n' > "${!#}";
 if [[ -n "${REMOVE_ON_WAIT-}" ]]; then rm -r "$(dirname "${!#}")"; exit 1; fi
 exit 2
 FAKE
-export PATH="$work/bin:$PATH" STUB_LOG="$work/log" LISTING="$work/listing" STALE_LISTING="$work/stale-listing" RELOADED="$work/reloaded"
+export PATH="$work/bin:$PATH" STUB_LOG="$work/log" LISTING="$work/listing" STALE_LISTING="$work/stale-listing" RELOADED="$work/reloaded" LISTED="$work/listed"
 export VEKRONA_SYSFS_ROOT="$work/root"
 export CGROUP_PATH=/user.slice/user-1000.slice/user@1000.service
 manager="$VEKRONA_SYSFS_ROOT/sys/fs/cgroup$CGROUP_PATH"
@@ -167,6 +170,16 @@ log "ok: a unit that an earlier run left failed is reset although no orphan runs
 if (RESET_FAIL=1 stop_orphaned_autostart_units) 2>"$work/err"; then die "stage 30 went on while reset-failed failed"; fi
 grep -q 'cannot reset the failed state of app-sealertauto@autostart.service' "$work/err" || die "a failing reset-failed did not say so: $(<"$work/err")"
 log "ok: a failing reset-failed is an error"
+
+# systemd lists a killed orphan as failed once its process is gone: the unit is then both an orphan and a failed gone unit, and the
+# second name in a reset-failed would find the first one's unit unloaded and fail.
+printf 'app-blueman@autostart.service not-found active running app-blueman@autostart.service\n' > "$LISTING"
+printf 'app-blueman@autostart.service not-found failed failed app-blueman@autostart.service\n' > "$work/after-kill-listing"
+rm -f "$LISTED"
+: > "$STUB_LOG"
+AFTER_KILL_LISTING="$work/after-kill-listing" stop_orphaned_autostart_units 2>/dev/null
+grep -qxF 'systemctl --user reset-failed app-blueman@autostart.service' "$STUB_LOG" || die "a killed orphan that reads as failed was not reset exactly once: $(grep reset-failed "$STUB_LOG")"
+log "ok: an orphan that the listing shows as failed after the kill is reset once"
 : > "$LISTING"
 
 # Stage 70 calls the check inside `if`, where set -e is off: a reload or lister failure must still end the run, not read as "no orphans".
