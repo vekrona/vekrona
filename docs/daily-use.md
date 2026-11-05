@@ -294,7 +294,7 @@ is between devices you accepted yourself; there is no server.
   You do not have to look: when such a device appears and answers, a notification asks "A Syncthing device ABCD-EFG is nearby.
   Pair with it?" with Not now, Pair and Ignore, once per device for good (a device that goes away and comes back, or a restart of
   Syncthing or of the watcher, does not ask again; the ledger is kept in `~/.local/state/vekrona/sync-ledger.json`). Not now leaves the device under Nearby,
-  with a dot on the bar's Sync icon until you open the list; Ignore is the same as Reject (the device is ignored for good). Pair,
+  with a dot on the bar's Sync icon until the list shows it (it shows a device that answers when the list opens); Ignore is the same as Reject (the device is ignored for good). Pair,
   here or anywhere else, says "Pair request sent to ABCD-EFG", and once the other device accepts and connects, "<name> is now
   one of your devices".
 - *Not nearby.* "Pair another device…" shows this computer's device ID as text (Copy ID puts it on the clipboard) and as a QR code

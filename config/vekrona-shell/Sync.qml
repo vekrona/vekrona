@@ -38,7 +38,7 @@ BarPill {
     // What vekrona-sync watch wrote, or offlineReport.
     readonly property var report: file.value
     readonly property int unseenArrivals: report.arrivals.filter(arrival => arrival.unseen).length
-    // Nearby devices that answered and that the popout has not been open for since: the watcher sets and clears the flag.
+    // Nearby devices that answered and that the popout has not shown since: the watcher sets the flag, `seen` clears it.
     readonly property int unseenNearby: report.nearby.filter(device => device.unseen).length
     // The devices of the nearby list that are there now. Syncthing never forgets a device it heard once, so the list in sync.json
     // holds also those that have left; `vekrona-sync nearby` tries their addresses, once when the popout opens and again when the
@@ -78,10 +78,15 @@ BarPill {
         return "Up to date";
     }
 
-    // Asks which of the nearby devices answer; the answer of an earlier, slower question is dropped.
+    // Asks which of the nearby devices answer; the answer of an earlier, slower question is dropped. The ones that answer are
+    // shown, and so lose their dot; a device that does not answer is not shown and keeps it.
     function probeNearby(): void {
         nearbyProbe?.kill();
-        nearbyProbe = Exec.runOr(["vekrona-sync", "nearby"], stdout => nearbyReachable = stdout.split("\n").filter(line => line !== ""), reason => failure = reason);
+        nearbyProbe = Exec.runOr(["vekrona-sync", "nearby"], stdout => {
+            nearbyReachable = stdout.split("\n").filter(line => line !== "");
+            if (nearbyReachable.length > 0)
+                Exec.check(["vekrona-sync", "seen", "--"].concat(nearbyReachable));
+        }, reason => failure = reason);
     }
 
     // Runs a vekrona-sync command that the open popout shows the failure of.

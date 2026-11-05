@@ -25,7 +25,7 @@ from the same file. A failure exits 1 with Syncthing's message on stderr.
   send DEVICE [FILE...]   drop files into DEVICE's ~/Downloads, now or when it is next online (no FILE: the portal)
   nearby                  print the device ID of each nearby device in sync.json that answers on a TCP address it announced
                           on the local network (a private or link-local IP), one per line; the popout lists only those
-  seen                    mark every received file as seen
+  seen [DEVICE...]        mark every received file as seen, and the nearby devices DEVICE, which the popout shows
   watch                   the service: follow Syncthing's events, write sync.json, notify, receive dropped files; exits
                           75 when Syncthing does not answer (systemd starts it again, later each time) and 78 when
                           Syncthing's configuration is wrong (systemd does not start it again)
@@ -792,12 +792,16 @@ class StateStore:
         cannot be read does not leave the bar showing what the watcher last saw."""
         self.update_view(lambda current: {**offline_view(), "arrivals": (current or {}).get("arrivals", [])})
 
-    def mark_seen(self):
+    def mark_seen(self, device_ids):
+        """Every arrival is seen, and of the nearby devices those in device_ids: the ones the popout shows, which are only
+        those that answered its probe."""
         def change(current, ledger):
             if current is None:
                 return None, ledger
-            ledger["seen"] = remembered(ledger["seen"] + [device["id"] for device in current["nearby"]])
-            return {**current, "nearby": [{**device, "unseen": False} for device in current["nearby"]],
+            shown = [device["id"] for device in current["nearby"] if device["id"] in device_ids]
+            ledger["seen"] = remembered(ledger["seen"] + shown)
+            return {**current, "nearby": [{**device, "unseen": device["unseen"] and device["id"] not in shown}
+                                          for device in current["nearby"]],
                     "arrivals": [{**arrival, "unseen": False} for arrival in current["arrivals"]]}, ledger
         self.update(change)
 
@@ -1692,7 +1696,7 @@ def command_nearby(args):
 
 
 def command_seen(args):
-    StateStore(report_failure).mark_seen()
+    StateStore(report_failure).mark_seen(frozenset(args.devices))
 
 
 def command_offline(args):
@@ -1727,7 +1731,7 @@ def parse_args(argv):
             ("reject", command_reject, [("device", {"type": device_id_arg})]),
             ("send", command_send, [("device", {"type": device_id_arg}), ("files", {"nargs": "*"})]),
             ("nearby", command_nearby, []),
-            ("seen", command_seen, []),
+            ("seen", command_seen, [("devices", {"nargs": "*", "type": device_id_arg})]),
             ("offline", command_offline, []),
             ("watch", command_watch, [])):
         subparser = commands.add_parser(name)

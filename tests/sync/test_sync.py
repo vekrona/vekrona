@@ -349,7 +349,7 @@ class StateStoreTest(unittest.TestCase):
 
     def test_every_write_carries_the_schema(self):
         publish = lambda: self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0)
-        for name, write in (("publish", publish), ("seen", lambda: (publish(), self.store.mark_seen())),
+        for name, write in (("publish", publish), ("seen", lambda: (publish(), self.store.mark_seen(frozenset()))),
                             ("offline", lambda: sync.command_offline(None))):
             with self.subTest(write=name):
                 if os.path.exists(self.store.path):
@@ -398,7 +398,8 @@ class StateStoreTest(unittest.TestCase):
                         json.dumps({"version": sync.LEDGER_VERSION, "proposed": [None], "seen": [], "awaiting": []})):
             with self.subTest(content=content):
                 self.write(self.store.ledger_path, content)
-                for change in (lambda: self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0), self.store.mark_seen,
+                for change in (lambda: self.store.publish(sync.assemble(snapshot(), {}), [], frozenset(), 0),
+                               lambda: self.store.mark_seen(frozenset()),
                                lambda: self.store.await_connection(PEER), lambda: self.store.take_awaiting({PEER})):
                     with self.assertRaisesRegex(sync.ConfigError, re.escape(self.store.ledger_path) + ".*delete it"):
                         change()
@@ -412,20 +413,20 @@ class StateStoreTest(unittest.TestCase):
 
     def test_seen_marks_every_arrival_and_keeps_the_rest(self):
         self.store.publish(sync.assemble(snapshot(), {}), [self.arrival("a"), self.arrival("b")], frozenset(), 0)
-        self.store.mark_seen()
+        self.store.mark_seen(frozenset())
         state = self.store.read()
         self.assertEqual([a["unseen"] for a in state["arrivals"]], [False, False])
         self.assertEqual(state["state"], "idle")
 
     def test_seen_without_a_state_file_creates_none(self):
-        self.store.mark_seen()
+        self.store.mark_seen(frozenset())
         self.assertIsNone(self.store.read())
 
     def test_seen_when_everything_is_seen_does_not_rewrite_the_file(self):
         self.store.publish(sync.assemble(snapshot(), {}), [self.arrival("a")], frozenset(), 0)
-        self.store.mark_seen()
+        self.store.mark_seen(frozenset())
         before = os.stat(self.store.path)
-        self.store.mark_seen()
+        self.store.mark_seen(frozenset())
         after = os.stat(self.store.path)
         self.assertEqual((before.st_ino, before.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
 
@@ -437,7 +438,7 @@ class StateStoreTest(unittest.TestCase):
 
     def test_new_arrivals_come_first_and_only_the_last_twenty_stay(self):
         self.store.publish(sync.assemble(snapshot(), {}), [self.arrival(f"old{i}") for i in range(15)], frozenset(), 0)
-        self.store.mark_seen()
+        self.store.mark_seen(frozenset())
         self.store.publish(sync.assemble(snapshot(), {}), [self.arrival(f"new{i}") for i in range(10)], frozenset(), 0)
         arrivals = self.store.read()["arrivals"]
         self.assertEqual(len(arrivals), 20)
@@ -753,11 +754,26 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(api.writes, [])
         self.assertEqual(len(self.proposals()), 1)
         self.assertEqual(self.store.read()["nearby"][0]["unseen"], True)
-        self.store.mark_seen()
+        self.store.mark_seen({THIRD})
         self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
         self.refresh(api, scan_all=False, discovered=True)
         self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
         self.assertEqual(len(self.proposals()), 1)
+
+    def test_the_popout_clears_the_dots_of_the_devices_it_shows_and_no_others(self):
+        self.here = {THIRD, FOURTH}
+        self.refresh(self.nearby_api(THIRD, FOURTH), scan_all=False, discovered=True)
+        self.store.mark_seen({THIRD, PEER})
+        self.assertEqual([(device["id"], device["unseen"]) for device in self.store.read()["nearby"]],
+                         [(THIRD, False), (FOURTH, True)])
+        self.assertEqual(self.store.read_ledger()["seen"], [THIRD])
+
+    def test_the_seen_command_takes_device_ids_only(self):
+        for argv in (["seen"], ["seen", THIRD, FOURTH]):
+            self.assertEqual(sync.parse_args(argv).devices, argv[1:])
+        for text in ("lizard", "", THIRD.lower()):
+            with self.subTest(text=text), mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+                sync.parse_args(["seen", text])
 
     def test_the_dot_of_a_device_stays_through_the_events_that_try_no_device(self):
         self.here = {THIRD}
@@ -770,7 +786,7 @@ class WatcherTest(unittest.TestCase):
         self.here = {THIRD}
         api = self.nearby_api(THIRD)
         self.refresh(api, scan_all=False, discovered=True)
-        self.store.mark_seen()
+        self.store.mark_seen({THIRD})
         self.store.publish_offline()
         self.assertEqual(self.store.read()["nearby"], [])
         self.refresh(api, scan_all=False, discovered=True)
