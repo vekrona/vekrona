@@ -530,9 +530,9 @@ class Syncthing:
         def change(config):
             if any(ignored["deviceID"] == device_id for ignored in config["remoteIgnoredDevices"]):
                 return None
-            time = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             return {**config, "remoteIgnoredDevices": [*config["remoteIgnoredDevices"],
-                                                       {"deviceID": device_id, "name": name, "address": address, "time": time}]}
+                                                       {"deviceID": device_id, "name": name, "address": address, "time": now}]}
         self.edit_config("/rest/config", change)
 
 
