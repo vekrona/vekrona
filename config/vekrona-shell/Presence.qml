@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import Quickshell
 import Quickshell.Wayland
 
 // Whether somebody can be looking at the screen: false from the idle time after which vekrona-idle.service locks the screen
