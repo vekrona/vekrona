@@ -370,8 +370,10 @@ the two cannot join the folder: its offer of a drop is ignored (a line in the jo
 that a third device shares in Syncthing is neither sent through nor received from until you remove that device from it.
 
 What the icon shows: the two round arrows of Material's `sync`, still when idle and turning in steps (four a second, only while something syncs and somebody is there: it stops after 300 s without input, when the screen locks, and goes on at the next input) while syncing, with a warning mark for a problem (the list gives the reason in words), and struck through when offline (Syncthing is not running). `vekrona-sync watch`
-is the service behind it (if the list says "The sync service is out of date", the service runs code from before an update of the checkout: `systemctl --user restart vekrona-sync`, or `./install.sh 50`, which restarts it) (`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change, and while Syncthing
-does not answer it is started again after a longer wait each time, up to a minute.
+is the service behind it, and `systemctl --user status vekrona-sync` shows how it is doing. It wakes only when Syncthing reports a
+change, and while Syncthing does not answer it is started again after a longer wait each time, up to a minute. When the list says
+"The sync service is out of date", the service still runs code from before an update of the checkout: restart it with
+`systemctl --user restart vekrona-sync`, or run `./install.sh 50`, which restarts it.
 
 ## The Desktops widget
 
