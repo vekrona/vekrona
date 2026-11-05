@@ -191,6 +191,7 @@ BarPill {
         onDismissed: root.bar.openPopout = null
         onOpenChanged: {
             root.failure = "";
+            pasteField.text = "";
             if (!open)
                 root.sharePath = "";
             root.pairing = false;

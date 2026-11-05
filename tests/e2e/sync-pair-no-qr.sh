@@ -3,7 +3,8 @@
 # installed after qrencode was added to them): the popout says in plain words which program is missing and which stage installs
 # it, in the place where the QR code would be, and everything else of the section works: the ID as text, Copy ID, and the field
 # for the other device's ID (a wrong ID is still refused with Syncthing's reason). With qrencode back, closing and opening the
-# section makes the code and the message goes. No other device is needed.
+# section makes the code and the message goes; what was refused in the field is gone when the popout opens again. No other device
+# is needed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -61,3 +62,9 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- qr_png_exists
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_absent 'qrencode, which is\s+not installed'
 snap pair-qr-back
 log "ok: with qrencode installed again the section makes the QR code and the message is gone"
+
+close_popout
+open_popout
+click_word '^another$'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Paste a device ID'
+log "ok: a word that was refused is not still in the field when the popout is opened again"
