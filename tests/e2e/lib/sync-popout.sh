@@ -29,13 +29,23 @@ close_popout() { absent popout_open || click_sync_pill; }
 # Whether a word of the screen matches the regex $1, which is read against one word at a time.
 word_shown() { vekrona-dev see find "$1" >/dev/null; }
 export -f word_shown
-# Clicks the first word of the screen that matches the regex $1, once it is there.
+# The pointer rests here after a click on a word of the popout: on the word, its arrow breaks the OCR of the text that the click
+# changes ("Copied", "Pair request sent"), and a rest away from the bar and the popout is where no hover shows.
+POINTER_REST_X=640
+POINTER_REST_Y=400
+# Clicks the first word of the screen that matches the regex $1, once it is there, or with --last the last one (a button whose
+# label is also the first word of the text above it: "Pair with it?", then Pair).
 click_word() {
-  local found
+  local found last=()
+  if [[ "$1" == --last ]]; then
+    last=(--last)
+    shift
+  fi
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- word_shown "$1"
-  found="$(vekrona-dev see find "$1")" || die "the word /$1/ was on screen and is gone"
+  found="$(vekrona-dev see find "${last[@]}" "$1")" || die "the word /$1/ was on screen and is gone"
   # shellcheck disable=SC2086
   vekrona-dev click $found
+  vekrona-dev move "$POINTER_REST_X" "$POINTER_REST_Y"
 }
 snap() {
   [[ -z "${SYNC_SHOTS_DIR:-}" ]] || vekrona-dev shot "$SYNC_SHOTS_DIR/$1.png" >/dev/null

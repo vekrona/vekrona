@@ -50,7 +50,7 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Pair with it'
 snap proposed
 log "ok: the device that appears is proposed in a notification without the popout open, and carries a dot"
 
-click_word '^Pair$'
+click_word --last '^Pair$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- peer_has_pending_device
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Pair request sent'
 snap pair-sent

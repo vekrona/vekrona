@@ -24,7 +24,7 @@ STEP_TIMEOUT_SEC=90
 # The command waits one second for a device that does not answer.
 NEARBY_COMMAND_SEC=5
 PEER_ID=
-export PEER_ID
+export PEER_ID NEARBY_COMMAND_SEC
 
 nearby_ids() { vekrona-dev run timeout "$NEARBY_COMMAND_SEC" vekrona-sync nearby; }
 nearby_is_the_peer() { [[ "$(nearby_ids)" == "$PEER_ID" ]]; }
