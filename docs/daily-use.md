@@ -286,7 +286,14 @@ is between devices you accepted yourself; there is no server.
 - *Nearby.* A device on the same network that runs Syncthing announces itself (local discovery), and shows up under "Nearby" as
   "Syncthing device ABCD-EFG" (its code, the first characters of its device ID). Press Pair: this computer adds it and offers it
   every folder. It then asks on its side, "<this computer> wants to connect", and is *online* under "My devices" as soon as you
-  accept there. The list shows every device heard since Syncthing started, also one that has left since.
+  accept there. Syncthing never forgets a device it heard, so when the list opens the shell tries the addresses that each announced
+  (one second at most, only while the list is open) and shows the ones that answer; `vekrona-sync nearby` prints them.
+  You do not have to look: when such a device appears and answers, a notification asks "A Syncthing device ABCD-EFG is nearby.
+  Pair with it?" with Not now, Pair and Ignore, once per device for good (a device that goes away and comes back, or a restart of
+  Syncthing or of the watcher, does not ask again; the ledger is kept in `sync.json`). Not now leaves the device under Nearby,
+  with a dot on the bar's Sync icon until you open the list; Ignore is the same as Reject (the device is ignored for good). Pair,
+  here or anywhere else, says "Pair request sent to ABCD-EFG", and once the other device accepts and connects, "<name> is now
+  one of your devices".
 - *Not nearby.* "Pair another device…" shows this computer's device ID as text (Copy ID puts it on the clipboard) and as a QR code
   that the Syncthing app of a phone scans, and has a field for the other device's ID: paste or type it (any case, with or without
   dashes), then Pair or Enter. A wrong ID is refused with Syncthing's reason under the field.
@@ -333,12 +340,19 @@ vekrona-sync send DEVICE_ID photo.jpg report.pdf
 Sending needs both devices to run vekrona. Under the hood the two devices share a hidden folder, `vekrona-drop-<id>-<id>`, in
 `~/.local/share/vekrona-sync/drops/`, which each accepts from the other without asking; it holds the files that are on their way, and
 a file leaves it once it is in Downloads. Another Syncthing client (Android, macOS) sees that folder as an ordinary shared folder
-and never empties it, so a file sent to such a device stays in the folder's `to/<device ID>/` directory. A device that is not one of
+and never empties it, so a file sent to such a device stays on that device in the folder's `to/<device ID>/` directory, where
+`<device ID>` is the long ID of that device. When its Syncthing asks about the folder "vekrona drop", accept it and set its
+path to a folder you will find in the device's file app, for example `Download/vekrona-drop` on a phone: the files arrive in
+`Download/vekrona-drop/to/<the phone's ID>/`. This computer's own copy of such a file does not stay: once the device has the
+file, this watcher adds the file's path to the `.stignore` of the drop (Syncthing then keeps the device's copy and no longer
+treats this computer's as a file to sync), deletes its copy, and removes the line when the device deletes its copy. The `.stignore`
+of a drop therefore holds one line per file that a keeping device still has; a name that has a line is not reused, so sending
+`photo.jpg` again becomes `photo (2).jpg` while the device still has the first one. A device that is not one of
 the two cannot join the folder: its offer of a drop is ignored (a line in the journal of `vekrona-sync.service`), and a drop folder
 that a third device shares in Syncthing is neither sent through nor received from until you remove that device from it.
 
-What the icon shows: the two round arrows of Material's `sync`, still when idle and turning in steps (four a second, only while something syncs) while syncing, with a warning mark for a problem (the list gives the reason in words), and struck through when offline (Syncthing is not running). `vekrona-sync watch`
-is the service behind it (`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change, and while Syncthing
+What the icon shows: the two round arrows of Material's `sync`, still when idle and turning in steps (four a second, only while something syncs and somebody is there: it stops after 300 s without input, when the screen locks, and goes on at the next input) while syncing, with a warning mark for a problem (the list gives the reason in words), and struck through when offline (Syncthing is not running). `vekrona-sync watch`
+is the service behind it (if the list says "The sync service is out of date", the service runs code from before an update of the checkout: `systemctl --user restart vekrona-sync`, or `./install.sh 50`, which restarts it) (`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change, and while Syncthing
 does not answer it is started again after a longer wait each time, up to a minute.
 
 ## The Desktops widget

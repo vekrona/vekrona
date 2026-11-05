@@ -1,8 +1,12 @@
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
+import re
 import shutil
+import socket
 import socketserver
 import tempfile
 import threading
@@ -20,6 +24,7 @@ loader.exec_module(sync)
 ME = "AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA"
 PEER = "BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB"
 THIRD = "CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC"
+FOURTH = "DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD"
 DROP = sync.drop_folder_id(ME, PEER)
 
 
@@ -184,10 +189,10 @@ class PlacementTest(unittest.TestCase):
         original = self.write(self.tmp.name, "report.pdf", "v1")
         inbox = open_dir(self.source_dir)
         self.addCleanup(os.close, inbox)
-        sync.deliver(original, inbox)
+        sync.deliver(original, inbox, frozenset())
         with open(original, "w") as f:
             f.write("v2")
-        sync.deliver(original, inbox)
+        sync.deliver(original, inbox, frozenset())
         self.assertEqual(sorted(os.listdir(self.source_dir)), ["report (2).pdf", "report.pdf"])
         with open(os.path.join(self.source_dir, "report.pdf")) as f1, open(os.path.join(self.source_dir, "report (2).pdf")) as f2:
             self.assertEqual((f1.read(), f2.read()), ("v1", "v2"))
@@ -196,7 +201,7 @@ class PlacementTest(unittest.TestCase):
         inbox = open_dir(self.source_dir)
         self.addCleanup(os.close, inbox)
         with self.assertRaises(sync.SyncError):
-            sync.deliver(os.path.join(self.tmp.name, "missing.txt"), inbox)
+            sync.deliver(os.path.join(self.tmp.name, "missing.txt"), inbox, frozenset())
         self.assertEqual(os.listdir(self.source_dir), [])
 
 
@@ -303,6 +308,33 @@ class StateStoreTest(unittest.TestCase):
     def arrival(self, name):
         return {"name": name, "path": f"/d/{name}", "from": "Pixel", "unseen": True}
 
+    def raw(self):
+        with open(self.store.path) as f:
+            return json.load(f)
+
+    def test_every_write_carries_the_schema(self):
+        publish = lambda: self.store.publish(sync.assemble(snapshot()), [])
+        for name, write in (("publish", publish), ("seen", lambda: (publish(), self.store.mark_seen())),
+                            ("await", lambda: self.store.await_connection(PEER)), ("offline", lambda: sync.command_offline(None))):
+            with self.subTest(write=name):
+                if os.path.exists(self.store.path):
+                    os.unlink(self.store.path)
+                write()
+                self.assertEqual(self.raw()["schema"], sync.SCHEMA_VERSION)
+
+    def test_sync_qml_reads_the_schema_the_watcher_writes(self):
+        with open(os.path.join(os.path.dirname(os.path.dirname(HERE)), "config", "vekrona-shell", "Sync.qml")) as f:
+            self.assertRegex(f.read(), rf"readonly property int schemaVersion: {sync.SCHEMA_VERSION}\n")
+
+    def test_a_file_of_an_older_schema_is_replaced_without_a_complaint_and_keeps_nothing_of_it(self):
+        os.makedirs(os.path.dirname(self.store.path))
+        with open(self.store.path, "w") as f:
+            json.dump({"state": "idle", "folders": [], "offers": [], "pendingDevices": [], "devices": [],
+                       "arrivals": [self.arrival("old")]}, f)
+        self.assertIsNone(self.store.read())
+        self.store.publish(sync.assemble(snapshot()), [])
+        self.assertEqual((self.raw()["schema"], self.raw()["arrivals"], self.reports), (sync.SCHEMA_VERSION, [], []))
+
     def test_seen_marks_every_arrival_and_keeps_the_rest(self):
         self.store.publish(sync.assemble(snapshot()), [self.arrival("a"), self.arrival("b")])
         self.store.mark_seen()
@@ -389,6 +421,7 @@ class FakeSyncthing(sync.Syncthing):
 class Recorder:
     def __init__(self):
         self.calls = []
+        self.actions = {}
 
     def pairing(self, device, accept, reject):
         self.calls.append(("pairing", device["id"]))
@@ -398,6 +431,16 @@ class Recorder:
 
     def arrival(self, arrival):
         self.calls.append(("arrival", arrival["name"]))
+
+    def nearby(self, device, pair, ignore):
+        self.calls.append(("nearby", device["id"]))
+        self.actions[device["id"]] = (pair, ignore)
+
+    def pair_requested(self, code):
+        self.calls.append(("pair_requested", code))
+
+    def connected(self, name):
+        self.calls.append(("connected", name))
 
 
 class WatcherTest(unittest.TestCase):
@@ -417,6 +460,12 @@ class WatcherTest(unittest.TestCase):
         os.makedirs(self.inbox)
         self.notifier = Recorder()
         self.reports = []
+        # The devices that answer a connect, in place of the network: the ones of a test's nearby list that are in `here`.
+        self.here = set()
+        patcher = mock.patch.object(sync, "answering_nearby",
+                                    lambda nearby: [device["id"] for device in nearby if device["id"] in self.here])
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.store = sync.StateStore(self.reports.append)
         self.watcher = sync.Watcher(self.store, self.notifier, self.reports.append)
 
@@ -429,6 +478,10 @@ class WatcherTest(unittest.TestCase):
             "/rest/config": {"folders": config_folders, "remoteIgnoredDevices": [],
                              "devices": [{"deviceID": ME, "name": "this"}, {"deviceID": PEER, "name": "Pixel"}]},
             "/rest/system/discovery": {},
+            "/rest/db/ignores": {"ignore": [], "expanded": [], "error": None},
+            "/rest/svc/deviceid": syncthing_judging_ids,
+            "/rest/config/devices": [{"deviceID": ME}],
+            "/rest/config/defaults/device": {"addresses": ["dynamic"], "name": ""},
             "/rest/config/folders": config_folders,
             "/rest/system/connections": {"connections": {PEER: {"connected": True}}},
             "/rest/cluster/pending/devices": pending_devices or {},
@@ -436,10 +489,11 @@ class WatcherTest(unittest.TestCase):
             "/rest/config/defaults/folder": {"id": "", "devices": []}},
             statuses={"f1": notes_status} if notes_status is not None else {})
 
-    def refresh(self, api, scan_all, finished=()):
+    def refresh(self, api, scan_all, finished=(), summarized=(), discovered=None, connected=None):
         self.watcher.api = api
         self.watcher.snapshot = sync.read_snapshot(api, ME)
-        self.watcher.refresh(scan_all=scan_all, finished=set(finished))
+        self.watcher.refresh(scan_all=scan_all, finished=set(finished), summarized=set(summarized),
+                             discovered=scan_all if discovered is None else discovered, connected=connected or {})
 
     def follow(self, api, *batches):
         """Follows api through the batches of events, then until Syncthing stops answering."""
@@ -471,6 +525,195 @@ class WatcherTest(unittest.TestCase):
         state = self.store.read()
         self.assertEqual([(a["name"], a["from"], a["unseen"]) for a in state["arrivals"]], [("late.txt", "Pixel", True)])
         self.assertEqual(self.notifier.calls, [("arrival", "late.txt")])
+
+    def api_with_drop(self):
+        """api() whose answers about the ignore patterns and the files of the drop come from a SyncthingDrop."""
+        api = self.api()
+        outbox = os.path.join(self.drop_path, "to", PEER)
+        os.makedirs(outbox)
+        drop = SyncthingDrop(PEER, outbox)
+        drop.sent("photo.jpg")
+        plain_request = api.request
+        api.request = lambda method, path, **kwargs: (drop.request(method, path, **kwargs)
+                                                    if path in ("/rest/db/ignores", "/rest/db/file")
+                                                    else plain_request(method, path, **kwargs))
+        return api, drop, outbox
+
+    def test_a_summary_of_a_drop_has_the_watcher_clean_up_what_it_sent_and_no_other_event_does(self):
+        api, drop, outbox = self.api_with_drop()
+        self.refresh(api, scan_all=False)
+        self.refresh(api, scan_all=False, finished={"f1"})
+        self.assertEqual(drop.lines, [])
+        self.refresh(api, scan_all=False, summarized={DROP})
+        self.assertEqual(drop.lines, [f"/to/{PEER}/photo.jpg"])
+        drop.scan()
+        self.refresh(api, scan_all=False, summarized={DROP})
+        self.assertEqual(os.listdir(outbox), [])
+
+    def test_the_startup_scan_cleans_up_a_drop_whose_receiver_has_the_files(self):
+        api, drop, outbox = self.api_with_drop()
+        self.refresh(api, scan_all=True)
+        self.assertEqual(drop.lines, [f"/to/{PEER}/photo.jpg"])
+
+    def test_a_drop_that_a_third_device_shares_is_not_cleaned_up(self):
+        api, drop, outbox = self.api_with_drop()
+        api.answers["/rest/config"]["folders"] = [folder(DROP, "vekrona drop", self.drop_path, devices=(ME, PEER, THIRD))]
+        self.refresh(api, scan_all=True)
+        self.assertEqual(drop.lines, [])
+        self.assertEqual(len(self.reports), 1)
+
+    def test_a_paused_drop_is_not_cleaned_up(self):
+        api, drop, outbox = self.api_with_drop()
+        api.answers["/rest/config"]["folders"] = [folder(DROP, "vekrona drop", self.drop_path, devices=(ME, PEER), paused=True)]
+        self.refresh(api, scan_all=True)
+        self.assertEqual(drop.lines, [])
+        self.assertEqual(self.reports, [])
+
+    def test_a_cleanup_that_fails_is_reported_once_and_the_receiving_goes_on(self):
+        api, drop, outbox = self.api_with_drop()
+        drop.sent("two\nlines.txt")
+        self.put("incoming.txt")
+        self.refresh(api, scan_all=True)
+        self.refresh(api, scan_all=True)
+        self.assertEqual(os.listdir(self.downloads), ["incoming.txt"])
+        self.assertEqual(len(self.reports), 1)
+        self.assertIn("two\\nlines.txt", self.reports[0])
+
+    def test_a_syncthing_that_stops_answering_during_the_cleanup_ends_the_watcher_pass(self):
+        api, drop, outbox = self.api_with_drop()
+
+        def gone(*args, **kwargs):
+            raise sync.Unreachable("no socket")
+
+        drop.request = gone
+        with self.assertRaises(sync.Unreachable):
+            self.refresh(api, scan_all=True)
+
+    def nearby_api(self, *devices):
+        api = self.api()
+        api.answers["/rest/system/discovery"] = {device: {"addresses": ["tcp://10.0.0.2:22000"]} for device in devices}
+        return api
+
+    def proposals(self):
+        return [call for call in self.notifier.calls if call[0] == "nearby"]
+
+    def test_a_device_that_announces_itself_and_answers_is_proposed_once_with_a_dot(self):
+        self.here = {THIRD}
+        self.refresh(self.nearby_api(THIRD), scan_all=False, discovered=True)
+        self.assertEqual(self.proposals(), [("nearby", THIRD)])
+        state = self.store.read()
+        self.assertEqual([(device["id"], device["unseen"]) for device in state["nearby"]], [(THIRD, True)])
+
+    def test_a_device_that_is_heard_again_is_not_proposed_again_whether_it_left_for_a_while_or_the_watcher_restarted(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=True)
+        restarted = sync.Watcher(sync.StateStore(self.reports.append), self.notifier, self.reports.append)
+        restarted.api = api
+        restarted.snapshot = sync.read_snapshot(api, ME)
+        restarted.refresh(scan_all=True, finished=set(), summarized=set(), discovered=True, connected={})
+        self.assertEqual(len(self.proposals()), 1)
+
+    def test_a_device_that_does_not_answer_is_not_proposed_until_it_does(self):
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(self.proposals(), [])
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
+        self.here = {THIRD}
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(len(self.proposals()), 1)
+
+    def test_nothing_is_tried_or_proposed_by_an_event_that_heard_no_device(self):
+        self.here = {THIRD}
+        self.refresh(self.nearby_api(THIRD), scan_all=False, discovered=False)
+        self.assertEqual(self.proposals(), [])
+
+    def test_this_computer_its_devices_the_pending_and_the_ignored_are_never_proposed(self):
+        self.here = {ME, PEER, THIRD, FOURTH}
+        api = self.nearby_api(ME, PEER, THIRD, FOURTH)
+        api.answers["/rest/cluster/pending/devices"] = {THIRD: {"name": "Laptop"}}
+        api.answers["/rest/config"]["remoteIgnoredDevices"] = [{"deviceID": FOURTH}]
+        self.refresh(api, scan_all=True)
+        self.assertEqual(self.proposals(), [])
+
+    def test_not_now_proposes_nothing_more_and_the_device_stays_in_the_list_with_its_dot_until_the_popout_is_opened(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(api.writes, [])
+        self.assertEqual(len(self.proposals()), 1)
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], True)
+        self.store.mark_seen()
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
+        self.assertEqual(len(self.proposals()), 1)
+
+    def test_the_dot_of_a_device_stays_through_the_events_that_try_no_device(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=False, discovered=False)
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], True)
+
+    def test_a_dot_cleared_by_the_popout_stays_clear_when_syncthing_restarts_and_the_device_is_heard_again(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.store.mark_seen()
+        self.store.publish(sync.offline_view(), [])
+        self.assertEqual(self.store.read()["nearby"], [])
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
+        self.assertEqual(len(self.proposals()), 1)
+
+    def test_ignore_puts_the_device_on_the_ignored_list_and_pair_asks_it_and_says_so(self):
+        self.here = {THIRD, FOURTH}
+        api = self.nearby_api(THIRD, FOURTH)
+        self.refresh(api, scan_all=False, discovered=True)
+        pair, _ = self.notifier.actions[THIRD]
+        _, ignore = self.notifier.actions[FOURTH]
+        ignore()
+        put = next(body for method, path, body in api.writes if (method, path) == ("PUT", "/rest/config"))
+        self.assertEqual([entry["deviceID"] for entry in put["remoteIgnoredDevices"]], [FOURTH])
+        pair()
+        posted = next(body for method, path, body in api.writes if (method, path) == ("POST", "/rest/config/devices"))
+        self.assertEqual(posted["deviceID"], THIRD)
+        self.assertIn(("pair_requested", sync.short_code(THIRD)), self.notifier.calls)
+
+    def test_the_first_connection_of_a_device_that_was_asked_to_pair_is_announced_once_with_its_name(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.notifier.actions[THIRD][0]()
+        self.refresh(api, scan_all=False, connected={FOURTH: "Stranger"})
+        self.assertNotIn(("connected", "Stranger"), self.notifier.calls)
+        self.refresh(api, scan_all=False, connected={THIRD: "Pixel"})
+        self.refresh(api, scan_all=False, connected={THIRD: "Pixel"})
+        self.assertEqual([call for call in self.notifier.calls if call[0] == "connected"], [("connected", "Pixel")])
+
+    def test_a_device_that_connected_while_the_watcher_was_down_is_announced_at_the_start(self):
+        self.store.await_connection(PEER)
+        self.refresh(self.api(), scan_all=True)
+        self.assertEqual([call for call in self.notifier.calls if call[0] == "connected"], [("connected", "Pixel")])
+
+    def test_following_proposes_a_device_when_syncthing_reports_it_and_announces_a_connection_with_the_name_it_reports(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.store.await_connection(THIRD)
+        discovered = {"id": 1, "type": "DeviceDiscovered", "data": {"device": THIRD, "addrs": []}}
+        connected = {"id": 2, "type": "DeviceConnected", "data": {"id": THIRD, "deviceName": "Pixel 9"}}
+        self.follow(api, [discovered], [connected])
+        self.assertEqual(self.notifier.calls, [("nearby", THIRD), ("connected", "Pixel 9")])
+
+    def test_the_ledger_is_bounded(self):
+        for index in range(sync.MAX_LEDGER + 20):
+            self.store.await_connection(f"D{index}")
+        self.assertEqual(len(self.store.read()["ledger"]["awaiting"]), sync.MAX_LEDGER)
+        self.assertEqual(self.store.read()["ledger"]["awaiting"][-1], f"D{sync.MAX_LEDGER + 19}")
 
     def test_an_event_batch_looks_only_into_the_drops_where_a_file_finished(self):
         self.put("a.txt")
@@ -612,6 +855,343 @@ class WatcherTest(unittest.TestCase):
         self.assertTrue(sync.matters(finished_in_drop))
         self.assertTrue(sync.matters({"type": "StateChanged", "data": {"folder": "f1"}}))
         self.assertEqual(sync.finished_drops([finished_elsewhere, finished_in_drop, failed_in_drop]), {DROP})
+        self.assertEqual(sync.summarized_drops([{"type": "FolderSummary", "data": {"folder": "f1"}},
+                                                {"type": "FolderSummary", "data": {"folder": DROP}},
+                                                {"type": "StateChanged", "data": {"folder": DROP}}]), {DROP})
+
+
+def pattern_regex(pattern):
+    """The documented syntax of a Syncthing ignore pattern (backslash escapes, * ? [] {}), as a regular expression: an
+    implementation of its own, so that the lines of vekrona-sync are judged by something other than its own parser."""
+    out, index = [], 0
+    while index < len(pattern):
+        c = pattern[index]
+        if c == "\\":
+            out.append(re.escape(pattern[index + 1]))
+            index += 2
+        elif c == "*":
+            out.append("[^/]*")
+            index += 1
+        elif c == "?":
+            out.append("[^/]")
+            index += 1
+        elif c == "[":
+            end = pattern.index("]", index)
+            out.append("[" + pattern[index + 1:end] + "]")
+            index = end + 1
+        elif c == "{":
+            end = pattern.index("}", index)
+            out.append("(?:" + "|".join(re.escape(alternative) for alternative in pattern[index + 1:end].split(",")) + ")")
+            index = end + 1
+        elif c in "]}":
+            raise ValueError(f"unbalanced {c} in {pattern!r}")
+        else:
+            out.append(re.escape(c))
+            index += 1
+    return re.compile("".join(out))
+
+
+class SyncthingDrop(sync.Syncthing):
+    """What Syncthing does with one drop folder, as far as vekrona-sync asks it: the .stignore it keeps, a scan that flags the
+    files which a line matches as ignored in the index (and keeps the flag when the file is gone), and for each path the entry
+    of this device and the global one, which is the other device's when it has a file of its own. The checks of Syncthing's
+    source that the model rests on are listed in the comment above tend_sent."""
+
+    def __init__(self, partner, directory):
+        super().__init__("/nonexistent", "key")
+        self.partner = partner
+        self.directory = directory
+        self.lines = []
+        self.theirs = {}
+        self.indexed = set()
+        self.flagged = set()
+        self.connected = True
+        self.writes = []
+        self.refuse_patterns = False
+
+    def sent(self, name, content="x", has=True):
+        """A file here, in the index, which the other device has (or not yet)."""
+        with open(os.path.join(self.directory, name), "w") as f:
+            f.write(content)
+        path = f"to/{self.partner}/{sync.db_name(name)}"
+        self.indexed.add(path)
+        if has:
+            self.theirs[path] = {"deleted": False, "version": ["S:1"]}
+        return path
+
+    def matches(self, path):
+        return any(pattern_regex(sync.db_name(line.strip()).lstrip("/")).fullmatch(path) for line in self.lines
+                   if line.strip() and not line.strip().startswith("//"))
+
+    def scan(self):
+        self.flagged |= {path for path in self.indexed if self.matches(path)}
+
+    def request(self, method, path, query=None, body=None, timeout=None):
+        if path == "/rest/db/ignores":
+            if method == "POST":
+                self.writes.append((method, path, body))
+                self.lines = list(body["ignore"])
+            error = "invalid pattern" if self.refuse_patterns and method == "POST" else None
+            return {"ignore": list(self.lines), "expanded": [], "error": error}
+        if path == "/rest/db/file":
+            return self.entry(query["file"])
+        raise AssertionError(f"unexpected {method} {path}")
+
+    def entry(self, path):
+        local_exists = path in self.indexed
+        there = self.theirs.get(path)
+        if not local_exists and there is None:
+            raise sync.NotFound("Syncthing refused GET /rest/db/file with HTTP 404: No such object in the index")
+        flagged = path in self.flagged
+        here = {"name": path if local_exists else "", "deleted": False, "invalid": flagged, "ignored": flagged,
+                "version": ["S:1"]}
+        remote = dict(here) if there is None else {"name": path, "deleted": there["deleted"], "version": there["version"]}
+        availability = [{"id": self.partner, "fromTemporary": False}] if there is not None and self.connected else None
+        return {"global": remote, "local": here, "availability": availability}
+
+
+class TendSentTest(unittest.TestCase):
+    """The sender's cleanup of a drop whose receiver keeps files (an Android or macOS client)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.drop = os.path.join(self.tmp.name, "drop")
+        self.inbox = os.path.join(self.drop, "to", PEER)
+        os.makedirs(self.inbox)
+        self.api = SyncthingDrop(PEER, self.inbox)
+
+    def tend(self):
+        return sync.tend_sent(self.api, DROP, self.drop, PEER)
+
+    def on_disk(self):
+        return sorted(os.listdir(self.inbox))
+
+    def test_a_file_the_receiver_has_is_ignored_then_deleted_here_and_the_receivers_copy_is_never_touched(self):
+        path = self.api.sent("photo.jpg")
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+        self.assertEqual(self.on_disk(), ["photo.jpg"])
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.on_disk(), ["photo.jpg"])
+        self.api.scan()
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.on_disk(), [])
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+        self.assertEqual(self.api.theirs[path], {"deleted": False, "version": ["S:1"]})
+        self.assertEqual([write[0] for write in self.api.writes], ["POST"])
+
+    def test_nothing_is_ignored_or_deleted_before_the_receiver_has_the_very_file(self):
+        self.api.sent("not-yet.txt", has=False)
+        self.api.sent("older-there.txt")
+        self.api.theirs[f"to/{PEER}/older-there.txt"]["version"] = ["S:0"]
+        self.assertEqual(self.tend(), [])
+        self.api.scan()
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.on_disk(), ["not-yet.txt", "older-there.txt"])
+        self.assertEqual(self.api.writes, [])
+
+    def test_nothing_is_ignored_or_deleted_while_the_receiver_is_not_connected(self):
+        self.api.sent("away.txt")
+        self.api.connected = False
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(self.on_disk(), ["away.txt"])
+
+    def test_a_file_that_is_not_in_the_index_yet_waits(self):
+        with open(os.path.join(self.inbox, "new.txt"), "w") as f:
+            f.write("x")
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(self.on_disk(), ["new.txt"])
+
+    def test_the_line_goes_when_the_receiver_deletes_its_copy_and_not_before(self):
+        path = self.api.sent("photo.jpg")
+        self.tend()
+        self.api.scan()
+        self.tend()
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+        self.api.theirs[path] = {"deleted": True, "version": ["S:1", "R:1"]}
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.lines, [])
+
+    def test_a_receiver_that_has_no_entry_of_the_file_does_not_end_the_line(self):
+        path = self.api.sent("photo.jpg")
+        self.tend()
+        self.api.scan()
+        self.tend()
+        del self.api.theirs[path]
+        self.tend()
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+
+    def test_a_line_whose_file_is_still_here_stays_even_when_the_receiver_deleted_its_copy(self):
+        path = self.api.sent("photo.jpg")
+        self.tend()
+        self.api.theirs[path] = {"deleted": True, "version": ["S:1", "R:1"]}
+        self.tend()
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/photo.jpg"])
+        self.assertEqual(self.on_disk(), ["photo.jpg"])
+
+    def test_the_lines_that_are_not_ours_are_kept_in_their_place(self):
+        self.api.lines = ["*.tmp", f"/to/{THIRD}/x.txt", "", "// by hand"]
+        self.api.sent("a.txt")
+        self.tend()
+        self.assertEqual(self.api.lines, ["*.tmp", f"/to/{THIRD}/x.txt", "", "// by hand", f"/to/{PEER}/a.txt"])
+        self.api.scan()
+        self.tend()
+        self.api.theirs[f"to/{PEER}/a.txt"] = {"deleted": True, "version": ["S:1", "R:1"]}
+        self.tend()
+        self.assertEqual(self.api.lines, ["*.tmp", f"/to/{THIRD}/x.txt", "", "// by hand"])
+
+    def test_a_name_with_characters_of_the_pattern_language_ignores_that_file_and_no_other(self):
+        names = ["a*b.txt", "[1] {x,y}.txt", "?.txt", "back\\slash", "#hash", "!bang", "(?i)Case", "trailing space ",
+                 "tab\t", "a,b", "é.txt", "emoji \U0001F600.png", "x]y", "p}q"]
+        decoys = ["aXb.txt", "1 x.txt", "x.txt", "y.txt", "Z.txt", "backslash", "hash", "bang", "case", "trailing space",
+                  "tab", "ab", "é.png", "emoji.png", "xy", "pq", "AB"]
+        for name in names:
+            self.api.sent(name)
+        for decoy in decoys:
+            self.api.sent(decoy, has=False)
+        self.tend()
+        self.api.scan()
+        self.assertEqual(self.api.flagged, {f"to/{PEER}/{sync.db_name(name)}" for name in names})
+        self.tend()
+        self.assertEqual(self.on_disk(), sorted(decoys))
+
+    def test_a_name_with_a_line_break_stays_and_is_reported_while_the_others_are_cleaned(self):
+        self.api.sent("two\nlines.txt")
+        self.api.sent("fine.txt")
+        failures = self.tend()
+        self.assertEqual(self.api.lines, [f"/to/{PEER}/fine.txt"])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("two\\nlines.txt", failures[0])
+
+    def test_files_that_are_links_directories_or_half_written_are_left_alone(self):
+        os.mkdir(os.path.join(self.inbox, "dir"))
+        os.symlink("/etc/hostname", os.path.join(self.inbox, "link"))
+        self.api.sent(".syncthing.half.tmp")
+        self.assertEqual(self.tend(), [])
+        self.assertEqual(self.api.writes, [])
+
+    def test_a_pattern_syncthing_refuses_is_taken_back_and_reported(self):
+        self.api.lines = ["*.tmp"]
+        self.api.sent("a.txt")
+        self.api.refuse_patterns = True
+        with self.assertRaisesRegex(sync.SyncError, "refused the ignore patterns.*as before"):
+            self.tend()
+        self.assertEqual(self.api.lines, ["*.tmp"])
+
+    def test_an_inbox_a_peer_replaced_by_a_link_is_refused_and_the_target_untouched(self):
+        victims = os.path.join(self.tmp.name, "victims")
+        os.mkdir(victims)
+        with open(os.path.join(victims, "private.txt"), "w") as f:
+            f.write("secret")
+        os.rmdir(self.inbox)
+        os.symlink(victims, self.inbox)
+        self.api.lines = [f"/to/{PEER}/private.txt"]
+        with self.assertRaisesRegex(sync.SyncError, "is a link"):
+            self.tend()
+        self.assertEqual(os.listdir(victims), ["private.txt"])
+
+    def test_a_drop_without_an_inbox_yet_has_nothing_to_clean(self):
+        shutil.rmtree(self.inbox)
+        self.assertEqual(self.tend(), [])
+
+    def test_a_file_that_cannot_be_deleted_is_reported_and_the_pass_goes_on(self):
+        self.api.sent("a.txt")
+        self.api.sent("b.txt")
+        self.tend()
+        self.api.scan()
+        real_unlink = os.unlink
+
+        def unlink(name, *args, **kwargs):
+            if name == "a.txt":
+                raise PermissionError("read-only")
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(sync.os, "unlink", unlink):
+            failures = self.tend()
+        self.assertEqual(self.on_disk(), ["a.txt"])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("a.txt", failures[0])
+
+
+class IgnoreLineTest(unittest.TestCase):
+    def test_a_line_names_its_file_back_whatever_the_characters(self):
+        for name in ("a.txt", "a*b", "[x]", "{a,b}", "back\\slash", "?", "trailing ", " leading", "tab\t", "é",
+                     "'quoted'", "\\", "x[ ]"):
+            with self.subTest(name=name):
+                self.assertEqual(sync.ignored_name(PEER, sync.ignore_line(PEER, name)), sync.db_name(name))
+
+    def test_no_character_of_the_pattern_language_is_left_bare(self):
+        self.assertEqual(sync.ignore_line(PEER, "*?[]{}\\"), f"/to/{PEER}/" + r"\*\?\[\]\{\}\\")
+
+    def test_the_lines_of_others_are_none_of_ours(self):
+        for line in ("", "*.tmp", "// /to/x", f"/to/{THIRD}/a.txt", f"/to/{PEER}/", f"/to/{PEER}/*.txt", f"/to/{PEER}/a{{b,c}}",
+                     f"/to/{PEER}/[ab]", f"/to/{PEER}/ends\\"):
+            with self.subTest(line=line):
+                self.assertIsNone(sync.ignored_name(PEER, line))
+
+    def test_names_that_no_line_can_hold_are_refused(self):
+        for name in ("", "a\nb", "a\rb"):
+            with self.subTest(name=name):
+                with self.assertRaises(sync.SyncError):
+                    sync.ignore_line(PEER, name)
+
+
+class SendAvoidsIgnoredNamesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.inbox = os.path.join(self.tmp.name, "to", PEER)
+        os.makedirs(self.inbox)
+        self.fd = os.open(self.inbox, os.O_RDONLY | os.O_DIRECTORY)
+        self.addCleanup(os.close, self.fd)
+        self.file = os.path.join(self.tmp.name, "photo.jpg")
+        with open(self.file, "w") as f:
+            f.write("new")
+
+    def test_a_file_gets_another_name_when_its_name_has_an_ignore_line(self):
+        sync.deliver(self.file, self.fd, frozenset({"photo.jpg", "photo (2).jpg"}))
+        self.assertEqual(os.listdir(self.inbox), ["photo (3).jpg"])
+
+    def test_a_name_with_an_ignore_line_is_taken_in_any_normalization(self):
+        decomposed = os.path.join(self.tmp.name, "é.txt")
+        with open(decomposed, "w") as f:
+            f.write("x")
+        sync.deliver(decomposed, self.fd, frozenset({sync.db_name("é.txt")}))
+        self.assertEqual(len(os.listdir(self.inbox)), 1)
+        self.assertNotEqual(sync.db_name(os.listdir(self.inbox)[0]), sync.db_name("é.txt"))
+
+    def test_send_asks_the_ignore_lines_of_the_drop_for_the_names_to_avoid(self):
+        api = FakeSyncthing({
+            "/rest/system/status": {"myID": ME},
+            "/rest/config/folders": [folder(DROP, "vekrona drop", os.path.join(self.tmp.name, "drop"), devices=(ME, PEER))],
+            "/rest/config/devices": [{"deviceID": ME}, {"deviceID": PEER}],
+            "/rest/db/ignores": {"ignore": [f"/to/{PEER}/photo.jpg"], "expanded": [], "error": None}})
+        sync.send(api, PEER, [self.file])
+        self.assertEqual(os.listdir(os.path.join(self.tmp.name, "drop", "to", PEER)), ["photo (2).jpg"])
+
+
+class NotificationTextTest(unittest.TestCase):
+    def shown(self, call):
+        with mock.patch.object(sync, "run_tool", return_value=mock.Mock(returncode=0, stderr="")) as run:
+            call(sync.DesktopNotifier(lambda message: self.fail(message)))
+        return run.call_args.args[1]
+
+    def test_the_notifications_of_pairing_say_what_happened_and_what_to_do(self):
+        self.assertEqual(self.shown(lambda n: n.pair_requested("ABCD-EFG"))[-2:],
+                         ["Pair request sent to ABCD-EFG", "Accept it on the other device."])
+        self.assertEqual(self.shown(lambda n: n.connected("Pixel"))[-2:], ["Pixel is now one of your devices", ""])
+
+    def test_the_question_about_a_nearby_device_offers_not_now_first_then_pair_and_ignore(self):
+        asked = []
+        notifier = sync.DesktopNotifier(lambda message: self.fail(message))
+        with mock.patch.object(notifier, "ask", lambda title, body, choices: asked.append((title, body, choices))):
+            notifier.nearby({"code": "ABCD-EFG"}, "pair-action", "ignore-action")
+        title, body, choices = asked[0]
+        self.assertEqual((title, body), ("A Syncthing device ABCD-EFG is nearby", "Pair with it?"))
+        self.assertEqual(choices, [("later", "Not now", None), ("pair", "Pair", "pair-action"), ("ignore", "Ignore", "ignore-action")])
 
 
 class NotifierTest(unittest.TestCase):
@@ -619,7 +1199,7 @@ class NotifierTest(unittest.TestCase):
         reports = []
         sync.DesktopNotifier(reports.append).wait_for_answer(["/nonexistent/vekrona-update-ask"], {})
         self.assertEqual(len(reports), 1)
-        self.assertIn("cannot run /nonexistent/vekrona-update-ask", reports[0])
+        self.assertIn("needs /nonexistent/vekrona-update-ask, which is not installed", reports[0])
 
 
 class CommandTest(unittest.TestCase):
@@ -655,6 +1235,29 @@ class CommandTest(unittest.TestCase):
             with mock.patch.object(sync.Syncthing, "from_config", side_effect=sync.SyncError("HTTP 500")):
                 sync.command_watch(None)
 
+    def printed_by_nearby(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            sync.command_nearby(None)
+        return out.getvalue().split()
+
+    def test_the_nearby_command_prints_the_devices_of_the_list_that_answer_and_nothing_without_a_list(self):
+        self.assertEqual(self.printed_by_nearby(), [])
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        there = f"tcp://127.0.0.1:{listener.getsockname()[1]}"
+        gone = socket.socket()
+        gone.bind(("127.0.0.1", 0))
+        left = f"tcp://127.0.0.1:{gone.getsockname()[1]}"
+        gone.close()
+        store = sync.StateStore(self.reports.append)
+        view = sync.assemble(snapshot(discovered={THIRD: {"addresses": [there]}, FOURTH: {"addresses": [left]}}))
+        self.assertEqual([device["id"] for device in view["nearby"]], [THIRD, FOURTH])
+        store.publish(view, [])
+        self.assertEqual(self.printed_by_nearby(), [THIRD])
+
     def test_the_offline_command_writes_the_offline_view_and_keeps_the_arrivals(self):
         store = sync.StateStore(self.reports.append)
         store.publish(sync.assemble(snapshot()), [{"name": "a", "path": "/d/a", "from": "Pixel", "unseen": True}])
@@ -683,6 +1286,7 @@ class JoinAndSendTest(unittest.TestCase):
             "/rest/system/status": {"myID": ME},
             "/rest/cluster/pending/folders": pending_folders or {},
             "/rest/config/folders": folders,
+            "/rest/db/ignores": {"ignore": [], "expanded": [], "error": None},
             "/rest/config/devices": [{"deviceID": ME}, {"deviceID": PEER}],
             "/rest/config/defaults/folder": {"id": "", "devices": []}})
 
@@ -895,10 +1499,106 @@ class QrTest(unittest.TestCase):
                 sync.write_qr(ME)
         self.assertEqual(self.state_files(), [])
 
-    def test_a_missing_qrencode_is_an_error_not_a_traceback(self):
-        with mock.patch.object(sync.subprocess, "run", side_effect=FileNotFoundError("qrencode")):
-            with self.assertRaisesRegex(sync.SyncError, "cannot make the QR code"):
+    def test_a_missing_qrencode_says_what_to_install_and_leaves_no_file(self):
+        with mock.patch.dict(os.environ, {"PATH": self.tmp.name}):
+            with self.assertRaisesRegex(sync.MissingTool, r"the QR code needs qrencode, which is not installed.*install\.sh 30"):
                 sync.write_qr(ME)
+        self.assertEqual(self.state_files(), [])
+
+
+class ToolTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {"PATH": self.tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_every_tool_that_is_not_installed_is_named_with_what_it_was_for_and_the_stage_that_installs_it(self):
+        for tool, purpose in (("qrencode", "the QR code"), ("syncthing", "finding Syncthing's configuration"),
+                              ("notify-send", "telling that a file arrived")):
+            with self.subTest(tool=tool):
+                with self.assertRaisesRegex(sync.MissingTool, f"{purpose} needs {tool}, which is not installed.*install.sh 30"):
+                    sync.run_tool(purpose, [tool])
+
+    def test_syncthings_config_file_of_a_machine_without_syncthing_is_not_a_traceback(self):
+        sync.syncthing_config_file.cache_clear()
+        with self.assertRaisesRegex(sync.MissingTool, "syncthing, which is not installed"):
+            sync.syncthing_config_file()
+
+    def test_downloads_falls_back_to_the_home_directory_without_xdg_user_dir(self):
+        self.assertEqual(sync.downloads_dir(), os.path.join(os.path.expanduser("~"), "Downloads"))
+
+    def test_downloads_does_not_hide_an_xdg_user_dir_that_hangs(self):
+        with mock.patch.object(sync.subprocess, "run", side_effect=sync.subprocess.TimeoutExpired("xdg-user-dir", 10)):
+            with self.assertRaisesRegex(sync.SyncError, "cannot run xdg-user-dir for finding Downloads"):
+                sync.downloads_dir()
+
+    def test_a_tool_that_cannot_be_started_is_a_sync_error(self):
+        not_executable = os.path.join(self.tmp.name, "broken")
+        with open(not_executable, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(not_executable, 0o644)
+        with self.assertRaisesRegex(sync.SyncError, "cannot run broken for testing"):
+            sync.run_tool("testing", [not_executable.replace(self.tmp.name + "/", "")])
+
+    def test_a_missing_notify_send_is_reported_not_raised_when_a_file_arrives(self):
+        reports = []
+        sync.DesktopNotifier(reports.append).arrival({"name": "a.txt", "from": "Pixel", "path": "/home/u/Downloads/a.txt"})
+        self.assertEqual(len(reports), 1)
+        self.assertIn("notify-send, which is not installed", reports[0])
+
+
+class NearbyTest(unittest.TestCase):
+    """Devices are on 127.0.0.1: a listener that accepts is a device that is there, a port nobody listens on is one that left."""
+
+    def setUp(self):
+        self.listener = socket.socket()
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen()
+        self.addCleanup(self.listener.close)
+        self.there = self.listener.getsockname()[1]
+        closed = socket.socket()
+        closed.bind(("127.0.0.1", 0))
+        self.gone = closed.getsockname()[1]
+        closed.close()
+
+    def device(self, device_id, *addresses):
+        return {"id": device_id, "code": sync.short_code(device_id), "addresses": list(addresses)}
+
+    def test_a_device_that_accepts_a_connection_is_there_and_one_that_refuses_has_left(self):
+        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.there}"), self.device(THIRD, f"tcp://127.0.0.1:{self.gone}")]
+        self.assertEqual(sync.answering_nearby(nearby), [PEER])
+
+    def test_one_address_that_answers_is_enough(self):
+        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.gone}", f"quic://127.0.0.1:{self.there}",
+                              f"tcp://127.0.0.1:{self.there}")]
+        self.assertEqual(sync.answering_nearby(nearby), [PEER])
+
+    def test_a_connect_that_times_out_counts_as_gone(self):
+        nearby = [self.device(PEER, "tcp://127.0.0.1:22000")]
+        with mock.patch.object(sync.socket, "create_connection", side_effect=TimeoutError("timed out")):
+            self.assertEqual(sync.answering_nearby(nearby), [])
+
+    def test_the_list_keeps_its_order_and_an_empty_one_is_empty(self):
+        nearby = [self.device(THIRD, f"tcp://127.0.0.1:{self.there}"), self.device(PEER, f"tcp://127.0.0.1:{self.there}")]
+        self.assertEqual(sync.answering_nearby(nearby), [THIRD, PEER])
+        self.assertEqual(sync.answering_nearby([]), [])
+
+    def test_a_device_with_no_address_to_try_stays_listed(self):
+        for addresses in ([], [f"quic://127.0.0.1:{self.there}"], ["tcp://example.invalid:22000"], ["tcp://127.0.0.1:0"],
+                          ["tcp://127.0.0.1:99999"], ["tcp://127.0.0.1"], ["lizard"], [""]):
+            with self.subTest(addresses=addresses):
+                self.assertEqual(sync.answering_nearby([self.device(PEER, *addresses)]), [PEER])
+
+    def test_a_device_with_no_address_to_try_stays_listed_next_to_devices_that_are_tried(self):
+        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.there}"), self.device(THIRD, f"quic://127.0.0.1:{self.there}"),
+                  self.device(FOURTH, f"tcp://127.0.0.1:{self.gone}")]
+        self.assertEqual(sync.answering_nearby(nearby), [PEER, THIRD])
+
+    def test_ipv6_and_the_tcp4_and_tcp6_schemes_are_tried(self):
+        self.assertEqual(sync.tcp_endpoints(["tcp4://10.0.0.5:22000", "tcp6://[fe80::1%eth0]:22001", "tcp://[::1]:22002"]),
+                         [("10.0.0.5", 22000), ("fe80::1%eth0", 22001), ("::1", 22002)])
 
 
 class UnixHandler(BaseHTTPRequestHandler):
@@ -908,6 +1608,8 @@ class UnixHandler(BaseHTTPRequestHandler):
             status = 200
         elif self.path == "/rest/empty":
             body, status = b"", 200
+        elif self.path.startswith("/rest/db/file?") and "file=known" not in self.path:
+            body, status = b"No such object in the index\n" if "folder=drop" in self.path else b"folder missing\n", 404
         else:
             body, status = b"folder is paused\n", 500
         self.send_response(status)
@@ -941,6 +1643,11 @@ class TransportTest(unittest.TestCase):
     def test_a_refusal_carries_syncthings_message(self):
         with self.assertRaisesRegex(sync.SyncError, "HTTP 500: folder is paused"):
             self.api.request("GET", "/rest/other")
+
+    def test_a_file_the_index_does_not_have_is_none_and_any_other_refusal_is_an_error(self):
+        self.assertIsNone(self.api.file_entry("drop", "to/x/gone.txt"))
+        with self.assertRaises(sync.NotFound):
+            self.api.file_entry("nonexistent-folder", "to/x/gone.txt")
 
     def test_a_missing_socket_is_unreachable_not_a_plain_error(self):
         with self.assertRaises(sync.Unreachable):

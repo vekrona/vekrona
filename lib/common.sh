@@ -2245,6 +2245,15 @@ vekrona_desktop_pkgs() {
   printf '%s\n' "${VEKRONA_DESKTOP_PKGS[@]}" "$wlroots_pkg"
 }
 
+# Dies at once, naming the packages, when a desktop package is not installed. Stage 30 installs them, so a stage that is run on
+# its own after the list grew (./install.sh 50) would otherwise go on, and leave the tool of the new package missing for good.
+require_desktop_pkgs() {
+  local desktop_pkgs missing=() p
+  read_pkg_list desktop_pkgs vekrona_desktop_pkgs
+  for p in "${desktop_pkgs[@]}"; do pkg_installed "$p" || missing+=("$p"); done
+  [[ ${#missing[@]} -eq 0 ]] || die "desktop packages not installed: ${missing[*]}; run ./install.sh 30 first"
+}
+
 VEKRONA_VERSIONLOCK_PKGS=(sway quickshell qt6-qtbase qt6-qtdeclarative qt6-qtwayland xremap-wlroots)
 
 vekrona_versionlock_pkgs() {

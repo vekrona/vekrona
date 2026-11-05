@@ -7,6 +7,9 @@ source "$ROOT/lib/common.sh"
 # shellcheck source=../lib/display-scale.sh
 source "$ROOT/lib/display-scale.sh"
 
+# Stage 30 installs the programs that the tools linked below run, so a missing one stops the stage before it changes anything.
+require_desktop_pkgs
+
 # First: a user unit linked below runs its ~/.local/bin tool as soon as any daemon-reload (an RPM scriptlet, say) sees it.
 ensure_symlink_tree "$VEKRONA_ROOT/bin" "$HOME/.local/bin"
 ensure_symlink_tree "$VEKRONA_ROOT/config/sway" "$HOME/.config/sway"
@@ -229,6 +232,7 @@ if [[ -n "$(sway_socket)" ]]; then
   systemctl --user start "${session_triggers[@]}" || die "the triggers (${session_triggers[*]}) failed to start"
 fi
 # The Sync watcher follows syncthing.service (PartOf, WantedBy), which is running by now; enabling alone would leave it down until
-# Syncthing next starts.
+# Syncthing next starts. A restart, not a start: a watcher that kept running would go on with the code it started with, while the
+# shell reads the checkout's QML at once (and shows "out of date" for the watcher's sync.json).
 ensure_user_unit_enabled vekrona-sync.service
-systemctl --user start vekrona-sync.service || die "vekrona-sync.service failed to start"
+systemctl --user restart vekrona-sync.service || die "vekrona-sync.service failed to start"

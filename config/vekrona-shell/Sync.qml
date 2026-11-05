@@ -28,18 +28,39 @@ BarPill {
             devices: [],
             arrivals: []
         })
+    // The layout of sync.json that this file reads: SCHEMA_VERSION of bin/vekrona-sync, which tests/sync checks to be this number.
+    readonly property int schemaVersion: 1
+    // What the pill shows while the watcher runs code from before an update of the checkout (its sync.json has another schema).
+    readonly property var outdatedReport: Object.assign({}, offlineReport, {
+        state: "problem",
+        problem: "The sync service is out of date. Run `systemctl --user restart vekrona-sync` or `./install.sh 50`."
+    })
     // What vekrona-sync watch wrote, or offlineReport.
     readonly property var report: file.value
     readonly property int unseenArrivals: report.arrivals.filter(arrival => arrival.unseen).length
+    // Nearby devices that answered and that the popout has not been open for since: the watcher sets and clears the flag.
+    readonly property int unseenNearby: report.nearby.filter(device => device.unseen).length
+    // The devices of the nearby list that are there now. Syncthing never forgets a device it heard once, so the list in sync.json
+    // holds also those that have left; `vekrona-sync nearby` tries their addresses, once when the popout opens and again when the
+    // list changes while it is open (a device that appears is announced on the network, which changes sync.json), and nothing
+    // runs while the popout is shut. Empty from the opening until the answer, so that a device that left is never shown.
+    property var nearbyReachable: []
+    property var nearbyProbe: null
+    readonly property var nearbyHere: report.nearby.filter(device => nearbyReachable.indexOf(device.id) >= 0)
+    readonly property string nearbyIds: report.nearby.map(device => device.id).join(",")
     // Why the last command of the popout failed, "" while none did.
     property string failure: ""
     // Whether the popout shows how to pair a device that is not nearby.
     property bool pairing: false
     // The PNG of this computer's device ID, "" until vekrona-sync has made it.
     property string qrPath: ""
+    // Why there is no QR code, "" while there is one or none was asked for. It is shown where the code would be, since the ID,
+    // Copy ID and the field below it work without the code.
+    property string qrFailure: ""
     property bool copied: false
     // The turn of the icon while syncing, in steps of a quarter of the half turn after which the glyph looks the same: one
-    // timer wakeup per step, four a second, and nothing at all while no sync runs (an animation would redraw every frame).
+    // timer wakeup per step, four a second, and nothing at all while no sync runs (an animation would redraw every frame) or
+    // nobody is there to see it (Presence.qml: the screen is locked or off).
     property int spinStep: 0
     readonly property int spinSteps: 4
 
@@ -50,6 +71,12 @@ BarPill {
         if (folder.state === "problem")
             return "Problem: " + folder.problem;
         return "Up to date";
+    }
+
+    // Asks which of the nearby devices answer; the answer of an earlier, slower question is dropped.
+    function probeNearby(): void {
+        nearbyProbe?.kill();
+        nearbyProbe = Exec.runOr(["vekrona-sync", "nearby"], stdout => nearbyReachable = stdout.split("\n").filter(line => line !== ""), reason => failure = reason);
     }
 
     // Runs a vekrona-sync command that the open popout shows the failure of.
@@ -69,8 +96,10 @@ BarPill {
     function setPairing(shown: bool): void {
         pairing = shown;
         copied = false;
+        qrPath = "";
+        qrFailure = "";
         if (shown)
-            Exec.runOr(["vekrona-sync", "qr"], stdout => qrPath = stdout.trim(), reason => failure = reason);
+            Exec.runOr(["vekrona-sync", "qr"], stdout => qrPath = stdout.trim(), reason => qrFailure = reason);
     }
 
     function pairPasted(): void {
@@ -88,14 +117,16 @@ BarPill {
 
     icon: icons[report.state]
     iconRotation: spinStep * 180 / spinSteps
-    badgeCount: report.offers.length + report.pendingDevices.length + unseenArrivals
+    badgeCount: report.offers.length + report.pendingDevices.length + unseenArrivals + unseenNearby
     ariaName: "Sync, " + report.state
     onClicked: bar.togglePopout(popout)
+    onNearbyIdsChanged: if (popout.open)
+        probeNearby()
 
     Timer {
         interval: 250
         repeat: true
-        running: root.report.state === "syncing"
+        running: root.report.state === "syncing" && Presence.here
         onTriggered: root.spinStep = (root.spinStep + 1) % root.spinSteps
         onRunningChanged: if (!running)
             root.spinStep = 0
@@ -107,6 +138,10 @@ BarPill {
         absent: root.offlineReport
         parse: text => {
             const next = JSON.parse(text);
+            if (next.schema !== root.schemaVersion) {
+                console.error("sync.json has schema " + next.schema + " and this shell reads " + root.schemaVersion + ": vekrona-sync.service runs older code than the checkout, restart it");
+                return root.outdatedReport;
+            }
             if (!(next.state in root.icons))
                 throw new Error("unknown state " + next.state);
             for (const key of ["folders", "offers", "nearby", "pendingDevices", "devices", "arrivals"])
@@ -124,8 +159,11 @@ BarPill {
         onOpenChanged: {
             root.failure = "";
             root.pairing = false;
-            if (open)
+            root.nearbyReachable = [];
+            if (open) {
                 Exec.check(["vekrona-sync", "seen"]);
+                root.probeNearby();
+            }
         }
 
         ColumnLayout {
@@ -144,10 +182,10 @@ BarPill {
 
             SyncSection {
                 title: "Nearby"
-                visible: root.report.nearby.length > 0
+                visible: root.nearbyHere.length > 0
 
                 Repeater {
-                    model: root.report.nearby
+                    model: root.nearbyHere
 
                     SyncRow {
                         required property var modelData
@@ -347,6 +385,18 @@ BarPill {
                     source: root.qrPath === "" ? "" : "file://" + root.qrPath
                     Accessible.role: Accessible.Graphic
                     Accessible.name: "QR code of this computer's device ID"
+                }
+
+                Label {
+                    visible: root.qrFailure !== ""
+                    Layout.fillWidth: true
+                    Layout.leftMargin: VekronaTheme.space2
+                    Layout.rightMargin: VekronaTheme.space2
+                    Layout.topMargin: VekronaTheme.space2
+                    wrapMode: Text.Wrap
+                    color: VekronaTheme.c.dangerInk
+                    style: VekronaTheme.type.body
+                    text: root.qrFailure
                 }
 
                 Label {
