@@ -106,6 +106,17 @@ Read before filing:
 - File at: https://github.com/fedora-selinux/setroubleshoot/issues (unverified; Fedora's component is also on https://bugzilla.redhat.com)
 - Issue title: `seapplet: status icon is never created on Wayland (GtkStatusIcon), GTK_IS_WIDGET assertion at login`
 
+## 8b. Sway: the end of a session lock does not give the pointer back to the surface under it
+
+- Project and version: Sway 1.11 (the vekrona-dev guest); `sway/lock.c` on master (read 2026-11-05) is the same: `handle_surface_map` ends with `cursor_rebase_all()`, `handle_unlock` calls none.
+- Symptom on vekrona: with the pointer resting on a bar pill, lock the screen and unlock it by typing; the first click on the pill, without moving the pointer, does nothing. The pill shows its hover afterwards, and a second click works. In the guest it failed 6 times in 6 (lock, unlock, click), and never in 36 trials of the same click after the notification centre, a toast, a restart of the Sync watcher, `vekrona-dev session` or `swaymsg reload`.
+- Root cause as known: mapping a lock surface rebases the cursor, so the bar gets `wl_pointer.leave`; destroying the lock does not, so no surface has the pointer until the next motion, and the press goes nowhere. Read from the source; not traced with `WAYLAND_DEBUG`.
+- Minimal reproduction: any session lock client (swaylock); rest the pointer on a client, lock, unlock, click without moving.
+- vekrona workaround: `config/vekrona-lock/shell.qml` runs `swaymsg seat * cursor move 0 0` after it unlocks, which rebases the cursor without moving it (tested by `tests/e2e/bar-click-after-unlock.sh`).
+- Request: call `cursor_rebase_all()` in `handle_unlock` once the lock is destroyed.
+- File at: https://github.com/swaywm/sway/issues
+- Issue title: `session lock: pointer focus is not restored on unlock until the cursor moves (handle_unlock does not rebase the cursor)`
+
 ## 9. Other upstream items found in TODO.md
 
 Already tracked there with their own next step; listed here so nothing is lost. Not written up further.

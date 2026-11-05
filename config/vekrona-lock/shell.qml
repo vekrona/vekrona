@@ -25,14 +25,19 @@ ShellRoot {
     readonly property string touchPrompt: "Touch your security key"
     // The lock is always dark, in both themes (VekronaTheme.dark).
 
-    // ---- Unlock sequence: unlock, LockedHint=false and logind's Unlock on sway's session, quit.
+    // ---- Unlock sequence: unlock, LockedHint=false and logind's Unlock on sway's session, the pointer back to the surface under it,
+    // quit.
     // vekrona-session-hint addresses sway's own login session: this service is in none, and logind's
     // "auto" session would be the user's Display session, a text or ssh login when one started first.
     // Neither locking nor unlocking waits for the hint, and a hint that cannot be set is an error record.
-    // The process quits only after the hint step ended, so the unit stays active until the hint is clear;
-    // a hint step that hangs is cut off after hintDeadlineMs, since an active unit swallows the next lock.
+    // The process quits only after the steps ended, so the unit stays active until the hint is clear;
+    // a step that hangs is cut off after stepsDeadlineMs, since an active unit swallows the next lock.
+    // Sway gives the pointer to the surface under it when a lock surface maps, but not when the lock ends (handle_unlock in its
+    // sway/lock.c rebases no cursor), so until the next motion no surface has the pointer, and a click that comes first is lost.
+    // `seat cursor move 0 0` rebases it without moving it. It runs once the hint step ended, by when the unlock request has long
+    // gone out on the Wayland connection, which Qt flushes before it waits for the step.
     property bool unlocking: false
-    readonly property int hintDeadlineMs: 3000
+    readonly property int stepsDeadlineMs: 3000
 
     // `finished` comes once per run, also when the command could not start: Quickshell then emits no
     // `exited`, only `runningChanged` without a `started` before it.
@@ -68,14 +73,23 @@ ShellRoot {
     CommandStep {
         id: clearHint
         command: ["vekrona-session-hint", "locked", "no"]
+        onFinished: rebasePointer.running = true
+    }
+
+    CommandStep {
+        id: rebasePointer
+        command: ["swaymsg", "seat", "*", "cursor", "move", "0", "0"]
         onFinished: Qt.quit()
     }
 
     Timer {
-        id: hintDeadline
-        interval: root.hintDeadlineMs
+        id: stepsDeadline
+        interval: root.stepsDeadlineMs
         onTriggered: {
-            console.error("vekrona-session-hint locked no did not end within", interval / 1000, "s; quitting with sway's session still marked locked");
+            if (clearHint.running)
+                console.error("vekrona-session-hint locked no did not end within", interval / 1000, "s; quitting with sway's session still marked locked");
+            else
+                console.error("swaymsg seat * cursor move 0 0 did not end within", interval / 1000, "s of the unlock; quitting, the first click may be lost");
             Qt.quit();
         }
     }
@@ -88,7 +102,7 @@ ShellRoot {
         u2f.abort();
         fprint.abort();
         lock.locked = false;
-        hintDeadline.start();
+        stepsDeadline.start();
         clearHint.running = true;
     }
 
