@@ -37,6 +37,9 @@ BarPill {
     property bool pairing: false
     // The PNG of this computer's device ID, "" until vekrona-sync has made it.
     property string qrPath: ""
+    // Why there is no QR code, "" while there is one or none was asked for. It is shown where the code would be, since the ID,
+    // Copy ID and the field below it work without the code.
+    property string qrFailure: ""
     property bool copied: false
     // The turn of the icon while syncing, in steps of a quarter of the half turn after which the glyph looks the same: one
     // timer wakeup per step, four a second, and nothing at all while no sync runs (an animation would redraw every frame).
@@ -69,8 +72,10 @@ BarPill {
     function setPairing(shown: bool): void {
         pairing = shown;
         copied = false;
+        qrPath = "";
+        qrFailure = "";
         if (shown)
-            Exec.runOr(["vekrona-sync", "qr"], stdout => qrPath = stdout.trim(), reason => failure = reason);
+            Exec.runOr(["vekrona-sync", "qr"], stdout => qrPath = stdout.trim(), reason => qrFailure = reason);
     }
 
     function pairPasted(): void {
@@ -347,6 +352,18 @@ BarPill {
                     source: root.qrPath === "" ? "" : "file://" + root.qrPath
                     Accessible.role: Accessible.Graphic
                     Accessible.name: "QR code of this computer's device ID"
+                }
+
+                Label {
+                    visible: root.qrFailure !== ""
+                    Layout.fillWidth: true
+                    Layout.leftMargin: VekronaTheme.space2
+                    Layout.rightMargin: VekronaTheme.space2
+                    Layout.topMargin: VekronaTheme.space2
+                    wrapMode: Text.Wrap
+                    color: VekronaTheme.c.dangerInk
+                    style: VekronaTheme.type.body
+                    text: root.qrFailure
                 }
 
                 Label {

@@ -71,6 +71,7 @@ EVENT_TYPES = ("ConfigSaved", "StateChanged", "FolderSummary", "DeviceConnected"
 # What these events change is not in their data: the whole snapshot is read again.
 REREAD_EVENTS = frozenset({"ConfigSaved", "PendingDevicesChanged", "PendingFoldersChanged", "DeviceDiscovered"})
 NOTIFY_TIMEOUT_SEC = 3600
+NOTIFY_SEND_TIMEOUT_SEC = 5
 QR_PIXELS_PER_MODULE = 8
 QR_QUIET_ZONE_MODULES = 2
 MAX_ARRIVALS = 20
@@ -94,6 +95,28 @@ class Unreachable(SyncError):
 
 class ConfigError(SyncError):
     """Syncthing's configuration cannot be used however often it is read again."""
+
+
+class MissingTool(SyncError):
+    """An external program that is not installed."""
+
+
+# The stage that installs the desktop packages, which every external tool of vekrona-sync belongs to.
+PACKAGES_STAGE = 30
+
+
+def run_tool(purpose, argv, **kwargs):
+    """subprocess.run for every external program here, so that one that is not installed is said in plain words, with the
+    stage that installs it, and any other failure to start it is a SyncError as well."""
+    try:
+        return subprocess.run(argv, **kwargs)
+    except FileNotFoundError as exc:
+        # A program named by its path is one of vekrona's own that was found and is gone; a bare name is a package's.
+        way_out = "it is gone" if os.path.isabs(argv[0]) else (
+            f"it comes with the desktop packages: run `./install.sh {PACKAGES_STAGE}` in the vekrona checkout")
+        raise MissingTool(f"{purpose} needs {argv[0]}, which is not installed; {way_out}") from exc
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SyncError(f"cannot run {argv[0]} for {purpose}: {exc}")
 
 
 def device_id_arg(text):
@@ -267,11 +290,10 @@ def sync_root():
 
 def downloads_dir():
     try:
-        result = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True, timeout=PATHS_TIMEOUT_SEC)
-    except FileNotFoundError:
+        result = run_tool("finding Downloads", ["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True,
+                          timeout=PATHS_TIMEOUT_SEC)
+    except MissingTool:
         return os.path.join(os.path.expanduser("~"), "Downloads")
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SyncError(f"cannot run xdg-user-dir: {exc}")
     if result.returncode != 0:
         raise SyncError(f"xdg-user-dir DOWNLOAD exited with status {result.returncode}: {result.stderr.strip()}")
     # xdg-user-dir answers $HOME for a directory the user never set.
@@ -283,10 +305,8 @@ def downloads_dir():
 
 @functools.cache
 def syncthing_config_file():
-    try:
-        result = subprocess.run(["syncthing", "paths"], capture_output=True, text=True, timeout=PATHS_TIMEOUT_SEC)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SyncError(f"cannot run `syncthing paths`: {exc}")
+    result = run_tool("finding Syncthing's configuration", ["syncthing", "paths"], capture_output=True, text=True,
+                      timeout=PATHS_TIMEOUT_SEC)
     if result.returncode != 0:
         raise SyncError(f"`syncthing paths` exited with status {result.returncode}: {result.stderr.strip()}")
     lines = result.stdout.splitlines()
@@ -642,10 +662,17 @@ class DesktopNotifier:
                  [("later", "Not now", None), ("join", "Join", join)])
 
     def arrival(self, arrival):
-        failure = vekrona_cli.run_quietly(["notify-send", "-a", "vekrona", "--", f"{arrival['name']} received",
-                                           f"From {arrival['from']}, in {os.path.dirname(arrival['path'])}"])
-        if failure:
-            self.report(f"cannot show the arrival of {arrival['name']}: {failure}")
+        try:
+            result = run_tool("telling that a file arrived",
+                              ["notify-send", "-a", "vekrona", "--", f"{arrival['name']} received",
+                               f"From {arrival['from']}, in {os.path.dirname(arrival['path'])}"],
+                              capture_output=True, text=True, timeout=NOTIFY_SEND_TIMEOUT_SEC)
+        except SyncError as exc:
+            self.report(str(exc))
+            return
+        if result.returncode != 0:
+            self.report(f"cannot show the arrival of {arrival['name']}: notify-send exited with status "
+                        f"{result.returncode}: {result.stderr.strip()}")
 
     def ask(self, title, body, choices):
         """choices: (key, label, action or None); the first is the harmless one, which vekrona-update-ask requires."""
@@ -661,9 +688,9 @@ class DesktopNotifier:
 
     def wait_for_answer(self, argv, actions):
         try:
-            result = subprocess.run(argv, capture_output=True, text=True)
-        except OSError as exc:
-            self.report(f"cannot run {argv[0]}: {exc}")
+            result = run_tool("asking a question in a notification", argv, capture_output=True, text=True)
+        except SyncError as exc:
+            self.report(str(exc))
             return
         if result.returncode != 0:
             self.report(f"{os.path.basename(argv[0])} exited with status {result.returncode}: {result.stderr.strip()}")
@@ -810,12 +837,13 @@ def write_qr(device_id):
     path = os.path.join(directory, "device-id.png")
     staged = f"{path}.{secrets.token_hex(4)}.tmp"
     try:
-        result = subprocess.run(["qrencode", "-t", "PNG", "-s", str(QR_PIXELS_PER_MODULE), "-m", str(QR_QUIET_ZONE_MODULES),
-                                 "-o", staged, "--", device_id], capture_output=True, text=True, timeout=PATHS_TIMEOUT_SEC)
+        result = run_tool("the QR code", ["qrencode", "-t", "PNG", "-s", str(QR_PIXELS_PER_MODULE), "-m", str(QR_QUIET_ZONE_MODULES),
+                                         "-o", staged, "--", device_id], capture_output=True, text=True,
+                          timeout=PATHS_TIMEOUT_SEC)
         if result.returncode != 0:
             raise SyncError(f"qrencode exited with status {result.returncode}: {result.stderr.strip()}")
         os.replace(staged, path)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except OSError as exc:
         raise SyncError(f"cannot make the QR code: {exc}")
     finally:
         with contextlib.suppress(FileNotFoundError):

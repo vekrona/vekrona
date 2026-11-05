@@ -619,7 +619,7 @@ class NotifierTest(unittest.TestCase):
         reports = []
         sync.DesktopNotifier(reports.append).wait_for_answer(["/nonexistent/vekrona-update-ask"], {})
         self.assertEqual(len(reports), 1)
-        self.assertIn("cannot run /nonexistent/vekrona-update-ask", reports[0])
+        self.assertIn("needs /nonexistent/vekrona-update-ask, which is not installed", reports[0])
 
 
 class CommandTest(unittest.TestCase):
@@ -895,10 +895,54 @@ class QrTest(unittest.TestCase):
                 sync.write_qr(ME)
         self.assertEqual(self.state_files(), [])
 
-    def test_a_missing_qrencode_is_an_error_not_a_traceback(self):
-        with mock.patch.object(sync.subprocess, "run", side_effect=FileNotFoundError("qrencode")):
-            with self.assertRaisesRegex(sync.SyncError, "cannot make the QR code"):
+    def test_a_missing_qrencode_says_what_to_install_and_leaves_no_file(self):
+        with mock.patch.dict(os.environ, {"PATH": self.tmp.name}):
+            with self.assertRaisesRegex(sync.MissingTool, r"the QR code needs qrencode, which is not installed.*install\.sh 30"):
                 sync.write_qr(ME)
+        self.assertEqual(self.state_files(), [])
+
+
+class ToolTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {"PATH": self.tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_every_tool_that_is_not_installed_is_named_with_what_it_was_for_and_the_stage_that_installs_it(self):
+        for tool, purpose in (("qrencode", "the QR code"), ("syncthing", "finding Syncthing's configuration"),
+                              ("notify-send", "telling that a file arrived")):
+            with self.subTest(tool=tool):
+                with self.assertRaisesRegex(sync.MissingTool, f"{purpose} needs {tool}, which is not installed.*install.sh 30"):
+                    sync.run_tool(purpose, [tool])
+
+    def test_syncthings_config_file_of_a_machine_without_syncthing_is_not_a_traceback(self):
+        sync.syncthing_config_file.cache_clear()
+        with self.assertRaisesRegex(sync.MissingTool, "syncthing, which is not installed"):
+            sync.syncthing_config_file()
+
+    def test_downloads_falls_back_to_the_home_directory_without_xdg_user_dir(self):
+        self.assertEqual(sync.downloads_dir(), os.path.join(os.path.expanduser("~"), "Downloads"))
+
+    def test_downloads_does_not_hide_an_xdg_user_dir_that_hangs(self):
+        with mock.patch.object(sync.subprocess, "run", side_effect=sync.subprocess.TimeoutExpired("xdg-user-dir", 10)):
+            with self.assertRaisesRegex(sync.SyncError, "cannot run xdg-user-dir for finding Downloads"):
+                sync.downloads_dir()
+
+    def test_a_tool_that_cannot_be_started_is_a_sync_error(self):
+        not_executable = os.path.join(self.tmp.name, "broken")
+        with open(not_executable, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(not_executable, 0o644)
+        with self.assertRaisesRegex(sync.SyncError, "cannot run broken for testing"):
+            sync.run_tool("testing", [not_executable.replace(self.tmp.name + "/", "")])
+
+    def test_a_missing_notify_send_is_reported_not_raised_when_a_file_arrives(self):
+        reports = []
+        sync.DesktopNotifier(reports.append).arrival({"name": "a.txt", "from": "Pixel", "path": "/home/u/Downloads/a.txt"})
+        self.assertEqual(len(reports), 1)
+        self.assertIn("notify-send, which is not installed", reports[0])
 
 
 class UnixHandler(BaseHTTPRequestHandler):
