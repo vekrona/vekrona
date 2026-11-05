@@ -36,7 +36,7 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watcher_active
 main_forget_peers
 main_syncthing_restart
 # The ledger of what was proposed outlives the watcher: this scenario starts without it.
-vekrona-dev run bash -c 'rm -f "$HOME/.local/state/vekrona/sync.json"'
+vekrona-dev run bash -c 'rm -f "$HOME/.local/state/vekrona/sync-ledger.json"'
 vekrona-dev sh systemctl --user restart vekrona-sync.service
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- watcher_active
 peer_start

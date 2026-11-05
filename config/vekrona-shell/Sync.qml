@@ -29,7 +29,7 @@ BarPill {
             arrivals: []
         })
     // The layout of sync.json that this file reads: SCHEMA_VERSION of bin/vekrona-sync, which tests/sync checks to be this number.
-    readonly property int schemaVersion: 2
+    readonly property int schemaVersion: 3
     // What the pill shows while the watcher runs code from before an update of the checkout (its sync.json has another schema).
     readonly property var outdatedReport: Object.assign({}, offlineReport, {
         state: "problem",

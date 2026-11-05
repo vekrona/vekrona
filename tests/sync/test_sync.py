@@ -339,7 +339,7 @@ class StateStoreTest(unittest.TestCase):
     def test_every_write_carries_the_schema(self):
         publish = lambda: self.store.publish(sync.assemble(snapshot()), [])
         for name, write in (("publish", publish), ("seen", lambda: (publish(), self.store.mark_seen())),
-                            ("await", lambda: self.store.await_connection(PEER)), ("offline", lambda: sync.command_offline(None))):
+                            ("offline", lambda: sync.command_offline(None))):
             with self.subTest(write=name):
                 if os.path.exists(self.store.path):
                     os.unlink(self.store.path)
@@ -358,6 +358,46 @@ class StateStoreTest(unittest.TestCase):
         self.assertIsNone(self.store.read())
         self.store.publish(sync.assemble(snapshot()), [])
         self.assertEqual((self.raw()["schema"], self.raw()["arrivals"], self.reports), (sync.SCHEMA_VERSION, [], []))
+
+    def write(self, path, content):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(content)
+
+    def test_a_sync_json_that_is_missing_garbage_or_of_another_schema_leaves_the_ledger_as_it_is(self):
+        self.store.await_connection(PEER)
+        self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}})), [], reachable={THIRD})
+        ledger = self.store.read_ledger()
+        self.assertEqual((ledger["proposed"], ledger["awaiting"]), ([THIRD], [PEER]))
+        for content in (None, "garbage", "[]", json.dumps({"schema": sync.SCHEMA_VERSION + 1, "arrivals": []}),
+                        json.dumps({"schema": 2, "arrivals": [], "ledger": {"proposed": [], "seen": [], "awaiting": []}})):
+            with self.subTest(content=content):
+                if content is None:
+                    os.unlink(self.store.path)
+                else:
+                    self.write(self.store.path, content)
+                self.store.publish(sync.assemble(snapshot(discovered={THIRD: {"addresses": []}})), [], reachable={THIRD})
+                self.assertEqual(self.store.read_ledger(), ledger)
+                self.assertEqual(self.raw()["schema"], sync.SCHEMA_VERSION)
+                self.assertNotIn("ledger", self.raw())
+
+    def test_a_ledger_that_cannot_be_read_stops_every_change_with_its_path_and_stays_as_it_is(self):
+        for content in ("garbage", "[]", "{}", json.dumps({"version": sync.LEDGER_VERSION + 1, **sync.empty_ledger()}),
+                        json.dumps({"version": sync.LEDGER_VERSION, "proposed": "lizard", "seen": [], "awaiting": []}),
+                        json.dumps({"version": sync.LEDGER_VERSION, "proposed": [None], "seen": [], "awaiting": []})):
+            with self.subTest(content=content):
+                self.write(self.store.ledger_path, content)
+                for change in (lambda: self.store.publish(sync.assemble(snapshot()), []), self.store.mark_seen,
+                               lambda: self.store.await_connection(PEER), lambda: self.store.take_awaiting({PEER})):
+                    with self.assertRaisesRegex(sync.ConfigError, re.escape(self.store.ledger_path) + ".*delete it"):
+                        change()
+                with open(self.store.ledger_path) as f:
+                    self.assertEqual(f.read(), content)
+
+    def test_the_offline_view_is_written_even_when_the_ledger_cannot_be_read(self):
+        self.write(self.store.ledger_path, "garbage")
+        sync.command_offline(None)
+        self.assertEqual(self.raw()["state"], "offline")
 
     def test_seen_marks_every_arrival_and_keeps_the_rest(self):
         self.store.publish(sync.assemble(snapshot()), [self.arrival("a"), self.arrival("b")])
@@ -745,8 +785,8 @@ class WatcherTest(unittest.TestCase):
     def test_the_ledger_is_bounded(self):
         for index in range(sync.MAX_LEDGER + 20):
             self.store.await_connection(f"D{index}")
-        self.assertEqual(len(self.store.read()["ledger"]["awaiting"]), sync.MAX_LEDGER)
-        self.assertEqual(self.store.read()["ledger"]["awaiting"][-1], f"D{sync.MAX_LEDGER + 19}")
+        self.assertEqual(len(self.store.read_ledger()["awaiting"]), sync.MAX_LEDGER)
+        self.assertEqual(self.store.read_ledger()["awaiting"][-1], f"D{sync.MAX_LEDGER + 19}")
 
     def test_an_event_batch_looks_only_into_the_drops_where_a_file_finished(self):
         self.put("a.txt")

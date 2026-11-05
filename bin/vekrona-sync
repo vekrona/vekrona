@@ -96,7 +96,9 @@ MAX_LEDGER = 200
 # long-running process that keeps the code it started with, while the shell reloads its QML from the checkout at once, so after
 # an update of the checkout the two can disagree for as long as the watcher is not restarted. Raise it with every change of the
 # layout that an older Sync.qml or watcher would misread.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+# The layout of sync-ledger.json, which is never replaced: a file of another version is an error.
+LEDGER_VERSION = 1
 
 DEVICE_ID = r"[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}"
 DEVICE_ID_RE = re.compile(DEVICE_ID)
@@ -120,7 +122,7 @@ class NotFound(SyncError):
 
 
 class ConfigError(SyncError):
-    """Syncthing's configuration cannot be used however often it is read again."""
+    """Syncthing's configuration, or the ledger of sync-ledger.json, cannot be used however often it is read again."""
 
 
 class MissingTool(SyncError):
@@ -654,8 +656,11 @@ def offline_view():
             "nearby": [], "pendingDevices": [], "devices": []}
 
 
+LEDGER_KEYS = ("proposed", "seen", "awaiting")
+
+
 def empty_ledger():
-    return {"proposed": [], "seen": [], "awaiting": []}
+    return {key: [] for key in LEDGER_KEYS}
 
 
 def remembered(ids):
@@ -664,8 +669,10 @@ def remembered(ids):
 
 
 class StateStore:
-    """sync.json. The watcher, `pair` and `seen` all rewrite it, so every change is a locked read-modify-write. Next to what the
-    popout shows it keeps the ledger of what the user was told, which has to outlive the watcher and Syncthing:
+    """sync.json, what the popout shows, and sync-ledger.json, what the user was told. The watcher, `pair`, `seen` and `offline`
+    all rewrite them, so every change is a read-modify-write under one lock. sync.json is a view that the next write rebuilds,
+    and a file of another schema is replaced. The ledger has to outlive the watcher, Syncthing and a new schema of sync.json, so it
+    has a file and a version of its own, and one that cannot be read is an error, never replaced:
       proposed   nearby devices the user was asked about with a notification: never asked twice, so a phone that comes and
                  goes (Syncthing announces it again after 90 s of silence) and a restart of Syncthing do not ask again
       seen       nearby devices the user has had in front of them in the popout: they carry no dot
@@ -674,6 +681,7 @@ class StateStore:
     def __init__(self, report):
         directory = vekrona_cli.vekrona_state_dir()
         self.path = os.path.join(directory, "sync.json")
+        self.ledger_path = os.path.join(directory, "sync-ledger.json")
         self.lock_path = os.path.join(directory, "sync.json.lock")
         self.report = report
 
@@ -696,72 +704,101 @@ class StateStore:
             return None
         return current
 
-    def update(self, change):
-        """Writes what change(current or None) returns, with the schema, unless it returns None or the file says so already."""
+    def read_ledger(self):
+        """The ledger, empty when there is no file yet. A file that is not a ledger of LEDGER_VERSION stops every change."""
+        try:
+            with open(self.ledger_path) as f:
+                ledger = json.load(f)
+        except FileNotFoundError:
+            return empty_ledger()
+        except (OSError, ValueError) as exc:
+            raise ConfigError(self.unusable_ledger(exc))
+        if not isinstance(ledger, dict) or ledger.get("version") != LEDGER_VERSION:
+            raise ConfigError(self.unusable_ledger(f"it is not a ledger of version {LEDGER_VERSION}"))
+        if not all(isinstance(ledger.get(key), list) and all(isinstance(item, str) for item in ledger[key]) for key in LEDGER_KEYS):
+            raise ConfigError(self.unusable_ledger(f"its {', '.join(LEDGER_KEYS)} are not all lists of device IDs"))
+        return {key: ledger[key] for key in LEDGER_KEYS}
+
+    def unusable_ledger(self, why):
+        return (f"cannot use {self.ledger_path}: {why}. It remembers which nearby devices you were asked about; fix it, or "
+                f"delete it to be asked about each of them once more")
+
+    @contextlib.contextmanager
+    def locked(self):
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
         with open(self.lock_path, "w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+    def write_view(self, changed, current):
+        """Writes the view with the schema, unless it is None or the file says so already."""
+        if changed is not None and {**changed, "schema": SCHEMA_VERSION} != current:
+            vekrona_cli.write_json_atomically(self.path, {**changed, "schema": SCHEMA_VERSION})
+
+    def update_view(self, change):
+        """Writes what change(current or None) returns, for a change that needs no ledger."""
+        with self.locked():
             current = self.read()
-            changed = change(current)
-            if changed is not None and {**changed, "schema": SCHEMA_VERSION} != current:
-                vekrona_cli.write_json_atomically(self.path, {**changed, "schema": SCHEMA_VERSION})
+            self.write_view(change(current), current)
+
+    def update(self, change):
+        """change(current or None, ledger) returns the view to write (or None) and the ledger, which is written when it changed."""
+        with self.locked():
+            current = self.read()
+            ledger = self.read_ledger()
+            changed, new_ledger = change(current, {key: list(ids) for key, ids in ledger.items()})
+            if new_ledger != ledger:
+                vekrona_cli.write_json_atomically(self.ledger_path, {**new_ledger, "version": LEDGER_VERSION})
+            self.write_view(changed, current)
 
     def publish(self, view, new_arrivals, reachable=frozenset()):
-        """Writes the view, keeping the arrivals and the ledger; `reachable` are the nearby devices that answered just now.
-        They get a dot unless they were seen, and the ones never proposed are marked proposed and returned, in the order of
-        the list: those are the devices to ask the user about, once."""
+        """Writes the view, keeping the arrivals; `reachable` are the nearby devices that answered just now. They get a dot
+        unless they were seen, and the ones never proposed are marked proposed and returned, in the order of the list: those
+        are the devices to ask the user about, once."""
         proposals = []
 
-        def change(current):
+        def change(current, ledger):
             nonlocal proposals
             old = current or {}
-            ledger = {**empty_ledger(), **old.get("ledger", {})}
             unseen_before = {device["id"] for device in old.get("nearby", []) if device.get("unseen")}
             nearby = [{**device, "unseen": device["id"] in unseen_before or
                        (device["id"] in reachable and device["id"] not in ledger["seen"])} for device in view["nearby"]]
             proposals = [device["id"] for device in nearby if device["id"] in reachable and device["id"] not in ledger["proposed"]]
             ledger["proposed"] = remembered(ledger["proposed"] + proposals)
-            state = {**view, "nearby": nearby, "arrivals": (new_arrivals + old.get("arrivals", []))[:MAX_ARRIVALS],
-                     "ledger": ledger}
-            return state
+            return {**view, "nearby": nearby, "arrivals": (new_arrivals + old.get("arrivals", []))[:MAX_ARRIVALS]}, ledger
         self.update(change)
         return proposals
 
+    def publish_offline(self):
+        """Writes the view of a Syncthing that does not run, keeping the arrivals. It needs no ledger, so that a ledger that
+        cannot be read does not leave the bar showing what the watcher last saw."""
+        self.update_view(lambda current: {**offline_view(), "arrivals": (current or {}).get("arrivals", [])})
+
     def mark_seen(self):
-        def change(current):
+        def change(current, ledger):
             if current is None:
-                return None
-            ledger = {**empty_ledger(), **current.get("ledger", {})}
-            ledger["seen"] = remembered(ledger["seen"] + [device["id"] for device in current.get("nearby", [])])
-            state = {**current, "ledger": ledger,
-                     "nearby": [{**device, "unseen": False} for device in current.get("nearby", [])],
-                     "arrivals": [{**arrival, "unseen": False} for arrival in current["arrivals"]]}
-            return state
+                return None, ledger
+            ledger["seen"] = remembered(ledger["seen"] + [device["id"] for device in current["nearby"]])
+            return {**current, "nearby": [{**device, "unseen": False} for device in current["nearby"]],
+                    "arrivals": [{**arrival, "unseen": False} for arrival in current["arrivals"]]}, ledger
         self.update(change)
 
     def await_connection(self, device_id):
         """Notes that this computer asked device_id to pair, so that its first connection is announced once."""
-        def change(current):
-            base = current if current is not None else {**offline_view(), "arrivals": []}
-            ledger = {**empty_ledger(), **base.get("ledger", {})}
+        def change(current, ledger):
             ledger["awaiting"] = remembered(ledger["awaiting"] + [device_id])
-            return {**base, "ledger": ledger}
+            return None, ledger
         self.update(change)
 
     def take_awaiting(self, device_ids):
         """Removes the devices from the awaited ones and returns those that were."""
         taken = []
 
-        def change(current):
+        def change(current, ledger):
             nonlocal taken
-            if current is None:
-                return None
-            ledger = {**empty_ledger(), **current.get("ledger", {})}
             taken = [device_id for device_id in ledger["awaiting"] if device_id in device_ids]
-            if not taken:
-                return None
             ledger["awaiting"] = [device_id for device_id in ledger["awaiting"] if device_id not in taken]
-            return {**current, "ledger": ledger}
+            return None, ledger
         self.update(change)
         return taken
 
@@ -1610,7 +1647,7 @@ def command_seen(args):
 
 
 def command_offline(args):
-    StateStore(report_failure).publish(offline_view(), [])
+    StateStore(report_failure).publish_offline()
 
 
 def command_watch(args):
