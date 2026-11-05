@@ -1404,7 +1404,9 @@ class FolderIdTest(unittest.TestCase):
     def test_a_name_becomes_lowercase_words_with_dashes(self):
         for name, expected in (("My Notes", "my-notes"), ("notes", "notes"), ("UPPER Case", "upper-case"), ("a_b.c d", "a-b-c-d"),
                                ("Café Menü", "cafe-menu"), ("  spaced   out  ", "spaced-out"), ("-x-", "x"), ("a--b", "a-b"),
-                               ("Notes 📒 2024", "notes-2024"), ("2024", "2024")):
+                               ("Notes 📒 2024", "notes-2024"), ("2024", "2024"), ("Straße", "strasse"), ("STRAẞE", "strasse"),
+                               ("Øresund", "oresund"), ("Łódź", "lodz"), ("Ærø", "aero"), ("Œuvre", "oeuvre"), ("Đakovo", "dakovo"),
+                               ("Þingvellir", "thingvellir")):
             with self.subTest(name=name):
                 self.assertEqual(sync.suggest_folder_id(f"/home/u/{name}", set()), expected)
 

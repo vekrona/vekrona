@@ -1040,17 +1040,22 @@ def ensure_drop_folder(api, my_id, other_id):
     return os.path.expanduser(existing["path"])
 
 
+# The Latin letters that are no letter with an accent, so NFKD leaves them whole, spelled as their languages spell them in ASCII.
+# The name is case-folded first, which also makes "ss" of "ß" and "ẞ".
+LATIN_SPELLINGS = str.maketrans({"ø": "o", "ł": "l", "æ": "ae", "œ": "oe", "đ": "d", "þ": "th"})
+
+
 def kebab_case(name):
     """The name in lowercase letters and digits with single dashes between the words, or None when that would not stand for it:
     a letter or digit that ASCII cannot spell (Cyrillic, CJK) would be dropped and leave half a name, so none is made. Accents
-    are folded ("Café" is "cafe"); symbols and emoji count as a separator."""
+    are folded ("Café" is "cafe", "Łódź" is "lodz"); symbols and emoji count as a separator."""
     words = []
-    for char in unicodedata.normalize("NFKD", name):
+    for char in unicodedata.normalize("NFKD", name.casefold().translate(LATIN_SPELLINGS)):
         if unicodedata.combining(char):
             continue
         if not char.isascii() and char.isalnum():
             return None
-        words.append(char.lower() if char.isascii() else " ")
+        words.append(char if char.isascii() else " ")
     kept = re.sub(r"[^a-z0-9]+", "-", "".join(words)).strip("-")[:FOLDER_ID_MAX].rstrip("-")
     return kept or None
 
