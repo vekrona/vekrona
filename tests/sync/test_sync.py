@@ -1,4 +1,6 @@
 import contextlib
+import copy
+import fcntl
 import importlib.machinery
 import importlib.util
 import io
@@ -12,6 +14,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from http.server import BaseHTTPRequestHandler
 from unittest import mock
 
@@ -435,8 +438,17 @@ class FakeSyncthing(sync.Syncthing):
             return None
         if path == "/rest/db/status":
             return self.statuses[query["folder"]]
+        item = re.fullmatch(r"/rest/config/(folders|devices)/([^/]+)", path)
+        if item is not None:
+            kind, item_id = item[1], urllib.parse.unquote(item[2])
+            listed = f"/rest/config/{kind}"
+            entries = self.answers[listed] if listed in self.answers else self.answers["/rest/config"][kind]
+            found = [entry for entry in entries if entry["id" if kind == "folders" else "deviceID"] == item_id]
+            if not found:
+                raise sync.NotFound(f"Syncthing refused GET {path} with HTTP 404: No {kind[:-1]} with given ID")
+            return copy.deepcopy(found[0])
         answer = self.answers[path]
-        return answer(query) if callable(answer) else answer
+        return answer(query) if callable(answer) else copy.deepcopy(answer)
 
 
 class Recorder:
@@ -701,7 +713,7 @@ class WatcherTest(unittest.TestCase):
         put = next(body for method, path, body in api.writes if (method, path) == ("PUT", "/rest/config"))
         self.assertEqual([entry["deviceID"] for entry in put["remoteIgnoredDevices"]], [FOURTH])
         pair()
-        posted = next(body for method, path, body in api.writes if (method, path) == ("POST", "/rest/config/devices"))
+        posted = next(body for method, path, body in api.writes if (method, path) == ("PUT", f"/rest/config/devices/{THIRD}"))
         self.assertEqual(posted["deviceID"], THIRD)
         self.assertIn(("pair_requested", sync.short_code(THIRD)), self.notifier.calls)
 
@@ -762,8 +774,8 @@ class WatcherTest(unittest.TestCase):
     def test_the_drop_of_the_other_party_is_taken_and_never_listed_as_an_offer(self):
         api = self.api(pending_folders={DROP: {"offeredBy": {PEER: {"label": "vekrona drop"}}}}, drop_devices=(ME,))
         self.refresh(api, scan_all=True)
-        self.assertEqual(api.writes, [("PATCH", f"/rest/config/folders/{DROP}",
-                                       {"devices": [{"deviceID": ME}, {"deviceID": PEER}]})])
+        self.assertEqual([(method, path, body["devices"]) for method, path, body in api.writes],
+                         [("PUT", f"/rest/config/folders/{DROP}", [{"deviceID": ME}, {"deviceID": PEER}])])
         self.assertEqual(self.store.read()["offers"], [])
         self.assertEqual(self.notifier.calls, [])
 
@@ -773,7 +785,7 @@ class WatcherTest(unittest.TestCase):
         self.refresh(api, scan_all=True)
         method, path, body = api.writes[0]
         self.assertEqual((method, path, body["id"], body["type"], [d["deviceID"] for d in body["devices"]]),
-                         ("POST", "/rest/config/folders", DROP, "sendreceive", [ME, PEER]))
+                         ("PUT", f"/rest/config/folders/{DROP}", DROP, "sendreceive", [ME, PEER]))
         self.assertTrue(body["path"].startswith(os.path.join(self.tmp.name, "data")))
 
     def test_a_drop_offered_by_a_third_device_is_not_shown_taken_or_notified_and_is_logged_once(self):
@@ -1269,7 +1281,8 @@ class CommandTest(unittest.TestCase):
 
 def patch_syncthing_home(test, home):
     """Puts Syncthing's directory, which `syncthing paths` names, and the drops of Send file under home."""
-    for name, value in (("HOME", home), ("XDG_DATA_HOME", os.path.join(home, ".local", "share"))):
+    for name, value in (("HOME", home), ("XDG_DATA_HOME", os.path.join(home, ".local", "share")),
+                        ("XDG_STATE_HOME", os.path.join(home, ".local", "state"))):
         patcher = mock.patch.dict(os.environ, {name: value})
         patcher.start()
         test.addCleanup(patcher.stop)
@@ -1311,7 +1324,7 @@ class JoinAndSendTest(unittest.TestCase):
         api = self.api(pending_folders={"p1": {"offeredBy": {PEER: {"label": "Photos"}}}})
         sync.join(api, "p1", None)
         self.assertTrue(os.path.isdir(os.path.join(self.home, "Sync", "Photos")))
-        self.assertEqual(api.writes[0][1], "/rest/config/folders")
+        self.assertEqual(api.writes[0][:2], ("PUT", "/rest/config/folders/p1"))
 
     def test_a_folder_is_not_joined_into_a_shared_folder(self):
         api = self.api(pending_folders={"p1": {"offeredBy": {PEER: {"label": "Photos"}}}})
@@ -1329,7 +1342,7 @@ class JoinAndSendTest(unittest.TestCase):
     def test_a_folder_that_is_here_gets_shared_with_the_device_that_offers_it_and_is_not_joined_again(self):
         api = self.api_with_folder(devices=(ME,), offered_by=(PEER, THIRD))
         sync.join(api, "p1", None)
-        self.assertEqual([(w[0], w[1]) for w in api.writes], [("PATCH", "/rest/config/folders/p1")])
+        self.assertEqual([(w[0], w[1]) for w in api.writes], [("PUT", "/rest/config/folders/p1")])
         self.assertEqual([d["deviceID"] for d in api.writes[0][2]["devices"]], [ME, PEER, THIRD])
         self.assertFalse(os.path.exists(os.path.join(self.home, "Sync")))
 
@@ -1391,7 +1404,7 @@ class JoinAndSendTest(unittest.TestCase):
         api = self.api(drop_devices=(ME,))
         sync.send(api, PEER, [file])
         self.assertEqual(os.listdir(os.path.join(self.tmp.name, "drop", "to", PEER)), ["a.txt"])
-        self.assertEqual(api.writes[0][0], "PATCH")
+        self.assertEqual(api.writes[0][:2], ("PUT", f"/rest/config/folders/{DROP}"))
 
 
 class FolderIdTest(unittest.TestCase):
@@ -1466,7 +1479,7 @@ class ShareTest(unittest.TestCase):
         self.assertEqual(sync.share(api, self.notes, "notes-of-mine"), "notes-of-mine")
         body = api.writes[0][2]
         self.assertEqual((api.writes[0][:2], body["id"], body["label"], body["path"]),
-                         (("POST", "/rest/config/folders"), "notes-of-mine", "My Notes", self.notes))
+                         (("PUT", "/rest/config/folders/notes-of-mine"), "notes-of-mine", "My Notes", self.notes))
         self.assertEqual([d["deviceID"] for d in body["devices"]], [ME, PEER, THIRD])
 
     def test_without_an_id_the_suggestion_is_used(self):
@@ -1562,12 +1575,13 @@ class PairingTest(unittest.TestCase):
             "/rest/system/status": {"myID": ME},
             "/rest/svc/deviceid": syncthing_judging_ids,
             "/rest/config": {"folders": self.folders, "remoteIgnoredDevices": [{"deviceID": d} for d in ignored]},
+            "/rest/config/folders": self.folders,
             "/rest/config/devices": [{"deviceID": d} for d in devices],
             "/rest/config/defaults/device": {"addresses": ["dynamic"], "name": ""},
             "/rest/cluster/pending/devices": pending_devices or {}})
 
     def posted_device(self, api):
-        return next(body for method, path, body in api.writes if (method, path) == ("POST", "/rest/config/devices"))
+        return next(body for method, path, body in api.writes if method == "PUT" and path.startswith("/rest/config/devices/"))
 
     def test_a_device_is_paired_by_its_id_in_any_spelling_and_gets_every_folder_but_the_drops(self):
         for typed in (THIRD, THIRD.lower(), THIRD.replace("-", ""), f"  {THIRD}\n"):
@@ -1575,7 +1589,8 @@ class PairingTest(unittest.TestCase):
                 api = self.api()
                 sync.pair_device(api, typed, None)
                 self.assertEqual(self.posted_device(api), {"addresses": ["dynamic"], "name": "", "deviceID": THIRD})
-                shared = [(path, body["devices"][-1]["deviceID"]) for method, path, body in api.writes if method == "PATCH"]
+                shared = [(path, body["devices"][-1]["deviceID"]) for method, path, body in api.writes
+                          if path.startswith("/rest/config/folders/")]
                 self.assertEqual(shared, [("/rest/config/folders/f1", THIRD), ("/rest/config/folders/f2", THIRD)])
 
     def test_a_name_given_is_the_name_of_the_device(self):
@@ -1604,7 +1619,7 @@ class PairingTest(unittest.TestCase):
         api = self.api(pending_devices={THIRD: {"name": "Pixel"}})
         sync.accept_device(api, THIRD)
         self.assertEqual(self.posted_device(api), {"addresses": ["dynamic"], "name": "Pixel", "deviceID": THIRD})
-        self.assertEqual(len([w for w in api.writes if w[0] == "PATCH"]), 2)
+        self.assertEqual(len([w for w in api.writes if w[1].startswith("/rest/config/folders/")]), 2)
 
     def test_accepting_a_device_that_did_not_ask_is_an_error(self):
         api = self.api()
@@ -1632,6 +1647,65 @@ class PairingTest(unittest.TestCase):
         with self.assertRaisesRegex(sync.SyncError, "has not asked"):
             sync.reject_device(api, THIRD)
         self.assertEqual(api.writes, [])
+
+
+class ConfigLockTest(unittest.TestCase):
+    """Syncthing's REST API changes a list of the configuration only as a whole, so a change that read an old copy would undo
+    one that came between: every change reads what it changes and writes it back while it holds the lock of all changes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patch_syncthing_home(self, os.path.join(self.tmp.name, "home"))
+        self.notes = os.path.join(self.tmp.name, "home", "Notes")
+        for directory in (self.notes, sync.vekrona_cli.vekrona_state_dir()):
+            os.makedirs(directory)
+        self.log = []
+
+    def lock_held(self):
+        path = os.path.join(sync.vekrona_cli.vekrona_state_dir(), sync.CONFIG_LOCK_NAME)
+        with open(path, "a") as other:
+            try:
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(other, fcntl.LOCK_UN)
+            return False
+
+    def api(self):
+        folders = [folder("f1"), folder("f2", devices=(ME, PEER))]
+        api = FakeSyncthing({
+            "/rest/system/status": {"myID": ME},
+            "/rest/svc/deviceid": syncthing_judging_ids,
+            "/rest/config": {"folders": folders, "remoteIgnoredDevices": []},
+            "/rest/config/folders": folders,
+            "/rest/config/devices": [{"deviceID": ME}, {"deviceID": PEER}],
+            "/rest/config/defaults/device": {"addresses": ["dynamic"], "name": ""},
+            "/rest/config/defaults/folder": {"id": "", "devices": []},
+            "/rest/cluster/pending/devices": {THIRD: {"name": "Pixel"}}})
+        plain = api.request
+
+        def request(method, path, **kwargs):
+            if path.startswith("/rest/config") and not path.startswith("/rest/config/defaults"):
+                self.log.append((method, path, self.lock_held()))
+            return plain(method, path, **kwargs)
+        api.request = request
+        return api
+
+    def test_every_change_of_the_configuration_reads_it_and_writes_it_back_under_the_lock(self):
+        api = self.api()
+        sync.pair_device(api, FOURTH, "Phone")
+        sync.reject_device(api, THIRD)
+        sync.share(api, self.notes, "notes")
+        sync.ensure_drop_folder(api, ME, PEER)
+        writes = [index for index, (method, _, _) in enumerate(self.log) if method != "GET"]
+        self.assertEqual(len(writes), 6)
+        for index in writes:
+            with self.subTest(write=self.log[index]):
+                method, path, held = self.log[index]
+                self.assertEqual((method, held), ("PUT", True))
+                self.assertEqual(self.log[index - 1], ("GET", path, True))
+        self.assertFalse(self.lock_held())
 
 
 class QrTest(unittest.TestCase):

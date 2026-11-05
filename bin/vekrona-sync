@@ -130,6 +130,9 @@ class MissingTool(SyncError):
 # The stage that installs the desktop packages, which every external tool of vekrona-sync belongs to.
 PACKAGES_STAGE = 30
 
+# The lock file in the state directory that every change of Syncthing's configuration from here holds (Syncthing.edit_config).
+CONFIG_LOCK_NAME = "syncthing-config.lock"
+
 FOLDER_ID_MAX = 64
 FOLDER_ID_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
@@ -428,18 +431,47 @@ class Syncthing:
         events = self.events(since=0, limit=1, timeout_sec=1)
         return events[-1]["id"] if events else 0
 
-    def add_folder(self, folder_id, label, path, device_ids):
-        folder = self.request("GET", "/rest/config/defaults/folder")
-        folder.update(id=folder_id, label=label, path=path, type="sendreceive",
-                      devices=[{"deviceID": device_id} for device_id in device_ids])
-        self.request("POST", "/rest/config/folders", body=folder)
+    def edit_config(self, path, change):
+        """The one way vekrona-sync changes Syncthing's configuration. The object at path (None when there is none) is read
+        while a lock that every change from here takes is held, and what change() makes of it is PUT back unless it is None:
+        the watcher, a notification's button and a command can change the configuration at once, and each sees the others'
+        changes. The REST API has no way to change one entry of a list, such as a device of a folder or of remoteIgnoredDevices."""
+        directory = vekrona_cli.vekrona_state_dir()
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, CONFIG_LOCK_NAME), "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                current = self.request("GET", path)
+            except NotFound:
+                current = None
+            changed = change(current)
+            if changed is not None:
+                self.request("PUT", path, body=changed)
 
-    def share_folder_with(self, folder, *device_ids):
-        shared = {device["deviceID"] for device in folder["devices"]}
-        added = [{"deviceID": device_id} for device_id in dict.fromkeys(device_ids) if device_id not in shared]
-        if added:
-            self.request("PATCH", f"/rest/config/folders/{urllib.parse.quote(folder['id'], safe='')}",
-                         body={"devices": [*folder["devices"], *added]})
+    def add_folder(self, folder_id, label, path, device_ids):
+        defaults = self.request("GET", "/rest/config/defaults/folder")
+
+        def change(current):
+            # PUT replaces a folder of the same ID, with its path and devices.
+            if current is not None:
+                raise SyncError(f"This computer already has a folder with ID {folder_id}")
+            return {**defaults, "id": folder_id, "label": label, "path": path, "type": "sendreceive",
+                    "devices": [{"deviceID": device_id} for device_id in device_ids]}
+        self.edit_config(config_path("folders", folder_id), change)
+
+    def share_folder_with(self, folder_id, *device_ids):
+        def change(folder):
+            if folder is None:
+                raise SyncError(f"the folder {folder_id} is gone from Syncthing's configuration")
+            shared = {device["deviceID"] for device in folder["devices"]}
+            added = [{"deviceID": device_id} for device_id in dict.fromkeys(device_ids) if device_id not in shared]
+            return {**folder, "devices": [*folder["devices"], *added]} if added else None
+        self.edit_config(config_path("folders", folder_id), change)
+
+    def add_device(self, device_id, name):
+        defaults = self.request("GET", "/rest/config/defaults/device")
+        self.edit_config(config_path("devices", device_id),
+                         lambda current: {**defaults, "deviceID": device_id, "name": name} if current is None else None)
 
     def ignore_lines(self, folder_id):
         """The lines of the .stignore of a folder."""
@@ -481,12 +513,18 @@ class Syncthing:
     def ignore_device(self, device_id, name, address):
         """Puts the device on the list of devices whose connection attempts Syncthing drops without a word. The REST API
         takes that list only inside the whole configuration."""
-        config = self.request("GET", "/rest/config")
-        if any(ignored["deviceID"] == device_id for ignored in config["remoteIgnoredDevices"]):
-            return
-        config["remoteIgnoredDevices"].append({"deviceID": device_id, "name": name, "address": address,
-                                               "time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
-        self.request("PUT", "/rest/config", body=config)
+        def change(config):
+            if any(ignored["deviceID"] == device_id for ignored in config["remoteIgnoredDevices"]):
+                return None
+            time = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            return {**config, "remoteIgnoredDevices": [*config["remoteIgnoredDevices"],
+                                                       {"deviceID": device_id, "name": name, "address": address, "time": time}]}
+        self.edit_config("/rest/config", change)
+
+
+def config_path(kind, item_id):
+    """The REST path of one folder or device of the configuration."""
+    return f"/rest/config/{kind}/{urllib.parse.quote(item_id, safe='')}"
 
 
 # ---- What sync.json shows --------------------------------------------------------------------------------------------
@@ -1036,7 +1074,7 @@ def ensure_drop_folder(api, my_id, other_id):
         api.add_folder(folder_id, DROP_LABEL, path, [my_id, other_id])
         return path
     refuse_third_devices(existing, my_id, other_id)
-    api.share_folder_with(existing, other_id)
+    api.share_folder_with(folder_id, other_id)
     return os.path.expanduser(existing["path"])
 
 
@@ -1138,7 +1176,7 @@ def join(api, folder_id, path):
     if is_drop(folder_id):
         raise SyncError(f"{folder_id} is a drop, which is taken from the other device of the drop without asking and never joined")
     offer = api.request("GET", "/rest/cluster/pending/folders").get(folder_id)
-    # POST /rest/config/folders replaces a folder of the same ID, so a folder that is here already must not get there.
+    # A folder that is here already is not added again (add_folder refuses it): it only gets shared with the devices that offer it.
     folders = api.request("GET", "/rest/config/folders")
     existing = next((folder for folder in folders if folder["id"] == folder_id), None)
     if existing is not None:
@@ -1173,19 +1211,16 @@ def join_existing(api, folder, offer, path):
     if path and os.path.abspath(os.path.expanduser(path)) != os.path.abspath(os.path.expanduser(folder["path"])):
         raise SyncError(f"the folder {folder['id']} is here already, at {folder['path']}, not at {path}")
     if offer is not None:
-        api.share_folder_with(folder, *offer["offeredBy"])
+        api.share_folder_with(folder["id"], *offer["offeredBy"])
 
 
 def add_device(api, device_id, name):
     """The one way a device becomes one of this computer's: added with Syncthing's defaults (addresses by discovery), and
     every folder that is not a drop shared with it. An empty name is filled in by Syncthing once the device connects."""
-    config = api.request("GET", "/rest/config")
-    device = api.request("GET", "/rest/config/defaults/device")
-    device.update(deviceID=device_id, name=name)
-    api.request("POST", "/rest/config/devices", body=device)
-    for folder in config["folders"]:
+    api.add_device(device_id, name)
+    for folder in api.request("GET", "/rest/config/folders"):
         if not is_drop(folder["id"]):
-            api.share_folder_with(folder, device_id)
+            api.share_folder_with(folder["id"], device_id)
 
 
 def known_device(api, device_id):
