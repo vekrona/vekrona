@@ -986,23 +986,31 @@ kill_cgroup() {
 }
 
 # Kills each running user unit named here through its cgroup, not through systemctl: once the user manager has re-executed, it
-# holds a unit whose file is gone as not loaded, and `systemctl --user stop` and `kill` both refuse it.
+# holds a unit whose file is gone as not loaded, and `systemctl --user stop` and `kill` both refuse it while it runs. Once the
+# cgroup is empty, systemd may not have seen it yet: the unit can still read active or deactivating, or be failed already, or
+# be gone. A stop then waits until the unit's job is done, and systemd refuses it only for a unit that is not loaded and
+# inactive ("Unit ... not loaded."), which is where the stop would have taken it.
 kill_user_unit_cgroups() {
-  local unit cgroup_dir
+  local unit cgroup_dir cause state
   require_cmd inotifywait
   for unit in "$@"; do
     log "killing user unit $unit through its cgroup"
     read_user_unit_cgroup_dir cgroup_dir "$unit"
     kill_cgroup "$cgroup_dir"
+    if ! cause="$(systemctl --user stop "$unit" 2>&1)"; then
+      unit_state state is-active --user "$unit"
+      [[ "$state" == inactive ]] || die "cannot stop $unit after its cgroup was killed (it is $state): $cause"
+    fi
   done
 }
 
 # Autostart units are generated, never enabled, so there is nothing to disable. The cgroup kill leaves each killed unit failed
-# and not-found, which makes the user manager degraded; so does a unit that an earlier run killed. Both are reset by name: a
-# blanket reset-failed would also hide a real failure from stage 70.
+# and not-found, which makes the user manager degraded; so does a unit that an earlier run killed. The ones that systemd reports
+# failed are reset by name: a blanket reset-failed would also hide a real failure from stage 70, and reset-failed fails for a
+# unit that is gone already.
 stop_orphaned_autostart_units() {
-  local -a orphans failed to_reset
-  local orphan
+  local -a orphans failed candidates to_reset=()
+  local unit state
   read_gone_autostart_units orphans active
   if ((${#orphans[@]} == 0)); then
     log "no autostart app runs without its desktop entry"
@@ -1011,9 +1019,13 @@ stop_orphaned_autostart_units() {
     kill_user_unit_cgroups "${orphans[@]}"
   fi
   read_gone_autostart_units failed failed
-  to_reset=("${failed[@]}")
-  for orphan in "${orphans[@]}"; do
-    [[ " ${failed[*]} " == *" $orphan "* ]] || to_reset+=("$orphan")
+  candidates=("${failed[@]}")
+  for unit in "${orphans[@]}"; do
+    [[ " ${failed[*]} " == *" $unit "* ]] || candidates+=("$unit")
+  done
+  for unit in "${candidates[@]}"; do
+    unit_state state is-active --user "$unit"
+    if [[ "$state" == failed ]]; then to_reset+=("$unit"); fi
   done
   if ((${#to_reset[@]} == 0)); then
     return 0

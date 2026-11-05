@@ -589,18 +589,36 @@ export -f binding_mode mode_is
 # The keyboard layout pill. Sway splits a command at commas, so the layout list is quoted inside the command.
 set_layouts() { vekrona-dev sh swaymsg "input type:keyboard xkb_layout \"$1\""; }
 # A changed code keeps the pill in place (its width is fixed); other text containing EN or UA sits elsewhere on screen. The pill
-# is at PILL_X, which a scenario sets from the screen once the keymap has two layouts. Exit 0 when the code $1 is in the pill,
-# 1 when it is not on screen or sits elsewhere, 2 when the screen could not be read.
+# is at PILL_X, which find_layout_pill sets from the screen once the keymap has two layouts. Exit 0 when the code $1 is in the
+# pill, 1 when it is not on screen or sits elsewhere, 2 when the screen could not be read. The code is matched as a word with no
+# other letter (OCR reads the pill's edge as "(UA" at times): OCR is case-blind, and a word that contains the code ("Open", "sent"
+# in a toast) would be found first.
 PILL_DRIFT_PX=20
+code_word() { printf '^[^A-Za-z]*%s[^A-Za-z]*$' "$1"; }
 code_shown() {
   local center x status=0
-  center="$(vekrona-dev see find "$1")" || status=$?
+  center="$(vekrona-dev see find "$(code_word "$1")")" || status=$?
   ((status == 0)) || return "$status"
   x="${center%% *}"
   ((x > PILL_X - PILL_DRIFT_PX && x < PILL_X + PILL_DRIFT_PX))
 }
 code_hidden() { absent code_shown "$1"; }
-export -f set_layouts code_shown code_hidden
+# Waits until the bar shows the layout code EN, which it does once the keymap has two layouts, and sets PILL_X to where it is,
+# from the same screenshot that found it (retried back to back, as `vekrona-dev until` does).
+find_layout_pill() {
+  local deadline=$((SECONDS + STEP_TIMEOUT_SEC)) center status
+  while true; do
+    status=0
+    center="$(vekrona-dev see find "$(code_word EN)")" || status=$?
+    case "$status" in
+      0) break ;;
+      1) ((SECONDS < deadline)) || die "the bar must show the layout code EN once the keymap has two layouts" ;;
+      *) abort "cannot look for the layout code EN, 'vekrona-dev see find' exited $status" ;;
+    esac
+  done
+  PILL_X="${center%% *}"
+}
+export -f set_layouts code_word code_shown code_hidden
 export PILL_DRIFT_PX
 
 # The lock screen (vekrona-lock) and its security-key watcher. systemctl is-active exits 3 for a unit that is not active, and

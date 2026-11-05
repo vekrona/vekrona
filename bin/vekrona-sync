@@ -23,9 +23,9 @@ from the same file. A failure exits 1 with Syncthing's message on stderr.
   accept DEVICE           add a device that asked to connect, and share every folder with it
   reject DEVICE           ignore a device that asked to connect, for good: it asks no more
   send DEVICE [FILE...]   drop files into DEVICE's ~/Downloads, now or when it is next online (no FILE: the portal)
-  nearby                  print the device ID of each nearby device in sync.json that answers on a TCP address it announced,
-                          one per line; the popout lists only those
-  seen                    mark every received file as seen
+  nearby                  print the device ID of each nearby device in sync.json that answers on a TCP address it announced
+                          on the local network (a private or link-local IP), one per line; the popout lists only those
+  seen [DEVICE...]        mark every received file as seen, and the nearby devices DEVICE, which the popout shows
   watch                   the service: follow Syncthing's events, write sync.json, notify, receive dropped files; exits
                           75 when Syncthing does not answer (systemd starts it again, later each time) and 78 when
                           Syncthing's configuration is wrong (systemd does not start it again)
@@ -58,6 +58,7 @@ import subprocess
 import stat
 import sys
 import threading
+import time
 import unicodedata
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -88,6 +89,17 @@ NOTIFY_SEND_TIMEOUT_SEC = 5
 # A device on the same network answers a TCP connect within milliseconds; one that has left does not, and its address is
 # refused at once or the connect hangs, so this is how long the popout waits for the Nearby list when the device is gone.
 NEARBY_PROBE_TIMEOUT_SEC = 1
+# Any host of the network can announce as many devices as it likes, each with any addresses, so what one pass tries is bounded:
+# sync.json lists at most this many nearby devices, each is tried on at most NEARBY_MAX_ENDPOINTS of its addresses, and the
+# connects run on a fixed number of threads.
+NEARBY_MAX_DEVICES = 16
+NEARBY_MAX_ENDPOINTS = 4
+NEARBY_PROBE_WORKERS = 8
+# The networks a nearby device can be on: the private IPv4 ranges (RFC 1918), IPv4 link-local, IPv6 unique local and link-local.
+# Syncthing keeps an announced address as given (it puts in the sender's address only for an unspecified one), so an address
+# outside these is one that a host of the network chose to have this computer connect to: loopback, a public host, a name.
+NEARBY_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"))
 QR_PIXELS_PER_MODULE = 8
 QR_QUIET_ZONE_MODULES = 2
 MAX_ARRIVALS = 20
@@ -96,7 +108,9 @@ MAX_LEDGER = 200
 # long-running process that keeps the code it started with, while the shell reloads its QML from the checkout at once, so after
 # an update of the checkout the two can disagree for as long as the watcher is not restarted. Raise it with every change of the
 # layout that an older Sync.qml or watcher would misread.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+# The layout of sync-ledger.json, which is never replaced: a file of another version is an error.
+LEDGER_VERSION = 1
 
 DEVICE_ID = r"[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}"
 DEVICE_ID_RE = re.compile(DEVICE_ID)
@@ -120,7 +134,7 @@ class NotFound(SyncError):
 
 
 class ConfigError(SyncError):
-    """Syncthing's configuration cannot be used however often it is read again."""
+    """Syncthing's configuration, or the ledger of sync-ledger.json, cannot be used however often it is read again."""
 
 
 class MissingTool(SyncError):
@@ -129,6 +143,9 @@ class MissingTool(SyncError):
 
 # The stage that installs the desktop packages, which every external tool of vekrona-sync belongs to.
 PACKAGES_STAGE = 30
+
+# The lock file in the state directory that every change of Syncthing's configuration from here holds (Syncthing.edit_config).
+CONFIG_LOCK_NAME = "syncthing-config.lock"
 
 FOLDER_ID_MAX = 64
 FOLDER_ID_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -428,18 +445,47 @@ class Syncthing:
         events = self.events(since=0, limit=1, timeout_sec=1)
         return events[-1]["id"] if events else 0
 
-    def add_folder(self, folder_id, label, path, device_ids):
-        folder = self.request("GET", "/rest/config/defaults/folder")
-        folder.update(id=folder_id, label=label, path=path, type="sendreceive",
-                      devices=[{"deviceID": device_id} for device_id in device_ids])
-        self.request("POST", "/rest/config/folders", body=folder)
+    def edit_config(self, path, change):
+        """The one way vekrona-sync changes Syncthing's configuration. The object at path (None when there is none) is read
+        while a lock that every change from here takes is held, and what change() makes of it is PUT back unless it is None:
+        the watcher, a notification's button and a command can change the configuration at once, and each sees the others'
+        changes. The REST API has no way to change one entry of a list, such as a device of a folder or of remoteIgnoredDevices."""
+        directory = vekrona_cli.vekrona_state_dir()
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, CONFIG_LOCK_NAME), "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                current = self.request("GET", path)
+            except NotFound:
+                current = None
+            changed = change(current)
+            if changed is not None:
+                self.request("PUT", path, body=changed)
 
-    def share_folder_with(self, folder, *device_ids):
-        shared = {device["deviceID"] for device in folder["devices"]}
-        added = [{"deviceID": device_id} for device_id in dict.fromkeys(device_ids) if device_id not in shared]
-        if added:
-            self.request("PATCH", f"/rest/config/folders/{urllib.parse.quote(folder['id'], safe='')}",
-                         body={"devices": [*folder["devices"], *added]})
+    def add_folder(self, folder_id, label, path, device_ids):
+        defaults = self.request("GET", "/rest/config/defaults/folder")
+
+        def change(current):
+            # PUT replaces a folder of the same ID, with its path and devices.
+            if current is not None:
+                raise SyncError(f"This computer already has a folder with ID {folder_id}")
+            return {**defaults, "id": folder_id, "label": label, "path": path, "type": "sendreceive",
+                    "devices": [{"deviceID": device_id} for device_id in device_ids]}
+        self.edit_config(config_path("folders", folder_id), change)
+
+    def share_folder_with(self, folder_id, *device_ids):
+        def change(folder):
+            if folder is None:
+                raise SyncError(f"the folder {folder_id} is gone from Syncthing's configuration")
+            shared = {device["deviceID"] for device in folder["devices"]}
+            added = [{"deviceID": device_id} for device_id in dict.fromkeys(device_ids) if device_id not in shared]
+            return {**folder, "devices": [*folder["devices"], *added]} if added else None
+        self.edit_config(config_path("folders", folder_id), change)
+
+    def add_device(self, device_id, name):
+        defaults = self.request("GET", "/rest/config/defaults/device")
+        self.edit_config(config_path("devices", device_id),
+                         lambda current: {**defaults, "deviceID": device_id, "name": name} if current is None else None)
 
     def ignore_lines(self, folder_id):
         """The lines of the .stignore of a folder."""
@@ -481,12 +527,18 @@ class Syncthing:
     def ignore_device(self, device_id, name, address):
         """Puts the device on the list of devices whose connection attempts Syncthing drops without a word. The REST API
         takes that list only inside the whole configuration."""
-        config = self.request("GET", "/rest/config")
-        if any(ignored["deviceID"] == device_id for ignored in config["remoteIgnoredDevices"]):
-            return
-        config["remoteIgnoredDevices"].append({"deviceID": device_id, "name": name, "address": address,
-                                               "time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
-        self.request("PUT", "/rest/config", body=config)
+        def change(config):
+            if any(ignored["deviceID"] == device_id for ignored in config["remoteIgnoredDevices"]):
+                return None
+            now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            return {**config, "remoteIgnoredDevices": [*config["remoteIgnoredDevices"],
+                                                       {"deviceID": device_id, "name": name, "address": address, "time": now}]}
+        self.edit_config("/rest/config", change)
+
+
+def config_path(kind, item_id):
+    """The REST path of one folder or device of the configuration."""
+    return f"/rest/config/{kind}/{urllib.parse.quote(item_id, safe='')}"
 
 
 # ---- What sync.json shows --------------------------------------------------------------------------------------------
@@ -577,8 +629,9 @@ def overall(folders):
     return "idle", None
 
 
-def assemble(snapshot):
-    """The sync.json of a Syncthing that answered, without its arrivals."""
+def assemble(snapshot, heard):
+    """The sync.json of a Syncthing that answered, without its arrivals. heard: device ID -> when Syncthing last reported it on
+    the network (seconds since the epoch), which orders the nearby list, the most recent first, before it is cut to its length."""
     names = {device["deviceID"]: device_name(device["deviceID"], device.get("name")) for device in snapshot.devices}
     folders = [folder_view(folder, snapshot.statuses.get(folder["id"])) for folder in snapshot.folders
                if not is_drop(folder["id"])]
@@ -601,8 +654,10 @@ def assemble(snapshot):
     return {
         "state": state, "problem": problem, "me": {"id": snapshot.my_id, "code": short_code(snapshot.my_id)},
         "folders": folders, "offers": offers,
-        "nearby": [{"id": device_id, "code": short_code(device_id), "addresses": announcement["addresses"]}
-                   for device_id, announcement in sorted(snapshot.discovered.items()) if device_id not in known],
+        "nearby": sorted(({"id": device_id, "code": short_code(device_id), "addresses": announcement["addresses"],
+                           "heard": heard.get(device_id)}
+                          for device_id, announcement in snapshot.discovered.items() if device_id not in known),
+                         key=lambda device: (device["heard"] is None, -(device["heard"] or 0), device["id"]))[:NEARBY_MAX_DEVICES],
         "pendingDevices": [{"id": device_id, "name": device_name(device_id, info.get("name")),
                             "code": short_code(device_id)}
                            for device_id, info in snapshot.pending_devices.items()],
@@ -616,8 +671,11 @@ def offline_view():
             "nearby": [], "pendingDevices": [], "devices": []}
 
 
+LEDGER_KEYS = ("proposed", "seen", "awaiting")
+
+
 def empty_ledger():
-    return {"proposed": [], "seen": [], "awaiting": []}
+    return {key: [] for key in LEDGER_KEYS}
 
 
 def remembered(ids):
@@ -626,8 +684,10 @@ def remembered(ids):
 
 
 class StateStore:
-    """sync.json. The watcher, `pair` and `seen` all rewrite it, so every change is a locked read-modify-write. Next to what the
-    popout shows it keeps the ledger of what the user was told, which has to outlive the watcher and Syncthing:
+    """sync.json, what the popout shows, and sync-ledger.json, what the user was told. The watcher, `pair`, `seen` and `offline`
+    all rewrite them, so every change is a read-modify-write under one lock. sync.json is a view that the next write rebuilds,
+    and a file of another schema is replaced. The ledger has to outlive the watcher, Syncthing and a new schema of sync.json, so it
+    has a file and a version of its own, and one that cannot be read is an error, never replaced:
       proposed   nearby devices the user was asked about with a notification: never asked twice, so a phone that comes and
                  goes (Syncthing announces it again after 90 s of silence) and a restart of Syncthing do not ask again
       seen       nearby devices the user has had in front of them in the popout: they carry no dot
@@ -636,6 +696,7 @@ class StateStore:
     def __init__(self, report):
         directory = vekrona_cli.vekrona_state_dir()
         self.path = os.path.join(directory, "sync.json")
+        self.ledger_path = os.path.join(directory, "sync-ledger.json")
         self.lock_path = os.path.join(directory, "sync.json.lock")
         self.report = report
 
@@ -658,92 +719,131 @@ class StateStore:
             return None
         return current
 
-    def update(self, change):
-        """Writes what change(current or None) returns, with the schema, unless it returns None or the file says so already."""
+    def read_ledger(self):
+        """The ledger, empty when there is no file yet. A file that is not a ledger of LEDGER_VERSION stops every change."""
+        try:
+            with open(self.ledger_path) as f:
+                ledger = json.load(f)
+        except FileNotFoundError:
+            return empty_ledger()
+        except (OSError, ValueError) as exc:
+            raise ConfigError(self.unusable_ledger(exc))
+        if not isinstance(ledger, dict) or ledger.get("version") != LEDGER_VERSION:
+            raise ConfigError(self.unusable_ledger(f"it is not a ledger of version {LEDGER_VERSION}"))
+        if not all(isinstance(ledger.get(key), list) and all(isinstance(item, str) for item in ledger[key]) for key in LEDGER_KEYS):
+            raise ConfigError(self.unusable_ledger(f"its {', '.join(LEDGER_KEYS)} are not all lists of device IDs"))
+        return {key: ledger[key] for key in LEDGER_KEYS}
+
+    def unusable_ledger(self, why):
+        return (f"cannot use {self.ledger_path}: {why}. It remembers which nearby devices you were asked about; fix it, or "
+                f"delete it to be asked about each of them once more")
+
+    @contextlib.contextmanager
+    def locked(self):
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
         with open(self.lock_path, "w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+    def write_view(self, changed, current):
+        """Writes the view with the schema, unless it is None or the file says so already."""
+        if changed is not None and {**changed, "schema": SCHEMA_VERSION} != current:
+            vekrona_cli.write_json_atomically(self.path, {**changed, "schema": SCHEMA_VERSION})
+
+    def update_view(self, change):
+        """Writes what change(current or None) returns, for a change that needs no ledger."""
+        with self.locked():
             current = self.read()
-            changed = change(current)
-            if changed is not None and {**changed, "schema": SCHEMA_VERSION} != current:
-                vekrona_cli.write_json_atomically(self.path, {**changed, "schema": SCHEMA_VERSION})
+            self.write_view(change(current), current)
 
-    def publish(self, view, new_arrivals, reachable=frozenset()):
-        """Writes the view, keeping the arrivals and the ledger; `reachable` are the nearby devices that answered just now.
-        They get a dot unless they were seen, and the ones never proposed are marked proposed and returned, in the order of
-        the list: those are the devices to ask the user about, once."""
-        proposals = []
+    def update(self, change):
+        """change(current or None, ledger) returns the view to write (or None) and the ledger, which is written when it changed."""
+        with self.locked():
+            current = self.read()
+            ledger = self.read_ledger()
+            changed, new_ledger = change(current, {key: list(ids) for key, ids in ledger.items()})
+            if new_ledger != ledger:
+                vekrona_cli.write_json_atomically(self.ledger_path, {**new_ledger, "version": LEDGER_VERSION})
+            self.write_view(changed, current)
 
-        def change(current):
-            nonlocal proposals
+    def publish(self, view, new_arrivals, reachable, proposal_limit):
+        """Writes the view, keeping the arrivals; `reachable` are the nearby devices that answered just now. They get a dot
+        unless they were seen. Of the ones never proposed, the first proposal_limit in the order of the list are marked proposed:
+        they are the devices to ask the user about, once. Returns them and the others, which wait for a later pass. The devices
+        proposed are never forgotten, or a host that announces many devices could have a real one asked about again; at most one
+        question at a time (Watcher.refresh) keeps that list short."""
+        proposals, deferred = [], []
+
+        def change(current, ledger):
+            nonlocal proposals, deferred
             old = current or {}
-            ledger = {**empty_ledger(), **old.get("ledger", {})}
             unseen_before = {device["id"] for device in old.get("nearby", []) if device.get("unseen")}
             nearby = [{**device, "unseen": device["id"] in unseen_before or
                        (device["id"] in reachable and device["id"] not in ledger["seen"])} for device in view["nearby"]]
-            proposals = [device["id"] for device in nearby if device["id"] in reachable and device["id"] not in ledger["proposed"]]
-            ledger["proposed"] = remembered(ledger["proposed"] + proposals)
-            state = {**view, "nearby": nearby, "arrivals": (new_arrivals + old.get("arrivals", []))[:MAX_ARRIVALS],
-                     "ledger": ledger}
-            return state
+            fresh = [device["id"] for device in nearby if device["id"] in reachable and device["id"] not in ledger["proposed"]]
+            proposals, deferred = fresh[:proposal_limit], fresh[proposal_limit:]
+            ledger["proposed"] = ledger["proposed"] + proposals
+            return {**view, "nearby": nearby, "arrivals": (new_arrivals + old.get("arrivals", []))[:MAX_ARRIVALS]}, ledger
         self.update(change)
-        return proposals
+        return proposals, deferred
 
-    def mark_seen(self):
-        def change(current):
+    def publish_offline(self):
+        """Writes the view of a Syncthing that does not run, keeping the arrivals. It needs no ledger, so that a ledger that
+        cannot be read does not leave the bar showing what the watcher last saw."""
+        self.update_view(lambda current: {**offline_view(), "arrivals": (current or {}).get("arrivals", [])})
+
+    def mark_seen(self, device_ids):
+        """Every arrival is seen, and of the nearby devices those in device_ids: the ones the popout shows, which are only
+        those that answered its probe."""
+        def change(current, ledger):
             if current is None:
-                return None
-            ledger = {**empty_ledger(), **current.get("ledger", {})}
-            ledger["seen"] = remembered(ledger["seen"] + [device["id"] for device in current.get("nearby", [])])
-            state = {**current, "ledger": ledger,
-                     "nearby": [{**device, "unseen": False} for device in current.get("nearby", [])],
-                     "arrivals": [{**arrival, "unseen": False} for arrival in current["arrivals"]]}
-            return state
+                return None, ledger
+            shown = [device["id"] for device in current["nearby"] if device["id"] in device_ids]
+            ledger["seen"] = remembered(ledger["seen"] + shown)
+            return {**current, "nearby": [{**device, "unseen": device["unseen"] and device["id"] not in shown}
+                                          for device in current["nearby"]],
+                    "arrivals": [{**arrival, "unseen": False} for arrival in current["arrivals"]]}, ledger
         self.update(change)
 
     def await_connection(self, device_id):
         """Notes that this computer asked device_id to pair, so that its first connection is announced once."""
-        def change(current):
-            base = current if current is not None else {**offline_view(), "arrivals": []}
-            ledger = {**empty_ledger(), **base.get("ledger", {})}
+        def change(current, ledger):
             ledger["awaiting"] = remembered(ledger["awaiting"] + [device_id])
-            return {**base, "ledger": ledger}
+            return None, ledger
         self.update(change)
 
     def take_awaiting(self, device_ids):
         """Removes the devices from the awaited ones and returns those that were."""
         taken = []
 
-        def change(current):
+        def change(current, ledger):
             nonlocal taken
-            if current is None:
-                return None
-            ledger = {**empty_ledger(), **current.get("ledger", {})}
             taken = [device_id for device_id in ledger["awaiting"] if device_id in device_ids]
-            if not taken:
-                return None
             ledger["awaiting"] = [device_id for device_id in ledger["awaiting"] if device_id not in taken]
-            return {**current, "ledger": ledger}
+            return None, ledger
         self.update(change)
         return taken
 
 
 # ---- Nearby ----------------------------------------------------------------------------------------------------------
 
-def tcp_endpoints(addresses):
-    """The (host, port) of each tcp://, tcp4:// and tcp6:// address with an IP and a port that a device announced. QUIC runs
-    over UDP, which a connect cannot test. A name is not tried: any device on the network can announce one, and looking it up
-    would be a request to wherever it points."""
+def lan_endpoints(addresses):
+    """The (host, port) of the first NEARBY_MAX_ENDPOINTS tcp://, tcp4:// and tcp6:// addresses that a device announced whose
+    host is an IP literal on one of NEARBY_NETWORKS. QUIC runs over UDP, which a connect cannot test. A name is not tried: looking
+    it up would be a request to wherever the announcing host points it."""
     endpoints = []
     for address in addresses:
         try:
             url = urllib.parse.urlsplit(address)
-            if url.scheme in ("tcp", "tcp4", "tcp6") and url.port:
-                ipaddress.ip_address(url.hostname)
-                endpoints.append((url.hostname, url.port))
-        except ValueError:
+            if url.scheme not in ("tcp", "tcp4", "tcp6") or not url.port:
+                continue
+            # A link-local IPv6 address carries its interface, which a URL writes as %25: tcp://[fe80::1%25eth0]:22000.
+            ip = ipaddress.ip_address(urllib.parse.unquote(url.hostname))
+        except (ValueError, TypeError):
             continue
-    return endpoints
+        if any(ip in network for network in NEARBY_NETWORKS):
+            endpoints.append((str(ip), url.port))
+    return endpoints[:NEARBY_MAX_ENDPOINTS]
 
 
 def accepts_connection(endpoint, timeout_sec):
@@ -755,18 +855,17 @@ def accepts_connection(endpoint, timeout_sec):
 
 
 def answering_nearby(nearby, timeout_sec=NEARBY_PROBE_TIMEOUT_SEC):
-    """The IDs of the devices of sync.json's nearby list that are there now. Syncthing's discovery cache never forgets a
-    device (its entries carry no time in the REST API, and none expires), so a device is there when one of its announced TCP
-    addresses accepts a connection, tried for all of them at once. A device that announced no TCP address cannot be tried and
-    stays listed, as without this check."""
-    endpoints = {device["id"]: tcp_endpoints(device["addresses"]) for device in nearby}
-    attempts = [(device_id, endpoint) for device_id, device_endpoints in endpoints.items() for endpoint in device_endpoints]
+    """The IDs of the devices of a nearby list of sync.json that are there now: one of their announced addresses on the local
+    network (lan_endpoints) accepts a TCP connection. Syncthing's discovery cache never forgets a device (its entries carry no
+    time in the REST API, and none expires), and a device can announce anything, so a device without such an address is not
+    there. The connects run NEARBY_PROBE_WORKERS at a time."""
+    attempts = [(device["id"], endpoint) for device in nearby for endpoint in lan_endpoints(device["addresses"])]
     if not attempts:
-        return [device["id"] for device in nearby]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(attempts)) as pool:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=NEARBY_PROBE_WORKERS) as pool:
         answered = pool.map(lambda attempt: accepts_connection(attempt[1], timeout_sec), attempts)
         reached = {device_id for (device_id, _), ok in zip(attempts, answered) if ok}
-    return [device["id"] for device in nearby if device["id"] in reached or not endpoints[device["id"]]]
+    return [device["id"] for device in nearby if device["id"] in reached]
 
 
 # ---- Receiving -----------------------------------------------------------------------------------------------------
@@ -957,8 +1056,9 @@ class DesktopNotifier:
                  [("later", "Not now", None), ("join", "Join", join)])
 
     def nearby(self, device, pair, ignore):
-        self.ask(f"A Syncthing device {device['code']} is nearby", "Pair with it?",
-                 [("later", "Not now", None), ("pair", "Pair", pair), ("ignore", "Ignore", ignore)])
+        """Returns the thread that waits for the answer, None when no question could be asked."""
+        return self.ask(f"A Syncthing device {device['code']} is nearby", "Pair with it?",
+                        [("later", "Not now", None), ("pair", "Pair", pair), ("ignore", "Ignore", ignore)])
 
     def arrival(self, arrival):
         self.show("telling that a file arrived", f"{arrival['name']} received",
@@ -981,16 +1081,19 @@ class DesktopNotifier:
             self.report(f"cannot show {title!r}: notify-send exited with status {result.returncode}: {result.stderr.strip()}")
 
     def ask(self, title, body, choices):
-        """choices: (key, label, action or None); the first is the harmless one, which vekrona-update-ask requires."""
+        """choices: (key, label, action or None); the first is the harmless one, which vekrona-update-ask requires. Returns the
+        thread that waits for the answer, None when vekrona-update-ask is missing (reported)."""
         tool = vekrona_cli.resolve_tool(__file__, "vekrona-update-ask")
         if tool is None:
             self.report("vekrona-update-ask not found, so no notification can ask a question")
-            return
+            return None
         argv = [tool, "--timeout", str(NOTIFY_TIMEOUT_SEC), "--title", title, "--body", body]
         for key, label, _ in choices:
             argv += ["--action", f"{key}={label}"]
-        threading.Thread(target=self.wait_for_answer, args=(argv, {key: action for key, _, action in choices}),
-                         daemon=True).start()
+        thread = threading.Thread(target=self.wait_for_answer, args=(argv, {key: action for key, _, action in choices}),
+                                  daemon=True)
+        thread.start()
+        return thread
 
     def wait_for_answer(self, argv, actions):
         try:
@@ -1036,21 +1139,26 @@ def ensure_drop_folder(api, my_id, other_id):
         api.add_folder(folder_id, DROP_LABEL, path, [my_id, other_id])
         return path
     refuse_third_devices(existing, my_id, other_id)
-    api.share_folder_with(existing, other_id)
+    api.share_folder_with(folder_id, other_id)
     return os.path.expanduser(existing["path"])
+
+
+# The Latin letters that are no letter with an accent, so NFKD leaves them whole, spelled as their languages spell them in ASCII.
+# The name is case-folded first, which also makes "ss" of "ß" and "ẞ".
+LATIN_SPELLINGS = str.maketrans({"ø": "o", "ł": "l", "æ": "ae", "œ": "oe", "đ": "d", "þ": "th"})
 
 
 def kebab_case(name):
     """The name in lowercase letters and digits with single dashes between the words, or None when that would not stand for it:
     a letter or digit that ASCII cannot spell (Cyrillic, CJK) would be dropped and leave half a name, so none is made. Accents
-    are folded ("Café" is "cafe"); symbols and emoji count as a separator."""
+    are folded ("Café" is "cafe", "Łódź" is "lodz"); symbols and emoji count as a separator."""
     words = []
-    for char in unicodedata.normalize("NFKD", name):
+    for char in unicodedata.normalize("NFKD", name.casefold().translate(LATIN_SPELLINGS)):
         if unicodedata.combining(char):
             continue
         if not char.isascii() and char.isalnum():
             return None
-        words.append(char.lower() if char.isascii() else " ")
+        words.append(char if char.isascii() else " ")
     kept = re.sub(r"[^a-z0-9]+", "-", "".join(words)).strip("-")[:FOLDER_ID_MAX].rstrip("-")
     return kept or None
 
@@ -1089,12 +1197,30 @@ def check_folder_id(folder_id, taken):
         raise SyncError(f"This computer already has a folder with ID {folder_id}")
 
 
+def refuse_overlap(directory, folders):
+    """Refuses a directory to sync that is, holds or sits inside a shared folder, Syncthing's own directory (its configuration,
+    keys and database) or the drops of Send file: Syncthing would sync the same files twice, or its own. Paths are compared
+    with their links resolved, so a link to a shared folder is that folder."""
+    real = os.path.realpath(directory)
+    taken = [(os.path.dirname(syncthing_config_file()), "Syncthing's own directory, with its configuration and keys", None),
+             (drops_root(), "the directory of the hidden folders that Send file uses", None)]
+    taken += [(os.path.expanduser(folder["path"]), f"the shared folder {folder.get('label') or folder['id']}", folder)
+              for folder in folders]
+    for path, what, folder in taken:
+        other = os.path.realpath(path)
+        if real == other:
+            raise SyncError(f"{directory} is shared already, as {what}" if folder else f"{directory} is {what}, which is never shared")
+        if os.path.commonpath([real, other]) == other:
+            raise SyncError(f"{directory} is inside {path}, which is {what}; Syncthing would sync its files twice")
+        if os.path.commonpath([real, other]) == real:
+            raise SyncError(f"{directory} holds {path}, which is {what}; choose a folder that does not hold it")
+
+
 def folder_directory(path, folders):
     directory = os.path.abspath(os.path.expanduser(path))
     if not os.path.isdir(directory):
         raise SyncError(f"{directory} is not a directory")
-    if any(os.path.expanduser(folder["path"]).rstrip("/") == directory for folder in folders):
-        raise SyncError(f"{directory} is shared already")
+    refuse_overlap(directory, folders)
     return directory
 
 
@@ -1115,8 +1241,9 @@ def join(api, folder_id, path):
     if is_drop(folder_id):
         raise SyncError(f"{folder_id} is a drop, which is taken from the other device of the drop without asking and never joined")
     offer = api.request("GET", "/rest/cluster/pending/folders").get(folder_id)
-    # POST /rest/config/folders replaces a folder of the same ID, so a folder that is here already must not get there.
-    existing = next((folder for folder in api.request("GET", "/rest/config/folders") if folder["id"] == folder_id), None)
+    # A folder that is here already is not added again (add_folder refuses it): it only gets shared with the devices that offer it.
+    folders = api.request("GET", "/rest/config/folders")
+    existing = next((folder for folder in folders if folder["id"] == folder_id), None)
     if existing is not None:
         join_existing(api, existing, offer, path)
         return
@@ -1133,6 +1260,7 @@ def join(api, folder_id, path):
     # lstat: a link is no directory to take, whatever it points at.
     if existing is not None and (not stat.S_ISDIR(existing.st_mode) or os.listdir(target)):
         raise SyncError(f"{target} exists and is not an empty directory; pass another path")
+    refuse_overlap(target, folders)
     my_id = api.my_id()
     try:
         os.makedirs(target, exist_ok=True)
@@ -1148,19 +1276,16 @@ def join_existing(api, folder, offer, path):
     if path and os.path.abspath(os.path.expanduser(path)) != os.path.abspath(os.path.expanduser(folder["path"])):
         raise SyncError(f"the folder {folder['id']} is here already, at {folder['path']}, not at {path}")
     if offer is not None:
-        api.share_folder_with(folder, *offer["offeredBy"])
+        api.share_folder_with(folder["id"], *offer["offeredBy"])
 
 
 def add_device(api, device_id, name):
     """The one way a device becomes one of this computer's: added with Syncthing's defaults (addresses by discovery), and
     every folder that is not a drop shared with it. An empty name is filled in by Syncthing once the device connects."""
-    config = api.request("GET", "/rest/config")
-    device = api.request("GET", "/rest/config/defaults/device")
-    device.update(deviceID=device_id, name=name)
-    api.request("POST", "/rest/config/devices", body=device)
-    for folder in config["folders"]:
+    api.add_device(device_id, name)
+    for folder in api.request("GET", "/rest/config/folders"):
         if not is_drop(folder["id"]):
-            api.share_folder_with(folder, device_id)
+            api.share_folder_with(folder["id"], device_id)
 
 
 def known_device(api, device_id):
@@ -1334,6 +1459,11 @@ def summarized_drops(events):
             if event["type"] == "FolderSummary" and is_drop(event["data"]["folder"])}
 
 
+def discovered_in(events):
+    """The devices that Syncthing reported on the network in a batch of events."""
+    return frozenset(event["data"]["device"] for event in events if event["type"] == "DeviceDiscovered")
+
+
 def connections_in(events):
     """The devices that connected in a batch of events, by ID, with the name they gave."""
     return {event["data"]["id"]: device_name(event["data"]["id"], event["data"].get("deviceName"))
@@ -1355,6 +1485,13 @@ class Watcher:
         self.notified = set()
         self.reported = set()
         self.ignored_offers = set()
+        # The thread of the question about a nearby device that is open, and the nearby devices that answered while it was:
+        # one question at a time, so that a host that announces many devices gets no more than one notification on screen.
+        self.question = None
+        self.waiting = frozenset()
+        # When Syncthing last reported each nearby device on the network (DeviceDiscovered), which sync.json keeps as "heard"
+        # so that a restarted watcher starts from it.
+        self.heard = {}
 
     def follow(self, api):
         """Follows Syncthing until it stops answering (Unreachable)."""
@@ -1362,7 +1499,9 @@ class Watcher:
         my_id = api.my_id()
         latest = api.latest_event_id()
         self.snapshot = read_snapshot(api, my_id)
-        self.refresh(scan_all=True, finished=set(), summarized=set(), discovered=True, connected={})
+        self.heard = {device["id"]: device["heard"] for device in (self.store.read() or {}).get("nearby", [])
+                      if device.get("heard") is not None}
+        self.refresh(scan_all=True, finished=set(), summarized=set(), discovered=frozenset(), connected={})
         while True:
             batch = api.events(latest)
             if not batch:
@@ -1377,19 +1516,29 @@ class Watcher:
                     apply_event(self.snapshot, event)
             else:
                 continue
-            self.refresh(scan_all=gap, finished=finished_drops(batch), summarized=summarized_drops(batch),
-                         discovered=gap or any(event["type"] == "DeviceDiscovered" for event in batch),
+            discovered = discovered_in(batch)
+            self.heard.update(dict.fromkeys(discovered, int(time.time())))
+            self.refresh(scan_all=gap, finished=finished_drops(batch), summarized=summarized_drops(batch), discovered=discovered,
                          connected=connections_in(batch))
 
     def refresh(self, scan_all, finished, summarized, discovered, connected):
-        """discovered: Syncthing heard a device on the network (or everything is looked at again), so the nearby ones are
-        tried for an answer; connected: device ID -> name, of the devices that connected in this batch."""
+        """discovered: the devices that Syncthing reported on the network in this batch, which are tried for an answer (all
+        nearby ones are when everything is looked at again); connected: device ID -> name, of the devices that connected in this
+        batch. Syncthing reports a device when it first hears it, after 90 s of silence, or when its Syncthing restarted, so a
+        device that stays is tried once, and again whenever the popout opens (`nearby`)."""
         self.accept_drops()
         arrivals = self.receive(scan_all, finished)
         self.tend(scan_all, finished | summarized)
-        view = assemble(self.snapshot)
-        reachable = frozenset(answering_nearby(view["nearby"])) if discovered else frozenset()
-        proposals = self.store.publish(view, arrivals, reachable)
+        view = assemble(self.snapshot, self.heard)
+        self.heard = {device["id"]: device["heard"] for device in view["nearby"] if device["heard"] is not None}
+        asking = self.question is not None and self.question.is_alive()
+        # The devices that waited for the question to close are tried again once it has.
+        tried = [device["id"] for device in view["nearby"]
+                 if scan_all or device["id"] in discovered or (not asking and device["id"] in self.waiting)]
+        reachable = frozenset(answering_nearby([device for device in view["nearby"] if device["id"] in tried]))
+        proposals, deferred = self.store.publish(view, arrivals, reachable, proposal_limit=0 if asking else 1)
+        listed = {device["id"] for device in view["nearby"]}
+        self.waiting = ((self.waiting & listed) - set(tried)) | set(deferred)
         self.notify(view, arrivals, proposals)
         if scan_all:
             connected = {**{device_id: self.device_label(device_id) for device_id in self.snapshot.connected}, **connected}
@@ -1482,8 +1631,9 @@ class Watcher:
                 offer = offers[key]
                 self.notifier.offer(offer, lambda offer=offer: join(api, offer["folder"], None))
         for device in (device for device in view["nearby"] if device["id"] in proposals):
-            self.notifier.nearby(device, lambda device=device: pair_and_confirm(api, self.store, self.notifier, device["id"], ""),
-                                 lambda device=device: ignore_nearby(api, device["id"]))
+            self.question = self.notifier.nearby(
+                device, lambda device=device: pair_and_confirm(api, self.store, self.notifier, device["id"], ""),
+                lambda device=device: ignore_nearby(api, device["id"]))
         for arrival in arrivals:
             self.notifier.arrival(arrival)
 
@@ -1546,11 +1696,11 @@ def command_nearby(args):
 
 
 def command_seen(args):
-    StateStore(report_failure).mark_seen()
+    StateStore(report_failure).mark_seen(frozenset(args.devices))
 
 
 def command_offline(args):
-    StateStore(report_failure).publish(offline_view(), [])
+    StateStore(report_failure).publish_offline()
 
 
 def command_watch(args):
@@ -1581,7 +1731,7 @@ def parse_args(argv):
             ("reject", command_reject, [("device", {"type": device_id_arg})]),
             ("send", command_send, [("device", {"type": device_id_arg}), ("files", {"nargs": "*"})]),
             ("nearby", command_nearby, []),
-            ("seen", command_seen, []),
+            ("seen", command_seen, [("devices", {"nargs": "*", "type": device_id_arg})]),
             ("offline", command_offline, []),
             ("watch", command_watch, [])):
         subparser = commands.add_parser(name)

@@ -11,8 +11,9 @@ source "$ROOT/tests/lib.sh"
 #   missing   present when the unit has no file at all: is-enabled prints nothing and exits 1, LoadState is not-found;
 #   no-bus-for-enablement   present when is-enabled and `show -p LoadState` fail without output, as they do on an unreachable bus.
 # `stop` and `disable` exit with the status in $scratch/<verb>.status (default 0). Of a missing unit, `stop` and `kill` are refused
-# as the host's user manager refused them after it re-executed: "Unit old.service not loaded.", exit 5. The user manager's cgroup
-# is $CGROUP_PATH under $VEKRONA_SYSFS_ROOT/sys/fs/cgroup, where old.service has its own (unit_cgroup). Every call is logged.
+# as the host's user manager refused them after it re-executed: "Unit old.service not loaded.", exit 5. Once its cgroup is killed,
+# a missing unit is gone as systemd gets rid of it: is-active says inactive. The user manager's cgroup is $CGROUP_PATH under
+# $VEKRONA_SYSFS_ROOT/sys/fs/cgroup, where old.service has its own (unit_cgroup). Every call is logged.
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 mkdir "$scratch/stubs"
@@ -20,7 +21,12 @@ cat >"$scratch/stubs/systemctl" <<STUB
 #!/bin/sh
 echo "\$@" >>"$scratch/systemctl.log"
 case " \$* " in
-  *" is-active "*) cat "$scratch/active"; [ "\$(cat "$scratch/active")" = active ] || exit 3 ;;
+  *" is-active "*)
+    state="\$(cat "$scratch/active")"
+    if [ -e "$scratch/missing" ] && [ "\$(cat "$scratch/root/sys/fs/cgroup\$CGROUP_PATH/app.slice/old.service/cgroup.kill")" = 1 ]; then
+      state=inactive
+    fi
+    echo "\$state"; [ "\$state" = active ] || exit 3 ;;
   *" show -p LoadState "*)
     [ ! -e "$scratch/no-bus-for-enablement" ] || exit 1
     if [ -e "$scratch/missing" ]; then echo not-found; else echo loaded; fi ;;
@@ -75,8 +81,21 @@ echo active >"$scratch/active"
 touch "$scratch/missing"
 ensure_user_unit_stopped old.service 2>/dev/null
 cgroup_killed || die "a running unit whose file is gone, which the user manager refuses to stop or kill, was not killed through its cgroup"
-[[ "$(calls stop)" == 0 && "$(calls disable)" == 0 ]] || die "a running unit whose file is gone must be killed through its cgroup, not stopped, and not disabled"
+[[ "$(calls stop)" == 1 && "$(calls disable)" == 0 ]] || die "a running unit whose file is gone must be killed through its cgroup, then waited for with one stop, and not disabled"
 log "ok: a running unit whose file is gone is killed through its cgroup, although systemctl refuses it as not loaded, and not disabled"
+
+reset
+echo active >"$scratch/active"
+touch "$scratch/missing"
+mkdir "$scratch/stuck"
+# A stub of its own for this case: a missing unit that still reads active after its cgroup was killed, and refuses the stop.
+cp "$scratch/stubs/systemctl" "$scratch/stuck/systemctl"
+sed -i 's/state=inactive/state=active/' "$scratch/stuck/systemctl"
+if out="$( (PATH="$scratch/stuck:$PATH" ensure_user_unit_stopped old.service) 2>&1)"; then die "a killed unit that systemd neither stops nor lets go was taken for stopped"; fi
+[[ "$out" == *"cannot stop old.service after its cgroup was killed (it is active): Failed to stop unit old.service: Unit old.service not loaded."* ]] ||
+  die "a killed unit that still runs did not say so: $out"
+rm -r "$scratch/stuck"
+log "ok: a killed unit that systemd still reads active and refuses to stop is an error with systemd's words"
 
 reset
 echo failed >"$scratch/active"
