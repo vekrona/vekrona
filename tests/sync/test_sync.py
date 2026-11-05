@@ -1,8 +1,11 @@
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import shutil
+import socket
 import socketserver
 import tempfile
 import threading
@@ -20,6 +23,7 @@ loader.exec_module(sync)
 ME = "AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA"
 PEER = "BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB-BBBBBBB"
 THIRD = "CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC-CCCCCCC"
+FOURTH = "DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD-DDDDDDD"
 DROP = sync.drop_folder_id(ME, PEER)
 
 
@@ -655,6 +659,29 @@ class CommandTest(unittest.TestCase):
             with mock.patch.object(sync.Syncthing, "from_config", side_effect=sync.SyncError("HTTP 500")):
                 sync.command_watch(None)
 
+    def printed_by_nearby(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            sync.command_nearby(None)
+        return out.getvalue().split()
+
+    def test_the_nearby_command_prints_the_devices_of_the_list_that_answer_and_nothing_without_a_list(self):
+        self.assertEqual(self.printed_by_nearby(), [])
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        there = f"tcp://127.0.0.1:{listener.getsockname()[1]}"
+        gone = socket.socket()
+        gone.bind(("127.0.0.1", 0))
+        left = f"tcp://127.0.0.1:{gone.getsockname()[1]}"
+        gone.close()
+        store = sync.StateStore(self.reports.append)
+        view = sync.assemble(snapshot(discovered={THIRD: {"addresses": [there]}, FOURTH: {"addresses": [left]}}))
+        self.assertEqual([device["id"] for device in view["nearby"]], [THIRD, FOURTH])
+        store.publish(view, [])
+        self.assertEqual(self.printed_by_nearby(), [THIRD])
+
     def test_the_offline_command_writes_the_offline_view_and_keeps_the_arrivals(self):
         store = sync.StateStore(self.reports.append)
         store.publish(sync.assemble(snapshot()), [{"name": "a", "path": "/d/a", "from": "Pixel", "unseen": True}])
@@ -943,6 +970,58 @@ class ToolTest(unittest.TestCase):
         sync.DesktopNotifier(reports.append).arrival({"name": "a.txt", "from": "Pixel", "path": "/home/u/Downloads/a.txt"})
         self.assertEqual(len(reports), 1)
         self.assertIn("notify-send, which is not installed", reports[0])
+
+
+class NearbyTest(unittest.TestCase):
+    """Devices are on 127.0.0.1: a listener that accepts is a device that is there, a port nobody listens on is one that left."""
+
+    def setUp(self):
+        self.listener = socket.socket()
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen()
+        self.addCleanup(self.listener.close)
+        self.there = self.listener.getsockname()[1]
+        closed = socket.socket()
+        closed.bind(("127.0.0.1", 0))
+        self.gone = closed.getsockname()[1]
+        closed.close()
+
+    def device(self, device_id, *addresses):
+        return {"id": device_id, "code": sync.short_code(device_id), "addresses": list(addresses)}
+
+    def test_a_device_that_accepts_a_connection_is_there_and_one_that_refuses_has_left(self):
+        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.there}"), self.device(THIRD, f"tcp://127.0.0.1:{self.gone}")]
+        self.assertEqual(sync.answering_nearby(nearby), [PEER])
+
+    def test_one_address_that_answers_is_enough(self):
+        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.gone}", f"quic://127.0.0.1:{self.there}",
+                              f"tcp://127.0.0.1:{self.there}")]
+        self.assertEqual(sync.answering_nearby(nearby), [PEER])
+
+    def test_a_connect_that_times_out_counts_as_gone(self):
+        nearby = [self.device(PEER, "tcp://127.0.0.1:22000")]
+        with mock.patch.object(sync.socket, "create_connection", side_effect=TimeoutError("timed out")):
+            self.assertEqual(sync.answering_nearby(nearby), [])
+
+    def test_the_list_keeps_its_order_and_an_empty_one_is_empty(self):
+        nearby = [self.device(THIRD, f"tcp://127.0.0.1:{self.there}"), self.device(PEER, f"tcp://127.0.0.1:{self.there}")]
+        self.assertEqual(sync.answering_nearby(nearby), [THIRD, PEER])
+        self.assertEqual(sync.answering_nearby([]), [])
+
+    def test_a_device_with_no_address_to_try_stays_listed(self):
+        for addresses in ([], [f"quic://127.0.0.1:{self.there}"], ["tcp://example.invalid:22000"], ["tcp://127.0.0.1:0"],
+                          ["tcp://127.0.0.1:99999"], ["tcp://127.0.0.1"], ["lizard"], [""]):
+            with self.subTest(addresses=addresses):
+                self.assertEqual(sync.answering_nearby([self.device(PEER, *addresses)]), [PEER])
+
+    def test_a_device_with_no_address_to_try_stays_listed_next_to_devices_that_are_tried(self):
+        nearby = [self.device(PEER, f"tcp://127.0.0.1:{self.there}"), self.device(THIRD, f"quic://127.0.0.1:{self.there}"),
+                  self.device(FOURTH, f"tcp://127.0.0.1:{self.gone}")]
+        self.assertEqual(sync.answering_nearby(nearby), [PEER, THIRD])
+
+    def test_ipv6_and_the_tcp4_and_tcp6_schemes_are_tried(self):
+        self.assertEqual(sync.tcp_endpoints(["tcp4://10.0.0.5:22000", "tcp6://[fe80::1%eth0]:22001", "tcp://[::1]:22002"]),
+                         [("10.0.0.5", 22000), ("fe80::1%eth0", 22001), ("::1", 22002)])
 
 
 class UnixHandler(BaseHTTPRequestHandler):

@@ -16,6 +16,8 @@ from the same file. A failure exits 1 with Syncthing's message on stderr.
   accept DEVICE           add a device that asked to connect, and share every folder with it
   reject DEVICE           ignore a device that asked to connect, for good: it asks no more
   send DEVICE [FILE...]   drop files into DEVICE's ~/Downloads, now or when it is next online (no FILE: the portal)
+  nearby                  print the device ID of each nearby device in sync.json that answers on a TCP address it announced,
+                          one per line; the popout lists only those
   seen                    mark every received file as seen
   watch                   the service: follow Syncthing's events, write sync.json, notify, receive dropped files; exits
                           75 when Syncthing does not answer (systemd starts it again, later each time) and 78 when
@@ -27,6 +29,7 @@ puts files in to/<receiver>/, and the receiver's watch moves them out into ~/Dow
 controls what its drop folders hold, so every step into to/<receiver>/ refuses a link, and a drop folder that a third
 device shares is neither used nor offered."""
 import argparse
+import concurrent.futures
 import contextlib
 import dataclasses
 import datetime
@@ -34,6 +37,7 @@ import errno
 import fcntl
 import functools
 import http.client
+import ipaddress
 import itertools
 import json
 import os
@@ -72,6 +76,9 @@ EVENT_TYPES = ("ConfigSaved", "StateChanged", "FolderSummary", "DeviceConnected"
 REREAD_EVENTS = frozenset({"ConfigSaved", "PendingDevicesChanged", "PendingFoldersChanged", "DeviceDiscovered"})
 NOTIFY_TIMEOUT_SEC = 3600
 NOTIFY_SEND_TIMEOUT_SEC = 5
+# A device on the same network answers a TCP connect within milliseconds; one that has left does not, and its address is
+# refused at once or the connect hangs, so this is how long the popout waits for the Nearby list when the device is gone.
+NEARBY_PROBE_TIMEOUT_SEC = 1
 QR_PIXELS_PER_MODULE = 8
 QR_QUIET_ZONE_MODULES = 2
 MAX_ARRIVALS = 20
@@ -599,6 +606,47 @@ class StateStore:
         self.update(change)
 
 
+# ---- Nearby ----------------------------------------------------------------------------------------------------------
+
+def tcp_endpoints(addresses):
+    """The (host, port) of each tcp://, tcp4:// and tcp6:// address with an IP and a port that a device announced. QUIC runs
+    over UDP, which a connect cannot test. A name is not tried: any device on the network can announce one, and looking it up
+    would be a request to wherever it points."""
+    endpoints = []
+    for address in addresses:
+        try:
+            url = urllib.parse.urlsplit(address)
+            if url.scheme in ("tcp", "tcp4", "tcp6") and url.port:
+                ipaddress.ip_address(url.hostname)
+                endpoints.append((url.hostname, url.port))
+        except ValueError:
+            continue
+    return endpoints
+
+
+def accepts_connection(endpoint, timeout_sec):
+    try:
+        with socket.create_connection(endpoint, timeout=timeout_sec):
+            return True
+    except OSError:
+        return False
+
+
+def answering_nearby(nearby, timeout_sec=NEARBY_PROBE_TIMEOUT_SEC):
+    """The IDs of the devices of sync.json's nearby list that are there now. Syncthing's discovery cache never forgets a
+    device (its entries carry no time in the REST API, and none expires), so a device is there when one of its announced TCP
+    addresses accepts a connection, tried for all of them at once. A device that announced no TCP address cannot be tried and
+    stays listed, as without this check."""
+    endpoints = {device["id"]: tcp_endpoints(device["addresses"]) for device in nearby}
+    attempts = [(device_id, endpoint) for device_id, device_endpoints in endpoints.items() for endpoint in device_endpoints]
+    if not attempts:
+        return [device["id"] for device in nearby]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(attempts)) as pool:
+        answered = pool.map(lambda attempt: accepts_connection(attempt[1], timeout_sec), attempts)
+        reached = {device_id for (device_id, _), ok in zip(attempts, answered) if ok}
+    return [device["id"] for device in nearby if device["id"] in reached or not endpoints[device["id"]]]
+
+
 # ---- Receiving -----------------------------------------------------------------------------------------------------
 
 def finished_files(inbox_fd):
@@ -1101,6 +1149,12 @@ def report_failure(message):
     vekrona_cli.surface_failure(PROG, message, __file__)
 
 
+def command_nearby(args):
+    current = StateStore(report_failure).read()
+    for device_id in answering_nearby([] if current is None else current["nearby"]):
+        print(device_id)
+
+
 def command_seen(args):
     StateStore(report_failure).mark_seen()
 
@@ -1134,6 +1188,7 @@ def parse_args(argv):
             ("accept", command_accept, [("device", {"type": device_id_arg})]),
             ("reject", command_reject, [("device", {"type": device_id_arg})]),
             ("send", command_send, [("device", {"type": device_id_arg}), ("files", {"nargs": "*"})]),
+            ("nearby", command_nearby, []),
             ("seen", command_seen, []),
             ("offline", command_offline, []),
             ("watch", command_watch, [])):

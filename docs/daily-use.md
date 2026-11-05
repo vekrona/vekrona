@@ -286,7 +286,8 @@ is between devices you accepted yourself; there is no server.
 - *Nearby.* A device on the same network that runs Syncthing announces itself (local discovery), and shows up under "Nearby" as
   "Syncthing device ABCD-EFG" (its code, the first characters of its device ID). Press Pair: this computer adds it and offers it
   every folder. It then asks on its side, "<this computer> wants to connect", and is *online* under "My devices" as soon as you
-  accept there. The list shows every device heard since Syncthing started, also one that has left since.
+  accept there. Syncthing never forgets a device it heard, so when the list opens the shell tries the addresses that each announced
+  (one second at most, only while the list is open) and shows the ones that answer; `vekrona-sync nearby` prints them.
 - *Not nearby.* "Pair another device…" shows this computer's device ID as text (Copy ID puts it on the clipboard) and as a QR code
   that the Syncthing app of a phone scans, and has a field for the other device's ID: paste or type it (any case, with or without
   dashes), then Pair or Enter. A wrong ID is refused with Syncthing's reason under the field.
