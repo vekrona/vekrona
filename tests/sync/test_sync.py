@@ -308,6 +308,33 @@ class StateStoreTest(unittest.TestCase):
     def arrival(self, name):
         return {"name": name, "path": f"/d/{name}", "from": "Pixel", "unseen": True}
 
+    def raw(self):
+        with open(self.store.path) as f:
+            return json.load(f)
+
+    def test_every_write_carries_the_schema(self):
+        publish = lambda: self.store.publish(sync.assemble(snapshot()), [])
+        for name, write in (("publish", publish), ("seen", lambda: (publish(), self.store.mark_seen())),
+                            ("await", lambda: self.store.await_connection(PEER)), ("offline", lambda: sync.command_offline(None))):
+            with self.subTest(write=name):
+                if os.path.exists(self.store.path):
+                    os.unlink(self.store.path)
+                write()
+                self.assertEqual(self.raw()["schema"], sync.SCHEMA_VERSION)
+
+    def test_sync_qml_reads_the_schema_the_watcher_writes(self):
+        with open(os.path.join(os.path.dirname(os.path.dirname(HERE)), "config", "vekrona-shell", "Sync.qml")) as f:
+            self.assertRegex(f.read(), rf"readonly property int schemaVersion: {sync.SCHEMA_VERSION}\n")
+
+    def test_a_file_of_an_older_schema_is_replaced_without_a_complaint_and_keeps_nothing_of_it(self):
+        os.makedirs(os.path.dirname(self.store.path))
+        with open(self.store.path, "w") as f:
+            json.dump({"state": "idle", "folders": [], "offers": [], "pendingDevices": [], "devices": [],
+                       "arrivals": [self.arrival("old")]}, f)
+        self.assertIsNone(self.store.read())
+        self.store.publish(sync.assemble(snapshot()), [])
+        self.assertEqual((self.raw()["schema"], self.raw()["arrivals"], self.reports), (sync.SCHEMA_VERSION, [], []))
+
     def test_seen_marks_every_arrival_and_keeps_the_rest(self):
         self.store.publish(sync.assemble(snapshot()), [self.arrival("a"), self.arrival("b")])
         self.store.mark_seen()
@@ -394,6 +421,7 @@ class FakeSyncthing(sync.Syncthing):
 class Recorder:
     def __init__(self):
         self.calls = []
+        self.actions = {}
 
     def pairing(self, device, accept, reject):
         self.calls.append(("pairing", device["id"]))
@@ -403,6 +431,16 @@ class Recorder:
 
     def arrival(self, arrival):
         self.calls.append(("arrival", arrival["name"]))
+
+    def nearby(self, device, pair, ignore):
+        self.calls.append(("nearby", device["id"]))
+        self.actions[device["id"]] = (pair, ignore)
+
+    def pair_requested(self, code):
+        self.calls.append(("pair_requested", code))
+
+    def connected(self, name):
+        self.calls.append(("connected", name))
 
 
 class WatcherTest(unittest.TestCase):
@@ -422,6 +460,12 @@ class WatcherTest(unittest.TestCase):
         os.makedirs(self.inbox)
         self.notifier = Recorder()
         self.reports = []
+        # The devices that answer a connect, in place of the network: the ones of a test's nearby list that are in `here`.
+        self.here = set()
+        patcher = mock.patch.object(sync, "answering_nearby",
+                                    lambda nearby: [device["id"] for device in nearby if device["id"] in self.here])
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.store = sync.StateStore(self.reports.append)
         self.watcher = sync.Watcher(self.store, self.notifier, self.reports.append)
 
@@ -435,6 +479,9 @@ class WatcherTest(unittest.TestCase):
                              "devices": [{"deviceID": ME, "name": "this"}, {"deviceID": PEER, "name": "Pixel"}]},
             "/rest/system/discovery": {},
             "/rest/db/ignores": {"ignore": [], "expanded": [], "error": None},
+            "/rest/svc/deviceid": syncthing_judging_ids,
+            "/rest/config/devices": [{"deviceID": ME}],
+            "/rest/config/defaults/device": {"addresses": ["dynamic"], "name": ""},
             "/rest/config/folders": config_folders,
             "/rest/system/connections": {"connections": {PEER: {"connected": True}}},
             "/rest/cluster/pending/devices": pending_devices or {},
@@ -442,10 +489,11 @@ class WatcherTest(unittest.TestCase):
             "/rest/config/defaults/folder": {"id": "", "devices": []}},
             statuses={"f1": notes_status} if notes_status is not None else {})
 
-    def refresh(self, api, scan_all, finished=(), summarized=()):
+    def refresh(self, api, scan_all, finished=(), summarized=(), discovered=None, connected=None):
         self.watcher.api = api
         self.watcher.snapshot = sync.read_snapshot(api, ME)
-        self.watcher.refresh(scan_all=scan_all, finished=set(finished), summarized=set(summarized))
+        self.watcher.refresh(scan_all=scan_all, finished=set(finished), summarized=set(summarized),
+                             discovered=scan_all if discovered is None else discovered, connected=connected or {})
 
     def follow(self, api, *batches):
         """Follows api through the batches of events, then until Syncthing stops answering."""
@@ -540,6 +588,132 @@ class WatcherTest(unittest.TestCase):
         drop.request = gone
         with self.assertRaises(sync.Unreachable):
             self.refresh(api, scan_all=True)
+
+    def nearby_api(self, *devices):
+        api = self.api()
+        api.answers["/rest/system/discovery"] = {device: {"addresses": ["tcp://10.0.0.2:22000"]} for device in devices}
+        return api
+
+    def proposals(self):
+        return [call for call in self.notifier.calls if call[0] == "nearby"]
+
+    def test_a_device_that_announces_itself_and_answers_is_proposed_once_with_a_dot(self):
+        self.here = {THIRD}
+        self.refresh(self.nearby_api(THIRD), scan_all=False, discovered=True)
+        self.assertEqual(self.proposals(), [("nearby", THIRD)])
+        state = self.store.read()
+        self.assertEqual([(device["id"], device["unseen"]) for device in state["nearby"]], [(THIRD, True)])
+
+    def test_a_device_that_is_heard_again_is_not_proposed_again_whether_it_left_for_a_while_or_the_watcher_restarted(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=True)
+        restarted = sync.Watcher(sync.StateStore(self.reports.append), self.notifier, self.reports.append)
+        restarted.api = api
+        restarted.snapshot = sync.read_snapshot(api, ME)
+        restarted.refresh(scan_all=True, finished=set(), summarized=set(), discovered=True, connected={})
+        self.assertEqual(len(self.proposals()), 1)
+
+    def test_a_device_that_does_not_answer_is_not_proposed_until_it_does(self):
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(self.proposals(), [])
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
+        self.here = {THIRD}
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(len(self.proposals()), 1)
+
+    def test_nothing_is_tried_or_proposed_by_an_event_that_heard_no_device(self):
+        self.here = {THIRD}
+        self.refresh(self.nearby_api(THIRD), scan_all=False, discovered=False)
+        self.assertEqual(self.proposals(), [])
+
+    def test_this_computer_its_devices_the_pending_and_the_ignored_are_never_proposed(self):
+        self.here = {ME, PEER, THIRD, FOURTH}
+        api = self.nearby_api(ME, PEER, THIRD, FOURTH)
+        api.answers["/rest/cluster/pending/devices"] = {THIRD: {"name": "Laptop"}}
+        api.answers["/rest/config"]["remoteIgnoredDevices"] = [{"deviceID": FOURTH}]
+        self.refresh(api, scan_all=True)
+        self.assertEqual(self.proposals(), [])
+
+    def test_not_now_proposes_nothing_more_and_the_device_stays_in_the_list_with_its_dot_until_the_popout_is_opened(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(api.writes, [])
+        self.assertEqual(len(self.proposals()), 1)
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], True)
+        self.store.mark_seen()
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
+        self.assertEqual(len(self.proposals()), 1)
+
+    def test_the_dot_of_a_device_stays_through_the_events_that_try_no_device(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.refresh(api, scan_all=False, discovered=False)
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], True)
+
+    def test_a_dot_cleared_by_the_popout_stays_clear_when_syncthing_restarts_and_the_device_is_heard_again(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.store.mark_seen()
+        self.store.publish(sync.offline_view(), [])
+        self.assertEqual(self.store.read()["nearby"], [])
+        self.refresh(api, scan_all=False, discovered=True)
+        self.assertEqual(self.store.read()["nearby"][0]["unseen"], False)
+        self.assertEqual(len(self.proposals()), 1)
+
+    def test_ignore_puts_the_device_on_the_ignored_list_and_pair_asks_it_and_says_so(self):
+        self.here = {THIRD, FOURTH}
+        api = self.nearby_api(THIRD, FOURTH)
+        self.refresh(api, scan_all=False, discovered=True)
+        pair, _ = self.notifier.actions[THIRD]
+        _, ignore = self.notifier.actions[FOURTH]
+        ignore()
+        put = next(body for method, path, body in api.writes if (method, path) == ("PUT", "/rest/config"))
+        self.assertEqual([entry["deviceID"] for entry in put["remoteIgnoredDevices"]], [FOURTH])
+        pair()
+        posted = next(body for method, path, body in api.writes if (method, path) == ("POST", "/rest/config/devices"))
+        self.assertEqual(posted["deviceID"], THIRD)
+        self.assertIn(("pair_requested", sync.short_code(THIRD)), self.notifier.calls)
+
+    def test_the_first_connection_of_a_device_that_was_asked_to_pair_is_announced_once_with_its_name(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.refresh(api, scan_all=False, discovered=True)
+        self.notifier.actions[THIRD][0]()
+        self.refresh(api, scan_all=False, connected={FOURTH: "Stranger"})
+        self.assertNotIn(("connected", "Stranger"), self.notifier.calls)
+        self.refresh(api, scan_all=False, connected={THIRD: "Pixel"})
+        self.refresh(api, scan_all=False, connected={THIRD: "Pixel"})
+        self.assertEqual([call for call in self.notifier.calls if call[0] == "connected"], [("connected", "Pixel")])
+
+    def test_a_device_that_connected_while_the_watcher_was_down_is_announced_at_the_start(self):
+        self.store.await_connection(PEER)
+        self.refresh(self.api(), scan_all=True)
+        self.assertEqual([call for call in self.notifier.calls if call[0] == "connected"], [("connected", "Pixel")])
+
+    def test_following_proposes_a_device_when_syncthing_reports_it_and_announces_a_connection_with_the_name_it_reports(self):
+        self.here = {THIRD}
+        api = self.nearby_api(THIRD)
+        self.store.await_connection(THIRD)
+        discovered = {"id": 1, "type": "DeviceDiscovered", "data": {"device": THIRD, "addrs": []}}
+        connected = {"id": 2, "type": "DeviceConnected", "data": {"id": THIRD, "deviceName": "Pixel 9"}}
+        self.follow(api, [discovered], [connected])
+        self.assertEqual(self.notifier.calls, [("nearby", THIRD), ("connected", "Pixel 9")])
+
+    def test_the_ledger_is_bounded(self):
+        for index in range(sync.MAX_LEDGER + 20):
+            self.store.await_connection(f"D{index}")
+        self.assertEqual(len(self.store.read()["ledger"]["awaiting"]), sync.MAX_LEDGER)
+        self.assertEqual(self.store.read()["ledger"]["awaiting"][-1], f"D{sync.MAX_LEDGER + 19}")
 
     def test_an_event_batch_looks_only_into_the_drops_where_a_file_finished(self):
         self.put("a.txt")
@@ -997,6 +1171,27 @@ class SendAvoidsIgnoredNamesTest(unittest.TestCase):
             "/rest/db/ignores": {"ignore": [f"/to/{PEER}/photo.jpg"], "expanded": [], "error": None}})
         sync.send(api, PEER, [self.file])
         self.assertEqual(os.listdir(os.path.join(self.tmp.name, "drop", "to", PEER)), ["photo (2).jpg"])
+
+
+class NotificationTextTest(unittest.TestCase):
+    def shown(self, call):
+        with mock.patch.object(sync, "run_tool", return_value=mock.Mock(returncode=0, stderr="")) as run:
+            call(sync.DesktopNotifier(lambda message: self.fail(message)))
+        return run.call_args.args[1]
+
+    def test_the_notifications_of_pairing_say_what_happened_and_what_to_do(self):
+        self.assertEqual(self.shown(lambda n: n.pair_requested("ABCD-EFG"))[-2:],
+                         ["Pair request sent to ABCD-EFG", "Accept it on the other device."])
+        self.assertEqual(self.shown(lambda n: n.connected("Pixel"))[-2:], ["Pixel is now one of your devices", ""])
+
+    def test_the_question_about_a_nearby_device_offers_not_now_first_then_pair_and_ignore(self):
+        asked = []
+        notifier = sync.DesktopNotifier(lambda message: self.fail(message))
+        with mock.patch.object(notifier, "ask", lambda title, body, choices: asked.append((title, body, choices))):
+            notifier.nearby({"code": "ABCD-EFG"}, "pair-action", "ignore-action")
+        title, body, choices = asked[0]
+        self.assertEqual((title, body), ("A Syncthing device ABCD-EFG is nearby", "Pair with it?"))
+        self.assertEqual(choices, [("later", "Not now", None), ("pair", "Pair", "pair-action"), ("ignore", "Ignore", "ignore-action")])
 
 
 class NotifierTest(unittest.TestCase):

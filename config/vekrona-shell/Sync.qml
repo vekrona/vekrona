@@ -28,9 +28,18 @@ BarPill {
             devices: [],
             arrivals: []
         })
+    // The layout of sync.json that this file reads: SCHEMA_VERSION of bin/vekrona-sync, which tests/sync checks to be this number.
+    readonly property int schemaVersion: 1
+    // What the pill shows while the watcher runs code from before an update of the checkout (its sync.json has another schema).
+    readonly property var outdatedReport: Object.assign({}, offlineReport, {
+        state: "problem",
+        problem: "The sync service is out of date. Run `systemctl --user restart vekrona-sync` or `./install.sh 50`."
+    })
     // What vekrona-sync watch wrote, or offlineReport.
     readonly property var report: file.value
     readonly property int unseenArrivals: report.arrivals.filter(arrival => arrival.unseen).length
+    // Nearby devices that answered and that the popout has not been open for since: the watcher sets and clears the flag.
+    readonly property int unseenNearby: report.nearby.filter(device => device.unseen).length
     // The devices of the nearby list that are there now. Syncthing never forgets a device it heard once, so the list in sync.json
     // holds also those that have left; `vekrona-sync nearby` tries their addresses, once when the popout opens and again when the
     // list changes while it is open (a device that appears is announced on the network, which changes sync.json), and nothing
@@ -108,7 +117,7 @@ BarPill {
 
     icon: icons[report.state]
     iconRotation: spinStep * 180 / spinSteps
-    badgeCount: report.offers.length + report.pendingDevices.length + unseenArrivals
+    badgeCount: report.offers.length + report.pendingDevices.length + unseenArrivals + unseenNearby
     ariaName: "Sync, " + report.state
     onClicked: bar.togglePopout(popout)
     onNearbyIdsChanged: if (popout.open)
@@ -129,6 +138,10 @@ BarPill {
         absent: root.offlineReport
         parse: text => {
             const next = JSON.parse(text);
+            if (next.schema !== root.schemaVersion) {
+                console.error("sync.json has schema " + next.schema + " and this shell reads " + root.schemaVersion + ": vekrona-sync.service runs older code than the checkout, restart it");
+                return root.outdatedReport;
+            }
             if (!(next.state in root.icons))
                 throw new Error("unknown state " + next.state);
             for (const key of ["folders", "offers", "nearby", "pendingDevices", "devices", "arrivals"])

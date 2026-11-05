@@ -84,6 +84,12 @@ NEARBY_PROBE_TIMEOUT_SEC = 1
 QR_PIXELS_PER_MODULE = 8
 QR_QUIET_ZONE_MODULES = 2
 MAX_ARRIVALS = 20
+MAX_LEDGER = 200
+# The layout of sync.json. Sync.qml has the same number as `schemaVersion` and shows "out of date" for any other: the watcher is a
+# long-running process that keeps the code it started with, while the shell reloads its QML from the checkout at once, so after
+# an update of the checkout the two can disagree for as long as the watcher is not restarted. Raise it with every change of the
+# layout that an older Sync.qml or watcher would misread.
+SCHEMA_VERSION = 1
 
 DEVICE_ID = r"[A-Z2-7]{7}(?:-[A-Z2-7]{7}){7}"
 DEVICE_ID_RE = re.compile(DEVICE_ID)
@@ -593,8 +599,22 @@ def offline_view():
             "nearby": [], "pendingDevices": [], "devices": []}
 
 
+def empty_ledger():
+    return {"proposed": [], "seen": [], "awaiting": []}
+
+
+def remembered(ids):
+    """The last MAX_LEDGER entries of a list of IDs, without repeats."""
+    return list(dict.fromkeys(ids))[-MAX_LEDGER:]
+
+
 class StateStore:
-    """sync.json. The watcher and `seen` both rewrite it, so every change is a locked read-modify-write."""
+    """sync.json. The watcher, `pair` and `seen` all rewrite it, so every change is a locked read-modify-write. Next to what the
+    popout shows it keeps the ledger of what the user was told, which has to outlive the watcher and Syncthing:
+      proposed   nearby devices the user was asked about with a notification: never asked twice, so a phone that comes and
+                 goes (Syncthing announces it again after 90 s of silence) and a restart of Syncthing do not ask again
+      seen       nearby devices the user has had in front of them in the popout: they carry no dot
+      awaiting   devices this computer asked to pair with that have not connected yet: the one connection says it is done"""
 
     def __init__(self, report):
         directory = vekrona_cli.vekrona_state_dir()
@@ -615,30 +635,80 @@ class StateStore:
         if not isinstance(current, dict) or not isinstance(current.get("arrivals"), list):
             self.report(f"{self.path} is no sync.json, which is replaced by the next state")
             return None
+        if current.get("schema") != SCHEMA_VERSION:
+            # Written by older code (a watcher that has not been restarted since an update): not reported here, since the
+            # popout says so, and the next write replaces it.
+            return None
         return current
 
     def update(self, change):
-        """Writes what change(current or None) returns, unless it returns None."""
+        """Writes what change(current or None) returns, with the schema, unless it returns None or the file says so already."""
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
         with open(self.lock_path, "w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            changed = change(self.read())
-            if changed is not None:
-                vekrona_cli.write_json_atomically(self.path, changed)
+            current = self.read()
+            changed = change(current)
+            if changed is not None and {**changed, "schema": SCHEMA_VERSION} != current:
+                vekrona_cli.write_json_atomically(self.path, {**changed, "schema": SCHEMA_VERSION})
 
-    def publish(self, view, new_arrivals):
+    def publish(self, view, new_arrivals, reachable=frozenset()):
+        """Writes the view, keeping the arrivals and the ledger; `reachable` are the nearby devices that answered just now.
+        They get a dot unless they were seen, and the ones never proposed are marked proposed and returned, in the order of
+        the list: those are the devices to ask the user about, once."""
+        proposals = []
+
         def change(current):
-            old = [] if current is None else current["arrivals"]
-            state = {**view, "arrivals": (new_arrivals + old)[:MAX_ARRIVALS]}
-            return None if state == current else state
+            nonlocal proposals
+            old = current or {}
+            ledger = {**empty_ledger(), **old.get("ledger", {})}
+            unseen_before = {device["id"] for device in old.get("nearby", []) if device.get("unseen")}
+            nearby = [{**device, "unseen": device["id"] in unseen_before or
+                       (device["id"] in reachable and device["id"] not in ledger["seen"])} for device in view["nearby"]]
+            proposals = [device["id"] for device in nearby if device["id"] in reachable and device["id"] not in ledger["proposed"]]
+            ledger["proposed"] = remembered(ledger["proposed"] + proposals)
+            state = {**view, "nearby": nearby, "arrivals": (new_arrivals + old.get("arrivals", []))[:MAX_ARRIVALS],
+                     "ledger": ledger}
+            return state
         self.update(change)
+        return proposals
 
     def mark_seen(self):
         def change(current):
-            if current is None or not any(arrival["unseen"] for arrival in current["arrivals"]):
+            if current is None:
                 return None
-            return {**current, "arrivals": [{**arrival, "unseen": False} for arrival in current["arrivals"]]}
+            ledger = {**empty_ledger(), **current.get("ledger", {})}
+            ledger["seen"] = remembered(ledger["seen"] + [device["id"] for device in current.get("nearby", [])])
+            state = {**current, "ledger": ledger,
+                     "nearby": [{**device, "unseen": False} for device in current.get("nearby", [])],
+                     "arrivals": [{**arrival, "unseen": False} for arrival in current["arrivals"]]}
+            return state
         self.update(change)
+
+    def await_connection(self, device_id):
+        """Notes that this computer asked device_id to pair, so that its first connection is announced once."""
+        def change(current):
+            base = current if current is not None else {**offline_view(), "arrivals": []}
+            ledger = {**empty_ledger(), **base.get("ledger", {})}
+            ledger["awaiting"] = remembered(ledger["awaiting"] + [device_id])
+            return {**base, "ledger": ledger}
+        self.update(change)
+
+    def take_awaiting(self, device_ids):
+        """Removes the devices from the awaited ones and returns those that were."""
+        taken = []
+
+        def change(current):
+            nonlocal taken
+            if current is None:
+                return None
+            ledger = {**empty_ledger(), **current.get("ledger", {})}
+            taken = [device_id for device_id in ledger["awaiting"] if device_id in device_ids]
+            if not taken:
+                return None
+            ledger["awaiting"] = [device_id for device_id in ledger["awaiting"] if device_id not in taken]
+            return {**current, "ledger": ledger}
+        self.update(change)
+        return taken
 
 
 # ---- Nearby ----------------------------------------------------------------------------------------------------------
@@ -869,18 +939,29 @@ class DesktopNotifier:
         self.ask(f"{offer['deviceName']} offers a folder", offer["label"],
                  [("later", "Not now", None), ("join", "Join", join)])
 
+    def nearby(self, device, pair, ignore):
+        self.ask(f"A Syncthing device {device['code']} is nearby", "Pair with it?",
+                 [("later", "Not now", None), ("pair", "Pair", pair), ("ignore", "Ignore", ignore)])
+
     def arrival(self, arrival):
+        self.show("telling that a file arrived", f"{arrival['name']} received",
+                  f"From {arrival['from']}, in {os.path.dirname(arrival['path'])}")
+
+    def pair_requested(self, code):
+        self.show("confirming a pair request", f"Pair request sent to {code}", "Accept it on the other device.")
+
+    def connected(self, name):
+        self.show("telling that a device connected", f"{name} is now one of your devices", "")
+
+    def show(self, purpose, title, body):
         try:
-            result = run_tool("telling that a file arrived",
-                              ["notify-send", "-a", "vekrona", "--", f"{arrival['name']} received",
-                               f"From {arrival['from']}, in {os.path.dirname(arrival['path'])}"],
-                              capture_output=True, text=True, timeout=NOTIFY_SEND_TIMEOUT_SEC)
+            result = run_tool(purpose, ["notify-send", "-a", "vekrona", "--", title, body], capture_output=True, text=True,
+                              timeout=NOTIFY_SEND_TIMEOUT_SEC)
         except SyncError as exc:
             self.report(str(exc))
             return
         if result.returncode != 0:
-            self.report(f"cannot show the arrival of {arrival['name']}: notify-send exited with status "
-                        f"{result.returncode}: {result.stderr.strip()}")
+            self.report(f"cannot show {title!r}: notify-send exited with status {result.returncode}: {result.stderr.strip()}")
 
     def ask(self, title, body, choices):
         """choices: (key, label, action or None); the first is the harmless one, which vekrona-update-ask requires."""
@@ -1028,6 +1109,20 @@ def pair_device(api, text, name):
     if known_device(api, device_id):
         raise SyncError(f"device {device_id} is one of this computer's devices already")
     add_device(api, device_id, name or "")
+    return device_id
+
+
+def pair_and_confirm(api, store, notifier, text, name):
+    """Asks a device to pair, remembers that its first connection is to be announced, and says that the request is on its way:
+    the one way every pair goes, from the command line, the popout's button and the notification."""
+    device_id = pair_device(api, text, name)
+    store.await_connection(device_id)
+    notifier.pair_requested(short_code(device_id))
+
+
+def ignore_nearby(api, device_id):
+    """Puts a device that only announced itself on the list of ignored devices, as reject does for one that asked."""
+    api.ignore_device(device_id, "", "")
 
 
 def reject_device(api, device_id):
@@ -1165,6 +1260,12 @@ def summarized_drops(events):
             if event["type"] == "FolderSummary" and is_drop(event["data"]["folder"])}
 
 
+def connections_in(events):
+    """The devices that connected in a batch of events, by ID, with the name they gave."""
+    return {event["data"]["id"]: device_name(event["data"]["id"], event["data"].get("deviceName"))
+            for event in events if event["type"] == "DeviceConnected"}
+
+
 def matters(event):
     """Every file of every folder finishes with an ItemFinished, and only those of a drop need a look."""
     return event["type"] != "ItemFinished" or is_drop(event["data"]["folder"])
@@ -1187,7 +1288,7 @@ class Watcher:
         my_id = api.my_id()
         latest = api.latest_event_id()
         self.snapshot = read_snapshot(api, my_id)
-        self.refresh(scan_all=True, finished=set(), summarized=set())
+        self.refresh(scan_all=True, finished=set(), summarized=set(), discovered=True, connected={})
         while True:
             batch = api.events(latest)
             if not batch:
@@ -1197,19 +1298,33 @@ class Watcher:
             latest = batch[-1]["id"]
             if gap or any(event["type"] in REREAD_EVENTS for event in batch):
                 self.snapshot = read_snapshot(api, my_id)
-                self.refresh(scan_all=gap, finished=finished_drops(batch), summarized=summarized_drops(batch))
             elif any(matters(event) for event in batch):
                 for event in batch:
                     apply_event(self.snapshot, event)
-                self.refresh(scan_all=False, finished=finished_drops(batch), summarized=summarized_drops(batch))
+            else:
+                continue
+            self.refresh(scan_all=gap, finished=finished_drops(batch), summarized=summarized_drops(batch),
+                         discovered=gap or any(event["type"] == "DeviceDiscovered" for event in batch),
+                         connected=connections_in(batch))
 
-    def refresh(self, scan_all, finished, summarized):
+    def refresh(self, scan_all, finished, summarized, discovered, connected):
+        """discovered: Syncthing heard a device on the network (or everything is looked at again), so the nearby ones are
+        tried for an answer; connected: device ID -> name, of the devices that connected in this batch."""
         self.accept_drops()
         arrivals = self.receive(scan_all, finished)
         self.tend(scan_all, finished | summarized)
         view = assemble(self.snapshot)
-        self.store.publish(view, arrivals)
-        self.notify(view, arrivals)
+        reachable = frozenset(answering_nearby(view["nearby"])) if discovered else frozenset()
+        proposals = self.store.publish(view, arrivals, reachable)
+        self.notify(view, arrivals, proposals)
+        if scan_all:
+            connected = {**{device_id: self.device_label(device_id) for device_id in self.snapshot.connected}, **connected}
+        for device_id in self.store.take_awaiting(connected):
+            self.notifier.connected(connected[device_id])
+
+    def device_label(self, device_id):
+        names = {device["deviceID"]: device.get("name") for device in self.snapshot.devices}
+        return device_name(device_id, names.get(device_id))
 
     def problem(self, message):
         """Reports a problem that stays until someone fixes it, once, not at every event."""
@@ -1278,7 +1393,7 @@ class Watcher:
             for failure in failures:
                 self.problem(failure)
 
-    def notify(self, view, arrivals):
+    def notify(self, view, arrivals, proposals):
         pending = {("device", device["id"]): device for device in view["pendingDevices"]}
         offers = {("offer", offer["folder"], offer["device"]): offer for offer in view["offers"]}
         fresh = (pending.keys() | offers.keys()) - self.notified
@@ -1292,6 +1407,9 @@ class Watcher:
             else:
                 offer = offers[key]
                 self.notifier.offer(offer, lambda offer=offer: join(api, offer["folder"], None))
+        for device in (device for device in view["nearby"] if device["id"] in proposals):
+            self.notifier.nearby(device, lambda device=device: pair_and_confirm(api, self.store, self.notifier, device["id"], ""),
+                                 lambda device=device: ignore_nearby(api, device["id"]))
         for arrival in arrivals:
             self.notifier.arrival(arrival)
 
@@ -1317,7 +1435,7 @@ def command_qr(args):
 
 
 def command_pair(args):
-    pair_device(Syncthing.from_config(), args.device, args.name)
+    pair_and_confirm(Syncthing.from_config(), StateStore(report_failure), DesktopNotifier(report_failure), args.device, args.name)
 
 
 def command_accept(args):

@@ -288,6 +288,12 @@ is between devices you accepted yourself; there is no server.
   every folder. It then asks on its side, "<this computer> wants to connect", and is *online* under "My devices" as soon as you
   accept there. Syncthing never forgets a device it heard, so when the list opens the shell tries the addresses that each announced
   (one second at most, only while the list is open) and shows the ones that answer; `vekrona-sync nearby` prints them.
+  You do not have to look: when such a device appears and answers, a notification asks "A Syncthing device ABCD-EFG is nearby.
+  Pair with it?" with Not now, Pair and Ignore, once per device for good (a device that goes away and comes back, or a restart of
+  Syncthing or of the watcher, does not ask again; the ledger is kept in `sync.json`). Not now leaves the device under Nearby,
+  with a dot on the bar's Sync icon until you open the list; Ignore is the same as Reject (the device is ignored for good). Pair,
+  here or anywhere else, says "Pair request sent to ABCD-EFG", and once the other device accepts and connects, "<name> is now
+  one of your devices".
 - *Not nearby.* "Pair another device…" shows this computer's device ID as text (Copy ID puts it on the clipboard) and as a QR code
   that the Syncthing app of a phone scans, and has a field for the other device's ID: paste or type it (any case, with or without
   dashes), then Pair or Enter. A wrong ID is refused with Syncthing's reason under the field.
@@ -346,7 +352,7 @@ the two cannot join the folder: its offer of a drop is ignored (a line in the jo
 that a third device shares in Syncthing is neither sent through nor received from until you remove that device from it.
 
 What the icon shows: the two round arrows of Material's `sync`, still when idle and turning in steps (four a second, only while something syncs and somebody is there: it stops after 300 s without input, when the screen locks, and goes on at the next input) while syncing, with a warning mark for a problem (the list gives the reason in words), and struck through when offline (Syncthing is not running). `vekrona-sync watch`
-is the service behind it (`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change, and while Syncthing
+is the service behind it (if the list says "The sync service is out of date", the service runs code from before an update of the checkout: `systemctl --user restart vekrona-sync`, or `./install.sh 50`, which restarts it) (`systemctl --user status vekrona-sync`); it wakes only when Syncthing reports a change, and while Syncthing
 does not answer it is started again after a longer wait each time, up to a minute.
 
 ## The Desktops widget
