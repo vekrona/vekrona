@@ -159,19 +159,88 @@ ensure_pkg_from_repo() {
   done
 }
 
-# Removes installed packages through a --assumeno transaction first, which dies when it would take a desktop package along.
+# The protected_packages value for a dnf call: libdnf5's own default (dnf5 and the packages of /etc/dnf/protected.d, which
+# keep sudo, systemd and the boot chain), spelled out so that it holds whether dnf appends to its default or replaces it,
+# then the named packages. Every dnf call that sets protected_packages takes its value from here.
+dnf_protected() {
+  local IFS=,
+  printf '%s' "dnf5,glob:/etc/dnf/protected.d/*.conf${*:+,$*}"
+}
+
+# Packages the person chose: dnf's install reason "User" (dnf install, dnf mark user, what the installer named). Not "External
+# User" (dnf gives it to every package it has no record of, plain dependencies like clang21-libs among them) and not
+# `dnf repoquery --userinstalled`, which adds the reason "Group", every member of the groups the installer ran (bash,
+# cups-pk-helper, realmd, ...), which nobody chose.
+user_chosen_pkgs() {
+  local out
+  out="$(LC_ALL=C dnf repoquery --installed --qf '%{name}|%{reason}\n')" || die "dnf repoquery failed to list the installed packages"
+  awk -F'|' '$2 == "User" { print $1 }' <<<"$out"
+}
+
+# The packages the person chose, except the named ones (the packages about to be removed are often "User" themselves).
+user_chosen_pkgs_except() {
+  local -A excepted=()
+  local all=() pkg
+  for pkg in "$@"; do excepted[$pkg]=1; done
+  read_pkg_list all user_chosen_pkgs
+  for pkg in "${all[@]}"; do [[ -n "${excepted[$pkg]+x}" ]] || printf '%s\n' "$pkg"; done
+}
+
+# Dry run of `dnf remove PKGS...` with PROTECTED as protected_packages. Prints dnf's protected-packages problem line when dnf
+# refuses for that reason, nothing when dnf would go ahead; dies on any other outcome. LC_ALL=C: sudo keeps the person's
+# LC_*, and the refusal is recognised by dnf's English text.
+removal_refusal() {
+  local protected="$1" out rc=0
+  shift
+  out="$(root env LC_ALL=C dnf remove --assumeno --setopt=protected_packages="$protected" "$@" 2>&1)" || rc=$?
+  printf '%s\n' "$out" >&2
+  if [[ "$out" == *"protected packages"* ]]; then grep -m1 'protected packages' <<<"$out"; return 0; fi
+  [[ $rc -eq 1 && "$out" == *"Operation aborted"* ]] || die "dnf remove $* --assumeno failed unexpectedly (exit $rc)"
+}
+
+# Plans the removal of the installed packages named after the two output names. Sets the associative array OUT_HELD to the
+# packages that a package the person chose needs, each with dnf's refusal line, and the string OUT_PROTECTED to the
+# protected_packages value for the real removal of the others (desktop packages and chosen ones, never the targets). Dies when a
+# desktop package would go along (that is a vekrona bug), before anything is removed. The common case is one dry run.
+removal_plan() {
+  local -n out_held="$1" out_protected="$2"
+  shift 2
+  local desktop_pkgs=() chosen_pkgs=() desktop_only pkg refusal
+  read_pkg_list desktop_pkgs vekrona_desktop_pkgs
+  read_pkg_list chosen_pkgs user_chosen_pkgs_except "$@"
+  desktop_only="$(dnf_protected "${desktop_pkgs[@]}")"
+  out_protected="$(dnf_protected "${desktop_pkgs[@]}" "${chosen_pkgs[@]}")"
+  out_held=()
+  refusal="$(removal_refusal "$out_protected" "$@")"
+  if [[ -z "$refusal" ]]; then return 0; fi
+  refusal="$(removal_refusal "$desktop_only" "$@")"
+  [[ -z "$refusal" ]] || die "dnf remove $* would remove protected packages: $refusal"
+  for pkg in "$@"; do
+    refusal="$(removal_refusal "$out_protected" "$pkg")"
+    # shellcheck disable=SC2034,SC2004 # shellcheck cannot see through the nameref: out_held is the caller's associative array
+    if [[ -n "$refusal" ]]; then out_held[$pkg]="$refusal"; fi
+  done
+}
+
+warn_pkg_kept() {
+  warn "$1 stays installed: removing it would also remove a package you installed (dnf: $2). Remove that package, or $1 itself, to finish."
+}
+
+# Removes the installed ones of the named packages, and never a package the person chose: one that a chosen package needs stays and
+# is reported (removal_plan). Dies, before removing anything, when a desktop package would go along.
 ensure_pkg_absent() {
-  local installed=() pkg out protected rc=0
+  local installed=() removable=() pkg protected
+  local -A held=()
   for pkg in "$@"; do pkg_installed "$pkg" && installed+=("$pkg"); done
   if [[ ${#installed[@]} -eq 0 ]]; then log "packages absent: $*"; return 0; fi
-  protected="$(vekrona_desktop_pkgs | paste -sd,)"
-  out="$(root dnf remove --assumeno --setopt=protected_packages="$protected" "${installed[@]}" 2>&1)" || rc=$?
-  printf '%s\n' "$out"
-  [[ "$out" != *"protected packages"* ]] || die "dnf remove ${installed[*]} would remove protected packages"
-  [[ $rc -eq 1 && "$out" == *"Operation aborted"* ]] || die "dnf remove ${installed[*]} --assumeno failed unexpectedly (exit $rc)"
-  log "removing: ${installed[*]}"
-  root dnf remove -y --setopt=protected_packages="$protected" "${installed[@]}"
+  removal_plan held protected "${installed[@]}"
   for pkg in "${installed[@]}"; do
+    if [[ -n "${held[$pkg]+x}" ]]; then warn_pkg_kept "$pkg" "${held[$pkg]}"; else removable+=("$pkg"); fi
+  done
+  if [[ ${#removable[@]} -eq 0 ]]; then return 0; fi
+  log "removing: ${removable[*]}"
+  root dnf remove -y --setopt=protected_packages="$protected" "${removable[@]}"
+  for pkg in "${removable[@]}"; do
     ! pkg_installed "$pkg" || die "package still installed: $pkg"
   done
   # A unit that failed because its package went away (or because a dependency did) has nothing left to retry.
@@ -232,16 +301,53 @@ ensure_copr() {
   done
 }
 
+# Removes the gpg key rpm trusts for a COPR (summary "<owner>_<project> (None) <owner#project@copr.fedorahosted.org>"): dnf
+# imported it when the COPR was enabled, and nothing else removes it.
+ensure_copr_key_absent() {
+  local c="$1" packager keys nvr summary
+  packager="<${c%%/*}#${c#*/}@copr.fedorahosted.org>"
+  keys="$(rpm -qa gpg-pubkey --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n')" || die "rpm cannot list the trusted gpg keys"
+  while IFS=$'\t' read -r nvr summary; do
+    [[ "$summary" == *"$packager"* ]] || continue
+    log "removing the gpg key of copr $c: $nvr"
+    root rpm -e "$nvr"
+    ! pkg_installed "$nvr" || die "gpg key still trusted: $nvr"
+  done <<<"$keys"
+}
+
+# Disables and removes the COPRs, and the gpg key of each (the key outlives the repo, and a COPR removed before this existed left it).
 ensure_copr_absent() {
-  local c
+  local c id
   for c in "$@"; do
-    local id
     id="$(copr_id "$c")"
-    repo_enabled "$id" || continue
-    log "removing copr: $c"
-    root dnf copr remove -y "$c"
-    repo_enabled "$id" && die "copr still enabled: $c"
+    if repo_enabled "$id"; then
+      log "removing copr: $c"
+      root dnf copr remove -y "$c"
+      repo_enabled "$id" && die "copr still enabled: $c"
+    fi
+    ensure_copr_key_absent "$c"
   done
+}
+
+# rpm records a gpg-pubkey's full lowercase fingerprint as %{VERSION}, so its NVR is looked up by that.
+ensure_rpm_key_absent() {
+  local fingerprint="$1" listing nvr
+  gpg_pubkey_installed "$fingerprint" || return 0
+  listing="$(rpm -q gpg-pubkey --qf '%{VERSION} %{NAME}-%{VERSION}-%{RELEASE}\n')" || die "rpm cannot list the trusted gpg keys"
+  nvr="$(awk -v v="$fingerprint" 'tolower($1) == tolower(v) { print $2 }' <<<"$listing")"
+  [[ -n "$nvr" ]] || die "gpg-pubkey with fingerprint $fingerprint is installed but rpm lists no NVR for it"
+  log "removing the retired rpm signing key $nvr"
+  root rpm -e "$nvr"
+  ! gpg_pubkey_installed "$fingerprint" || die "rpm signing key $fingerprint is still installed after rpm -e $nvr"
+}
+
+# Removes a vendor repo vekrona no longer uses: its repo file (REPO_FILE, in $VEKRONA_YUM_REPOS_DIR), the vendored copy of its key
+# (KEY_REPO names it as in VEKRONA_REPO_KEY_FINGERPRINTS) and the key rpm trusts (KEY_FPR), which outlives the repo file.
+ensure_repo_absent() {
+  local repo_file="$1" key_repo="$2" key_fpr="$3"
+  ensure_root_file_absent "$VEKRONA_YUM_REPOS_DIR/$repo_file"
+  ensure_root_file_absent "$VEKRONA_REPO_KEY_DIR/$(repo_key_name "$key_repo")"
+  ensure_rpm_key_absent "$key_fpr"
 }
 
 # Gives a tree installed by root the SELinux labels policy assigns its path (on hosts that have SELinux tools).
@@ -315,6 +421,26 @@ ensure_system_unit_file() {
   if root_file_current "$src" "$dst" 0644; then changed=0; fi
   ensure_root_file "$src" "$dst"
   if [[ $changed -eq 1 ]]; then root systemctl daemon-reload; fi
+}
+
+# Removes the unit file NAME (a unit an earlier install put into /etc/systemd/system and the checkout no longer ships), has
+# systemd forget it and stops it if it still runs from an earlier boot. The unit is stopped after the file is gone, so systemd
+# has no ExecStop left to run: whatever the unit started, such as a loaded nft table, stays until its owner removes it. A unit that
+# had failed stays in systemd's memory as "failed" after its file is gone, so that is cleared last.
+ensure_system_unit_file_absent() {
+  local name="$1" dst="${VEKRONA_SYSTEMD_UNIT_DIR:-/etc/systemd/system}/$1"
+  if ! path_absent "$dst"; then
+    ensure_root_file_absent "$dst"
+    root systemctl daemon-reload
+  fi
+  if unit_is_active "$name"; then
+    log "stopping the removed unit: $name"
+    root systemctl stop "$name"
+  fi
+  if unit_is_failed "$name"; then
+    log "forgetting the failed state of the removed unit: $name"
+    root systemctl reset-failed "$name"
+  fi
 }
 
 # Installs the files NAME... from SRC_DIR into DST_DIR (drop-ins, or a sysconfig file) and, if any of them changed, makes
@@ -710,8 +836,8 @@ ensure_system_unit() {
   done
 }
 
-# unit_state <var> is-active|is-enabled <unit> [systemctl flags]  Stores the state word systemctl prints. Both verbs
-# print the state even when they exit non-zero (is-active: 3 inactive, 4 not found; is-enabled: 1 disabled, masked or
+# unit_state <var> is-active|is-enabled|is-failed <unit> [systemctl flags]  Stores the state word systemctl prints. The verbs
+# print the state even when they exit non-zero (is-failed: 1 for any state but failed, 4 for a unit that is not found; is-active: 3 inactive, 4 not found; is-enabled: 1 disabled, masked or
 # linked, 4 not found; static, alias and indirect exit 0). A unit that has no file at all makes is-enabled print nothing
 # and exit 1 ("Failed to get unit file state"), exactly as an unreachable bus does, so only the unit's LoadState tells them
 # apart: not-found stores "not-found", anything else (or a `show` that fails too) is a systemctl failure. Any other status,
@@ -722,7 +848,7 @@ unit_state() {
   shift 2
   out="$(systemctl "$verb" "$@")" || rc=$?
   case "$verb:$rc" in
-    is-active:0 | is-active:3 | is-active:4 | is-enabled:0 | is-enabled:1 | is-enabled:4) ;;
+    is-active:0 | is-active:3 | is-active:4 | is-enabled:0 | is-enabled:1 | is-enabled:4 | is-failed:0 | is-failed:1 | is-failed:4) ;;
     *) die "systemctl $verb $* failed with status $rc (its stderr is above)" ;;
   esac
   if [[ "$verb:$rc" == is-enabled:1 && -z "$out" ]]; then
@@ -733,9 +859,10 @@ unit_state() {
   printf -v "$var" %s "$out"
 }
 
-# unit_is_active|unit_is_enabled <unit> [systemctl flags, e.g. --user]
+# unit_is_active|unit_is_enabled|unit_is_failed <unit> [systemctl flags, e.g. --user]
 unit_is_active() { local state; unit_state state is-active "$@"; [[ "$state" == active ]]; }
 unit_is_enabled() { local state; unit_state state is-enabled "$@"; [[ "$state" == enabled ]]; }
+unit_is_failed() { local state; unit_state state is-failed "$@"; [[ "$state" == failed ]]; }
 # systemctl show prints a LoadState for any unit name, known or not, so a failing show is systemctl itself failing (an unreachable
 # bus, for one) and dies; as with unit_state, the caller's shell must run this, not a $(...) subshell.
 unit_is_loaded() {
@@ -1591,7 +1718,8 @@ ensure_root_tree_absent() {
 owned_by() { [[ "$(stat -c '%U' "$1" 2>/dev/null)" == "$2" ]]; }
 dir_mode_is() { [[ "$(stat -c '%a' "$1" 2>/dev/null)" == "$2" ]]; }
 
-VEKRONA_REPO_KEY_DIR=/etc/pki/rpm-gpg
+VEKRONA_REPO_KEY_DIR="${VEKRONA_REPO_KEY_DIR:-/etc/pki/rpm-gpg}"
+VEKRONA_YUM_REPOS_DIR="${VEKRONA_YUM_REPOS_DIR:-/etc/yum.repos.d}"
 
 declare -A VEKRONA_REPO_KEY_FINGERPRINTS=(
   [1password]="3FEF9748469ADBE15DA7CA80AC2D62742012EA22"
@@ -1656,16 +1784,15 @@ assert_rpm_signed_by_pinned_key() {
 }
 
 gpg_pubkey_installed() {
-  # rpm records a gpg-pubkey's full fingerprint as %{VERSION}, not the 8-hex short key id.
-  local fingerprint_lower="$1" keys
-  keys="$(rpm -q gpg-pubkey --qf '%{VERSION}\n' 2>/dev/null | tr '[:upper:]' '[:lower:]')" || return 1
-  grep -qx -- "$fingerprint_lower" <<<"$keys"
+  # rpm records a gpg-pubkey's full fingerprint as %{VERSION}, not the 8-hex short key id. rpm -qa exits 0 when no key is installed,
+  # so a failure of rpm is an error (rpm -q exits 1 for that case), and a fingerprint that is not listed is not installed.
+  local fingerprint="$1" keys
+  keys="$(rpm -qa gpg-pubkey --qf '%{VERSION}\n')" || die "rpm cannot list the trusted gpg keys"
+  grep -qxiF -- "$fingerprint" <<<"$keys"
 }
 
 repo_key_in_rpm_keyring() {
-  local repo="$1" fingerprint_lower
-  fingerprint_lower="$(tr '[:upper:]' '[:lower:]' <<<"${VEKRONA_REPO_KEY_FINGERPRINTS[$repo]}")"
-  gpg_pubkey_installed "$fingerprint_lower"
+  gpg_pubkey_installed "${VEKRONA_REPO_KEY_FINGERPRINTS[$1]}"
 }
 
 assert_repo_key_trusted() {
@@ -1675,7 +1802,7 @@ assert_repo_key_trusted() {
 }
 
 ensure_1password_repo_file() {
-  ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" "${VEKRONA_YUM_REPOS_DIR:-/etc/yum.repos.d}/1password.repo"
+  ensure_root_file "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" "$VEKRONA_YUM_REPOS_DIR/1password.repo"
 }
 
 import_pinned_repo_key() {
@@ -2121,7 +2248,7 @@ read_pkg_list() {
   raw="$("$@")"
   out_arr=()
   while IFS= read -r line; do
-    out_arr+=("$line")
+    [[ -z "$line" ]] || out_arr+=("$line")
   done <<< "$raw"
 }
 
@@ -2223,7 +2350,7 @@ links_into_retired_mise_share() { [[ -L "$1" && "$(readlink "$1")" == "$VEKRONA_
 
 # What a Fedora Workstation install carries that vekrona never uses, each a daemon or a listener. dnf takes along what
 # requires them (bluez-cups, libsane-hpaio, sssd-proxy, NetworkManager-bluetooth, ...); ensure_pkg_absent dies if that would
-# be a desktop package. iscsi-initiator-utils stays: libvirt-daemon-kvm requires it, and its sockets start only on use.
+# be a desktop package, and keeps (and reports) the ones that a package the person chose needs. iscsi-initiator-utils stays: libvirt-daemon-kvm requires it, and its sockets start only on use.
 # shellcheck disable=SC2034
 VEKRONA_UNWANTED_PKGS=(
   # Crash reporter: it duplicates vekrona-error, which records every systemd-coredump coredump, and abrt-gui posts an
@@ -2382,13 +2509,13 @@ ensure_webapp_user_js() {
 # also answers from a guess over every installed .desktop file (which depends on XDG_DATA_DIRS, so the answer differs between a
 # systemd service and a login shell with Flatpak exports), and a guess that happens to name DESKTOP now is not a default.
 ensure_default_app() {
-  local desktop="$1" mime current
+  local desktop_file="$1" mime current
   shift
   for mime in "$@"; do
-    log "setting default handler: $mime = $desktop"
-    xdg-mime default "$desktop" "$mime" || die "xdg-mime default failed: $mime"
+    log "setting default handler: $mime = $desktop_file"
+    xdg-mime default "$desktop_file" "$mime" || die "xdg-mime default failed: $mime"
     current="$(xdg-mime query default "$mime")" || die "xdg-mime query failed: $mime"
-    [[ "$current" == "$desktop" ]] || die "default handler not applied: $mime (is $current)"
+    [[ "$current" == "$desktop_file" ]] || die "default handler not applied: $mime (is $current)"
   done
 }
 

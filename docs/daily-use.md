@@ -76,6 +76,17 @@ shell registers its own pairing agent (`blueman` provided the only one): run `bl
 `pair <MAC>`. A Wi-Fi hotspot on the phone is the usual way to share its connection. The machine does
 not print: there is no CUPS. `iscsi-initiator-utils` stays because `libvirt-daemon-kvm` requires it; its sockets start only on use.
 
+Stage 30 never removes a package you chose, for the packages above and for the retired ones (`VEKRONA_RETIRED_PKGS`, same path).
+It treats as chosen what `dnf` records with the install reason `User` (`dnf install`, `dnf mark user`; see them with
+`dnf repoquery --installed --qf '%{name} %{reason}\n'`). `External User` does not count: dnf gives it to any package it has no
+record of, plain dependencies included. The packages on the lists above go even when you installed them. When a package you chose
+needs one of them (directly or through dependencies), stage 30 keeps that package, removes the others, and prints a warning that
+names what holds it; stage 70 prints the same warning instead of failing. The warning repeats on every run until you remove the
+holder, or the unwanted package and the holder together. Packages that only came with the installer's groups (reason `Group`) or as
+dependencies do not count as chosen, and a vekrona desktop package that would be removed along is an error of vekrona, which stops
+the stage. Stage `90b-remove` (run by name) is different: it removes the GNOME and KDE leftovers it lists (`gnome-software`,
+`xdg-desktop-portal-gnome`, `xdg-desktop-portal-kde`, `gnome-remote-desktop`) whatever their install reason.
+
 ### Kernel hardening
 
 Stage `40-system` installs `/etc/sysctl.d/60-vekrona.conf` and `/etc/modprobe.d/vekrona-hardening.conf` ([threat model](threat-model.md)).

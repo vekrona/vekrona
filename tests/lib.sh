@@ -718,6 +718,18 @@ audio_teardown() {
 # included, is expanded while the fake is written.
 write_fake() { cat >"$1" && chmod +x "$1"; }
 
+# Runs the command the way a stage runs it, with errexit on, and leaves its output (stderr included) in $stage_output and its exit
+# status in $stage_status; the call itself never fails. Call it plainly: bash switches errexit off for everything that runs
+# under an `if` or `||`, a function and its command substitutions included, so `if x="$(fn)"` carries on after a `y="$(die)"` in fn
+# where the stage would have ended, and the test would pass for a failure that a stage swallows.
+# shellcheck disable=SC2034 # stage_output and stage_status are this function's results, read by the test scripts that source this file
+run_as_stage() {
+  set +e
+  stage_output="$(set -e; "$@" 2>&1)"
+  stage_status=$?
+  set -e
+}
+
 # Guard: a test process killed by a signal must not drop a coredump on the host, where vekrona-error would record it as a
 # real crash. systemd-coredump honors a core size limit of 0 (its %c), and every process a test starts inherits it.
 ulimit -c 0

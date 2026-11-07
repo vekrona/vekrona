@@ -65,10 +65,10 @@ contains() { [[ "$2" == *"$1"* ]]; }
 not_contains() { [[ "$2" != *"$1"* ]]; }
 file_exists() { [[ -e "$1" ]]; }
 check_default_handler() {
-  local desktop="$1" mime
+  local desktop_file="$1" mime
   shift
   for mime in "$@"; do
-    check assert "$desktop is the default handler of $mime" eq "$(xdg-mime query default "$mime")" "$desktop"
+    check assert "$desktop_file is the default handler of $mime" eq "$(xdg-mime query default "$mime")" "$desktop_file"
   done
 }
 fprintd_sees_reader() { fprintd-list "$VEKRONA_USER" >/dev/null 2>&1; }
@@ -89,6 +89,25 @@ user_unit_not_installed() {
 user_unit_loaded() { unit_is_loaded "$1" --user; }
 # rpm -q exits 1 for an absent package and for a broken rpm database alike, so only its "is not installed" answer counts.
 pkg_absent() { [[ "$(LC_ALL=C rpm -q "$1" 2>&1 || true)" == "package $1 is not installed" ]]; }
+# Stage 30 keeps an unwanted package that a package the person chose needs, and warns. This asks removal_plan the same question
+# about what is still installed of the named packages (a dnf failure ends the stage, as in stage 30), checks that the rest is
+# absent, and warns about the held ones, counting each warning.
+check_pkgs_absent_or_held() {
+  local what="$1" pkg
+  shift
+  local present=() protected
+  local -A held=()
+  for pkg in "$@"; do pkg_absent "$pkg" || present+=("$pkg"); done
+  if [[ ${#present[@]} -gt 0 ]]; then removal_plan held protected "${present[@]}"; fi
+  for pkg in "$@"; do
+    if [[ -n "${held[$pkg]+x}" ]]; then
+      warn_pkg_kept "$pkg" "${held[$pkg]}"
+      warn_count=$((warn_count + 1))
+    else
+      check assert "rpm -q $pkg finds nothing ($what)" pkg_absent "$pkg"
+    fi
+  done
+}
 gdm_absent_or_disabled() { ! pkg_installed gdm || ! unit_enabled gdm; }
 # The package owns at least one .desktop file under /usr/share/applications, and every one of them is on disk.
 pkg_desktop_files_present() {
@@ -347,19 +366,15 @@ if ran 30-packages; then
   done
 
   check assert "package installed: tuned-ppd" pkg_installed tuned-ppd
-  for p in "${VEKRONA_RETIRED_PKGS[@]}"; do
-    check assert "rpm -q $p finds nothing (retired)" pkg_absent "$p"
-  done
+  check_pkgs_absent_or_held retired "${VEKRONA_RETIRED_PKGS[@]}"
   declare -a unwanted_pkgs
   read_pkg_list unwanted_pkgs vekrona_unwanted_pkgs
-  for p in "${unwanted_pkgs[@]}"; do
-    check assert "rpm -q $p finds nothing (unwanted)" pkg_absent "$p"
-  done
+  check_pkgs_absent_or_held unwanted "${unwanted_pkgs[@]}"
   check assert "no XDG autostart app runs without its desktop entry" no_orphaned_autostart_units
   check assert "command -v dms fails" bash -c "! command -v dms"
   check assert "versionlock has no dms" not versionlock_has dms
   check assert "repo not enabled: $VEKRONA_RETIRED_MISE_REPO_ID (retired)" not_repo_enabled "$VEKRONA_RETIRED_MISE_REPO_ID"
-  check assert "rpm keyring lacks the retired mise key" not gpg_pubkey_installed "$(tr '[:upper:]' '[:lower:]' <<<"$VEKRONA_RETIRED_MISE_KEY_FPR")"
+  check assert "rpm keyring lacks the retired mise key" not gpg_pubkey_installed "$VEKRONA_RETIRED_MISE_KEY_FPR"
   for leftover in "${VEKRONA_RETIRED_AGENT_FILES[@]}" "${VEKRONA_RETIRED_AGENT_TREES[@]}"; do
     check assert "retired agent file or tree absent: $leftover" path_absent "$leftover"
   done

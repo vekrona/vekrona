@@ -11,11 +11,9 @@ session_is_sway || die "current session is not Sway (XDG_CURRENT_DESKTOP=${XDG_C
 session_started_by_gdm && die "gdm is still active; reboot into the greetd-started Sway session first"
 [[ "$(systemctl is-enabled greetd 2>/dev/null || true)" == enabled ]] || die "greetd is not enabled; run 90a-switch-dm and reboot first"
 
-BASE_PROTECTED="dnf5,sudo,systemd,systemd-udev,shim-x64,grub2-efi-x64,setup,selinux-policy-targeted"
-
 declare -a desktop_pkgs
 read_pkg_list desktop_pkgs vekrona_desktop_pkgs
-PROTECTED="$BASE_PROTECTED,$(IFS=,; echo "${desktop_pkgs[*]}")"
+PROTECTED="$(dnf_protected "${desktop_pkgs[@]}")"
 
 REMOVE_GLOBS=(
   omedora
@@ -32,6 +30,12 @@ REMOVE_GLOBS=(
   gdm
   'gnome-session*'
   gnome-control-center
+  # Leftovers of the GNOME and KDE groups: vekrona's portals are gtk, wlr and gnome-keyring (sway-portals.conf), the store is
+  # Bazaar, and nothing here shares a desktop by VNC or RDP.
+  gnome-software
+  xdg-desktop-portal-gnome
+  xdg-desktop-portal-kde
+  gnome-remote-desktop
   dunst # vekrona-shell owns org.freedesktop.Notifications; dunst's D-Bus activation file competes with it
 )
 

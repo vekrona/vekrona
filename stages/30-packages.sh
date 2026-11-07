@@ -11,18 +11,6 @@ source "$ROOT/lib/proton.sh"
 # is held until the stage ends.
 update_lock
 
-# rpm records a gpg-pubkey's full lowercase fingerprint as %{VERSION}, so its NVR is looked up by that.
-ensure_rpm_key_absent() {
-  local fingerprint_lower nvr
-  fingerprint_lower="$(tr '[:upper:]' '[:lower:]' <<<"$1")"
-  gpg_pubkey_installed "$fingerprint_lower" || return 0
-  nvr="$(rpm -q gpg-pubkey --qf '%{VERSION} %{NAME}-%{VERSION}-%{RELEASE}\n' | awk -v v="$fingerprint_lower" 'tolower($1) == v { print $2 }')"
-  [[ -n "$nvr" ]] || die "gpg-pubkey with fingerprint $fingerprint_lower is installed but rpm lists no NVR for it"
-  log "removing the retired rpm signing key $nvr"
-  root rpm -e "$nvr"
-  ! gpg_pubkey_installed "$fingerprint_lower" || die "rpm signing key $fingerprint_lower is still installed after rpm -e $nvr"
-}
-
 # Installs the RPM from a root-owned copy whose sha256 is checked here: the RPM is unsigned, so the pin is the only trust anchor,
 # and root installs exactly the bytes checked, which a process of the user could not swap in the download directory.
 install_pinned_rune_rpm() {
