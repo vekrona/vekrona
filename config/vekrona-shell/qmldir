@@ -22,8 +22,9 @@ Battery 1.0 Battery.qml
 TintedIcon 1.0 TintedIcon.qml
 Weather 1.0 Weather.qml
 Sync 1.0 Sync.qml
-SyncRow 1.0 SyncRow.qml
-SyncSection 1.0 SyncSection.qml
+PopoutRow 1.0 PopoutRow.qml
+PopoutColumn 1.0 PopoutColumn.qml
+PopoutSection 1.0 PopoutSection.qml
 Calendar 1.0 Calendar.qml
 MonthGrid 1.0 MonthGrid.qml
 LauncherButton 1.0 LauncherButton.qml

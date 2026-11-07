@@ -1,8 +1,10 @@
 # shellcheck shell=bash
 # Sourced by the Sync scenarios that click through the bar's Sync popout, after tests/lib.sh and lib/bar-widget.sh. Everything
 # is real input: a pointer click on the pill and on the words of the popout (found by OCR), key presses into its text field, and
-# the same on the file chooser of the desktop portal. SYNC_SHOTS_DIR, when set, collects a screenshot of each state a scenario
-# calls snap for.
+# the same on the file chooser of the desktop portal. POPOUT_SHOTS_DIR (words.sh) collects screenshots.
+
+# shellcheck source=words.sh
+source "$(dirname "${BASH_SOURCE[0]}")/words.sh"
 
 # A click on the pill toggles the popout (the first opens it, the second closes it).
 click_sync_pill() {
@@ -26,31 +28,6 @@ open_popout() {
   vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- popout_open
 }
 close_popout() { absent popout_open || click_sync_pill; }
-# Whether a word of the screen matches the regex $1, which is read against one word at a time.
-word_shown() { vekrona-dev see find "$1" >/dev/null; }
-export -f word_shown
-# The pointer rests here after a click on a word of the popout: on the word, its arrow breaks the OCR of the text that the click
-# changes ("Copied", "Pair request sent"), and a rest away from the bar and the popout is where no hover shows.
-POINTER_REST_X=640
-POINTER_REST_Y=400
-# Clicks the first word of the screen that matches the regex $1, once it is there, or with --last the last one (a button whose
-# label is also the first word of the text above it: "Pair with it?", then Pair).
-click_word() {
-  local found last=()
-  if [[ "$1" == --last ]]; then
-    last=(--last)
-    shift
-  fi
-  vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- word_shown "$1"
-  found="$(vekrona-dev see find "${last[@]}" "$1")" || die "the word /$1/ was on screen and is gone"
-  # shellcheck disable=SC2086
-  vekrona-dev click $found
-  vekrona-dev move "$POINTER_REST_X" "$POINTER_REST_Y"
-}
-snap() {
-  [[ -z "${SYNC_SHOTS_DIR:-}" ]] || vekrona-dev shot "$SYNC_SHOTS_DIR/$1.png" >/dev/null
-}
-export -f snap
 
 # The file chooser of the desktop portal ("Share a folder", "Send files"), which vekrona-sync opens after the popout closed.
 chooser_open() {

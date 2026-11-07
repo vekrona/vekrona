@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import "Vekrona"
 
-// A row of the Sync popout that is information with buttons after it, which a BarPill is not: a BarPill is one button
+// A row of a popout that is information with buttons after it, which a BarPill is not: a BarPill is one button
 // all over. The name elides before the buttons give way.
 RowLayout {
     id: root

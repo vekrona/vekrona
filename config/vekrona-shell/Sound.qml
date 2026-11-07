@@ -57,10 +57,7 @@ BarPill {
         open: root.bar.openPopout === popout
         onDismissed: root.bar.openPopout = null
 
-        ColumnLayout {
-            Layout.preferredWidth: 24 * VekronaTheme.space4
-            spacing: 0
-
+        PopoutColumn {
             MediaCard {
                 id: card
                 Layout.fillWidth: true

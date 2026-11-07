@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import "Vekrona"
 
-// A titled block of rows in the Sync popout. The caller hides it with `visible` while it has no rows.
+// A titled block of rows in a popout. The caller hides it with `visible` while it has no rows.
 ColumnLayout {
     id: root
 

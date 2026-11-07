@@ -207,10 +207,7 @@ BarPill {
             }
         }
 
-        ColumnLayout {
-            Layout.preferredWidth: 24 * VekronaTheme.space4
-            spacing: 0
-
+        PopoutColumn {
             Label {
                 visible: root.report.problem !== null || root.report.state === "offline"
                 Layout.fillWidth: true
@@ -221,14 +218,14 @@ BarPill {
                 text: root.report.problem ?? "Syncthing is not reachable"
             }
 
-            SyncSection {
+            PopoutSection {
                 title: "Nearby"
                 visible: root.nearbyHere.length > 0
 
                 Repeater {
                     model: root.nearbyHere
 
-                    SyncRow {
+                    PopoutRow {
                         required property var modelData
 
                         icon: "wifi_tethering"
@@ -243,14 +240,14 @@ BarPill {
                 }
             }
 
-            SyncSection {
+            PopoutSection {
                 title: "New devices"
                 visible: root.report.pendingDevices.length > 0
 
                 Repeater {
                     model: root.report.pendingDevices
 
-                    SyncRow {
+                    PopoutRow {
                         required property var modelData
 
                         icon: "person_add"
@@ -272,14 +269,14 @@ BarPill {
                 }
             }
 
-            SyncSection {
+            PopoutSection {
                 title: "Offered to you"
                 visible: root.report.offers.length > 0
 
                 Repeater {
                     model: root.report.offers
 
-                    SyncRow {
+                    PopoutRow {
                         required property var modelData
 
                         icon: "folder_shared"
@@ -295,7 +292,7 @@ BarPill {
                 }
             }
 
-            SyncSection {
+            PopoutSection {
                 title: "Folders"
                 visible: root.report.folders.length > 0
 
@@ -330,7 +327,7 @@ BarPill {
                 }
             }
 
-            SyncSection {
+            PopoutSection {
                 title: "My devices"
                 visible: root.report.devices.length > 0
 
@@ -343,7 +340,7 @@ BarPill {
                         Layout.fillWidth: true
                         spacing: 0
 
-                        SyncRow {
+                        PopoutRow {
                             icon: "devices"
                             text: modelData.name
                             detail: modelData.connected ? "Online" : "Offline"
@@ -369,7 +366,7 @@ BarPill {
                 }
             }
 
-            SyncSection {
+            PopoutSection {
                 title: "Received"
                 visible: root.report.arrivals.length > 0
 
@@ -484,11 +481,11 @@ BarPill {
                 }
             }
 
-            SyncSection {
+            PopoutSection {
                 title: "New folder"
                 visible: root.sharePath !== ""
 
-                SyncRow {
+                PopoutRow {
                     icon: "folder"
                     text: root.shareName
                 }

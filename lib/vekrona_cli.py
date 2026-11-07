@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -118,3 +119,66 @@ def make_die(prog, script_file, report=True):
         surface_failure(prog, msg, script_file, report)
         sys.exit(1)
     return die
+
+
+PORTAL_NAME = "org.freedesktop.portal.Desktop"
+PORTAL_PATH = "/org/freedesktop/portal/desktop"
+PORTAL_CALL_TIMEOUT_MS = 10000
+PORTAL_RESPONSE_OK = 0
+PORTAL_RESPONSE_CANCELLED = 1
+
+
+class PortalError(Exception):
+    """The file chooser could not be used (python3-gobject or the portal is missing, or the portal broke off)."""
+
+
+def choose_paths(title, directory):
+    """What the user picks in the portal's file chooser: one directory, or any number of files. [] when it is cancelled."""
+    try:
+        import gi
+        gi.require_version("Gio", "2.0")
+        gi.require_version("GLib", "2.0")
+        from gi.repository import Gio, GLib
+    except (ImportError, ValueError) as exc:
+        raise PortalError(f"the file chooser needs python3-gobject: {exc}")
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    token = f"vekrona_{secrets.token_hex(4)}"
+    # The portal answers on a request path it derives from our bus name and token, which is known before the call.
+    request_path = (f"/org/freedesktop/portal/desktop/request/"
+                    f"{bus.get_unique_name().lstrip(':').replace('.', '_')}/{token}")
+    loop = GLib.MainLoop()
+    outcome = {}
+
+    def on_response(connection, sender, path, interface, signal, params, user_data):
+        outcome["code"], results = params.unpack()
+        outcome["uris"] = results.get("uris", [])
+        loop.quit()
+
+    def on_name_owner_changed(connection, sender, path, interface, signal, params, user_data):
+        if not params.unpack()[2]:
+            outcome["error"] = "the desktop portal went away while the file chooser was open"
+            loop.quit()
+
+    bus.signal_subscribe(PORTAL_NAME, "org.freedesktop.portal.Request", "Response", request_path, None,
+                         Gio.DBusSignalFlags.NONE, on_response, None)
+    bus.signal_subscribe("org.freedesktop.DBus", "org.freedesktop.DBus", "NameOwnerChanged", "/org/freedesktop/DBus",
+                         PORTAL_NAME, Gio.DBusSignalFlags.NONE, on_name_owner_changed, None)
+    options = {"handle_token": GLib.Variant("s", token), "directory": GLib.Variant("b", directory),
+               "multiple": GLib.Variant("b", not directory)}
+    try:
+        bus.call_sync(PORTAL_NAME, PORTAL_PATH, "org.freedesktop.portal.FileChooser", "OpenFile",
+                      GLib.Variant("(ssa{sv})", ("", title, options)), GLib.VariantType("(o)"),
+                      Gio.DBusCallFlags.NONE, PORTAL_CALL_TIMEOUT_MS, None)
+    except GLib.Error as exc:
+        raise PortalError(f"cannot open the file chooser: {exc.message}")
+    loop.run()
+    if "error" in outcome:
+        raise PortalError(outcome["error"])
+    if outcome["code"] == PORTAL_RESPONSE_CANCELLED:
+        return []
+    if outcome["code"] != PORTAL_RESPONSE_OK:
+        raise PortalError(f"the file chooser ended with the portal's response {outcome['code']}")
+    paths = [Gio.File.new_for_uri(uri).get_path() for uri in outcome["uris"]]
+    if None in paths:
+        raise PortalError(f"the file chooser returned something that is not a local path: {outcome['uris']}")
+    return paths
