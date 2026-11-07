@@ -110,7 +110,7 @@ flatpak_override_has() {
 ensure_flatpak_override() {
   local app_id="$1" flag shown missing=()
   shift
-  flatpak_installed "$app_id" || { log "flatpak not installed, skipping override: $app_id"; return 0; }
+  flatpak_system_installed "$app_id" || { log "flatpak not installed, skipping override: $app_id"; return 0; }
   shown="$(flatpak override --user --show "$app_id")" || die "cannot read the flatpak override of $app_id"
   for flag in "$@"; do
     flatpak_override_has "$flag" "$shown" || missing+=("$flag")
@@ -132,7 +132,7 @@ ensure_flatpak_override_dropped() {
   local app_id="$1" flag shown stale=0 entry alt owned_re
   local entries=()
   shift
-  flatpak_installed "$app_id" || { log "flatpak not installed, skipping override cleanup: $app_id"; return 0; }
+  flatpak_system_installed "$app_id" || { log "flatpak not installed, skipping override cleanup: $app_id"; return 0; }
   shown="$(flatpak override --user --show "$app_id")" || die "cannot read the flatpak override of $app_id"
   for flag in "$@"; do
     case "$flag" in

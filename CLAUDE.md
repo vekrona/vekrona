@@ -19,6 +19,9 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
   end-to-end encryption, keys stay local).
 - Native, not FOSS: Obsidian (closed source, but it has no web version and works
   on local vault files).
+- Native: Bazaar (`io.github.kolunmi.Bazaar`, the Flathub store for apps the user installs on their own; installing Flatpaks needs
+  the host's Flatpak system helper, so it cannot be a webapp, and it has no web version; it installs system-wide through the system
+  Flathub remote, ships no config and runs no background update unless the user turns on its opt-in `auto-update`).
 - Native, official Proton builds only, one sign-in per app (Proton's SSO is
   web-only): VPN from Proton's signed dnf repo
   (`etc/yum.repos.d/protonvpn-stable.repo`, tray through vekrona-shell's SNI

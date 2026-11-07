@@ -150,7 +150,7 @@ time to catch up before this machine takes the upgrade.
 Updates flow through multiple channels:
 
 - **dnf upgrade** covers all system packages: Fedora, RPM Fusion, COPRs, and vendor repos (1Password, Proton VPN). This is protected by snapper pre/post snapshots created by the actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`), so any dnf transaction is automatically rolled back on failure via `vekrona-rollback`.
-- **flatpak update** covers Flatpak apps: currently Zed, Signal and OBS Studio.
+- **flatpak update** covers the system-wide Flatpak apps: the ones in `VEKRONA_FLATPAKS` (`lib/common.sh`) and the ones you install from Bazaar or `flatpak install flathub`. `vekrona-update` updates the system installation only.
 
 The versionlocked set, applied by the stage that installs each package and
 recorded in `/etc/dnf/versionlock.toml`:

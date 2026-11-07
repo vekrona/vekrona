@@ -388,7 +388,7 @@ if ran 30-packages; then
 
   check assert "flathub flatpak remote present and enabled system-wide" flatpak_remote_system_enabled flathub
   for app_id in "${VEKRONA_FLATPAKS[@]}"; do
-    check assert "$app_id flatpak installed" flatpak_installed "$app_id"
+    check assert "$app_id flatpak installed" flatpak_system_installed "$app_id"
   done
 
   declare -a desktop_pkgs
@@ -726,15 +726,15 @@ if ran 50-user; then
   check assert "qalc resolves (the launcher's /calc)" bash -c "command -v qalc >/dev/null"
 
   for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
-    flatpak_installed "$app_id" || continue
+    flatpak_system_installed "$app_id" || continue
     override="$(flatpak override --user --show "$app_id" 2>/dev/null || true)"
     check assert "flatpak x11 override set: $app_id" contains x11 "$override"
   done
-  if flatpak_installed md.obsidian.Obsidian; then
+  if flatpak_system_installed md.obsidian.Obsidian; then
     override="$(flatpak override --user --show md.obsidian.Obsidian 2>/dev/null || true)"
     check assert "obsidian flatpak keeps its wayland socket" not_contains '!wayland' "$override"
   fi
-  if flatpak_installed org.signal.Signal; then
+  if flatpak_system_installed org.signal.Signal; then
     override="$(flatpak override --user --show org.signal.Signal 2>/dev/null || true)"
     check assert "signal flatpak keeps its key in gnome-keyring" contains SIGNAL_PASSWORD_STORE=gnome-libsecret "$override"
   fi

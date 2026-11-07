@@ -12,6 +12,7 @@ Vekrona installs a curated set of applications via the following channels:
 - **herdr**: COPR `rossetnocpes/herdr` (single-package COPR, upstream Rust builds for f43–rawhide)
 - **Zed**: Flathub Flatpak `dev.zed.Zed` (system-wide install, requires hardware Vulkan driver; Fedora-built RPMs freeze on F44 due to GCC 16/LLVM ABI bug rhbz#2464281, unresolved; updates via `flatpak update`)
 - **Spotify**: Firefox webapp with Widevine (replaces the `com.spotify.Client` Flatpak; downloads the Widevine CDM on first launch)
+- **Bazaar**: Flathub Flatpak `io.github.kolunmi.Bazaar`, the store for GUI apps you install yourself (see [Installing your own software](#installing-your-own-software))
 - **Signal, OBS Studio, Obsidian**: Flathub Flatpaks (system-wide install, `VEKRONA_FLATPAKS`; Obsidian is closed source but has no web version and works on local vault files)
 - **Syncthing**: Fedora repository (the `syncthing` RPM runs as your user service `syncthing.service`; it has no web GUI and no TCP GUI port: its GUI and REST API listen on the unix socket `/run/user/<uid>/syncthing/gui.sock`, which only your user can open, so you need no login)
 - **Proton Mail (with Calendar), Pass and Authenticator**: native apps from Proton's own feeds (see [updates](updates.md))
@@ -20,6 +21,13 @@ Vekrona installs a curated set of applications via the following channels:
 - **Tailscale**: Fedora `updates` repository (no vendor repo needed; `tailscaled` enabled and active, you are operator: `tailscale up` without sudo; shields up and Tailscale SSH off, so nothing on the tailnet can connect in (what this breaks: another node cannot start a Syncthing connection to this one, receive a Taildrop file here, or open a Steam Remote Play session to this machine over the tailnet; connections this machine starts work as before): stage 40 sets them and a `tailscaled` drop-in sets them again at every start, because tailscaled keeps no setting across a restart until the node is logged in; so the first login is `tailscale up --shields-up --ssh=false` (without the flags it refuses, because they differ from the defaults); no tray icon: manage it from the CLI with `tailscale status`, `tailscale up` and `tailscale down`)
 - **btop**: Fedora repository
 - **Non-free codecs**: RPM Fusion (swap `ffmpeg-free` to `ffmpeg`, add freeworld gstreamer plugins, `mesa-va-drivers-freeworld`, openh264 via already-enabled `fedora-cisco-openh264`; VDPAU packages no longer exist in F44)
+
+## Installing your own software
+
+- GUI apps: open Bazaar from the launcher, or run `flatpak install flathub <id>`. Both install system-wide, because vekrona has
+  only the system Flathub remote and `vekrona-update` updates system Flatpaks only; do not use `--user`.
+- Everything else: `sudo dnf install <package>`; `dnf upgrade` keeps it current.
+- Stage 30 keeps an unwanted package that a package you installed depends on, and reports it ([details](#packages-vekrona-removes)).
 
 ## Daily operations
 

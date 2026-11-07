@@ -2261,7 +2261,7 @@ copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 copr_key_repo() { echo "copr-${1/\//-}"; }
 
 # shellcheck disable=SC2034
-VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio md.obsidian.Obsidian)
+VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio md.obsidian.Obsidian io.github.kolunmi.Bazaar)
 
 # shellcheck disable=SC2034
 VEKRONA_X11_FLATPAKS=(org.signal.Signal)
@@ -2405,9 +2405,10 @@ vekrona_versionlock_pkgs() {
   printf '%s\n' "${VEKRONA_VERSIONLOCK_PKGS[@]}" "$wlroots_pkg"
 }
 
-flatpak_installed() {
+# System scope only: vekrona-update updates system flatpaks only, so a user-scope copy must not count as installed.
+flatpak_system_installed() {
   local apps
-  apps="$(flatpak list --app --columns=application 2>/dev/null)" || die "flatpak list failed"
+  apps="$(flatpak list --system --app --columns=application)" || die "flatpak list failed"
   grep -qx -- "$1" <<<"$apps"
 }
 
@@ -2447,10 +2448,10 @@ ensure_flatpak_remote_system() {
 
 ensure_flatpak_app_system() {
   local remote="$1" app_id="$2"
-  flatpak_installed "$app_id" && { log "flatpak app present: $app_id"; return 0; }
+  flatpak_system_installed "$app_id" && { log "flatpak app present: $app_id"; return 0; }
   log "installing flatpak: $app_id"
   root flatpak install --system -y --noninteractive "$remote" "$app_id"
-  flatpak_installed "$app_id" || die "flatpak app not installed: $app_id"
+  flatpak_system_installed "$app_id" || die "flatpak app not installed: $app_id"
 }
 
 # vekrona_token_get <group> <name> [mode]: one value of config/tokens.json. The color group needs a
