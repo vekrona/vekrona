@@ -117,7 +117,29 @@ Read before filing:
 - File at: https://github.com/swaywm/sway/issues
 - Issue title: `session lock: pointer focus is not restored on unlock until the cursor moves (handle_unlock does not rebase the cursor)`
 
-## 9. Other upstream items found in TODO.md
+## 9. Bazaar: an app opened from Bazaar keeps Bazaar's sandbox alive until the app exits
+
+- Project and version: Bazaar 0.9.10 (`io.github.kolunmi.Bazaar`, Flathub; source at https://gitlab.gnome.org/World/bazaar). Seen on the owner's host on 2026-11-07, launching Tor Browser Launcher from Bazaar's "Open" button.
+- Symptom on vekrona: after Bazaar's window closes, its `bwrap` sandbox and a `flatpak-spawn` process stay alive for as long as the launched app runs. Bazaar's GUI and daemon do exit: the daemon logs "Idle timeout reached, closing down" 5 s after the window closes, while `auto-update` is false. Only the idle sandbox and `flatpak-spawn` remain.
+- Root cause as known: the Flathub build starts apps with `flatpak-spawn --host systemd-run --user --pipe flatpak run <ref>` (`src/bz-flatpak-entry.c`, around lines 822-827). The `--pipe` option keeps that `flatpak-spawn` process inside Bazaar's bwrap until the app exits.
+- Minimal reproduction: install Bazaar from Flathub, open an app with its "Open" button, close Bazaar's window, then list the `bwrap` and `flatpak-spawn` processes with `ps`. Only the host run above was seen; the exact steps are unverified.
+- vekrona workaround: start apps from the vekrona launcher instead.
+- Request: launch the app without `--pipe`, for example `systemd-run --user --collect` run detached, so no process has to stay inside Bazaar's sandbox.
+- File at: https://gitlab.gnome.org/World/bazaar (the issue tracker URL is unverified).
+- Issue title: `Apps started from the Open button keep Bazaar's sandbox (bwrap, flatpak-spawn --pipe) alive until the app exits`
+
+## 10. torbrowser-launcher: downloads have no timeout, so an unreachable IPv6 address stalls the version check for minutes
+
+- Project and version: torbrowser-launcher 0.3.9 (Flathub `org.torproject.torbrowser-launcher`; source at https://gitlab.torproject.org/tpo/applications/torbrowser-launcher). The installed Flatpak's package is 0.3.9, and the line numbers and the missing `timeout` below were checked in it on 2026-11-07.
+- Symptom on vekrona: under Proton VPN's app, which blackholed IPv6 into a dummy interface (the app is gone; vekrona-vpn's kill switch rejects instead), the first run sat at "Downloading version check, 0%" for many minutes. Seen 2026-11-07.
+- Root cause as known: the `requests.get` calls have no `timeout` (`torbrowser_launcher/launcher.py` line 554, `common.py` line 238; the package has no `timeout` anywhere). Python connects to the `getaddrinfo` results one at a time, IPv6 first, so on a network that blackholes IPv6 each IPv6 attempt blocks until the kernel gives up on it, and the IPv4 address is tried only after that.
+- Minimal reproduction: unverified, not run. On a network that blackholes IPv6, a `requests.get` to a host with an AAAA record should hang the same way, and `torbrowser-launcher` shows it at the version check.
+- vekrona workaround: none needed on vekrona-vpn, whose kill switch rejects IPv6 that does not use the tunnel, so a client fails over at once.
+- Request: pass a connect timeout to these calls, and/or prefer happy eyeballs or fall back to IPv4 after a timeout.
+- File at: https://gitlab.torproject.org/tpo/applications/torbrowser-launcher (the issue tracker URL is unverified).
+- Issue title: `Downloads have no timeout, and an unreachable IPv6 address stalls the version check for minutes`
+
+## 11. Other upstream items found in TODO.md
 
 Already tracked there with their own next step; listed here so nothing is lost. Not written up further.
 
