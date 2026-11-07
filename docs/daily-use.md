@@ -294,6 +294,21 @@ scb -- %command%
 MangoHud toggle in-game: Shift_R+F12 (`config/mangohud/MangoHud.conf`,
 `toggle_hud=Shift_R+F12`).
 
+## VPN
+
+The bar's VPN icon opens a popout: pick a vendor, then a country (and, where a country has several configurations, one of them).
+Mullvad: enter your account number once, then every country is one click and each connect uses a random relay there. Proton or any
+other provider: download a WireGuard `.conf` from the provider, use Import Proton… or Import other… (only the popout imports), and
+name the country in the file name (`NL-792.conf`) so the list can group it. Off turns the tunnel and the kill switch off.
+
+Settings, VPN in the launcher shows the same connections as one flat list, with Turn the VPN off as its first row: every Mullvad
+country and every imported configuration is a row of its own, and Enter connects. It has no account field and no Import, so while
+Mullvad has no account it lists no Mullvad countries at all; log in from the bar's popout first.
+
+The kill switch is the point: once you connect, anything that does not go through the tunnel is rejected until you press Off, so a
+tunnel that drops shows the blocked icon and stops your programs instead of leaking. The same commands work from a terminal
+(`vekrona-vpn status`, `connect`, `off`). What the kill switch lets through, and the rest: [vpn](vpn.md).
+
 ## Sync
 
 Sync keeps folders the same on all your devices, and sends a file to one of them. It is Syncthing underneath, but there is no web

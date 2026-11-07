@@ -168,6 +168,23 @@ the root-owned copy of `libexec/vekrona-vpn-apply` (`ensure_system_copy`, under 
 A process of yours can therefore do what you can do with the popout: import a configuration, connect, turn the kill switch off.
 [threat-model](threat-model.md#trust-boundaries) says what that means.
 
+## The bar icon
+
+One icon, six states, all in the bar button; a left click opens the popout and a second one closes it.
+
+| Icon | Meaning |
+|---|---|
+| `vpn_key_off` | Off: no tunnel, no kill switch |
+| `pending` | Connecting |
+| `vpn_lock` | Connected: the tunnel is up and the kill switch is armed |
+| `no_encryption` | Not protected: a tunnel is up and the kill switch is off, so traffic can leave around it (a tunnel brought up outside `vekrona-vpn`) |
+| `gpp_bad` | Blocked: the kill switch is armed and there is no tunnel |
+| `shield_question` | Status unknown (never shown as off): no `vekrona-vpn status` has answered yet, the last one failed, or `nmcli monitor` is not running, so changes of the network go unseen |
+
+The popout shows the state, the connection in use, an Off button while the kill switch is armed or a tunnel exists, the tree of vendors, countries and
+configurations, Import buttons, and the Mullvad account field while you are logged out. A country with one configuration connects
+on a click; a Forget button asks first.
+
 ## Commands
 
 All of them are for a terminal as well; a failure exits non-zero with one line on stderr.

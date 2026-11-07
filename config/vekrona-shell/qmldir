@@ -21,6 +21,9 @@ singleton Wireless 1.0 Wireless.qml
 Battery 1.0 Battery.qml
 TintedIcon 1.0 TintedIcon.qml
 Weather 1.0 Weather.qml
+Vpn 1.0 Vpn.qml
+singleton VpnState 1.0 VpnState.qml
+VpnNote 1.0 VpnNote.qml
 Sync 1.0 Sync.qml
 PopoutRow 1.0 PopoutRow.qml
 PopoutColumn 1.0 PopoutColumn.qml

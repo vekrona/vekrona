@@ -8,17 +8,22 @@ usage: bar-widget.py SCREENSHOT.png BAR_HEIGHT ICON_S GROUP_JOIN_PX COMMAND [NAM
   ink NAME    print how much ink the widget's columns hold
   look X      print a hash of the pixels within ICON_S of column X (an icon's centre, as `center` printed it), so that two
               screenshots that show the same icon give the same hash, and one that shows it turned or replaced another
+  pixels X    print the pixels `look` hashes, as hex
+  near X HEX  exit 0 when the pixels within ICON_S of column X are those of HEX (as `pixels` printed them) to within NEAR_LEVELS per
+              channel, 1 when not: the same icon of two screenshots differs by a level or two at its edges (the screenshots are not
+              bit-exact across time), a different icon by far more
   gauge       print the fill of the load widget's two halves as "CPU MEMORY", each 0 to 100
 
 The widgets are named by their place from the right edge, on the bar of the VM, which has no battery: the clock, the
-notification bell, the agent, the sync, the network and the sound icon. The load widget is found by its shape, one frame split by a single line,
+notification bell, the agent, the sync, the VPN, the network and the sound icon. The load widget is found by its shape, one frame split by a single line,
 because the caffeine and tray pictograms may sit left of it. Exits 1 when the bar has fewer widgets than the name needs."""
 import hashlib
 import sys
 
 from bar_widgets import PICTOGRAM, find_widgets, gauge_fills, ink_mass, read_bar
 
-FROM_RIGHT = ["clock", "bell", "agent", "sync", "network", "sound"]
+NEAR_LEVELS = 3
+FROM_RIGHT = ["clock", "bell", "agent", "sync", "vpn", "network", "sound"]
 LOAD = "load"
 
 
@@ -45,10 +50,17 @@ def main():
         x0, x1, _, _ = named_widget(widgets, ink, LOAD)
         print(*gauge_fills(ink, x0, x1))
         return
-    if command == "look":
+    if command in ("look", "pixels", "near"):
         _, rows, channels, _ = read_bar(path, bar_height)
         centre = int(sys.argv[6])
-        print(hashlib.sha1(b"".join(bytes(line[(centre - icon_size) * channels:(centre + icon_size + 1) * channels]) for line in rows)).hexdigest())
+        window = b"".join(bytes(line[(centre - icon_size) * channels:(centre + icon_size + 1) * channels]) for line in rows)
+        if command == "look":
+            print(hashlib.sha1(window).hexdigest())
+        elif command == "pixels":
+            print(window.hex())
+        else:
+            reference = bytes.fromhex(sys.argv[7])
+            sys.exit(0 if len(window) == len(reference) and all(abs(a - b) <= NEAR_LEVELS for a, b in zip(window, reference)) else 1)
         return
     x0, x1, cy, _ = named_widget(widgets, ink, sys.argv[6])
     if command == "center":

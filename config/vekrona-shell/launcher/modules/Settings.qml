@@ -3,7 +3,7 @@ import ".."
 import "../.." as Shell
 import "../../Vekrona"
 
-// Theme, night light, caffeine, Wi-Fi, Bluetooth and its pairing, audio output, the coding agent, keybindings and updates.
+// Theme, night light, caffeine, Wi-Fi, Bluetooth and its pairing, the VPN, audio output, the coding agent, keybindings and updates.
 LauncherModule {
     id: root
 
@@ -11,6 +11,8 @@ LauncherModule {
     property bool nightOn: false
     // The Wi-Fi network a connect was started on, until it connects or fails.
     property var attempt: null
+    // Whether this opening of the launcher asked for the VPN list (see loadVpnListOnce).
+    property bool vpnListLoaded: false
 
     readonly property var audioView: ({
             title: "Audio output",
@@ -32,17 +34,22 @@ LauncherModule {
             title: "Agent tool",
             viewId: "agent"
         })
+    readonly property var vpnView: ({
+            title: "VPN",
+            viewId: "vpn"
+        })
     // Every subview by its viewId, for the host's `launcher settings <viewId>` IPC.
     readonly property var views: ({
             audio: audioView,
             bluetooth: bluetoothView,
             keyboard: keyboardView,
             wifi: wifiView,
-            agent: agentView
+            agent: agentView,
+            vpn: vpnView
         })
     readonly property var settingRows: buildRows()
-    // What the Wi-Fi, Bluetooth, audio and keyboard views show, to tell the host to re-query only when it changes.
-    readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Wireless.scanning, Shell.Wireless.unpairedDevices.map(device => [device.address, device.name, device.pairing]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? "", Shell.Keyboard?.layouts.map(layout => [layout.id, layout.name]) ?? [], Shell.Keyboard?.activeIndex ?? -1])
+    // What the Wi-Fi, Bluetooth, audio, keyboard and VPN views show, to tell the host to re-query only when it changes.
+    readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Wireless.scanning, Shell.Wireless.unpairedDevices.map(device => [device.address, device.name, device.pairing]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? "", Shell.Keyboard?.layouts.map(layout => [layout.id, layout.name]) ?? [], Shell.Keyboard?.activeIndex ?? -1, Shell.VpnState.mullvadLoggedIn, Shell.VpnState.catalog, Shell.VpnState.listFailure])
 
     function setting(key: string, heading: string, icon: string, fields: var): var {
         return Object.assign({
@@ -160,6 +167,17 @@ LauncherModule {
                 }));
             }
         }
+        rows.push(setting("vpn", "VPN", "vpn_lock", {
+            keywords: ["vpn", "wireguard", "mullvad", "proton", "tunnel", "kill switch", "privacy", "connect"],
+            aliases: ["vpn"],
+            actions: [
+                {
+                    id: "open",
+                    label: "Choose connection",
+                    push: root.vpnView
+                }
+            ]
+        }));
         rows.push(setting("audio-output", "Audio output", "speaker", {
             subtitle: Shell.Audio.sink ? Shell.Audio.sink.description : "No output",
             keywords: ["audio", "sound", "output", "speakers", "headphones", "sink", "volume"],
@@ -353,6 +371,70 @@ LauncherModule {
         return rows;
     }
 
+    // The connections of `vekrona-vpn list`, flat: a Mullvad country is one row (none while Mullvad is logged out, as the bar's
+    // popout shows its login field instead), any other vendor's configuration is one, and the first row turns the VPN off. The
+    // bar's popout walks the same tree level by level.
+    function vpnRows(): var {
+        if (Shell.VpnState.listFailure !== "")
+            return [errorRow("list the VPN connections", Shell.VpnState.listFailure)];
+        const rows = [
+            {
+                id: "settings:vpn:off",
+                title: "Turn the VPN off",
+                glyph: "vpn_key_off",
+                kind: "VPN",
+                keywords: ["vpn", "off", "disconnect", "kill switch"],
+                actions: [
+                    {
+                        id: "off",
+                        label: "Turn off",
+                        run: () => root.vpnCommand(["off"], "Turning the VPN off", "The VPN is off")
+                    }
+                ]
+            }
+        ];
+        for (const vendor of Shell.VpnState.catalog) {
+            if (Shell.VpnState.needsLogin(vendor.id))
+                continue;
+            for (const country of vendor.countries) {
+                for (const choice of Shell.VpnState.connectChoices(vendor, country)) {
+                    rows.push({
+                        id: "settings:vpn:" + vendor.id + ":" + choice.key,
+                        title: choice.name,
+                        subtitle: choice.context,
+                        glyph: "vpn_lock",
+                        kind: "VPN connection",
+                        keywords: ["vpn", vendor.label, country.name, country.code],
+                        actions: [
+                            {
+                                id: "connect",
+                                label: "Connect",
+                                run: () => root.vpnCommand(choice.args, "Connecting to " + choice.name, "Connected to " + choice.name)
+                            }
+                        ]
+                    });
+                }
+            }
+        }
+        return rows;
+    }
+
+    // Asks for the list once per opening of the launcher, when the VPN view is first wanted: the list can cost a request to Mullvad,
+    // which opening the launcher for anything else must not make (the view is asked again at every key press).
+    function loadVpnListOnce(): void {
+        if (vpnListLoaded)
+            return;
+        vpnListLoaded = true;
+        Shell.VpnState.loadList();
+    }
+
+    // Runs a vekrona-vpn command and toasts how it ended. Returns false: the launcher stays open to show that.
+    function vpnCommand(args: list<string>, progress: string, done: string): bool {
+        launcher.toast(progress);
+        Shell.VpnState.command(args, stdout => launcher.toast(done), reason => launcher.toast(reason));
+        return false;
+    }
+
     // vekrona-agent list prints "<tool>  installed|not installed  default|-" per tool.
     function agentRows(output: string): var {
         const rows = [];
@@ -452,6 +534,7 @@ LauncherModule {
 
     function opened(): void {
         refresh();
+        vpnListLoaded = false;
     }
 
     function closed(): void {
@@ -475,6 +558,9 @@ LauncherModule {
         case "agent":
             loadAgents(reqId);
             return null;
+        case "vpn":
+            loadVpnListOnce();
+            return vpnRows();
         }
         console.error("Settings: unknown view " + viewId);
         return [];

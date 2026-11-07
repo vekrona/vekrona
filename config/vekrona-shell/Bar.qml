@@ -82,6 +82,10 @@ PanelWindow {
             bar: root
         }
 
+        Vpn {
+            bar: root
+        }
+
         Sync {
             bar: root
         }
