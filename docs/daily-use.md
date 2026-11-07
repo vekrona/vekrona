@@ -9,6 +9,7 @@ Vekrona installs a curated set of applications via the following channels:
 - **1Password + CLI**: vendor RPM repository (`downloads.1password.com/linux/rpm/stable`)
 - **rune**: the default editor (`$EDITOR`; `.md` and text files open in Ghostty); Zed remains for GPU editing. A pinned GitHub release RPM, see [updates](updates.md#rune)
 - **VPN (`vekrona-vpn`)**: WireGuard connections of NetworkManager for Mullvad, Proton or any provider's `.conf`, behind an nftables kill switch that rejects (so programs fail at once) whatever does not leave through the tunnel; no daemon of its own. Proton's own VPN app is not installed. See [VPN](#vpn)
+- **Tor Browser**: Flathub Flatpak `org.torproject.torbrowser-launcher` (system-wide), in a sandbox with no network; it reaches the internet only through the system tor, which runs while the browser does. See [Tor Browser](#tor-browser)
 - **herdr**: COPR `rossetnocpes/herdr` (single-package COPR, upstream Rust builds for f43–rawhide)
 - **Zed**: Flathub Flatpak `dev.zed.Zed` (system-wide install, requires hardware Vulkan driver; Fedora-built RPMs freeze on F44 due to GCC 16/LLVM ABI bug rhbz#2464281, unresolved; updates via `flatpak update`)
 - **Spotify**: Firefox webapp with Widevine (replaces the `com.spotify.Client` Flatpak; downloads the Widevine CDM on first launch)
@@ -308,6 +309,19 @@ Mullvad has no account it lists no Mullvad countries at all; log in from the bar
 The kill switch is the point: once you connect, anything that does not go through the tunnel is rejected until you press Off, so a
 tunnel that drops shows the blocked icon and stops your programs instead of leaking. The same commands work from a terminal
 (`vekrona-vpn status`, `connect`, `off`). What the kill switch lets through, and the rest: [vpn](vpn.md).
+
+## Tor Browser
+
+Start it from the launcher like any app (the entry runs `vekrona-tor-browser run`). The vekrona install puts you in the group
+`vekrona-tor`, which owns tor's socket; log out and in once afterwards, because `vekrona-tor-browser` refuses to run in a login that
+lacks the group and says so. Then run `vekrona-tor-browser install` in a terminal: the Tor Browser Launcher downloads Tor Browser
+over tor and stops without starting it, so no browser ever runs in the install's sandbox. That sandbox has no network either: the
+launcher can only use a TCP proxy, so a relay on the sandbox's own loopback hands its connections to tor's unix socket. The install
+downloads only when Tor Browser is missing or older than the launcher accepts; the browser updates itself afterwards.
+
+tor starts with the browser and stops when the last Tor Browser closes. It does not go through the VPN, and the browser has no
+network of its own, so the VPN being on or off changes nothing for it. The browser has no circuit display and its New Identity
+cannot ask tor for new circuits (it has no control port). Why: [threat-model](threat-model.md#trust-boundaries).
 
 ## Sync
 

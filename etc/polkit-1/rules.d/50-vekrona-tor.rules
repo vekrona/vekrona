@@ -1,0 +1,17 @@
+// An administrator at the machine's own session may start and stop tor.service without a password: vekrona-tor-browser runs tor
+// only while Tor Browser runs, starting it with the browser and stopping it with the last one. Nothing else matches: no other unit
+// and no other verb.
+// The subjects are the ones of 50-vekrona-vpn.rules: a wheel user at the machine's own session, or inside the user manager
+// (user@UID.service), which is where a systemd user service belongs: such a service is in no login session.
+polkit.addRule(function(action, subject) {
+  if (action.id != "org.freedesktop.systemd1.manage-units") {
+    return;
+  }
+  var verb = action.lookup("verb");
+  var atTheMachine = subject.active && subject.local;
+  var inUserManager = /^user@[0-9]+\.service$/.test(subject.system_unit);
+  if (action.lookup("unit") == "tor.service" && (verb == "start" || verb == "stop") && (atTheMachine || inUserManager) &&
+      subject.isInGroup("wheel")) {
+    return polkit.Result.YES;
+  }
+});

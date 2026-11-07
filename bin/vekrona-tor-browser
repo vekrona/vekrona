@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# Tor Browser, whose Flatpak has no network (stage 50) and reaches the system tor through /run/tor-tb/socks. tor runs only while
+# a Tor Browser started by this tool does: it starts tor.service (polkit lets an active local wheel user), runs the Flatpak,
+# and stops tor when the last such Tor Browser has ended.
+#
+#   vekrona-tor-browser run [ARGS]  run Tor Browser; ARGS go to it
+#   vekrona-tor-browser install     download Tor Browser over tor, without starting it
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# shellcheck source=../lib/tor.sh
+source "$ROOT/lib/tor.sh"
+
+APP=org.torproject.torbrowser-launcher
+SETTINGS="$HOME/.var/app/$APP/config/torbrowser/settings.json"
+LOCK_DIR="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set, so there is no place for the lock files}"
+MUTEX_FILE="$LOCK_DIR/vekrona-tor-browser.mutex"
+REFS_FILE="$LOCK_DIR/vekrona-tor-browser.refs"
+# The address the launcher's settings name as its SOCKS proxy. Nothing listens there on the host: the install run starts a relay
+# on the loopback of its own sandbox (lib/vekrona_tor_install.py).
+SOCKS_ADDRESS=127.0.0.1:9050
+
+fail() {
+  echo "vekrona-tor-browser: $*" >&2
+  exit 1
+}
+
+usage() {
+  echo "usage: vekrona-tor-browser run [ARGS] | install" >&2
+  exit 2
+}
+
+# The group applies to the processes of a login, so a user added to it needs a new login.
+require_group() {
+  [[ " $(id -nG) " == *" $VEKRONA_TOR_GROUP "* ]] \
+    || fail "this login is not in the group $VEKRONA_TOR_GROUP, which owns the socket of tor: log out and in again (the install added you to it)"
+}
+
+# tor.service is Type=notify, but tor says it is ready before it opens its listeners: the socket appears about a second later. Waits
+# for it with inotify on its directory; a socket made between the check and the watch is seen by the next round, one second later at
+# the latest (inotifywait exits 2 when its timeout ran out, which is not an error here).
+SOCKET_WAIT_SEC=30
+wait_for_socket() {
+  local deadline=$((SECONDS + SOCKET_WAIT_SEC)) status
+  until [[ -S "$VEKRONA_TOR_SOCKET" ]]; do
+    ((SECONDS < deadline)) || fail "tor.service is up but made no socket at $VEKRONA_TOR_SOCKET within $SOCKET_WAIT_SEC s (journalctl -u tor.service)"
+    status=0
+    inotifywait --quiet --timeout 1 --event create "$VEKRONA_TOR_SOCKET_DIR" >/dev/null || status=$?
+    ((status == 0 || status == 2)) || fail "inotifywait on $VEKRONA_TOR_SOCKET_DIR failed with status $status"
+  done
+}
+
+# Two locks decide when tor stops. Every running instance holds a shared lock on REFS_FILE. MUTEX_FILE serializes "take a
+# reference and start tor" against "drop the reference and stop tor if nobody else holds one", so an instance can never stop the
+# tor that another is just starting.
+start_tor() {
+  flock "$MUTEX_FD"
+  flock --shared "$REFS_FD"
+  systemctl start tor.service
+  wait_for_socket
+  flock --unlock "$MUTEX_FD"
+}
+
+# Stops tor when this instance held the last reference. The exclusive lock, taken on a file description of its own, succeeds only
+# when no instance holds the shared one.
+stop_tor() {
+  flock "$MUTEX_FD"
+  flock --unlock "$REFS_FD"
+  if flock --exclusive --nonblock "$REFS_FILE" true; then systemctl stop tor.service; fi
+  flock --unlock "$MUTEX_FD"
+}
+
+# The launcher starts Tor Browser and ends, so `flatpak run` returns while the browser still runs in the sandbox. Blocks until no
+# instance of the app is left: the cgroup of the sandbox (the scope that Flatpak makes for it) tells when its last process has ended,
+# and the kernel modifies cgroup.events when that flips, which wakes inotifywait. Its cap only re-checks a flip between the check and
+# the watch. A sandbox that ended while this looked at it is gone from the next `flatpak ps`; one that is there and cannot be watched
+# is an error, since a retry would spin.
+WAIT_RECHECK_SEC=60
+wait_for_instances() {
+  local pid cgroup events status
+  while pid="$(flatpak ps --columns=application,pid | awk -v app="$APP" '$1 == app { print $2; exit }')" && [[ -n "$pid" ]]; do
+    cgroup="$(sed -n 's/^0:://p' "/proc/$pid/cgroup" 2>/dev/null)" || true
+    if [[ -z "$cgroup" ]]; then
+      [[ ! -e "/proc/$pid" ]] || fail "cannot read the cgroup of pid $pid, the sandbox of $APP"
+      continue
+    fi
+    events="/sys/fs/cgroup$cgroup/cgroup.events"
+    if [[ ! -r "$events" ]]; then
+      [[ ! -e "/proc/$pid" ]] || fail "cannot read $events, the cgroup of the sandbox of $APP"
+      continue
+    fi
+    if ! grep -qx 'populated 0' "$events"; then
+      status=0
+      inotifywait --quiet --timeout "$WAIT_RECHECK_SEC" --event modify --event delete_self "$events" >/dev/null || status=$?
+      ((status == 0 || status == 2)) || [[ ! -e "$events" ]] || fail "inotifywait on $events failed with status $status"
+    fi
+  done
+}
+
+# Runs `flatpak run ARGS` with tor up around it, and until the sandbox has ended. The Flatpak does not inherit the locks: a process
+# it leaves behind would keep tor running for ever. Bash allocates the file descriptors of the locks.
+run_with_tor() {
+  exec {MUTEX_FD}>"$MUTEX_FILE" {REFS_FD}>"$REFS_FILE"
+  trap stop_tor EXIT
+  trap 'exit 143' HUP INT TERM
+  start_tor
+  flatpak run "$@" {MUTEX_FD}>&- {REFS_FD}>&-
+  wait_for_instances
+}
+
+# Sets the launcher to download over tor through SOCKS_ADDRESS and keeps the other settings it has.
+write_launcher_settings() {
+  local tmp
+  mkdir -p "$(dirname "$SETTINGS")"
+  tmp="$(mktemp "$SETTINGS.XXXXXX")"
+  if [[ -e "$SETTINGS" ]]; then
+    jq --exit-status --arg address "$SOCKS_ADDRESS" '. + {download_over_tor: true, tor_socks_address: $address}' "$SETTINGS" >"$tmp" \
+      || { rm -f "$tmp"; fail "cannot add the tor settings to $SETTINGS (is it a JSON object?)"; }
+  else
+    jq --null-input --arg address "$SOCKS_ADDRESS" '{download_over_tor: true, tor_socks_address: $address}' >"$tmp" \
+      || { rm -f "$tmp"; fail "jq failed writing the launcher settings"; }
+  fi
+  mv -f "$tmp" "$SETTINGS"
+}
+
+case "${1:-}" in
+  run)
+    shift
+    require_group
+    run_with_tor "$APP" "$@"
+    ;;
+  install)
+    (($# == 1)) || usage
+    require_group
+    write_launcher_settings
+    run_with_tor --command=python3 "$APP" -P -c "$(<"$ROOT/lib/vekrona_tor_install.py")" "$SOCKS_ADDRESS"
+    ;;
+  *) usage ;;
+esac

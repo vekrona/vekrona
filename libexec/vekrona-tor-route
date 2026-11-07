@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Runs as root from vekrona-tor-route.service: `up` makes tor's own traffic (and only that) use the main routing table, which
+# the VPN's routes and kill switch do not own; `down` takes the rule away. The rule sits at priority 100, ahead of NetworkManager's
+# WireGuard rules and Tailscale's (5210-5270). The uid is read when `up` runs, so a recreated tor user is followed. Both touch only
+# rules of the shape `uidrange N-N lookup main` at that priority, whatever N is, so the stale rule of a user that was recreated
+# since `up` goes too, and any other rule that sits at 100 stays.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# shellcheck source=../lib/tor.sh
+source "$ROOT/lib/tor.sh"
+PRIORITY=100
+
+fail() {
+  echo "vekrona-tor-route: $*" >&2
+  exit 1
+}
+
+[[ $EUID -eq 0 ]] || fail "must run as root"
+
+# The uid of the first rule of our shape at PRIORITY in the address family FAMILY (-4 or -6); nothing when there is none. A failing
+# `ip` is a failure of the function, not an empty list. Its callers run it as `uid="$(...)" || fail`, where `set -e` is off inside
+# the function, so `|| return` is what carries the failure out.
+own_rule_uid() {
+  local rules
+  rules="$(ip "$1" -o rule show priority "$PRIORITY")" || return 1
+  sed -nE '/^[0-9]+:[[:space:]]+from all uidrange ([0-9]+)-\1 lookup main$/{s//\1/;p;q}' <<<"$rules"
+}
+
+# One `ip rule del` removes one rule, and the kernel keeps duplicates, so it lists again after each delete until none is left.
+delete_own_rules() {
+  local family="$1" uid
+  uid="$(own_rule_uid "$family")" || fail "cannot list the ip rules ($family)"
+  while [[ -n "$uid" ]]; do
+    ip "$family" rule del uidrange "$uid-$uid" lookup main priority "$PRIORITY"
+    uid="$(own_rule_uid "$family")" || fail "cannot list the ip rules ($family)"
+  done
+}
+
+families=(-4)
+# A kernel booted without IPv6 has no -6 rules to manage.
+[[ ! -d /proc/sys/net/ipv6 ]] || families+=(-6)
+
+delete_all_own_rules() {
+  local family
+  for family in "${families[@]}"; do delete_own_rules "$family"; done
+}
+
+# A oneshot unit whose ExecStart failed does not run its ExecStop, so a failed `up` takes back the rules it added before the failure.
+delete_all_own_rules_when_failed() {
+  local status=$?
+  ((status == 0)) || delete_all_own_rules
+}
+
+case "${1:-}" in
+  up)
+    uid="$(id -u "$VEKRONA_TOR_USER")" || fail "no user $VEKRONA_TOR_USER (package tor)"
+    trap delete_all_own_rules_when_failed EXIT
+    for family in "${families[@]}"; do
+      delete_own_rules "$family"
+      ip "$family" rule add uidrange "$uid-$uid" lookup main priority "$PRIORITY"
+    done
+    ;;
+  down) delete_all_own_rules ;;
+  *) fail "usage: vekrona-tor-route up|down" ;;
+esac

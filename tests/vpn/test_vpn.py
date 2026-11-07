@@ -285,6 +285,12 @@ class InstanceTest(unittest.TestCase):
         self.assertEqual(re.findall(r'verb"?\)? == "(\w+)"', code), ["start"])
         self.assertNotIn("tor.service", code)
 
+    def test_the_tor_rule_starts_and_stops_tor_and_nothing_else(self):
+        code = self.rule_code("50-vekrona-tor.rules")
+        self.assertEqual(re.findall(r'"([^"]*\.service)"', code), ["tor.service"])
+        self.assertEqual(re.findall(r'verb == "(\w+)"', code), ["start", "stop"])
+        self.assertNotIn("vekrona-vpn", code)
+
 
 class TimeoutsTest(unittest.TestCase):
     def test_each_wait_contains_the_one_it_waits_for_and_the_unit_allows_what_the_helper_may_take(self):
@@ -295,6 +301,12 @@ class TimeoutsTest(unittest.TestCase):
         self.assertLess(vpn.NM_UP_WAIT_SEC, vpn.COMMAND_TIMEOUT_SEC)
         self.assertLessEqual(vpn.COMMAND_TIMEOUT_SEC, vpn.APPLY_UNIT_TIMEOUT_SEC)
         self.assertLess(vpn.APPLY_UNIT_TIMEOUT_SEC, vpn.APPLY_WAIT_SEC)
+
+
+class TorUserTest(unittest.TestCase):
+    def test_the_tor_user_of_the_shell_scripts_is_the_one_the_kill_switch_exempts(self):
+        names = re.findall(r"^VEKRONA_TOR_USER=(\w+)$", (REPO / "lib/tor.sh").read_text(), re.MULTILINE)
+        self.assertEqual(names, [vpn.TOR_USER])
 
 
 class KillSwitchTest(unittest.TestCase):

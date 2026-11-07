@@ -8,6 +8,8 @@ source "$ROOT/lib/common.sh"
 source "$ROOT/lib/firewall.sh"
 # shellcheck source=../lib/tailscale.sh
 source "$ROOT/lib/tailscale.sh"
+# shellcheck source=../lib/tor.sh
+source "$ROOT/lib/tor.sh"
 # shellcheck source=../lib/geoclue.sh
 source "$ROOT/lib/geoclue.sh"
 # shellcheck source=../lib/vpn.sh
@@ -117,6 +119,20 @@ ensure_system_unit_file "$VEKRONA_ROOT/etc/systemd/system/xremap.service"
 with_scratch_dir install_xremap_path_unit
 ensure_dropins_restarting xremap.service "$VEKRONA_ROOT/config/xremap" /etc/xremap config.yml
 ensure_system_unit --now enabled xremap.path
+
+# tor serves Tor Browser, whose Flatpak has no network of its own and reaches tor through a socket in /run/tor-tb (group
+# vekrona-tor, which the session user joins: a new login applies it). vekrona-tor-browser starts tor with the browser and
+# stops it after, so tor is not enabled at boot. tor_t may create that socket only in a directory labelled tor_var_run_t,
+# and a tmpfiles.d entry for the directory would land in the initramfs, which has no toranon user: libexec/vekrona-tor-prepare
+# makes it when tor starts. The drop-in restarts a running tor; the route unit keeps tor out of the VPN.
+ensure_root_file "$VEKRONA_ROOT/etc/sysusers.d/vekrona-tor.conf" /etc/sysusers.d/vekrona-tor.conf
+root systemd-sysusers /etc/sysusers.d/vekrona-tor.conf
+ensure_user_in_group "$VEKRONA_TOR_GROUP"
+ensure_fcontext tor_var_run_t "$VEKRONA_TOR_SOCKET_DIR(/.*)?"
+ensure_system_unit_file "$VEKRONA_ROOT/etc/systemd/system/vekrona-tor-route.service"
+ensure_dropins_restarting tor.service "$VEKRONA_ROOT/etc/tor/torrc.d" /etc/tor/torrc.d vekrona.conf
+ensure_dropins_restarting tor.service "$VEKRONA_ROOT/etc/systemd/system/tor.service.d" /etc/systemd/system/tor.service.d vekrona.conf
+ensure_system_unit disabled tor.service
 
 # These only reload systemd, except the dispatcher: restarting NetworkManager would drop the network mid-install, and the
 # ordering matters at shutdown; tailscaled gets shields up and ssh off by ensure_tailscale_settings below, and again by the

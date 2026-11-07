@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Tor Browser
+Comment=Browse through Tor, with no network of its own
+Exec=vekrona-tor-browser run %u
+Icon=org.torproject.torbrowser-launcher
+Categories=Network;WebBrowser;Security;
+StartupWMClass=Tor Browser

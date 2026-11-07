@@ -30,6 +30,11 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
   behind an nftables kill switch that rejects instead of dropping (armed before the tunnel
   comes up, removed only by "off"); root work runs as `vekrona-vpn-apply@<op>-<uid>.service`
   (polkit, `docs/vpn.md`); nothing of its own stays resident. There is no Proton VPN app.
+- Native, Flathub launcher: Tor Browser (`org.torproject.torbrowser-launcher`, in
+  `VEKRONA_FLATPAKS`; a browser, not a site, so a webapp profile cannot stand in for it).
+  Its Flatpak has no network, not even for `vekrona-tor-browser install`; it reaches the system tor only through the socket
+  `/run/tor-tb/socks`, and `vekrona-tor-browser` runs tor only while the browser runs. tor
+  bypasses the VPN (`docs/vpn.md`, `docs/threat-model.md`).
 - Native, pinned GitHub RPM: rune (default editor for `$EDITOR`, Markdown and
   plain text; a terminal app, so it needs no webapp sandbox and has no web
   version; sha256-pinned in `lib/common.sh`, bumped by hand, see

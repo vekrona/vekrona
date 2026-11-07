@@ -356,6 +356,35 @@ root_restorecon() { if command -v restorecon >/dev/null; then root restorecon -R
 # Like root_restorecon for the paths given only, not what lies below them.
 root_relabel() { if command -v restorecon >/dev/null; then root restorecon "$@"; fi; }
 
+# Whether the local SELinux rules RULES (the output of semanage fcontext --list --locallist) have a rule for PATTERN (a semanage
+# regex), and, when TYPE is given, one that gives it that type.
+fcontext_has_rule() {
+  local pattern="$1" rules="$2" type="${3:+:$3:}"
+  awk -v pattern="$pattern" -v type="$type" '$1 == pattern && (type == "" || index($0, type)) { found = 1 } END { exit !found }' <<<"$rules"
+}
+
+# Whether the local SELinux policy gives the paths that match PATTERN the type TYPE.
+fcontext_current() {
+  local rules
+  rules="$(root semanage fcontext --list --locallist)" || die "semanage fcontext --list failed"
+  fcontext_has_rule "$2" "$rules" "$1"
+}
+
+# Makes the local SELinux policy give the paths that match PATTERN the type TYPE (restorecon applies it, as does whoever creates
+# the path afterwards), where policy has no rule for them: a daemon's confined domain may create sockets and files only in a
+# directory of its own type.
+ensure_fcontext() {
+  local type="$1" pattern="$2" verb=--add rules
+  command -v semanage >/dev/null || die "semanage (package policycoreutils-python-utils) is missing"
+  rules="$(root semanage fcontext --list --locallist)" || die "semanage fcontext --list failed"
+  fcontext_has_rule "$pattern" "$rules" "$type" && { log "SELinux type $type for $pattern: set"; return 0; }
+  # A local rule of this pattern with another type is modified, not added.
+  if fcontext_has_rule "$pattern" "$rules"; then verb=--modify; fi
+  log "SELinux type $type for $pattern"
+  root semanage fcontext "$verb" --type "$type" "$pattern"
+  fcontext_current "$type" "$pattern" || die "semanage left no $type rule for $pattern"
+}
+
 # True when every path given carries the SELinux label policy assigns it (always true on hosts without SELinux tools).
 root_label_current() {
   local report
@@ -2263,7 +2292,7 @@ copr_id() { echo "copr:copr.fedorainfracloud.org:${1/\//:}"; }
 copr_key_repo() { echo "copr-${1/\//-}"; }
 
 # shellcheck disable=SC2034
-VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio md.obsidian.Obsidian io.github.kolunmi.Bazaar)
+VEKRONA_FLATPAKS=(dev.zed.Zed org.signal.Signal com.obsproject.Studio md.obsidian.Obsidian io.github.kolunmi.Bazaar org.torproject.torbrowser-launcher)
 
 # shellcheck disable=SC2034
 VEKRONA_X11_FLATPAKS=(org.signal.Signal)
@@ -2310,9 +2339,9 @@ VEKRONA_DESKTOP_PKGS=(
   dconf ffmpeg firefox firewalld flatpak gamemode gamescope ghostty
   geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver irqbalance
   jq kanshi khal
-  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 openh264 pipewire pipewire-pulseaudio pipewire-utils playerctl polkit
+  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 openh264 pipewire pipewire-pulseaudio pipewire-utils playerctl polkit policycoreutils-python-utils
   python3 python3-gobject python3-pyyaml python3-vdf qalculate qrencode qt6ct quickshell ripgrep rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
-  sway-systemd swayidle syncthing tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
+  sway-systemd swayidle syncthing tailscale tor tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wireguard-tools wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots
   Thunar thunar-archive-plugin xarchiver imv pavucontrol google-noto-color-emoji-fonts
 )

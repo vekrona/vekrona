@@ -93,7 +93,7 @@ version check, 0%" for ever. A reject makes every such program fall back to IPv4
    may set the mark), and never to the local network, to multicast or to a DNS port (53, and 853 for DNS over TLS or QUIC), so
    MagicDNS forwarding cannot ask the network's resolver outside the tunnel. One leak is left: [Tailscale and DNS](#tailscale-and-dns).
 3. Anything sent out through `vvpn0`.
-4. The `toranon` user's packets, when that user exists as the kill switch is armed.
+4. The `toranon` user's packets, when that user exists as the kill switch is armed ([tor](#tor-and-the-vpn)).
 5. Replies on connections that were opened to this machine, DHCP and DHCPv6, IPv6 neighbour discovery and MLD.
 6. The handshake and the tunnel's encrypted packets: the mark `0xca6c` to the endpoint's address and port only.
 7. The local network (RFC1918, link-local, `fe80::/10`, `fc00::/7`) except DNS: ports 53 and 853 are rejected there, so the
@@ -134,7 +134,8 @@ the root-owned copy of `libexec/vekrona-vpn-apply` (`ensure_system_copy`, under 
 - **Polkit** (`etc/polkit-1/rules.d/50-vekrona-vpn.rules`): a member of `wheel` who is at the machine (an active local session) or
   runs inside the user manager (`user@UID.service`, which is what the shell is) may start an apply unit whose name matches that
   exact pattern (the uid has no leading zero, as the helper parses it, so a job has one name), with no password. No other unit and
-  no other verb matches.
+  no other verb matches. Starting and stopping `tor.service` for the same subjects is the rule of its own,
+  `50-vekrona-tor.rules`: it has nothing to do with the VPN's operations.
 - **The request.** The arguments (a configuration's text, a uuid, a Mullvad relay or device) go in
   `/run/user/<uid>/vekrona-vpn/request.json`, which only you and root can enter. The helper takes it only if it opens without
   following a link, is a regular file owned by the uid in the unit's name, is at most 1 MiB and is JSON of the schema it knows.
@@ -167,6 +168,19 @@ the root-owned copy of `libexec/vekrona-vpn-apply` (`ensure_system_copy`, under 
 
 A process of yours can therefore do what you can do with the popout: import a configuration, connect, turn the kill switch off.
 [threat-model](threat-model.md#trust-boundaries) says what that means.
+
+## Tor and the VPN
+
+tor bypasses the VPN, on purpose, and the VPN does not break it. Tor Browser's circuits leave by the physical interface: your ISP
+sees that you use Tor, and your VPN provider sees none of it. Two pieces do that, both only while tor runs
+([Tor Browser](daily-use.md#tor-browser)):
+
+- `vekrona-tor-route.service` (pulled in by `tor.service`) holds `ip rule uidrange <toranon>-<toranon> lookup main priority 100`
+  (IPv4 and IPv6). It sits ahead of NetworkManager's WireGuard rules and Tailscale's (5210-5270), so tor's own packets use the
+  main routing table, not the tunnel's.
+- The kill switch accepts `meta skuid <toranon's uid>`. The uid is looked up when the kill switch is armed, and the rule is left out
+  when the user does not exist (nft refuses an unknown user name and the whole table would fail to load). If tor is installed while
+  the kill switch is armed, connect again to pick the user up.
 
 ## The bar icon
 

@@ -6,6 +6,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 # shellcheck source=../lib/display-scale.sh
 source "$ROOT/lib/display-scale.sh"
+# shellcheck source=../lib/tor.sh
+source "$ROOT/lib/tor.sh"
 
 # Stage 30 installs the programs that the tools linked below run, so a missing one stops the stage before it changes anything.
 require_desktop_pkgs
@@ -95,10 +97,22 @@ else
   warn "fonts/ missing or empty, skipping font install"
 fi
 
+# Whether the KEY= line of `flatpak override --user --show` output ($3) lists ITEM ($2) among its ;-separated entries.
+override_list_has() {
+  local key="$1" item="$2" shown="$3" line
+  while IFS= read -r line; do
+    [[ "$line" == "$key="* ]] || continue
+    if [[ ";${line#"$key="}" == *";$item;"* ]]; then return 0; fi
+  done <<<"$shown"
+  return 1
+}
+
 # Whether `flatpak override --user --show` output ($2) reflects the override flag $1.
 flatpak_override_has() {
   local flag="$1" shown="$2" name
   case "$flag" in
+    --unshare=*) override_list_has shared "!${flag#--unshare=}" "$shown" ;;
+    --filesystem=*) override_list_has filesystems "${flag#--filesystem=}" "$shown" ;;
     --socket=*) grep -Eq "^sockets=(.*;)?${flag#--socket=};" <<<"$shown" ;;
     --nosocket=*) grep -Eq "^sockets=(.*;)?!${flag#--nosocket=};" <<<"$shown" ;;
     --env=*) grep -qxF "${flag#--env=}" <<<"$shown" ;;
@@ -167,6 +181,14 @@ ensure_flatpak_override_dropped md.obsidian.Obsidian --nosocket=wayland --socket
 # Electron also picks its Wayland backend from XDG_SESSION_TYPE=wayland and exits when the sandbox has no Wayland socket, so name X11.
 ensure_flatpak_override org.signal.Signal --env=SIGNAL_PASSWORD_STORE=gnome-libsecret --env=XDG_SESSION_TYPE=x11
 
+# Tor Browser has no network: its Flatpak reaches the system tor through the socket in /run/tor-tb (stage 40), which
+# vekrona-tor-browser starts tor for. No control port is passed (TOR_PROVIDER=none): the browser only proxies. `install` runs the
+# launcher's download in this sandbox too, with a relay to the same socket on its own loopback. No PulseAudio socket: pipewire-pulse (a process of the user, with the network)
+# lets any client of its socket `load-module module-tunnel-sink server=tcp:IP`, and its module loading has no per-client switch
+# (pulse.allow-module-loading is server-wide, and vekrona's tests load modules), so the socket would be a way around tor.
+ensure_flatpak_override org.torproject.torbrowser-launcher --unshare=network --nosocket=pulseaudio --filesystem="$VEKRONA_TOR_SOCKET_DIR" \
+  --env=TOR_PROVIDER=none --env=TOR_SKIP_LAUNCH=1 --env=TOR_SOCKS_IPC_PATH="$VEKRONA_TOR_SOCKET"
+
 shopt -s nullglob
 firefox_root="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"
 for appdir in "$VEKRONA_ROOT"/config/firefox/webapps/*/; do
@@ -201,6 +223,8 @@ done < <(vekrona_webapp_profile_dirs)
 ensure_symlink "$VEKRONA_ROOT/config/vekrona-lock" "$HOME/.config/quickshell/vekrona-lock"
 
 ensure_symlink "$VEKRONA_ROOT/config/applications/vekrona-rune.desktop" "$HOME/.local/share/applications/vekrona-rune.desktop"
+# Same file id as the Flatpak's entry, so that this one replaces it in every launcher: it starts tor first.
+ensure_symlink "$VEKRONA_ROOT/config/applications/org.torproject.torbrowser-launcher.desktop" "$HOME/.local/share/applications/org.torproject.torbrowser-launcher.desktop"
 ensure_default_app "$VEKRONA_BROWSER_DESKTOP" "${VEKRONA_BROWSER_MIMES[@]}"
 ensure_default_app "$VEKRONA_EDITOR_DESKTOP" "${VEKRONA_EDITOR_MIMES[@]}"
 

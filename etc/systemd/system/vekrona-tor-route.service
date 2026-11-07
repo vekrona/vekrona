@@ -1,0 +1,10 @@
+[Unit]
+Description=Route tor around the VPN
+# Held for as long as tor runs: tor.service requires it, and it stops and restarts with tor.
+PartOf=tor.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/vekrona/libexec/vekrona-tor-route up
+ExecStop=/usr/local/lib/vekrona/libexec/vekrona-tor-route down

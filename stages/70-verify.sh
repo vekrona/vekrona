@@ -30,6 +30,8 @@ source "$ROOT/lib/geoclue.sh"
 source "$ROOT/lib/xremap.sh"
 # shellcheck source=../lib/display-scale.sh
 source "$ROOT/lib/display-scale.sh"
+# shellcheck source=../lib/tor.sh
+source "$ROOT/lib/tor.sh"
 
 [[ "${1:-}" == "--all" ]] && VEKRONA_VERIFY_ALL=1
 VEKRONA_VERIFY_ALL="${VEKRONA_VERIFY_ALL:-0}"
@@ -163,6 +165,19 @@ vekrona_pam_u2f_lines_ok() {
   total="$(count_occurrences "$content" "pam_u2f.so")"
   [[ "$pinned" -eq "$2" && "$total" -eq "$2" ]]
 }
+# tor's effective configuration, every option with its value, one "Option value" line each: all torrc files and tor's defaults
+# file counted, a later line winning over an earlier one for options that take one value. Run as root, because the defaults file
+# names `User toranon` and tor refuses that option from anyone else; warnings and errors go to stderr, where `die` shows them.
+tor_config_dump() {
+  root tor --dump-config full --hush --Log "warn stderr" -f /etc/tor/torrc --defaults-torrc /usr/share/tor/defaults-torrc || die "tor cannot read its configuration"
+}
+# Whether the effective configuration has each line given, or (matching) a line that matches the extended regex.
+tor_config_has() {
+  local dump want
+  dump="$(tor_config_dump)" || return 1
+  for want in "$@"; do grep -qxF "$want" <<<"$dump" || return 1; done
+}
+tor_config_has_matching() { grep -Eq "^$1\$" <<<"$(tor_config_dump)"; }
 # An inactive irqbalance (ConditionCPUs=>1 on a single CPU, or a container) has no command line to check.
 uinput_has_user_acl() { root getfacl -cp /dev/uinput | awk '/^user:[^:]/ { found = 1 } END { exit !found }'; }
 irqbalance_bans_nvme_when_running() {
@@ -501,6 +516,20 @@ if ran 40-system; then
   check assert "xremap.service runs as the xremap user" eq "$(systemctl show xremap.service -p User --value)" xremap
   check assert "xremap.service is active while sway runs" system_unit_active_when_sway_runs xremap.service
 
+  # Tor Browser's tor (stage 40): not enabled, since vekrona-tor-browser runs it only while the browser runs.
+  for file in etc/sysusers.d/vekrona-tor.conf etc/tor/torrc.d/vekrona.conf etc/systemd/system/tor.service.d/vekrona.conf etc/systemd/system/vekrona-tor-route.service; do
+    check assert "/$file matches the checkout" root_files_equal "$VEKRONA_ROOT/$file" "/$file"
+  done
+  check assert "the scripts of tor's drop-in and of the route unit, and the file with the tor user's name, are in the root-owned copy" \
+    test -x "$VEKRONA_SYSTEM_DIR/libexec/vekrona-tor-prepare" -a -x "$VEKRONA_SYSTEM_DIR/libexec/vekrona-tor-route" -a -r "$VEKRONA_SYSTEM_DIR/lib/tor.sh"
+  check assert "tor.service is not enabled (tor runs only while Tor Browser does)" not unit_enabled tor.service
+  check assert "$VEKRONA_USER is in the $VEKRONA_TOR_GROUP group (the socket of tor)" user_in_group "$VEKRONA_USER" "$VEKRONA_TOR_GROUP"
+  check assert "$VEKRONA_USER is not in the $VEKRONA_TOR_USER group (tor's control socket, cookie and data directory)" not user_in_group "$VEKRONA_USER" "$VEKRONA_TOR_USER"
+  check assert "policy labels $VEKRONA_TOR_SOCKET_DIR tor_var_run_t (tor_t may create its socket only there)" fcontext_current tor_var_run_t "$VEKRONA_TOR_SOCKET_DIR(/.*)?"
+  check assert "tor's effective configuration serves the sandbox and keeps its sockets and cookie from the group" \
+    tor_config_has "ControlSocketsGroupWritable 0" "CookieAuthFileGroupReadable 0" "DataDirectoryGroupReadable 0"
+  check assert "tor's effective configuration has the SOCKS socket of the sandbox" tor_config_has_matching "SocksPort unix:$VEKRONA_TOR_SOCKET .*GroupWritable.*"
+
   check assert "tailscaled enabled" unit_enabled tailscaled
   check assert "tailscaled active" unit_active tailscaled
 
@@ -744,6 +773,18 @@ if ran 50-user; then
   if flatpak_system_installed org.signal.Signal; then
     override="$(flatpak override --user --show org.signal.Signal 2>/dev/null || true)"
     check assert "signal flatpak keeps its key in gnome-keyring" contains SIGNAL_PASSWORD_STORE=gnome-libsecret "$override"
+  fi
+
+  if flatpak_system_installed org.torproject.torbrowser-launcher; then
+    override="$(flatpak override --user --show org.torproject.torbrowser-launcher 2>/dev/null || true)"
+    check assert "tor browser flatpak has no network" contains '!network' "$override"
+    check assert "tor browser flatpak has no PulseAudio socket (pipewire-pulse would load a tunnel module for it)" contains '!pulseaudio' "$override"
+    check assert "tor browser flatpak sees the socket directory of tor" contains "$VEKRONA_TOR_SOCKET_DIR;" "$override"
+    for env in TOR_PROVIDER=none TOR_SKIP_LAUNCH=1 TOR_SOCKS_IPC_PATH=$VEKRONA_TOR_SOCKET; do
+      check assert "tor browser flatpak has $env" contains "$env" "$override"
+    done
+    check assert "the Tor Browser launcher entry of vekrona replaces the Flatpak's" \
+      eq "$(readlink -f "$HOME/.local/share/applications/org.torproject.torbrowser-launcher.desktop")" "$(readlink -f "$VEKRONA_ROOT/config/applications/org.torproject.torbrowser-launcher.desktop")"
   fi
 
   firefox_profiles_dir="$(firefox_profile_root)" || die "cannot resolve the Firefox profile root"

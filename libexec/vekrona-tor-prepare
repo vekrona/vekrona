@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Runs as root before tor.service starts (ExecStartPre=+). Makes /run/tor-tb, the directory of the SOCKS socket that Tor Browser's
+# sandbox reaches tor through. tor insists that the directory of a socket it makes belongs to its own primary group (a supplementary
+# one is not enough), so the directory is the tor user's, mode 0750, and an ACL lets the group vekrona-tor (the session user's)
+# search it and gives every socket created in it (default ACL) read and write for that group. The policy labels it tor_var_run_t
+# (stage 40 adds the rule), since tor_t may create a socket only in a directory of that type. /run/tor, where tor puts its control
+# socket and cookie, is the tor user's alone: tor refuses to make the control socket in a directory that others can enter, and
+# torrc.d/vekrona.conf turns the group access to it off. /run is a tmpfs, and a tmpfiles.d entry would end up in the initramfs,
+# which has no toranon user.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# shellcheck source=../lib/tor.sh
+source "$ROOT/lib/tor.sh"
+
+[[ $EUID -eq 0 ]] || { echo "vekrona-tor-prepare: must run as root" >&2; exit 1; }
+
+install -d -o "$VEKRONA_TOR_USER" -g "$VEKRONA_TOR_USER" -m 0700 /run/tor
+install -d -o "$VEKRONA_TOR_USER" -g "$VEKRONA_TOR_USER" -m 0750 "$VEKRONA_TOR_SOCKET_DIR"
+setfacl -m "g:$VEKRONA_TOR_GROUP:rx,d:g:$VEKRONA_TOR_GROUP:rw" "$VEKRONA_TOR_SOCKET_DIR"
+restorecon "$VEKRONA_TOR_SOCKET_DIR"
