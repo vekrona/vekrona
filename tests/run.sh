@@ -35,6 +35,7 @@ run_suite "error pipeline" python3 -B -m unittest discover -v -s tests/errors -p
 run_suite "audio watchdog" python3 -B -m unittest discover -v -s tests/audio -p 'test_*.py'
 run_suite "update pipeline, user side" python3 -B -m unittest discover -v -s tests/updates -p 'test_*.py'
 run_suite "sync" python3 -B -m unittest discover -v -s tests/sync -p 'test_*.py'
+run_suite "vpn" python3 -B -m unittest discover -v -s tests/vpn -p 'test_*.py'
 run_suite "shellcheck" bash tests/test-shellcheck.sh
 run_suite "stage helpers" bash tests/stages/run.sh
 # The add-ons import the real pyanaconda and pykickstart (DBus structures, spoke

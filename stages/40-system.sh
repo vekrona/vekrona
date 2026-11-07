@@ -10,18 +10,27 @@ source "$ROOT/lib/firewall.sh"
 source "$ROOT/lib/tailscale.sh"
 # shellcheck source=../lib/geoclue.sh
 source "$ROOT/lib/geoclue.sh"
+# shellcheck source=../lib/vpn.sh
+source "$ROOT/lib/vpn.sh"
 # shellcheck source=../lib/xremap.sh
 source "$ROOT/lib/xremap.sh"
 
 ensure_system_copy
 root "$VEKRONA_SYSTEM_DIR/libexec/vekrona-update-seed"
 
-for unit in "$VEKRONA_ROOT"/etc/systemd/system/vekrona-update-*; do
+mapfile -t shipped_units < <(shipped_system_unit_files)
+for unit in "${shipped_units[@]}"; do
   ensure_system_unit_file "$unit"
 done
+# The kill switch unit is gone: vekrona-vpn-apply loads and removes the nft table itself. An armed table stays until "vekrona-vpn off",
+# except the one an earlier install's unit loaded, which nothing else would remove.
+retire_vpn_killswitch_unit
 for rule in "$VEKRONA_ROOT"/etc/polkit-1/rules.d/50-vekrona-*.rules; do
   ensure_root_file "$rule" "/etc/polkit-1/rules.d/${rule##*/}"
 done
+# The state file of vekrona-vpn exists from boot (and now: tmpfiles only creates what is missing, an arm's file stays).
+ensure_root_file "$VEKRONA_ROOT/etc/tmpfiles.d/vekrona-vpn.conf" /etc/tmpfiles.d/vekrona-vpn.conf
+root systemd-tmpfiles --create /etc/tmpfiles.d/vekrona-vpn.conf
 ensure_system_unit --now enabled vekrona-update-check.timer
 ensure_system_unit enabled vekrona-update-post.service
 

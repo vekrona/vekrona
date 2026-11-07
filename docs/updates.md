@@ -149,7 +149,7 @@ time to catch up before this machine takes the upgrade.
 
 Updates flow through multiple channels:
 
-- **dnf upgrade** covers all system packages: Fedora, RPM Fusion, COPRs, and vendor repos (1Password, Proton VPN). This is protected by snapper pre/post snapshots created by the actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`), so any dnf transaction is automatically rolled back on failure via `vekrona-rollback`.
+- **dnf upgrade** covers all system packages: Fedora, RPM Fusion, COPRs, and vendor repos (1Password). This is protected by snapper pre/post snapshots created by the actions plugin (`etc/dnf/libdnf5-plugins/actions.d/vekrona-snapper.actions`), so any dnf transaction is automatically rolled back on failure via `vekrona-rollback`.
 - **flatpak update** covers the system-wide Flatpak apps: the ones in `VEKRONA_FLATPAKS` (`lib/common.sh`) and the ones you install from Bazaar or `flatpak install flathub`. `vekrona-update` updates the system installation only.
 
 The versionlocked set, applied by the stage that installs each package and
@@ -207,7 +207,7 @@ name and version must match the feed's before it enters the repo.
 
 Release upgrade procedure:
 
-1. Pin the new release's RPM Fusion keys first. They are keyed by Fedora release (`rpmfusion-{free,nonfree}-fedora-<N>` in `VEKRONA_REPO_KEY_FINGERPRINTS`, see [Coding agents](agents.md)), and stage `00-repos` dies with "no pinned gpg key fingerprint for repo: rpmfusion-free-fedora-<N>" until they exist. Take `RPM-GPG-KEY-rpmfusion-{free,nonfree}-fedora-<N>` from `/usr/share/distribution-gpg-keys/rpmfusion/` (package `distribution-gpg-keys`, from Fedora's signed repos), compare their fingerprints with the ones published at <https://rpmfusion.org/keys>, copy them to `etc/pki/rpm-gpg/`, and add the two fingerprints to `VEKRONA_REPO_KEY_FINGERPRINTS` in one commit (the fingerprints stay the same while RPM Fusion keeps its 2020 keys). Proton VPN needs the same for `protonvpn-fedora-<N>`: take `https://repo.protonvpn.com/fedora-<N>-stable/public_key.asc`, confirm its fingerprint with Proton out of band, vendor it as `RPM-GPG-KEY-protonvpn-fedora-<N>` and pin it (the key differs per release).
+1. Pin the new release's RPM Fusion keys first. They are keyed by Fedora release (`rpmfusion-{free,nonfree}-fedora-<N>` in `VEKRONA_REPO_KEY_FINGERPRINTS`, see [Coding agents](agents.md)), and stage `00-repos` dies with "no pinned gpg key fingerprint for repo: rpmfusion-free-fedora-<N>" until they exist. Take `RPM-GPG-KEY-rpmfusion-{free,nonfree}-fedora-<N>` from `/usr/share/distribution-gpg-keys/rpmfusion/` (package `distribution-gpg-keys`, from Fedora's signed repos), compare their fingerprints with the ones published at <https://rpmfusion.org/keys>, copy them to `etc/pki/rpm-gpg/`, and add the two fingerprints to `VEKRONA_REPO_KEY_FINGERPRINTS` in one commit (the fingerprints stay the same while RPM Fusion keeps its 2020 keys).
 2. Smoke-test the new release in the VM first: point vekrona-dev's `bin/vekrona-dev` at the new release's cloud image (`IMAGE_NAME`, `IMAGE_URL` and `IMAGE_SHA256` from the `Fedora-Cloud-Base-Generic-<N>` entry of Fedora's published checksums), then run `vekrona-dev destroy`, `vekrona-dev up`, `vekrona-dev install`, `vekrona-dev session` and `vekrona-dev checks` (see [Sandbox VM](development.md#sandbox-vm-vekrona-dev)).
 3. Upgrade the host:
 

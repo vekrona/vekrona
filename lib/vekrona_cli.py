@@ -45,19 +45,25 @@ def vekrona_config_dir():
     return os.path.join(xdg_config_home(), "vekrona")
 
 
-def write_json_atomically(path, data):
-    """Replaces path with data as JSON through a temp file and a rename, so a reader never sees half a file."""
+def write_atomically(path, text, *, mode=0o600, directory_mode=0o777):
+    """Replaces path with text through a temp file and a rename, so a reader never sees half a file. The file is born with mode
+    and its directory, when missing, is made with directory_mode (before the umask)."""
     directory, name = os.path.split(path)
-    os.makedirs(directory, exist_ok=True)
+    os.makedirs(directory, mode=directory_mode, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(dir=directory, prefix=f".{name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-            f.write("\n")
+            os.fchmod(f.fileno(), mode)
+            f.write(text)
         os.replace(temp_path, path)
     except BaseException:
         os.unlink(temp_path)
         raise
+
+
+def write_json_atomically(path, data):
+    """Replaces path with data as JSON (see write_atomically)."""
+    write_atomically(path, json.dumps(data) + "\n")
 
 
 def run_quietly(argv):

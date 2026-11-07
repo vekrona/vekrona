@@ -1,0 +1,12 @@
+[Unit]
+Description=vekrona-vpn: %i
+
+[Service]
+Type=oneshot
+# bin/vekrona-vpn starts an instance named <operation>-<uid>; the helper checks the name and reads that user's request.
+# nmcli waits up to 60 s for a tunnel to come up, and an import has up to 32 files to do; APPLY_UNIT_TIMEOUT_SEC in
+# lib/vekrona_vpn.py derives this number from both, and a test holds the two together.
+TimeoutStartSec=160
+NoNewPrivileges=yes
+PrivateTmp=yes
+ExecStart=/usr/local/lib/vekrona/libexec/vekrona-vpn-apply apply %i

@@ -1,0 +1,18 @@
+// An administrator at the machine's own session may run the vekrona-vpn operations, which include turning its kill switch off,
+// without a password: bin/vekrona-vpn starts vekrona-vpn-apply@<operation>-<uid>.service, which checks its own instance name and
+// request. Only an instance of the closed set of operations matches, with a uid written the way the helper parses it (no leading
+// zero, so one job has one name).
+// The shell runs `vekrona-vpn` from a systemd user service, which belongs to no login session, so polkit sees neither a local nor an
+// active subject; their system unit, user@UID.service, stands for them.
+polkit.addRule(function(action, subject) {
+  if (action.id != "org.freedesktop.systemd1.manage-units") {
+    return;
+  }
+  var unit = action.lookup("unit");
+  var applies = /^vekrona-vpn-apply@(import|login|connect|off|forget)-(0|[1-9][0-9]{0,8})\.service$/.test(unit);
+  var atTheMachine = subject.active && subject.local;
+  var inUserManager = /^user@[0-9]+\.service$/.test(subject.system_unit);
+  if (applies && action.lookup("verb") == "start" && (atTheMachine || inUserManager) && subject.isInGroup("wheel")) {
+    return polkit.Result.YES;
+  }
+});

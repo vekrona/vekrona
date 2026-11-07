@@ -23,10 +23,13 @@ native FOSS app from Flathub, listed in `VEKRONA_FLATPAKS`
   the host's Flatpak system helper, so it cannot be a webapp, and it has no web version; it installs system-wide through the system
   Flathub remote, ships no config and runs no background update unless the user turns on its opt-in `auto-update`).
 - Native, official Proton builds only, one sign-in per app (Proton's SSO is
-  web-only): VPN from Proton's signed dnf repo
-  (`etc/yum.repos.d/protonvpn-stable.repo`, tray through vekrona-shell's SNI
-  tray); Mail (with Calendar), Pass and Authenticator are unsigned RPMs from
+  web-only): Mail (with Calendar), Pass and Authenticator are unsigned RPMs from
   Proton's feeds, sha512-checked into a local dnf repo by `vekrona-proton`.
+- Daemon-less VPN: `vekrona-vpn` (`bin/vekrona-vpn`, the bar's VPN popout) drives plain
+  WireGuard connections of NetworkManager for Mullvad, Proton or any provider's `.conf`,
+  behind an nftables kill switch that rejects instead of dropping (armed before the tunnel
+  comes up, removed only by "off"); root work runs as `vekrona-vpn-apply@<op>-<uid>.service`
+  (polkit, `docs/vpn.md`); nothing of its own stays resident. There is no Proton VPN app.
 - Native, pinned GitHub RPM: rune (default editor for `$EDITOR`, Markdown and
   plain text; a terminal app, so it needs no webapp sandbox and has no web
   version; sha256-pinned in `lib/common.sh`, bumped by hand, see
@@ -79,5 +82,5 @@ release `<N>`:
    `baseurl` and `gpgkey` to the new release.
 3. Replace `etc/pki/rpm-gpg/RPM-GPG-KEY-cuda-fedora-<N-1>` with `RPM-GPG-KEY-cuda-fedora-<N>` and its fingerprint under the new name in
    `VEKRONA_REPO_KEY_FINGERPRINTS`.
-4. Vendor `RPM-GPG-KEY-rpmfusion-free-fedora-<N>`, `RPM-GPG-KEY-rpmfusion-nonfree-fedora-<N>` and `RPM-GPG-KEY-protonvpn-fedora-<N>` the
+4. Vendor `RPM-GPG-KEY-rpmfusion-free-fedora-<N>` and `RPM-GPG-KEY-rpmfusion-nonfree-fedora-<N>` the
    same way (stage 00 looks them up by `rpm -E %fedora`, so they must exist before the upgrade).

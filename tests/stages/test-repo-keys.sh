@@ -58,20 +58,3 @@ expect_die "a release RPM modified after signing is rejected" "is not validly si
 UNSIGNED_RPM="$ROOT/tests/fixtures/unsigned/vekrona-unsigned-fixture-1-1.noarch.rpm"
 expect_die "an RPM that carries no signature is rejected" "is not validly signed by the pinned key" \
   assert_rpm_signed_by_pinned_key rpmfusion-free-fedora-44 "$UNSIGNED_RPM"
-
-PROTON_RPM="$ROOT/tests/fixtures/protonvpn/proton-vpn-gnome-desktop-0.11.0-1.fc44.noarch.rpm"
-assert_rpm_signed_by_pinned_key protonvpn-fedora-44 "$PROTON_RPM"
-log "ok: a Proton VPN RPM verifies against the pinned Proton key"
-
-expect_die "a Proton VPN RPM checked against another repo's pinned key is rejected" \
-  "is not validly signed by the pinned key of repo 'rpmfusion-free-fedora-44'" \
-  assert_rpm_signed_by_pinned_key rpmfusion-free-fedora-44 "$PROTON_RPM"
-
-proton_repo_file="$ROOT/etc/yum.repos.d/protonvpn-stable.repo"
-[[ "$(grep '^gpgkey=' "$proton_repo_file")" == "gpgkey=file://$VEKRONA_REPO_KEY_DIR/$(repo_key_name protonvpn-fedora-)\$releasever" ]] \
-  || die "protonvpn-stable.repo does not take its key only from the per-release pinned key file"
-for setting in gpgcheck=1 repo_gpgcheck=1; do
-  grep -qx "$setting" "$proton_repo_file" || die "protonvpn-stable.repo does not set $setting"
-done
-[[ "$(protonvpn_key_repo)" == "protonvpn-fedora-$(rpm -E %fedora)" ]] || die "protonvpn_key_repo does not name the running Fedora release"
-log "ok: the Proton VPN repo file verifies packages and metadata with the per-release pinned key file"

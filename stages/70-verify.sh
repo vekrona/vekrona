@@ -221,8 +221,9 @@ if ran 00-repos; then
   check assert "repo enabled: fedora-cisco-openh264" repo_enabled fedora-cisco-openh264
   check assert "repo enabled: 1password" repo_enabled 1password
   check assert "/etc/yum.repos.d/1password.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" /etc/yum.repos.d/1password.repo
-  check assert "repo enabled: protonvpn-fedora-stable" repo_enabled protonvpn-fedora-stable
-  check assert "/etc/yum.repos.d/protonvpn-stable.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/protonvpn-stable.repo" /etc/yum.repos.d/protonvpn-stable.repo
+  check assert "repo not enabled: $VEKRONA_RETIRED_PROTONVPN_REPO_ID (retired)" not_repo_enabled "$VEKRONA_RETIRED_PROTONVPN_REPO_ID"
+  check assert "/etc/yum.repos.d/$VEKRONA_RETIRED_PROTONVPN_REPO_FILE is absent" path_absent "/etc/yum.repos.d/$VEKRONA_RETIRED_PROTONVPN_REPO_FILE"
+  check assert "rpm keyring lacks the retired Proton VPN key" not gpg_pubkey_installed "$VEKRONA_RETIRED_PROTONVPN_KEY_FPR"
   for pin in "${!VEKRONA_REPO_KEY_FINGERPRINTS[@]}"; do
     [[ "$pin" != "$CUDA_KEY_REPO" ]] || continue # installed by stage 10, on NVIDIA machines only
     check assert_repo_key_trusted "$pin"
@@ -354,9 +355,6 @@ if ran 30-packages; then
   check assert "rune is installed at the pinned $(rune_pinned_nvr)" eq "$(rune_installed_nvr)" "$(rune_pinned_nvr)"
   check assert "rune is on PATH" command -v rune
   check assert "greetd user exists" bash -c "getent passwd greetd >/dev/null"
-  # The proton-vpn-daemon RPM enables and starts its split-tunneling service itself.
-  check assert "me.proton.vpn.split_tunneling.service enabled" unit_enabled me.proton.vpn.split_tunneling
-  check assert "me.proton.vpn.split_tunneling.service active" unit_active me.proton.vpn.split_tunneling
 
   check assert "/etc/yum.repos.d/vekrona-proton.repo matches repo" cmp -s "$VEKRONA_ROOT/etc/yum.repos.d/vekrona-proton.repo" /etc/yum.repos.d/vekrona-proton.repo
   check assert "repo enabled: vekrona-proton" repo_enabled vekrona-proton
@@ -416,9 +414,18 @@ if ran 40-system; then
     check assert "$VEKRONA_SYSTEM_DIR/bin/$script matches the checkout's bin/$script" root_files_equal "$VEKRONA_ROOT/bin/$script" "$VEKRONA_SYSTEM_DIR/bin/$script"
   done
   check assert "$VEKRONA_SYSTEM_DIR/etc/yum.repos.d/1password.repo matches the repo file" root_files_equal "$VEKRONA_ROOT/etc/yum.repos.d/1password.repo" "$VEKRONA_SYSTEM_DIR/etc/yum.repos.d/1password.repo"
-  for unit_file in "$VEKRONA_ROOT"/etc/systemd/system/vekrona-update-*; do
+  mapfile -t shipped_units < <(shipped_system_unit_files)
+  for unit_file in "${shipped_units[@]}"; do
     check assert "/etc/systemd/system/${unit_file##*/} matches the checkout" root_files_equal "$unit_file" "/etc/systemd/system/${unit_file##*/}"
   done
+  check assert "the kill switch unit file of an earlier install is gone" path_absent /etc/systemd/system/vekrona-vpn-killswitch.service
+  check assert "systemd has forgotten the kill switch unit of an earlier install" not unit_is_loaded vekrona-vpn-killswitch.service
+  check assert "the kill switch unit of an earlier install does not run" not unit_is_active vekrona-vpn-killswitch.service
+  check assert "the kill switch unit of an earlier install is not in the failed state" not unit_is_failed vekrona-vpn-killswitch.service
+  check assert "/etc/tmpfiles.d/vekrona-vpn.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/tmpfiles.d/vekrona-vpn.conf" /etc/tmpfiles.d/vekrona-vpn.conf
+  check assert "/run/vekrona-vpn is root:root 0755" eq "$(root stat -c '%U:%G %a' /run/vekrona-vpn)" "root:root 755"
+  check assert "/run/vekrona-vpn/state.json exists, root:root 0644, so the shell can watch it" eq "$(root stat -c '%U:%G %a' /run/vekrona-vpn/state.json)" "root:root 644"
+  check assert "the vekrona-vpn helper is in the root-owned copy" file_executable "$VEKRONA_SYSTEM_DIR/libexec/vekrona-vpn-apply"
   check assert "/etc/claude-code/managed-settings.json matches the repo file" root_files_equal "$VEKRONA_ROOT/etc/claude-code/managed-settings.json" /etc/claude-code/managed-settings.json
   check assert "/etc/claude-code/managed-settings.json is root:root 0644, so no user can loosen the policy" eq "$(root stat -c '%U:%G %a' /etc/claude-code/managed-settings.json)" "root:root 644"
   for rule in "$VEKRONA_ROOT"/etc/polkit-1/rules.d/50-vekrona-*.rules; do

@@ -423,6 +423,12 @@ ensure_system_unit_file() {
   if [[ $changed -eq 1 ]]; then root systemctl daemon-reload; fi
 }
 
+# The unit files of the checkout that stage 40 installs into /etc/systemd/system (the update and VPN helpers of the root side),
+# one path per line; stage 70 checks the same files.
+shipped_system_unit_files() {
+  printf '%s\n' "$VEKRONA_ROOT"/etc/systemd/system/vekrona-update-* "$VEKRONA_ROOT"/etc/systemd/system/vekrona-vpn-*
+}
+
 # Removes the unit file NAME (a unit an earlier install put into /etc/systemd/system and the checkout no longer ships), has
 # systemd forget it and stops it if it still runs from an earlier boot. The unit is stopped after the file is gone, so systemd
 # has no ExecStop left to run: whatever the unit started, such as a loaded nft table, stays until its owner removes it. A unit that
@@ -1728,7 +1734,6 @@ declare -A VEKRONA_REPO_KEY_FINGERPRINTS=(
   [copr-rossetnocpes-herdr]="AE7EDBCE7C2BDB5C784C4726AABC8F89407FB0C7"
   [copr-scottames-ghostty]="2DEFB319CCC3F393B6DAEAB297C83CA0FEB5DAFB"
   [cuda-fedora-44]="129994480EC63D2789BC98E490DFED2F73CD9B30"
-  [protonvpn-fedora-44]="6929133BDE1CE1CFA9EDB286D84176F6844830D4"
   [rpmfusion-free-fedora-44]="E9A491A3DE247814E7E067EAE06F8ECDD651FF2E"
   [rpmfusion-nonfree-fedora-44]="79BDB88F9BBF73910FD4095B6A2AF96194843C65"
 )
@@ -1736,9 +1741,6 @@ declare -A VEKRONA_REPO_KEY_FINGERPRINTS=(
 repo_key_name() { printf 'RPM-GPG-KEY-%s' "$1"; }
 
 rpmfusion_key_repo() { printf 'rpmfusion-%s-fedora-%s' "$1" "$(rpm -E %fedora)"; }
-
-# Proton signs each Fedora release's repo with its own key.
-protonvpn_key_repo() { printf 'protonvpn-fedora-%s' "$(rpm -E %fedora)"; }
 
 rpmfusion_release_url() {
   local section="$1"
@@ -2309,14 +2311,14 @@ VEKRONA_DESKTOP_PKGS=(
   geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver irqbalance
   jq kanshi khal
   libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 openh264 pipewire pipewire-pulseaudio pipewire-utils playerctl polkit
-  proton-vpn-cli proton-vpn-gtk-app python3 python3-gobject python3-pyyaml python3-vdf qalculate qrencode qt6ct quickshell ripgrep rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
+  python3 python3-gobject python3-pyyaml python3-vdf qalculate qrencode qt6ct quickshell ripgrep rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd swayidle syncthing tailscale tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
-  wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots
+  wireguard-tools wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots
   Thunar thunar-archive-plugin xarchiver imv pavucontrol google-noto-color-emoji-fonts
 )
 
 # shellcheck disable=SC2034
-VEKRONA_RETIRED_PKGS=(dms dms-cli dgop danksearch matugen mise)
+VEKRONA_RETIRED_PKGS=(dms dms-cli dgop danksearch matugen mise proton-vpn-gtk-app proton-vpn-cli python3-bcc)
 
 # The user units a past vekrona installed or enabled and no longer ships. tailscale-systray was the tray client of Tailscale (22 MiB
 # resident), which is managed from its CLI; vekrona-app-switch became part of vekrona-shell, and stopping its unit also runs its
@@ -2344,6 +2346,16 @@ VEKRONA_RETIRED_AGENT_LINKS=(/usr/local/bin/codex /usr/local/bin/pi /usr/local/b
 VEKRONA_RETIRED_MISE_REPO_ID=mise-repo
 # shellcheck disable=SC2034
 VEKRONA_RETIRED_MISE_KEY_FPR=24853EC9F655CE80B48E6C3A8B81C9D17413A06D
+
+# Proton's own VPN app and its dnf repo, which vekrona-vpn (plain WireGuard) replaced. python3-bcc was installed for the app's daemon.
+# shellcheck disable=SC2034
+VEKRONA_RETIRED_PROTONVPN_REPO_FILE=protonvpn-stable.repo
+# shellcheck disable=SC2034
+VEKRONA_RETIRED_PROTONVPN_REPO_ID=protonvpn-fedora-stable
+# shellcheck disable=SC2034
+VEKRONA_RETIRED_PROTONVPN_KEY=protonvpn-fedora-44
+# shellcheck disable=SC2034
+VEKRONA_RETIRED_PROTONVPN_KEY_FPR=6929133BDE1CE1CFA9EDB286D84176F6844830D4
 
 # True for a symlink whose stored target lies under mise's share; the target may already dangle, so plain readlink.
 links_into_retired_mise_share() { [[ -L "$1" && "$(readlink "$1")" == "$VEKRONA_RETIRED_MISE_SHARE/"* ]]; }

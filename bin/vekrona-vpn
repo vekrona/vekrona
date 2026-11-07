@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""A VPN from WireGuard configurations, with a kill switch: the commands behind the bar's VPN popout.
+
+Each configuration is a NetworkManager connection named "vekrona-vpn/<vendor>/<country>/<name>", the vendor being mullvad,
+proton or other. Connecting arms the kill switch (an nftables table that rejects whatever does not leave through the tunnel, so
+programs fail at once instead of waiting) and then brings the tunnel up. The kill switch stays until "off": a tunnel that drops
+leaves traffic blocked. The changes that need root run as vekrona-vpn-apply@<operation>-<uid>.service, which this command starts;
+the arguments reach it through a file in /run/user/<uid>/vekrona-vpn/. Commands that change something wait for each other (a lock
+in that directory), and the helper holds a lock of its own, so a connect and an off never interleave. status and list never wait.
+
+  status                 one JSON object on stdout:
+                           {"schema":1,"armed":bool,"tunnel":"down"|"activating"|"up",
+                            "connection":null|{"uuid":str,"vendor":"mullvad"|"proton"|"other","country":"NL","name":str},
+                            "mullvad":{"logged_in":bool}}
+                         connection is the one in use, or the one the kill switch was armed for while its tunnel is down
+  list                   one JSON object on stdout:
+                           {"schema":1,"vendors":[{"id":"mullvad"|"proton"|"other","label":str,
+                             "countries":[{"code":"NL"|"??","name":str,"configs":[{"uuid":str,"name":str}]}]}]}
+                         Mullvad's countries come from its relay list and have "configs":[]: connect to them by country. The
+                         relay list is asked for again when it is older than a day and Mullvad is logged in
+  connect UUID           arm the kill switch and bring that configuration up
+  connect mullvad CC     the same for a random Mullvad relay of the country CC (a code, or a name such as Netherlands). When CC is
+                         not a code, the country it was taken for is printed on stderr: "using Netherlands (NL)"
+  off                    take the tunnel down, then remove the kill switch
+  import --vendor proton|other [FILE...]
+                         add the WireGuard configurations FILE... (no FILE: the file chooser, several .conf files). The country
+                         is the first two-letter token of the file name that is an ISO country ("NL-792.conf"), else "??"
+  forget UUID            remove a configuration
+  mullvad login          read the Mullvad account number from stdin (a terminal prompt without echo), register a WireGuard
+                         device with Mullvad, and keep its key in NetworkManager. The number is never stored
+
+A failure exits non-zero with one line on stderr. The shell also watches /run/vekrona-vpn/state.json (root-owned:
+{"schema":1,"armed":bool,"uuid":str|null}) and runs `status` again when it changes, or when `nmcli monitor` reports a change."""
+import argparse
+import dataclasses
+import json
+import os
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import vekrona_cli
+import vekrona_countries
+import vekrona_mullvad as mullvad
+import vekrona_vpn as vpn
+from vekrona_vpn import VpnError
+
+PROG = "vekrona-vpn"
+IMPORT_TITLE = "Import WireGuard configurations"
+
+
+def relay_cache():
+    return os.path.join(vekrona_cli.xdg_dir("XDG_CACHE_HOME", (".cache",)), "vekrona", "vpn-relays.json")
+
+
+def helper_failure(uid, nonce, exc):
+    """The error for a `systemctl start` that failed with `exc`: the line the helper left for this request when it left one, else
+    systemctl's own error, with what is known of the helper (polkit refused the start, the unit ran into its timeout, ...)."""
+    try:
+        receipt = vpn.receipt_of(uid, nonce)
+    except VpnError as unreadable:
+        return VpnError(f"{exc}; and the helper's message cannot be read: {unreadable}")
+    if receipt is None:
+        return VpnError(f"{exc} (the helper did not serve this request)")
+    return VpnError(receipt.failure or f"{exc} (the helper did serve this request)")
+
+
+def run_apply(op, request):
+    """Do `op` as root: hand over the request (None: the operation takes none), start the unit, wait for it, and check that the
+    helper served this request and not one of an interrupted call whose job this start merged into. Calls queue behind each
+    other. A failure is reported with the line the helper left for this request."""
+    uid = os.getuid()
+    unit = vpn.APPLY_UNIT % vpn.instance_name(op, uid)
+    with vpn.handed_over(uid, request) as nonce:
+        try:
+            vpn.run(["systemctl", "--no-ask-password", "start", unit], timeout=vpn.APPLY_WAIT_SEC)
+        except VpnError as exc:
+            raise helper_failure(uid, nonce, exc)
+        vpn.require_served(uid, op, nonce)
+
+
+def command_status(args):
+    print(json.dumps(vpn.status_json(vpn.nm_connections(), vpn.read_state())))
+
+
+def listed_countries(connections):
+    """Mullvad's countries (code -> name) from the relay list cache, refreshed when it is old and there is an account. A list that
+    cannot be had is said on stderr and leaves Mullvad without countries: the other vendors are still listed."""
+    cache = relay_cache()
+    try:
+        if any(connection.vendor == vpn.VENDOR_MULLVAD for connection in connections):
+            relays = mullvad.current_relays(cache)
+        else:
+            relays = mullvad.read_cache(cache)
+    except VpnError as exc:
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        return mullvad.NO_RELAYS["names"]
+    return (relays or mullvad.NO_RELAYS)["names"]
+
+
+def command_list(args):
+    connections = vpn.nm_connections()
+    print(json.dumps(vpn.list_json(connections, listed_countries(connections))))
+
+
+def mullvad_relay_for(query):
+    relay_list = mullvad.current_relays(relay_cache())
+    try:
+        code, exact = vekrona_countries.resolve_country(query, relay_list["names"])
+    except vekrona_countries.CountryError as exc:
+        raise VpnError(str(exc))
+    if not exact:
+        # A name or a start of one is a guess (swe is Sweden): say which country the tunnel will be in.
+        print(f"{PROG}: using {vekrona_countries.display_name(code, relay_list['names'])} ({code.upper()})", file=sys.stderr)
+    return mullvad.select_relay(relay_list, code)
+
+
+def command_connect(args):
+    if args.target == "mullvad":
+        if args.country is None:
+            raise VpnError("connect mullvad needs a country")
+        run_apply("connect", {"mullvad": dataclasses.asdict(mullvad_relay_for(args.country))})
+    elif args.country is not None:
+        raise VpnError("connect takes a uuid, or mullvad and a country")
+    else:
+        run_apply("connect", {"uuid": vpn.require_uuid(args.target)})
+
+
+def command_off(args):
+    run_apply("off", None)
+
+
+def read_conf_file(path):
+    """{"file", "text"} of a configuration that parses; the error names the file, and never what is in it."""
+    name = os.path.basename(path)
+    with vpn.labelled(name):
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read(vpn.MAX_CONF_BYTES + 1)
+        except OSError as exc:
+            raise VpnError(exc.strerror)
+        text, _ = vpn.check_conf(raw)
+    return {"file": name, "text": text}
+
+
+def command_import(args):
+    try:
+        paths = args.files or vekrona_cli.choose_paths(IMPORT_TITLE, directory=False)
+    except vekrona_cli.PortalError as exc:
+        raise VpnError(str(exc))
+    if paths:
+        run_apply("import", {"vendor": args.vendor, "files": [read_conf_file(path) for path in paths]})
+
+
+def command_forget(args):
+    run_apply("forget", {"uuid": vpn.require_uuid(args.uuid)})
+
+
+def mullvad_uuids():
+    return {connection.uuid for connection in vpn.nm_connections() if connection.vendor == vpn.VENDOR_MULLVAD}
+
+
+def failed_login(exc, token, registered, known):
+    """The error for a login whose helper failed with `exc`: the new device goes back to the account, unless NetworkManager holds
+    its key by now (the helper imports the connection first and deletes the old ones after it): then it stays, since a revoked
+    device behind the newest connection would leave every later Mullvad connect without a handshake. `known` is the Mullvad
+    connections there were before."""
+    try:
+        stored = bool(mullvad_uuids() - known)
+    except VpnError as unlisted:
+        return VpnError(f"{exc}; the new device {registered.name} stays on the account, since it is unknown whether NetworkManager "
+                        f"holds its key: {unlisted}")
+    if stored:
+        return VpnError(f"{exc}; the new device {registered.name} stays on the account, since NetworkManager holds its key")
+    try:
+        mullvad.revoke_device(token, registered.id)
+    except VpnError as revoke:
+        return VpnError(f"{exc}; the new device {registered.name} stays on the account: {revoke}")
+    return exc
+
+
+def command_mullvad_login(args):
+    account = mullvad.read_account()
+    known = mullvad_uuids()
+    relay = mullvad.any_relay(mullvad.current_relays(relay_cache()))
+    token = mullvad.api_token(account)
+    private_key, public_key = mullvad.new_key_pair()
+    registered = mullvad.register_device(token, private_key, public_key)
+    try:
+        run_apply("login", {"device": dataclasses.asdict(registered.device), "relay": dataclasses.asdict(relay)})
+    except VpnError as exc:
+        raise failed_login(exc, token, registered, known)
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog=PROG, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("status").set_defaults(handler=command_status)
+    commands.add_parser("list").set_defaults(handler=command_list)
+    connect = commands.add_parser("connect")
+    connect.add_argument("target")
+    connect.add_argument("country", nargs="?")
+    connect.set_defaults(handler=command_connect)
+    commands.add_parser("off").set_defaults(handler=command_off)
+    import_parser = commands.add_parser("import")
+    import_parser.add_argument("--vendor", required=True, choices=vpn.IMPORT_VENDORS)
+    import_parser.add_argument("files", nargs="*")
+    import_parser.set_defaults(handler=command_import)
+    forget = commands.add_parser("forget")
+    forget.add_argument("uuid")
+    forget.set_defaults(handler=command_forget)
+    mullvad_parser = commands.add_parser("mullvad").add_subparsers(dest="mullvad_command", required=True)
+    mullvad_parser.add_parser("login").set_defaults(handler=command_mullvad_login)
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        args.handler(args)
+    except VpnError as exc:
+        # The shell shows stderr: a failure it started is its own to report.
+        vekrona_cli.exit_unrecorded(PROG, str(exc))
+
+
+if __name__ == "__main__":
+    main()
