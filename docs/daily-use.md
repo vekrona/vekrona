@@ -234,13 +234,27 @@ vekrona-webapp discord
 Snapshots:
 
 ```
-vekrona-snapshot "before X"
+vekrona-snapshot create "before X"
+vekrona-snapshot list
+vekrona-snapshot prune --older-than 30d
+vekrona-snapshot prune --all
 ```
 
-Wraps `sudo snapper -c root create -p -c number -d "<description>"`; the `-p`
-flag prints the new snapshot's number. Every dnf transaction also gets an
-automatic pre/post snapshot pair from the actions plugin installed by stage
-`20-snapper`.
+`create` takes a snapshot of `/` and prints its number (it wraps
+`sudo snapper -c root create -p -c number -d "<description>"`). `list` lists the
+snapshots. `prune --older-than <N>d` deletes the snapshots older than N days (N
+is a positive whole number) and never the running system, snapshot 0. `prune
+--all` deletes every snapshot, and also the subvolumes under `/.snapshots` that
+snapper has lost track of (an interrupted snapshot leaves one, and `snapper
+delete` never removes it); it deletes every rollback point, so
+`vekrona-rollback` has nothing to go back to until the next snapshot. Every dnf
+transaction also gets an automatic pre/post snapshot pair from the actions
+plugin installed by stage `20-snapper`.
+
+A snapshot of `/` leaves out `/tmp`, `/home`, `/var/lib/libvirt/images`,
+`/var/cache` and `/var/log`, which are subvolumes of their own (see
+[Migration](migration.md)), so a snapshot does not pin the old blocks of a VM
+image that keeps being rewritten, nor the package caches and logs.
 
 Rollback:
 

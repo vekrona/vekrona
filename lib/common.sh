@@ -2705,14 +2705,16 @@ ensure_btrfs_subvolume_fstab_entry() {
   root systemctl daemon-reload
 }
 
-# Runs with the top-level volume at TOP. The root of the tmp subvolume is the /tmp the system boots with, so it gets /tmp's owner, mode and
-# SELinux label here, on every run: a fresh subvolume is 0755 and unlabeled, and restorecon through TOP would match the path under TOP, not /tmp.
-ensure_tmp_subvolume_root() {
-  local path="$1/tmp"
-  ensure_btrfs_subvolume tmp "$1"
-  root chown root:root "$path"
-  root chmod 1777 "$path"
-  if selinuxenabled; then root chcon "$(matchpathcon -n /tmp)" "$path"; fi
+# Runs with the top-level volume at TOP. The root of the subvolume NAME is the MOUNTPOINT the system boots with, so it gets OWNER (user:group),
+# MODE and the SELinux label of MOUNTPOINT here, on every run: a fresh subvolume is 0755 and unlabeled, and restorecon through TOP would
+# match the path under TOP, not MOUNTPOINT.
+ensure_top_subvolume_root() {
+  local name="$1" mountpoint="$2" owner="$3" mode="$4" top="$5"
+  local path="$top/$name"
+  ensure_btrfs_subvolume "$name" "$top"
+  root chown "$owner" "$path"
+  root chmod "$mode" "$path"
+  if selinuxenabled; then root chcon "$(matchpathcon -n "$mountpoint")" "$path"; fi
 }
 
 # /tmp lives on disk, in a subvolume of its own: a tmpfs /tmp keeps scratch files in RAM, where zram holds them, and snapper snapshots
@@ -2726,7 +2728,93 @@ ensure_tmp_subvolume() {
   elif mountpoint -q /tmp; then
     [[ "$(findmnt -no FSTYPE /tmp)" == tmpfs ]] || die "/tmp is mounted from something other than tmpfs or the tmp subvolume: $(findmnt -no SOURCE /tmp)"
   fi
-  with_btrfs_top_level ensure_tmp_subvolume_root
+  with_btrfs_top_level ensure_top_subvolume_root tmp /tmp root:root 1777
   ensure_btrfs_subvolume_fstab_entry /tmp tmp nodev,nosuid
   ((on_subvolume)) || log "/tmp subvolume takes effect at the next boot"
+}
+
+# Whether the directory PATH holds anything; one that does not exist holds nothing. root reads it: a directory like
+# /var/lib/libvirt/images is closed to users.
+directory_has_files() {
+  local first
+  [[ -d "$1" ]] || return 1
+  first="$(root find "$1" -mindepth 1 -print -quit)" || die "cannot read the directory $1"
+  [[ -n "$first" ]]
+}
+
+# Whether the directory PATH carries the NOCOW attribute (chattr +C), which libvirt sets on its images directory and journald on the
+# journal's: the files made below it are NOCOW too.
+directory_is_nocow() {
+  local line
+  line="$(root lsattr -d "$1")" || die "cannot read the attributes of $1"
+  [[ "${line%% *}" == *C* ]]
+}
+
+# Runs with the top-level volume at TOP: makes the subvolume NAME (NOCOW like MOUNTPOINT when NOCOW is 1: a reflink from a NOCOW file
+# into a COW one is refused by btrfs, and a NOCOW root keeps the files below it NOCOW) and copies what MOUNTPOINT holds into it. The copy
+# is a reflink where btrfs allows one (instant, no second copy on disk), a full copy where it does not (a NOCOW file below a COW directory,
+# like journald's), and keeps owner, mode and SELinux labels. A subvolume that holds files already is refused, not copied over: it was
+# written on its own since an earlier migration (a rollback to a root from before it brings MOUNTPOINT back with older data), and a copy
+# would overwrite the newer files. A failing copy deletes the subvolume, which holds only a part of the files.
+copy_into_top_subvolume() {
+  local name="$1" mountpoint="$2" owner="$3" mode="$4" nocow="$5" top="$6"
+  local path="$top/$name"
+  if btrfs_subvolume_exists "$path"; then
+    if directory_has_files "$path"; then
+      die "the subvolume $name of the top-level volume already holds files, but $mountpoint is not mounted from it and holds files of its own: one of them is older, so nothing was copied; compare them, then delete one by hand (btrfs subvolume delete) or mount the subvolume"
+    fi
+  else
+    btrfs_create_subvolume "$path"
+  fi
+  if ((nocow)); then root chattr +C "$path" || die "cannot make the subvolume $name NOCOW"; fi
+  log "copying $mountpoint into the subvolume $name"
+  if ! root cp -a --reflink=auto "$mountpoint/." "$path/"; then
+    root btrfs subvolume delete "$path" || die "the copy of $mountpoint failed, and the subvolume $name with its partial copy cannot be deleted: delete it by hand (btrfs subvolume delete)"
+    die "cannot copy $mountpoint into the subvolume $name; the partial copy is deleted and $mountpoint is untouched"
+  fi
+  ensure_top_subvolume_root "$name" "$mountpoint" "$owner" "$mode" "$top"
+}
+
+# Mounts MOUNTPOINT from its fstab line and relabels what is on it. FAILURE says what the person finds when the mount fails.
+mount_fstab_mountpoint() {
+  root mount "$1" || die "cannot mount $1 from its fstab line. $2"
+  if selinuxenabled; then root restorecon -R "$1" || die "cannot relabel the files on $1"; fi
+}
+
+# MOUNTPOINT holds files that must move into the subvolume NAME, then the old directory is deleted, only after the subvolume is mounted.
+# Until then the old directory stays as MOUNTPOINT.vekrona-old, and every failing step stops here with it in place. Each step has its own
+# `|| die` instead of relying on errexit; the call of copy_into_top_subvolume has none, because that would switch errexit off inside it.
+migrate_into_top_subvolume() {
+  local name="$1" mountpoint="$2" owner="$3" mode="$4" extra="$5" old="$2.vekrona-old" nocow=0
+  if directory_is_nocow "$mountpoint"; then nocow=1; fi
+  with_btrfs_top_level copy_into_top_subvolume "$name" "$mountpoint" "$owner" "$mode" "$nocow"
+  ensure_btrfs_subvolume_fstab_entry "$mountpoint" "$name" "$extra"
+  log "moving $mountpoint to $old"
+  root mv "$mountpoint" "$old" || die "cannot move $mountpoint to $old; nothing else was changed"
+  root mkdir "$mountpoint" || die "cannot make $mountpoint; your files are in $old, put them back with: mv $old $mountpoint"
+  mount_fstab_mountpoint "$mountpoint" "Your files are in $old, put them back with: rmdir $mountpoint && mv $old $mountpoint"
+  log "deleting $old"
+  root rm -rf "$old" || die "cannot delete $old; $mountpoint is on the subvolume $name already, delete $old by hand"
+}
+
+# MOUNTPOINT is mounted from the top-level subvolume NAME, which snapper snapshots of root leave out and a rollback does not swap away
+# with root, and which an fstab line (like /home's, with the comma-separated EXTRA_OPTIONS added) mounts at every boot. What
+# MOUNTPOINT holds moves into the subvolume (migrate_into_top_subvolume). Running programs that hold files there are the caller's
+# to stop or to restart. A MOUNTPOINT that is mounted from anything else is refused before anything is made.
+ensure_top_subvolume() {
+  local name="$1" mountpoint="$2" owner="$3" mode="$4" extra="${5:-}"
+  if btrfs_subvolume_mounted "$mountpoint" "$name"; then
+    with_btrfs_top_level ensure_top_subvolume_root "$name" "$mountpoint" "$owner" "$mode"
+    ensure_btrfs_subvolume_fstab_entry "$mountpoint" "$name" "$extra"
+    return 0
+  fi
+  if mountpoint -q "$mountpoint"; then die "$mountpoint is mounted from something other than the $name subvolume: $(findmnt -no SOURCE "$mountpoint")"; fi
+  [[ ! -e "$mountpoint.vekrona-old" ]] || die "$mountpoint.vekrona-old is left from an earlier migration of $mountpoint, resolve manually"
+  if directory_has_files "$mountpoint"; then
+    migrate_into_top_subvolume "$name" "$mountpoint" "$owner" "$mode" "$extra"
+  else
+    with_btrfs_top_level ensure_top_subvolume_root "$name" "$mountpoint" "$owner" "$mode"
+    ensure_btrfs_subvolume_fstab_entry "$mountpoint" "$name" "$extra"
+    mount_fstab_mountpoint "$mountpoint" "Nothing was moved."
+  fi
 }

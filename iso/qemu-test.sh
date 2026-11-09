@@ -251,7 +251,7 @@ verify_output="$(ssh_guest "cd '$REPO_DIR' && ./install.sh --skip 10-nvidia 70" 
 echo "$verify_output" >&2
 
 log "snapshot/rollback round trip"
-snap_n="$(ssh_guest "sudo '$REPO_DIR/bin/vekrona-snapshot' qemu-test | tail -n1")"
+snap_n="$(ssh_guest "sudo '$REPO_DIR/bin/vekrona-snapshot' create qemu-test | tail -n1")"
 [[ "$snap_n" =~ ^[0-9]+$ ]] || fail "vekrona-snapshot did not print a snapshot number: $snap_n"
 ssh_guest "sudo '$REPO_DIR/bin/vekrona-rollback' --yes $snap_n" || fail "vekrona-rollback failed"
 

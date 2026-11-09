@@ -132,6 +132,13 @@ mounted_with_options() {
   options=",$(findmnt -no OPTIONS "$1")," || return 1
   for o in "${@:2}"; do [[ "$options" == *",$o,"* ]] || return 1; done
 }
+# Whether the fstab line of MOUNTPOINT mounts the subvolume SUBVOL, so that the mount survives a reboot.
+fstab_mounts_subvolume() {
+  local line options
+  line="$(fstab_line_for_mountpoint "$1")" || return 1
+  read -r _ _ _ options _ <<<"$line"
+  [[ ",$options," == *",subvol=$2,"* ]]
+}
 # /tmp is not the subvolume yet, and stage 20 left it for the next boot: a running tmpfs, or a plain directory.
 tmp_awaits_subvolume() { ! mountpoint -q /tmp || [[ "$(findmnt -no FSTYPE /tmp)" == tmpfs ]]; }
 # The kernel lists the algorithms of a zram device and brackets the one in use.
@@ -348,6 +355,12 @@ if ran 20-snapper; then
     check assert "/tmp is mounted nodev and nosuid" mounted_with_options /tmp nodev nosuid
     check assert "/tmp mode is 1777" eq "$(stat -c %a /tmp)" 1777
   fi
+
+  for entry in "libvirt-images /var/lib/libvirt/images" "var-cache /var/cache" "var-log /var/log"; do
+    read -r subvol mountpoint <<<"$entry"
+    check assert "$mountpoint mounted from subvolume $subvol" btrfs_subvolume_mounted "$mountpoint" "$subvol"
+    check assert "fstab mounts $mountpoint from subvolume $subvol" fstab_mounts_subvolume "$mountpoint" "$subvol"
+  done
 fi
 
 if ran 30-packages; then

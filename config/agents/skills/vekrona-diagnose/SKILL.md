@@ -81,7 +81,7 @@ around it here.
 
 ## Before risky changes
 
-Ask the user to take a snapshot first: `vekrona-snapshot "before <what you're about to do>"` (it needs root).
+Ask the user to take a snapshot first: `vekrona-snapshot create "before <what you're about to do>"` (it needs root).
 Every `dnf` transaction already gets its own automatic pre/post pair, but a
 snapshot right before you touch something by hand still gives you one clean
 rollback point, and its description says why, which the automatic ones don't.

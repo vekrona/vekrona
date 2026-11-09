@@ -7,6 +7,6 @@ Type=oneshot
 # nmcli waits up to 60 s for a tunnel to come up, and an import has up to 32 files to do; APPLY_UNIT_TIMEOUT_SEC in
 # lib/vekrona_vpn.py derives this number from both, and a test holds the two together.
 TimeoutStartSec=160
-NoNewPrivileges=yes
+# NoNewPrivileges stays off: the helper runs as root already, and SELinux denies it the exec of nft (init_t to iptables_t) under it.
 PrivateTmp=yes
 ExecStart=/usr/local/lib/vekrona/libexec/vekrona-vpn-apply apply %i

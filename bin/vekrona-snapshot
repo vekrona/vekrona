@@ -5,5 +5,101 @@ ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 # shellcheck source=../lib/common.sh
 source "$ROOT/lib/common.sh"
 
-[[ $# -eq 1 && -n "$1" ]] || refuse "usage: vekrona-snapshot <description>"
-root snapper -c root create -p -c number -d "$1"
+SNAPSHOTS_DIR="${VEKRONA_SNAPSHOTS_DIR:-/.snapshots}"
+
+USAGE='usage:
+  vekrona-snapshot create <description>     take a snapshot of / and print its number
+  vekrona-snapshot list                     list the snapshots
+  vekrona-snapshot prune --older-than <N>d  delete the snapshots older than N days (N is a positive whole number)
+  vekrona-snapshot prune --all              delete every snapshot, and every subvolume snapper lost track of under '"$SNAPSHOTS_DIR"'
+  vekrona-snapshot -h | --help              print this text'
+
+snapper_root() { root snapper -c root "$@"; }
+
+# The snapshots as snapper prints them, one line per snapshot, with the COLUMNS (comma separated) and ISO dates (YYYY-MM-DD HH:MM:SS).
+snapshot_listing() { snapper_root --csvout --no-headers --iso list --columns "$1"; }
+
+# The numbers of every snapshot of the number-only LISTING but 0, which is the running system, on one line.
+all_snapshot_numbers() {
+  local listing="$1" number found=()
+  while IFS= read -r number; do
+    [[ -n "$number" ]] || continue
+    [[ "$number" =~ ^[0-9]+$ ]] || die "snapper printed a snapshot number that is not a number: '$number'"
+    if [[ "$number" != 0 ]]; then found+=("$number"); fi
+  done <<<"$listing"
+  echo "${found[*]}"
+}
+
+# The numbers of the snapshots of the LISTING ("number,date" lines) dated before CUTOFF (YYYY-MM-DD HH:MM:SS) but 0, on one line.
+snapshot_numbers_before() {
+  local cutoff="$1" listing="$2" number date found=()
+  while IFS=, read -r number date; do
+    [[ -n "$number" ]] || continue
+    [[ "$number" =~ ^[0-9]+$ ]] || die "snapper printed a snapshot number that is not a number: '$number'"
+    [[ "$number" != 0 ]] || continue
+    [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]] || die "snapper printed a date that is not YYYY-MM-DD HH:MM:SS for snapshot $number: '$date'"
+    if [[ "$date" < "$cutoff" ]]; then found+=("$number"); fi
+  done <<<"$listing"
+  echo "${found[*]}"
+}
+
+# One snapper call for the whole batch, which returns when btrfs has freed the space.
+delete_snapshots() {
+  if (($# == 0)); then
+    log "no snapshots to delete"
+    return 0
+  fi
+  log "deleting snapshots: $*"
+  snapper_root delete --sync "$@"
+}
+
+# Deletes the subvolumes SNAPSHOTS_DIR/<number>/snapshot that are left once snapper has deleted the snapshots it lists, which are those it
+# does not know (an interrupted create or delete leaves one without its info.xml), and the directory around each. A path that does not
+# match that pattern is not touched.
+delete_orphan_subvolumes() {
+  local found path
+  found="$(root find "$SNAPSHOTS_DIR" -mindepth 2 -maxdepth 2 -name snapshot)" || die "cannot read $SNAPSHOTS_DIR"
+  while IFS= read -r path; do
+    [[ "$path" =~ ^"$SNAPSHOTS_DIR"/[0-9]+/snapshot$ ]] || continue
+    log "deleting the subvolume snapper does not list: $path"
+    root btrfs subvolume delete --commit-after "$path"
+    root rmdir "${path%/snapshot}"
+  done <<<"$found"
+}
+
+case "${1-}" in
+  -h | --help)
+    [[ $# -eq 1 ]] || refuse "$USAGE"
+    echo "$USAGE"
+    ;;
+  create)
+    [[ $# -eq 2 && -n "$2" && "$2" != -* ]] || refuse "$USAGE"
+    snapper_root create -p -c number -d "$2"
+    ;;
+  list)
+    [[ $# -eq 1 ]] || refuse "$USAGE"
+    snapper_root list
+    ;;
+  prune)
+    case "${2-}" in
+      --older-than)
+        [[ $# -eq 3 && "$3" =~ ^[1-9][0-9]*d$ ]] || refuse "$USAGE"
+        cutoff="$(date -d "${3%d} days ago" '+%Y-%m-%d %H:%M:%S')" || die "cannot work out the date ${3%d} days ago"
+        listing="$(snapshot_listing number,date)"
+        line="$(snapshot_numbers_before "$cutoff" "$listing")"
+        read -ra numbers <<<"$line"
+        delete_snapshots "${numbers[@]}"
+        ;;
+      --all)
+        [[ $# -eq 2 ]] || refuse "$USAGE"
+        listing="$(snapshot_listing number)"
+        line="$(all_snapshot_numbers "$listing")"
+        read -ra numbers <<<"$line"
+        delete_snapshots "${numbers[@]}"
+        delete_orphan_subvolumes
+        ;;
+      *) refuse "$USAGE" ;;
+    esac
+    ;;
+  *) refuse "$USAGE" ;;
+esac

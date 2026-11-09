@@ -212,7 +212,7 @@ Release upgrade procedure:
 3. Upgrade the host:
 
 ```
-vekrona-snapshot "before F<N> upgrade"
+vekrona-snapshot create "before F<N> upgrade"
 sudo dnf versionlock clear
 sudo dnf system-upgrade download --releasever=<N>
 sudo dnf system-upgrade reboot
@@ -239,7 +239,7 @@ it by re-running the stage that owns it (`30-packages` for the shell stack,
 `10-nvidia` for the driver):
 
 ```
-vekrona-snapshot "before qt6-qtbase upgrade"
+vekrona-snapshot create "before qt6-qtbase upgrade"
 sudo dnf versionlock delete qt6-qtbase
 sudo dnf upgrade qt6-qtbase
 ./install.sh 30
