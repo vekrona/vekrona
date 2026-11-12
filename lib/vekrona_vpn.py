@@ -40,8 +40,10 @@ INTERFACE = "vvpn0"
 # follows the import gives the connection its id and INTERFACE.
 IMPORT_NAME = "vvpn-import"
 CONF_FILE_NAME = IMPORT_NAME + ".conf"
-# The fwmark of the tunnel's own (encrypted) packets. NetworkManager takes it as a decimal number, nft as hex; both come from here.
+# The fwmark of the tunnel's own (encrypted) packets. NetworkManager and nft both read a number as hex, and nmcli reads even a bare
+# "51820" as hex (0x51820, not 0xca6c), so both get the explicit 0x literal WG_FWMARK_HEX.
 WG_FWMARK = 0xCA6C
+WG_FWMARK_HEX = "0x%x" % WG_FWMARK
 
 ID_PREFIX = "vekrona-vpn/"
 VENDOR_MULLVAD = "mullvad"
@@ -570,7 +572,7 @@ def nm_settings_for(conf: WgConf, full_id: str) -> List[str]:
     packets marked, all DNS through the tunnel, and no IPv6 of its own when the file has none (an IPv6 default route into a tunnel
     that has no IPv6 address is a black hole; without it the kill switch rejects at once)."""
     settings = ["connection.id", full_id, "connection.interface-name", INTERFACE, "connection.autoconnect", "no",
-                "wireguard.peer-routes", "yes", "wireguard.fwmark", str(WG_FWMARK),
+                "wireguard.peer-routes", "yes", "wireguard.fwmark", WG_FWMARK_HEX,
                 "ipv4.dns-priority", "-1", "ipv4.dns-search", "~."]
     if conf.has_ipv6:
         settings += ["ipv6.dns-priority", "-1", "ipv6.dns-search", "~."]
@@ -681,8 +683,8 @@ def output_rules(tor_uid: Optional[int]) -> List[str]:
         "icmpv6 type { mld-listener-report, mld2-listener-report } ip6 daddr %s accept" % LINK_LOCAL_MULTICAST_V6,
         # The handshake and the tunnel's encrypted packets, which carry the fwmark: the one thing that leaves by the physical
         # interface. Any other program that reached the endpoint would be outside the tunnel.
-        "meta mark 0x%x ip daddr . udp dport @endpoint4 accept" % WG_FWMARK,
-        "meta mark 0x%x ip6 daddr . udp dport @endpoint6 accept" % WG_FWMARK,
+        "meta mark %s ip daddr . udp dport @endpoint4 accept" % WG_FWMARK_HEX,
+        "meta mark %s ip6 daddr . udp dport @endpoint6 accept" % WG_FWMARK_HEX,
     ] + _local_network_rules() + [
         # Syncthing's local discovery: a broadcast to the subnet is in LAN_V4, these two are not.
         "udp dport %d ip daddr %s accept" % (SYNCTHING_DISCOVERY_PORT, LIMITED_BROADCAST_V4),

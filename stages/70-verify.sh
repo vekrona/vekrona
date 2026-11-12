@@ -450,6 +450,7 @@ if ran 40-system; then
   check assert "systemd has forgotten the kill switch unit of an earlier install" not unit_is_loaded vekrona-vpn-killswitch.service
   check assert "the kill switch unit of an earlier install does not run" not unit_is_active vekrona-vpn-killswitch.service
   check assert "the kill switch unit of an earlier install is not in the failed state" not unit_is_failed vekrona-vpn-killswitch.service
+  check assert "vekrona-vpn-apply@.service does not set NoNewPrivileges, which makes SELinux deny exec of nft" not root grep -qE '^NoNewPrivileges=yes' /etc/systemd/system/vekrona-vpn-apply@.service
   check assert "/etc/tmpfiles.d/vekrona-vpn.conf matches the checkout" root_files_equal "$VEKRONA_ROOT/etc/tmpfiles.d/vekrona-vpn.conf" /etc/tmpfiles.d/vekrona-vpn.conf
   check assert "/run/vekrona-vpn is root:root 0755" eq "$(root stat -c '%U:%G %a' /run/vekrona-vpn)" "root:root 755"
   check assert "/run/vekrona-vpn/state.json exists, root:root 0644, so the shell can watch it" eq "$(root stat -c '%U:%G %a' /run/vekrona-vpn/state.json)" "root:root 644"

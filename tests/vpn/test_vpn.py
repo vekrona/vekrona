@@ -318,7 +318,8 @@ class KillSwitchTest(unittest.TestCase):
 
     def test_the_mark_the_tunnel_uses_is_the_mark_the_kill_switch_lets_through(self):
         settings = vpn.nm_settings_for(vpn.parse_conf(PROTON_CONF), "vekrona-vpn/proton/NL/x")
-        nm_mark = int(settings[settings.index("wireguard.fwmark") + 1])
+        nm_mark = int(settings[settings.index("wireguard.fwmark") + 1], 16)  # nmcli reads hex, with or without 0x
+        self.assertEqual(nm_mark, vpn.WG_FWMARK)
         nft_marks = re.findall(r"meta mark (0x[0-9a-f]+) ip6? daddr", self.rendered())
         self.assertEqual(len(nft_marks), 2)
         for nft_mark in nft_marks:
@@ -947,7 +948,7 @@ class HelperTest(Sandbox):
         self.assertEqual(settings["connection.interface-name"], vpn.INTERFACE)
         self.assertEqual(settings["connection.autoconnect"], "no")
         self.assertEqual(settings["wireguard.peer-routes"], "yes")
-        self.assertEqual(settings["wireguard.fwmark"], str(vpn.WG_FWMARK))
+        self.assertEqual(int(settings["wireguard.fwmark"], 16), vpn.WG_FWMARK)
         self.assertEqual(settings["ipv4.dns-search"], "~.")
         self.assertEqual(list((self.tmp / "run" / "vekrona-vpn" / "import").iterdir()), [])
         self.assertEqual(self.stubs.called("nmcli", "connection", "delete"), [])
