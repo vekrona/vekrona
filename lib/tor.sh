@@ -12,5 +12,5 @@ VEKRONA_TOR_USER=toranon
 VEKRONA_TOR_GROUP=vekrona-tor
 # The directory of the SOCKS socket (made by libexec/vekrona-tor-prepare when tor starts) and the socket in it. Tor Browser's
 # sandbox binds the directory whole, so a tor restart's new socket is still seen.
-VEKRONA_TOR_SOCKET_DIR=/run/tor-tb
+VEKRONA_TOR_SOCKET_DIR=/run/vekrona-tor
 VEKRONA_TOR_SOCKET="$VEKRONA_TOR_SOCKET_DIR/socks"

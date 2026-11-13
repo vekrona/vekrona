@@ -139,6 +139,17 @@ Read before filing:
 - File at: https://gitlab.torproject.org/tpo/applications/torbrowser-launcher (the issue tracker URL is unverified).
 - Issue title: `Downloads have no timeout, and an unreachable IPv6 address stalls the version check for minutes`
 
+## 10b. torbrowser-launcher: a download thread is destroyed while it still runs, so Qt aborts the first run
+
+- Project and version: torbrowser-launcher 0.3.9 with PySide6 (Flathub `org.torproject.torbrowser-launcher`, Python 3.13 in the Flatpak; `DownloadThread`, `VerifyThread` and `ExtractThread` in `torbrowser_launcher/launcher.py` are `QtCore.QThread` subclasses). The Qt version of the Flatpak runtime is unverified.
+- Symptom on vekrona: on the host, two first runs of the launcher aborted with SIGABRT during the download: pid 2676667 at 00:42:57 on 2026-11-07, after it had downloaded the version check and the `.asc`, and pid 2683295 at 00:46 the same day. Both coredumps abort in Qt with `QThread: Destroyed while thread '' is still running`. The launcher's gpg agent outlived the abort and kept the Flatpak sandbox alive, so vekrona's wrapper waited for it (vekrona now ends it from the host, see workaround).
+- Root cause as known: Qt aborts the process when a QThread object is destroyed while its thread still runs. The message places the object in the launcher's own download path, which the abort shows during the first download. Which object, and which code path destroys it before the thread ends, is unconfirmed: the backtraces were not read.
+- Minimal reproduction: unverified. A first run of the launcher with no Tor Browser installed and `download_over_tor` set, as `tests/e2e/tor-browser-first-run.sh` runs it in the vekrona-dev VM; whether that scenario reproduces the abort is unverified.
+- vekrona workaround: `bin/vekrona-tor-browser` ends the gpg agent and smart card daemon that the abort leaves in the sandbox, so the sandbox can end when the browser closes. The abort itself still ends the first run.
+- Request: keep each QThread alive until its run has finished (wait for it before its owner is destroyed), so that Qt never destroys a running thread.
+- File at: https://gitlab.torproject.org/tpo/applications/torbrowser-launcher (the issue tracker URL is unverified, as in entry 10).
+- Issue title: `Abort "QThread: Destroyed while thread '' is still running" during the first-run download`
+
 ## 11. Other upstream items found in TODO.md
 
 Already tracked there with their own next step; listed here so nothing is lost. Not written up further.

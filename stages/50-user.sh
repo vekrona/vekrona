@@ -170,6 +170,32 @@ ensure_flatpak_override_dropped() {
   [[ -z "$(flatpak override --user --show "$app_id")" ]] || die "flatpak override not reset: $app_id"
 }
 
+# Removes the --filesystem=PATH grant from the app's user override by editing the keyfile that `flatpak override --user --show` reads.
+# `--nofilesystem` would keep a !PATH negation in the keyfile instead, and a reset would drop the other entries of the override, which
+# the helper above refuses to do (the tor override holds vekrona's own entries next to the stale grant).
+ensure_flatpak_filesystem_dropped() {
+  local app_id="$1" path="$2" shown kept file
+  flatpak_system_installed "$app_id" || { log "flatpak not installed, skipping override cleanup: $app_id"; return 0; }
+  shown="$(flatpak override --user --show "$app_id")" || die "cannot read the flatpak override of $app_id"
+  if ! flatpak_override_has "--filesystem=$path" "$shown"; then log "flatpak override already clean: $app_id"; return 0; fi
+  file="${XDG_DATA_HOME:-$HOME/.local/share}/flatpak/overrides/$app_id"
+  kept="$(awk -v item="$path" '
+    /^filesystems=/ {
+      sub(/^filesystems=/, "")
+      count = split($0, entries, ";")
+      line = ""
+      for (i = 1; i <= count; i++) if (entries[i] != "" && entries[i] != item) line = line entries[i] ";"
+      if (line != "") print "filesystems=" line
+      next
+    }
+    { print }
+  ' "$file")" || die "cannot read $file"
+  log "removing the flatpak filesystem override $path: $app_id"
+  write_file_atomic "$file" "$kept"$'\n'
+  shown="$(flatpak override --user --show "$app_id")" || die "cannot read the flatpak override of $app_id"
+  ! flatpak_override_has "--filesystem=$path" "$shown" || die "flatpak override still grants $path: $app_id"
+}
+
 for app_id in "${VEKRONA_X11_FLATPAKS[@]}"; do
   ensure_flatpak_override "$app_id" --nosocket=wayland --socket=x11
 done
@@ -181,9 +207,13 @@ ensure_flatpak_override_dropped md.obsidian.Obsidian --nosocket=wayland --socket
 # Electron also picks its Wayland backend from XDG_SESSION_TYPE=wayland and exits when the sandbox has no Wayland socket, so name X11.
 ensure_flatpak_override org.signal.Signal --env=SIGNAL_PASSWORD_STORE=gnome-libsecret --env=XDG_SESSION_TYPE=x11
 
-# Tor Browser has no network: its Flatpak reaches the system tor through the socket in /run/tor-tb (stage 40), which
-# vekrona-tor-browser starts tor for. No control port is passed (TOR_PROVIDER=none): the browser only proxies. `install` runs the
-# launcher's download in this sandbox too, with a relay to the same socket on its own loopback. No PulseAudio socket: pipewire-pulse (a process of the user, with the network)
+# Earlier installs granted Tor Browser the socket directory /run/tor-tb, which moved to /run/vekrona-tor; the grant is dropped before the
+# tor override below adds the new one.
+ensure_flatpak_filesystem_dropped org.torproject.torbrowser-launcher /run/tor-tb
+
+# Tor Browser has no network: its Flatpak reaches the system tor through the socket in /run/vekrona-tor (stage 40), which
+# vekrona-tor-browser starts tor for. No control port is passed (TOR_PROVIDER=none): the browser only proxies. `run`'s launch program
+# relays the launcher's own download through the socket, from the loopback of this sandbox. No PulseAudio socket: pipewire-pulse (a process of the user, with the network)
 # lets any client of its socket `load-module module-tunnel-sink server=tcp:IP`, and its module loading has no per-client switch
 # (pulse.allow-module-loading is server-wide, and vekrona's tests load modules), so the socket would be a way around tor.
 ensure_flatpak_override org.torproject.torbrowser-launcher --unshare=network --nosocket=pulseaudio --filesystem="$VEKRONA_TOR_SOCKET_DIR" \

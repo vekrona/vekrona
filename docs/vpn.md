@@ -182,6 +182,10 @@ sees that you use Tor, and your VPN provider sees none of it. Two pieces do that
   when the user does not exist (nft refuses an unknown user name and the whole table would fail to load). If tor is installed while
   the kill switch is armed, connect again to pick the user up.
 
+Other programs reach tor the same way when they are members of the group `vekrona-tor`, through its socket:
+`curl --proxy socks5h://localhost/run/vekrona-tor/socks https://check.torproject.org/api/ip`. torsocks cannot, since its `TorAddress`
+takes only an IP address. tor opens no TCP port on purpose, so a program without the socket path cannot reach tor.
+
 ## The bar icon
 
 One icon, six states, all in the bar button; a left click opens the popout and a second one closes it.

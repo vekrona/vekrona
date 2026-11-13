@@ -385,6 +385,18 @@ ensure_fcontext() {
   fcontext_current "$type" "$pattern" || die "semanage left no $type rule for $pattern"
 }
 
+# Removes the local SELinux rule for the paths that match PATTERN, if there is one: a path vekrona no longer uses keeps no rule of its own.
+ensure_fcontext_dropped() {
+  local pattern="$1" rules
+  command -v semanage >/dev/null || die "semanage (package policycoreutils-python-utils) is missing"
+  rules="$(root semanage fcontext --list --locallist)" || die "semanage fcontext --list failed"
+  if ! fcontext_has_rule "$pattern" "$rules"; then log "no local SELinux rule for $pattern"; return 0; fi
+  log "removing the SELinux rule for $pattern"
+  root semanage fcontext --delete "$pattern"
+  rules="$(root semanage fcontext --list --locallist)" || die "semanage fcontext --list failed"
+  ! fcontext_has_rule "$pattern" "$rules" || die "semanage left the rule for $pattern"
+}
+
 # True when every path given carries the SELinux label policy assigns it (always true on hosts without SELinux tools).
 root_label_current() {
   local report

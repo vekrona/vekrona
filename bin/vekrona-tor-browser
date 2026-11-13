@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Tor Browser, whose Flatpak has no network (stage 50) and reaches the system tor through /run/tor-tb/socks. tor runs only while
+# Tor Browser, whose Flatpak has no network (stage 50) and reaches the system tor through /run/vekrona-tor/socks. tor runs only while
 # a Tor Browser started by this tool does: it starts tor.service (polkit lets an active local wheel user), runs the Flatpak,
 # and stops tor when the last such Tor Browser has ended.
 #
-#   vekrona-tor-browser run [ARGS]  run Tor Browser; ARGS go to it
-#   vekrona-tor-browser install     download Tor Browser over tor, without starting it
+#   vekrona-tor-browser run [ARGS]  run Tor Browser through its launcher, which downloads it over tor first when it is missing; ARGS go to
+#                                   the launcher
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -16,8 +16,8 @@ SETTINGS="$HOME/.var/app/$APP/config/torbrowser/settings.json"
 LOCK_DIR="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set, so there is no place for the lock files}"
 MUTEX_FILE="$LOCK_DIR/vekrona-tor-browser.mutex"
 REFS_FILE="$LOCK_DIR/vekrona-tor-browser.refs"
-# The address the launcher's settings name as its SOCKS proxy. Nothing listens there on the host: the install run starts a relay
-# on the loopback of its own sandbox (lib/vekrona_tor_install.py).
+# The address the launcher's settings name as its SOCKS proxy. Nothing listens there on the host: the launch program starts a relay
+# on the loopback of its own sandbox (lib/vekrona_tor_launch.py).
 SOCKS_ADDRESS=127.0.0.1:9050
 
 fail() {
@@ -26,28 +26,14 @@ fail() {
 }
 
 usage() {
-  echo "usage: vekrona-tor-browser run [ARGS] | install" >&2
+  echo "usage: vekrona-tor-browser run [ARGS]" >&2
   exit 2
 }
 
 # The group applies to the processes of a login, so a user added to it needs a new login.
 require_group() {
   [[ " $(id -nG) " == *" $VEKRONA_TOR_GROUP "* ]] \
-    || fail "this login is not in the group $VEKRONA_TOR_GROUP, which owns the socket of tor: log out and in again (the install added you to it)"
-}
-
-# tor.service is Type=notify, but tor says it is ready before it opens its listeners: the socket appears about a second later. Waits
-# for it with inotify on its directory; a socket made between the check and the watch is seen by the next round, one second later at
-# the latest (inotifywait exits 2 when its timeout ran out, which is not an error here).
-SOCKET_WAIT_SEC=30
-wait_for_socket() {
-  local deadline=$((SECONDS + SOCKET_WAIT_SEC)) status
-  until [[ -S "$VEKRONA_TOR_SOCKET" ]]; do
-    ((SECONDS < deadline)) || fail "tor.service is up but made no socket at $VEKRONA_TOR_SOCKET within $SOCKET_WAIT_SEC s (journalctl -u tor.service)"
-    status=0
-    inotifywait --quiet --timeout 1 --event create "$VEKRONA_TOR_SOCKET_DIR" >/dev/null || status=$?
-    ((status == 0 || status == 2)) || fail "inotifywait on $VEKRONA_TOR_SOCKET_DIR failed with status $status"
-  done
+    || fail "this login is not in the group $VEKRONA_TOR_GROUP, which owns the socket of tor: log out and in again (the vekrona install added you to it)"
 }
 
 # Two locks decide when tor stops. Every running instance holds a shared lock on REFS_FILE. MUTEX_FILE serializes "take a
@@ -70,42 +56,209 @@ stop_tor() {
   flock --unlock "$MUTEX_FD"
 }
 
-# The launcher starts Tor Browser and ends, so `flatpak run` returns while the browser still runs in the sandbox. Blocks until no
-# instance of the app is left: the cgroup of the sandbox (the scope that Flatpak makes for it) tells when its last process has ended,
-# and the kernel modifies cgroup.events when that flips, which wakes inotifywait. Its cap only re-checks a flip between the check and
-# the watch. A sandbox that ended while this looked at it is gone from the next `flatpak ps`; one that is there and cannot be watched
-# is an error, since a retry would spin.
-WAIT_RECHECK_SEC=60
-wait_for_instances() {
-  local pid cgroup events status
-  while pid="$(flatpak ps --columns=application,pid | awk -v app="$APP" '$1 == app { print $2; exit }')" && [[ -n "$pid" ]]; do
-    cgroup="$(sed -n 's/^0:://p' "/proc/$pid/cgroup" 2>/dev/null)" || true
-    if [[ -z "$cgroup" ]]; then
-      [[ ! -e "/proc/$pid" ]] || fail "cannot read the cgroup of pid $pid, the sandbox of $APP"
-      continue
+# The root of the cgroup tree. A constant, so that the test copy of this tool can point it at a tree of its own.
+CGROUP_ROOT=/sys/fs/cgroup
+# Set by on_signal: a signal ends the run, and the sandbox is stopped rather than waited for.
+stop_requested=""
+# The pid of the flatpak run that runs, while it runs, and of the inotifywait that watches, while it waits.
+flatpak_pid=""
+watch_pid=""
+# The descriptor on which the messages of the watch come, set by arm_watch: EOF on it means that the watch has ended.
+watch_fd=""
+
+# Prints the message $* as this tool's error. Used where the code must not exit: the cleanup stops tor after it.
+report() {
+  echo "vekrona-tor-browser: $*" >&2
+}
+
+# Prints the instance ID that flatpak run wrote, and nothing when it wrote none. The file is opened again at each call, so each call
+# reads the whole ID.
+instance_id() {
+  cat "/proc/self/fd/$INSTANCE_READ_FD"
+}
+
+# Ends the watch $1 and reaps it, whether it still runs or has ended already.
+end_watch() {
+  kill "$1" 2>/dev/null || true
+  wait "$1" 2>/dev/null || true
+  watch_pid=""
+}
+
+# Starts inotifywait on the path $1 with the options that follow it, and returns 0 once its watch is armed, which inotifywait reports
+# with "Watches established.". Sets watch_pid and watch_fd: the caller closes watch_fd when it is done with the watch. Returns 1 when the
+# watch did not arm: then it has ended, and watch_fd is closed.
+#
+# The messages (on stderr) go to a FIFO that this shell reads; the events (on stdout) are not read. No open of the FIFO may block: the
+# watch can end before a reader opens it, and a blocked open cannot be interrupted by a trap. So the FIFO is opened read-write first, which
+# does not block, and that writer lets the reader open. The watch inherits the writer as its stderr, and this shell drops its own copy once
+# the watch has started: EOF on the reader then means that the watch has ended.
+arm_watch() {
+  local path="$1" fifo hold line
+  shift
+  fifo="$(mktemp -u -p "$LOCK_DIR")" && mkfifo "$fifo" || { report "cannot make a FIFO in $LOCK_DIR"; return 1; }
+  exec {hold}<>"$fifo"
+  exec {watch_fd}<"$fifo"
+  rm -f "$fifo"
+  inotifywait "$@" "$path" >/dev/null 2>&"$hold" {hold}>&- {watch_fd}>&- &
+  watch_pid=$!
+  exec {hold}>&-
+  # A signal that came before watch_pid was set could not stop the watch, so it is stopped here.
+  [[ -z "$stop_requested" ]] || kill -TERM "$watch_pid"
+  line=""
+  while read -r line <&"$watch_fd" && [[ "$line" != "Watches established." ]]; do :; done
+  [[ "$line" != "Watches established." ]] || return 0
+  end_watch "$watch_pid"
+  exec {watch_fd}<&-
+  return 1
+}
+
+# tor.service is Type=notify, but tor says it is ready before it opens its listeners: the socket appears a moment later. The directory is
+# watched for the socket's creation. The watch is armed before the socket is tested, so a socket made from then on is an event of the watch.
+# inotifywait ends with status 2 when SOCKET_WAIT_SEC ran out, which is the failure to report.
+SOCKET_WAIT_SEC=30
+wait_for_socket() {
+  local status=0
+  arm_watch "$VEKRONA_TOR_SOCKET_DIR" --timeout "$SOCKET_WAIT_SEC" --event create \
+    || { [[ -z "$stop_requested" ]] || return 143; fail "inotifywait on $VEKRONA_TOR_SOCKET_DIR did not arm its watch"; }
+  if [[ -S "$VEKRONA_TOR_SOCKET" ]]; then
+    end_watch "$watch_pid"
+    exec {watch_fd}<&-
+    return 0
+  fi
+  wait "$watch_pid" || status=$?
+  watch_pid=""
+  exec {watch_fd}<&-
+  [[ -z "$stop_requested" ]] || return 143
+  ((status != 2)) || fail "tor.service is up but made no socket at $VEKRONA_TOR_SOCKET within $SOCKET_WAIT_SEC s (journalctl -u tor.service)"
+  ((status == 0)) || fail "inotifywait on $VEKRONA_TOR_SOCKET_DIR failed with status $status"
+  [[ -S "$VEKRONA_TOR_SOCKET" ]] || fail "tor made a file in $VEKRONA_TOR_SOCKET_DIR that is no socket at $VEKRONA_TOR_SOCKET"
+}
+
+# Blocks until the cgroup.events file $1 of a sandbox says "populated 0", or the file is gone with its scope, and returns 0 then. Returns 1
+# when a signal (stop_requested) ends the wait, and the caller stops the scope: this function never stops anything itself. Every round arms
+# a watch and reads the file only once the watch is armed, so a change made from then on is an event of the watch and none is missed.
+wait_for_sandbox_end() {
+  local events="$1" status
+  while :; do
+    [[ -z "$stop_requested" ]] || return 1
+    if ! arm_watch "$events" --event modify --event delete_self; then
+      [[ -z "$stop_requested" ]] || return 1
+      [[ -e "$events" ]] || return 0
+      report "inotifywait on $events did not arm its watch"
+      return 1
     fi
-    events="/sys/fs/cgroup$cgroup/cgroup.events"
-    if [[ ! -r "$events" ]]; then
-      [[ ! -e "/proc/$pid" ]] || fail "cannot read $events, the cgroup of the sandbox of $APP"
-      continue
+    if [[ ! -e "$events" ]] || grep -qx 'populated 0' "$events"; then
+      end_watch "$watch_pid"
+      exec {watch_fd}<&-
+      return 0
     fi
-    if ! grep -qx 'populated 0' "$events"; then
-      status=0
-      inotifywait --quiet --timeout "$WAIT_RECHECK_SEC" --event modify --event delete_self "$events" >/dev/null || status=$?
-      ((status == 0 || status == 2)) || [[ ! -e "$events" ]] || fail "inotifywait on $events failed with status $status"
-    fi
+    status=0
+    wait "$watch_pid" || status=$?
+    watch_pid=""
+    exec {watch_fd}<&-
+    [[ -z "$stop_requested" ]] || return 1
+    ((status == 0)) || [[ ! -e "$events" ]] || { report "inotifywait on $events failed with status $status"; return 1; }
   done
 }
 
-# Runs `flatpak run ARGS` with tor up around it, and until the sandbox has ended. The Flatpak does not inherit the locks: a process
-# it leaves behind would keep tor running for ever. Bash allocates the file descriptors of the locks.
+# Stops the processes that the launcher leaves in the sandbox whose cgroup directory is $1: its gpg agent, smart card daemon, dirmngr and
+# keyboxd. They keep the scope populated after the browser has closed. The other processes of the sandbox are the browser's, and are left
+# alone. A cgroup that is gone has no process left.
+end_gpg_leftovers() {
+  local dir="$1" pid comm procs_fd
+  # The open decides: only when it fails is the cgroup looked at. Gone, it has no process left; present, its processes cannot be
+  # listed, which is an error. The message of the failed open is the open's own, and is hidden here: its failure is handled right away.
+  if ! { exec {procs_fd}<"$dir/cgroup.procs"; } 2>/dev/null; then
+    [[ -d "$dir" ]] || return 0
+    report "cannot read $dir/cgroup.procs"
+    return 1
+  fi
+  while read -r pid <&"$procs_fd"; do
+    comm="$(cat "/proc/$pid/comm" 2>/dev/null)" || continue # it has ended since it was listed
+    case "$comm" in
+      gpg-agent | scdaemon | dirmngr | keyboxd) ;;
+      *) continue ;;
+    esac
+    if ! kill -TERM "$pid" 2>/dev/null && [[ -e "/proc/$pid" ]]; then
+      exec {procs_fd}<&-
+      report "cannot stop $comm $pid of the sandbox"
+      return 1
+    fi
+  done
+  exec {procs_fd}<&-
+}
+
+# Ends what is left of the sandbox of this run's instance, and returns once none is. Flatpak makes the sandbox a systemd scope named
+# app-flatpak-<escaped app ID>-<instance ID>.scope, and the browser runs in it: it may outlive flatpak run, so it is waited for and not
+# killed. On a normal end the launcher's gpg leftovers go first. A signal stops the scope instead, which ends its processes: that is the
+# only stop in this function, and it is synchronous, so the scope is gone when it returns. A scope that is not loaded has ended already.
+end_instance() {
+  local instance escaped unit cgroup
+  instance="$(instance_id)" || { report "cannot read the instance ID that flatpak run wrote"; return 1; }
+  [[ -n "$instance" ]] || return 0
+  [[ "$instance" =~ ^[0-9]+$ ]] || { report "flatpak run named the instance '$instance', which is no ID"; return 1; }
+  escaped="$(systemd-escape "$APP")" || { report "systemd-escape failed for $APP"; return 1; }
+  unit="app-flatpak-$escaped-$instance.scope"
+  cgroup="$(systemctl --user show -P ControlGroup "$unit")" || { report "systemctl --user show failed for $unit"; return 1; }
+  [[ -n "$cgroup" ]] || return 0
+  if [[ -z "$stop_requested" ]]; then
+    end_gpg_leftovers "$CGROUP_ROOT$cgroup" || return 1
+  fi
+  if ! wait_for_sandbox_end "$CGROUP_ROOT$cgroup/cgroup.events"; then
+    [[ -n "$stop_requested" ]] || return 1
+    systemctl --user stop "$unit" || { report "systemctl --user stop $unit failed: the sandbox keeps running"; return 1; }
+  fi
+}
+
+# The one exit path of run: a normal end, a failure and a signal all come here. It ends the sandbox of this run's instance, and then stops
+# tor: tor runs as long as the browser does. The status of a signal is 143, and a failure of the cleanup is 1.
+cleanup_run() {
+  local leftover=0
+  if [[ -n "$flatpak_pid" ]]; then
+    kill -TERM "$flatpak_pid" 2>/dev/null || true
+    wait "$flatpak_pid" || true
+    flatpak_pid=""
+  fi
+  if [[ -n "${INSTANCE_READ_FD:-}" ]]; then
+    end_instance || leftover=1
+  fi
+  stop_tor
+  if ((leftover != 0)); then exit 1; fi
+  if [[ -n "$stop_requested" ]]; then exit 143; fi
+}
+
+# A signal ends the run: it is noted, and a flatpak run or a watch that waits is stopped, so that the wait ends at once. The sandbox is
+# stopped by cleanup_run. The handler does not exit, so that the cleanup, which stops tor, always completes.
+on_signal() {
+  stop_requested=1
+  # Each kill wakes the wait that a process is in, whenever the signal arrives: a wait is not interrupted by a trap that ran before it began.
+  [[ -z "$flatpak_pid" ]] || kill -TERM "$flatpak_pid" 2>/dev/null || true # it may have ended since it was checked
+  [[ -z "$watch_pid" ]] || kill -TERM "$watch_pid" 2>/dev/null || true
+}
+
+# Runs `flatpak run ARGS` with tor up around it, and returns its status. flatpak run returns when the launcher has ended, which can leave
+# the browser running: cleanup_run waits for the browser, and tor stays up meanwhile. The Flatpak does not inherit the locks: a process it
+# leaves behind would keep tor running for ever. Bash allocates the file descriptors of the locks and of the instance ID, which flatpak run
+# writes into a file that is unlinked at once, so no file is left behind.
 run_with_tor() {
+  local instance_file status=0
   exec {MUTEX_FD}>"$MUTEX_FILE" {REFS_FD}>"$REFS_FILE"
-  trap stop_tor EXIT
-  trap 'exit 143' HUP INT TERM
+  trap cleanup_run EXIT
+  trap on_signal HUP INT TERM
   start_tor
-  flatpak run "$@" {MUTEX_FD}>&- {REFS_FD}>&-
-  wait_for_instances
+  [[ -z "$stop_requested" ]] || return 143
+  instance_file="$(mktemp -p "$LOCK_DIR")"
+  exec {INSTANCE_FD}>"$instance_file" {INSTANCE_READ_FD}<"$instance_file"
+  rm -f "$instance_file"
+  # The explicit 0<&0 keeps stdin, since bash gives a background job /dev/null otherwise.
+  flatpak run --instance-id-fd="$INSTANCE_FD" "$@" {MUTEX_FD}>&- {REFS_FD}>&- {INSTANCE_READ_FD}>&- 0<&0 &
+  flatpak_pid=$!
+  # A signal that came before flatpak_pid was set could not stop flatpak run, so it is stopped here.
+  [[ -z "$stop_requested" ]] || kill -TERM "$flatpak_pid"
+  wait "$flatpak_pid" || status=$?
+  flatpak_pid=""
+  if ((status == 0)) && [[ -z "$(instance_id)" ]]; then fail "flatpak run made no instance of $APP"; fi
+  return "$status"
 }
 
 # Sets the launcher to download over tor through SOCKS_ADDRESS and keeps the other settings it has.
@@ -127,13 +280,8 @@ case "${1:-}" in
   run)
     shift
     require_group
-    run_with_tor "$APP" "$@"
-    ;;
-  install)
-    (($# == 1)) || usage
-    require_group
     write_launcher_settings
-    run_with_tor --command=python3 "$APP" -P -c "$(<"$ROOT/lib/vekrona_tor_install.py")" "$SOCKS_ADDRESS"
+    run_with_tor --command=python3 "$APP" -P -c "$(<"$ROOT/lib/vekrona_tor_launch.py")" "$SOCKS_ADDRESS" "$@"
     ;;
   *) usage ;;
 esac

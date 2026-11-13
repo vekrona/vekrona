@@ -120,7 +120,7 @@ with_scratch_dir install_xremap_path_unit
 ensure_dropins_restarting xremap.service "$VEKRONA_ROOT/config/xremap" /etc/xremap config.yml
 ensure_system_unit --now enabled xremap.path
 
-# tor serves Tor Browser, whose Flatpak has no network of its own and reaches tor through a socket in /run/tor-tb (group
+# tor serves Tor Browser, whose Flatpak has no network of its own and reaches tor through a socket in /run/vekrona-tor (group
 # vekrona-tor, which the session user joins: a new login applies it). vekrona-tor-browser starts tor with the browser and
 # stops it after, so tor is not enabled at boot. tor_t may create that socket only in a directory labelled tor_var_run_t,
 # and a tmpfiles.d entry for the directory would land in the initramfs, which has no toranon user: libexec/vekrona-tor-prepare
@@ -128,6 +128,10 @@ ensure_system_unit --now enabled xremap.path
 ensure_root_file "$VEKRONA_ROOT/etc/sysusers.d/vekrona-tor.conf" /etc/sysusers.d/vekrona-tor.conf
 root systemd-sysusers /etc/sysusers.d/vekrona-tor.conf
 ensure_user_in_group "$VEKRONA_TOR_GROUP"
+# /run/tor-tb was the socket directory before it was renamed to $VEKRONA_TOR_SOCKET_DIR; an earlier install left its rule behind.
+ensure_fcontext_dropped "/run/tor-tb(/.*)?"
+# An earlier install left the old socket directory behind, and nothing else removes it.
+[[ ! -d /run/tor-tb ]] || root rm -rf -- /run/tor-tb
 ensure_fcontext tor_var_run_t "$VEKRONA_TOR_SOCKET_DIR(/.*)?"
 ensure_system_unit_file "$VEKRONA_ROOT/etc/systemd/system/vekrona-tor-route.service"
 ensure_dropins_restarting tor.service "$VEKRONA_ROOT/etc/tor/torrc.d" /etc/tor/torrc.d vekrona.conf

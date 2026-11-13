@@ -328,9 +328,8 @@ tunnel that drops shows the blocked icon and stops your programs instead of leak
 
 Start it from the launcher like any app (the entry runs `vekrona-tor-browser run`). The vekrona install puts you in the group
 `vekrona-tor`, which owns tor's socket; log out and in once afterwards, because `vekrona-tor-browser` refuses to run in a login that
-lacks the group and says so. Then run `vekrona-tor-browser install` in a terminal: the Tor Browser Launcher downloads Tor Browser
-over tor and stops without starting it, so no browser ever runs in the install's sandbox. That sandbox has no network either: the
-launcher can only use a TCP proxy, so a relay on the sandbox's own loopback hands its connections to tor's unix socket. The install
+lacks the group and says so. The first start downloads Tor Browser over tor and then starts it. The Tor Browser Launcher runs in a
+sandbox that has no network either, so a relay on the sandbox's own loopback hands its connections to tor's unix socket. The launcher
 downloads only when Tor Browser is missing or older than the launcher accepts; the browser updates itself afterwards.
 
 tor starts with the browser and stops when the last Tor Browser closes. It does not go through the VPN, and the browser has no

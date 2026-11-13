@@ -17,6 +17,23 @@ tor_inactive() { inactive tor_active; }
 stop_tor() { vekrona-dev run sudo systemctl stop tor.service; }
 require_tor_browser() { vekrona-dev run flatpak info --system "$TOR_BROWSER_APP" >/dev/null || die "$TOR_BROWSER_APP must be installed system-wide"; }
 
+# Tor Browser's sandbox is a scope of the user manager, `app-flatpak-<app ID escaped by systemd>-<instance>.scope`, active for as long as
+# the browser runs. `flatpak ps` is not used: it lists instances whose processes have ended. The unit's name is made in the guest, where
+# systemd is. Prints the active scopes of Tor Browser, one per line.
+tor_browser_scopes() {
+  local escaped listing unit
+  escaped="$(vekrona-dev run systemd-escape "$TOR_BROWSER_APP")" || abort "cannot escape the app ID $TOR_BROWSER_APP in the guest"
+  listing="$(vekrona-dev sh systemctl --user list-units --state=active --type=scope --plain --no-legend --no-pager)" \
+    || abort "cannot list the active user scopes"
+  while read -r unit _; do
+    [[ "$unit" == "app-flatpak-$escaped-"*.scope ]] && printf '%s\n' "$unit"
+  done <<<"$listing"
+  return 0
+}
+tor_browser_running() { [[ -n "$(tor_browser_scopes)" ]]; }
+tor_browser_stopped() { ! tor_browser_running; }
+export -f tor_browser_scopes tor_browser_running tor_browser_stopped
+
 # Runs inside the sandbox and asks check.torproject.org through the SOCKS socket (SOCKS5, host name resolved by tor). Exit 0: the
 # answer says the request came through tor; NO_SOCKET_STATUS: nobody listens on the socket; anything else: tor answered with a failure.
 SOCKS_CHECK="$(

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs as root before tor.service starts (ExecStartPre=+). Makes /run/tor-tb, the directory of the SOCKS socket that Tor Browser's
+# Runs as root before tor.service starts (ExecStartPre=+). Makes /run/vekrona-tor, the directory of the SOCKS socket that Tor Browser's
 # sandbox reaches tor through. tor insists that the directory of a socket it makes belongs to its own primary group (a supplementary
 # one is not enough), so the directory is the tor user's, mode 0750, and an ACL lets the group vekrona-tor (the session user's)
 # search it and gives every socket created in it (default ACL) read and write for that group. The policy labels it tor_var_run_t

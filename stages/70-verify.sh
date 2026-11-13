@@ -794,6 +794,7 @@ if ran 50-user; then
     check assert "tor browser flatpak has no network" contains '!network' "$override"
     check assert "tor browser flatpak has no PulseAudio socket (pipewire-pulse would load a tunnel module for it)" contains '!pulseaudio' "$override"
     check assert "tor browser flatpak sees the socket directory of tor" contains "$VEKRONA_TOR_SOCKET_DIR;" "$override"
+    check assert "tor browser flatpak no longer sees the old socket directory /run/tor-tb" not_contains "/run/tor-tb" "$override"
     for env in TOR_PROVIDER=none TOR_SKIP_LAUNCH=1 TOR_SOCKS_IPC_PATH=$VEKRONA_TOR_SOCKET; do
       check assert "tor browser flatpak has $env" contains "$env" "$override"
     done
