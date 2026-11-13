@@ -21,7 +21,7 @@ IMPORT_PROFILE=vvpn-import
 
 import_profile_left() { vekrona-dev run bash -c 'nmcli -t -f NAME connection show | grep -qx "$1"' _ "$IMPORT_PROFILE"; }
 second_uuid() {
-  vpn list | jq -r --arg name "$SECOND_NAME" '[.vendors[] | select(.id == "proton") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty'
+  vpn list | jq -r --arg name "$SECOND_NAME" '[.vendors[] | select(.id == "other") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty'
 }
 
 require_vpn_conf
@@ -36,8 +36,8 @@ vekrona-dev until --timeout "$VPN_STEP_TIMEOUT_SEC" -- vpn_up
 [[ "$(guest_exit_ip)" != "$OWN_IP" ]] || die "the exit address is still the guest's own ($OWN_IP) with the tunnel up"
 
 vpn_conf_text | vpn_guest_write "$VPN_GUEST_DIR/$SECOND_NAME.conf"
-vpn import --vendor proton "$VPN_GUEST_DIR/$SECOND_NAME.conf"
-vpn_record_made "$(vpn list | jq -r --arg name "$SECOND_NAME" '[.vendors[] | select(.id == "proton") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty')"
+vpn import --vendor other "$VPN_GUEST_DIR/$SECOND_NAME.conf"
+vpn_record_made "$(vpn list | jq -r --arg name "$SECOND_NAME" '[.vendors[] | select(.id == "other") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty')"
 
 vpn_status_is ".tunnel == \"up\" and .armed and .connection.uuid == \"$UUID\"" \
   || die "importing a configuration must leave the tunnel in use alone: $(vpn_status)"

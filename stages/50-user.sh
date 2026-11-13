@@ -308,7 +308,7 @@ vekrona_profile_keeps_key() {
 # must run for the connections to be listed; without it, or without such a key, there is nothing to seal.
 if systemctl is-active --quiet NetworkManager; then
   if vekrona_profile_keeps_key; then
-    systemd-run --user --wait --pipe --quiet "$VEKRONA_ROOT/bin/vekrona-vpn" seal \
+    systemd-run --user --wait --pipe --collect --quiet "$VEKRONA_ROOT/bin/vekrona-vpn" seal \
       || die "vekrona-vpn seal failed: keys stay in NetworkManager's keyfiles until it succeeds"
   else
     log "no vekrona-vpn profile keeps a key in its keyfile: nothing to seal"

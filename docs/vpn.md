@@ -3,8 +3,8 @@
 `vekrona-vpn` runs WireGuard connections of NetworkManager behind an nftables kill switch. The bar's VPN icon and the launcher's
 Settings, VPN view are its UI; `bin/vekrona-vpn` is the command behind both. Proton's own VPN app is gone (stage `00-repos`
 removes its dnf repo and key): it sent IPv6 to a dummy device that dropped it silently, and that stalled Tor Browser Launcher
-([the kill switch](#the-kill-switch) says why that matters). `wireguard-tools` (`wg`, for Mullvad's key pair) is the only package the
-VPN adds, and `libsecret` (`secret-tool`) the one for the keyring it keeps the keys in.
+([the kill switch](#the-kill-switch) says why that matters). `wireguard-tools` (`wg`, for Mullvad's key pair) and `python3-cryptography` (Proton's
+Ed25519 and X25519 keys) are the packages the VPN adds, and `libsecret` (`secret-tool`) the one for the keyring it keeps the keys in.
 
 ## How it works
 
@@ -36,9 +36,38 @@ registered, the device is removed again: its key is kept nowhere else, so it wou
 device the keyring held before is removed from the account too (by its id, or for a key from before ids were kept, by its public
 key). That is how an old key stops working at Mullvad (see [Keys](#keys)).
 
-**Proton and other.** Import `.conf` files with Import Proton… or Import other… in the popout (the popout closes first, because
-the file chooser, a portal dialog, would be under it, and the keyring may prompt), or `vekrona-vpn import --vendor proton|other [FILE...]`. The vendor is the
-button you pressed. The country is the first two-letter token in the file name that is an ISO country (`NL-792.conf`,
+**Proton.** Sign in with `vekrona-vpn proton login`, or the Proton row of the popout (Sign in). vekrona starts the browser without waiting for it (a browser that stays open does not block the sign-in), and shows a code in a notification
+(and prints it), and opens `account.protonvpn.com/tv` in the browser. You enter the code there and sign in there: 2FA and FIDO stay in the
+browser, and nothing is typed into vekrona. A transient unit (`vekrona-vpn-proton-login`) waits up to ten minutes for the code, polling every
+five seconds, and then replaces the notification with "Signed in to Proton (plan)" or the reason it failed. One sign-in waits at a time.
+The session is kept in the keyring and the logical server list in `~/.cache/vekrona/vpn-proton.json`; the list shows the countries of
+your plan. A free account gets one choice, "Fastest free server"; a paid one gets its countries (each connect picks the usable server of
+the country with the lowest score).
+
+Server choice: a country is the usable server with the lowest score among its exits, and servers with IPv6 come first (IPv6 sites do not work through an IPv4-only tunnel). A country or the free plan with only IPv4 servers is labelled "(IPv4 only)" in the list and status. Secure Core servers (entry and exit in different
+countries, or Features 1) and Tor servers (Features 2) are left out; P2P and Streaming servers stay. Proton's Features values are not
+verified against the live API: SecureCore 1, Tor 2, P2P 4, Streaming 8 and IPv6 16 (the spike inferred IPv6). The values are constants in
+`lib/vekrona_proton.py`.
+
+Certificates. Each connect uses the catalog cache while it is younger than an hour, and the certificate it recorded (its times only, never
+the key) while that has more than an hour left, so a connect needs no request to Proton then. Otherwise it asks Proton for a fresh
+certificate (one day long), and records it. When Proton cannot be reached, a connect that needs a request says: turn the VPN off, then
+connect (the kill switch blocks the request, and the tunnel of a running connection is not disturbed). The connection is named
+`vekrona-vpn/proton/<CC or FREE>/signed-in`. Its status name is the server it was made for (the catalog's name for its
+endpoint address). A connect replaces every generated Proton connection of any country once the new one is up; a `proton` configuration
+imported before WP3 has another last segment and is never touched.
+
+Renewal. The certificate's RefreshTime (about 18 hours) arms one transient timer, `vekrona-vpn-proton-renew-<epoch of the time it fires>`:
+it requests a new certificate while a Proton connection is up and does nothing otherwise, and it arms the next timer from inside. A
+time that has passed is armed a minute from now. A failed renewal tells you in a notification when the tunnel stops working, and arms one
+retry 30 minutes later (or 5 minutes before the expiry, if sooner); after the expiry nothing is tried again. `off` and `proton logout`
+stop the timers, and `forget` of a Proton connection stops them when no Proton connection is left up. A renewal and a connect hold the
+Proton lock (`/run/user/<uid>/vekrona-vpn/proton.lock`): a session is refreshed by one of them at a time, so two never spend the same
+refresh token. When Proton refuses a refresh token that the keyring no longer holds, the stored session is adopted.
+
+**Other.** Import `.conf` files of any other provider with Import other… in the popout (the popout closes first, because the file
+chooser, a portal dialog, would be under it, and the keyring may prompt), or `vekrona-vpn import --vendor other [FILE...]`. The button you
+pressed is the vendor. Proton's own downloads import here too. The country is the first two-letter token in the file name that is an ISO country (`NL-792.conf`,
 `nl-ams-wg-001.conf` give NL; `wg0.conf` gives an unknown country, shown as `??`). The name is the file name without `.conf`.
 Importing a file with an id that exists replaces the old connection after the new one is made. Up to 32 files at a time.
 
@@ -72,8 +101,12 @@ section) instead of going into a tunnel that cannot carry it.
 ## Keys
 
 Every key lives in one place: the login keyring, as an item of application `vekrona-vpn` (gnome-keyring, through `secret-tool`,
-`lib/vekrona_secrets.py`). There are three kinds: the Mullvad account number, the Mullvad device (its private key and addresses, and
-its id at Mullvad), and the key of each imported configuration (its private key and preshared key, under the connection's id).
+`lib/vekrona_secrets.py`). There are five kinds: the Mullvad account number, the Mullvad device (its private key and addresses, and
+its id at Mullvad), the Proton session (its user id and access and refresh tokens, rewritten at every refresh), the Proton seed (32 random
+bytes; the WireGuard key is the X25519 key derived from it, so a seed is the one secret Proton needs), and the key of each imported
+configuration (its private key and preshared key, under the connection's id). The fork's selector, the bearer secret of a sign-in, never
+goes into an argument: `proton login` writes it to a file of yours in tmpfs (`/run/user/<uid>/vekrona-vpn/`, mode 0600), and the unit
+removes that file as it reads it.
 NetworkManager keeps none of them: each `nmcli connection up` gets the private key on stdin (`passwd-file /dev/stdin`); a preshared
 key is set on the live tunnel with `wg set` right after the activation (nmcli's passwd-file cannot name a peer's secret, see
 [TODO-UPSTREAM](../TODO-UPSTREAM.md)), so the peer keeps flag 4 (not required) and NetworkManager neither stores nor asks for it. The helper's
@@ -242,10 +275,14 @@ vekrona-vpn list                      # JSON: vendors, countries, configurations
 vekrona-vpn connect UUID              # arm the kill switch, bring that configuration up
 vekrona-vpn connect mullvad NL        # the same for a random Mullvad relay of a country (a code, or a name; a name is echoed: "using Netherlands (NL)")
 vekrona-vpn off                       # tunnel down, then the kill switch off
-vekrona-vpn import --vendor proton [FILE...]   # no FILE: the file chooser; --vendor proton|other
+vekrona-vpn import --vendor other [FILE...]    # no FILE: the file chooser
 vekrona-vpn forget UUID               # remove a configuration
 vekrona-vpn mullvad login             # account number on stdin; the number and the device's key go to the keyring
 vekrona-vpn mullvad logout            # remove this device from the Mullvad account, forget the Mullvad connections, clear the keyring of them
+vekrona-vpn proton login              # a sign-in: the code in a notification and on stdout; the browser opens the page
+vekrona-vpn proton logout             # end the Proton session, forget its connections, clear the keyring and the catalog
+vekrona-vpn proton netshield 0|1|2    # NetShield for the next connect
+vekrona-vpn connect proton NL        # a Proton server of a country (or `free`): a certificate, then the connection
 vekrona-vpn seal                      # move the keys of NetworkManager's keyfiles into the keyring (connect does it first when needed)
 ```
 
@@ -256,3 +293,6 @@ vekrona-vpn seal                      # move the keys of NetworkManager's keyfil
   if it had not read it yet. A call for the same operation that starts meanwhile fails with "another vekrona-vpn <op> was still running"
   (see the receipt under [Privilege](#privilege)); try again once the job is done.
 - One tunnel at a time, no VPN at boot, no IPv6 for a configuration without an IPv6 address.
+- Proton's app version is pinned (`APP_VERSION` in `lib/vekrona_proton.py`): when Proton refuses it, vekrona says it needs an update, and
+  the constant is bumped by hand. Configurations imported as `proton` before this change are not listed any more: forget them, or import
+  them again as `other`.

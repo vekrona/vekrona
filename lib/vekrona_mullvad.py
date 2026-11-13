@@ -3,80 +3,31 @@ the kill switch is armed or through the tunnel; the root helper never speaks to 
 
 Ported from yolobox-network's egress.py."""
 import getpass
-import http.client
 import ipaddress
-import json
-import os
 import random
 import sys
-import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import vekrona_api
 import vekrona_vpn
+from vekrona_api import ApiError
 from vekrona_vpn import VpnError
 
 MULLVAD_API = "https://api.mullvad.net"
-USER_AGENT = "vekrona-vpn"
-HTTP_TIMEOUT_SEC = 15
 MAX_DEVICES_REACHED = "MAX_DEVICES_REACHED"
 # The API is asked again for the relay list when its cache is older than this.
 RELAYS_MAX_AGE_SEC = 24 * 60 * 60
 WG_TOOL = vekrona_vpn.WG_TOOL
 
 
-class ApiError(Exception):
-    def __init__(self, message: str, status: Optional[int] = None, code: str = "") -> None:
-        super().__init__(message)
-        self.status = status
-        self.code = code
-
-
-def error_code(body: bytes) -> str:
-    """The API's error code: `code`, or `type` for problem+json."""
-    try:
-        doc = json.loads(body)
-    except vekrona_vpn.JSON_ERRORS:
-        return ""
-    if not isinstance(doc, dict):
-        return ""
-    for key in ("code", "type"):
-        if isinstance(doc.get(key), str):
-            return doc[key]
-    return ""
-
-
 def http_json(method: str, path: str, *, body: Optional[object] = None, token: Optional[str] = None,
               expect: Sequence[int] = (200,)) -> Any:
-    """One JSON request to the API. Returns the parsed answer, or None for an empty one."""
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    data = None
-    if body is not None:
-        data = json.dumps(body).encode()
-        headers["Content-Type"] = "application/json"
-    if token is not None:
-        headers["Authorization"] = "Bearer " + token
-    request = urllib.request.Request(MULLVAD_API + path, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SEC) as response:
-            status, payload = response.status, response.read()
-    except urllib.error.HTTPError as err:
-        with err:
-            code = error_code(err.read())
-        raise ApiError("%s %s: HTTP %d%s" % (method, path, err.code, " " + code if code else ""), err.code, code)
-    except (urllib.error.URLError, OSError, http.client.HTTPException) as err:
-        raise ApiError("%s %s: %s" % (method, path, getattr(err, "reason", err)))
-    if status not in expect:
-        raise ApiError("%s %s: unexpected HTTP %d" % (method, path, status), status)
-    if not payload:
-        return None
-    try:
-        return json.loads(payload)
-    except vekrona_vpn.JSON_ERRORS:
-        raise ApiError("%s %s: the answer is not JSON" % (method, path))
+    """One JSON request to the Mullvad API (see vekrona_api.request_json)."""
+    headers = {} if token is None else {"Authorization": "Bearer " + token}
+    return vekrona_api.request_json(MULLVAD_API, method, path, name="%s %s" % (method, path), headers=headers, body=body,
+                                    expect=expect)
 
 
 # ---- The relay list -----------------------------------------------------------------------------------------------------
@@ -124,20 +75,7 @@ def relay_list_from_api(doc: Any) -> dict:
 
 def read_cache(cache: str) -> Optional[dict]:
     """The cached relay list, None when there is none, an error when there is one that cannot be used."""
-    try:
-        with open(cache) as handle:
-            return validate_relay_list(json.load(handle))
-    except FileNotFoundError:
-        return None
-    except (OSError, VpnError, *vekrona_vpn.JSON_ERRORS) as exc:
-        raise VpnError("the relay list cache %s is unusable: %s" % (cache, exc))
-
-
-def cache_is_stale(cache: str) -> bool:
-    try:
-        return time.time() - os.stat(cache).st_mtime > RELAYS_MAX_AGE_SEC
-    except FileNotFoundError:
-        return True
+    return vekrona_vpn.read_cache(cache, validate_relay_list)
 
 
 def load_relays(cache: str) -> dict:
@@ -151,7 +89,7 @@ def load_relays(cache: str) -> dict:
             raise VpnError("cannot fetch the Mullvad relay list (%s) and there is no cache" % err)
         print("vekrona-vpn: cannot fetch the Mullvad relay list (%s); using the cache" % err, file=sys.stderr)
         return cached
-    vekrona_vpn.write_atomic(cache, json.dumps(value) + "\n", vekrona_vpn.PRIVATE_FILE_MODE)
+    vekrona_vpn.write_cache(cache, value)
     return value
 
 
@@ -159,7 +97,7 @@ def current_relays(cache: str) -> dict:
     """The relay list for a command that needs one now: the cache while it is younger than RELAYS_MAX_AGE_SEC (the API is asked for
     the whole list, a megabyte, over a network that may not be the VPN yet), else load_relays. A cache that cannot be used is asked
     for again like an old one."""
-    if not cache_is_stale(cache):
+    if not vekrona_vpn.cache_is_stale(cache, RELAYS_MAX_AGE_SEC):
         try:
             cached = read_cache(cache)
         except VpnError:

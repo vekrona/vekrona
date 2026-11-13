@@ -57,10 +57,10 @@ export -f vpn vpn_status vpn_status_is vpn_up vpn_down
 vpn_guest_write() { vekrona-dev run bash -c 'umask 077 && mkdir -p "$(dirname "$1")" && cat >"$1"' _ "$1"; }
 vpn_import_conf() {
   vpn_conf_text | vpn_guest_write "$VPN_GUEST_DIR/$VPN_CONF_NAME.conf"
-  vpn import --vendor proton "$VPN_GUEST_DIR/$VPN_CONF_NAME.conf"
+  vpn import --vendor other "$VPN_GUEST_DIR/$VPN_CONF_NAME.conf"
 }
 vpn_conf_uuid() {
-  vpn list | jq -r --arg name "$VPN_CONF_NAME" '[.vendors[] | select(.id == "proton") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty'
+  vpn list | jq -r --arg name "$VPN_CONF_NAME" '[.vendors[] | select(.id == "other") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty'
 }
 # Imports the configuration and prints its uuid; dies when vekrona-vpn list does not show the configuration under its country.
 vpn_import_conf_uuid() {

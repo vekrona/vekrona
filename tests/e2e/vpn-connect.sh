@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A VPN comes up from a configuration the user imported and from a Mullvad account, through the commands the bar's VPN popout runs
 # (the popout shows exactly what `vekrona-vpn list` says and runs `connect` and `off`), and goes away again:
-#   - a Proton configuration imports under its country, is listed, and `connect` arms the kill switch and brings the tunnel up:
+#   - a configuration of another provider (Proton's download, say) imports under its country, is listed, and `connect` arms the kill switch and brings the tunnel up:
 #     the exit address is not the guest's own, status says armed and up, and /run/vekrona-vpn/state.json (root-owned, readable)
 #     says the same;
 #   - Mullvad: logging in with the account number registers a device, `connect mullvad se` picks a relay of Sweden, Mullvad says
@@ -30,17 +30,17 @@ OWN_IP="$(guest_exit_ip)"
 log "the guest's own exit address is $OWN_IP"
 
 UUID="$(vpn_import_conf_uuid)"
-COUNTRY="$(vpn list | jq -r --arg uuid "$UUID" '.vendors[] | select(.id == "proton") | .countries[] | select(any(.configs[]; .uuid == $uuid)) | .code')"
-log "the configuration is listed under proton, country $COUNTRY"
+COUNTRY="$(vpn list | jq -r --arg uuid "$UUID" '.vendors[] | select(.id == "other") | .countries[] | select(any(.configs[]; .uuid == $uuid)) | .code')"
+log "the configuration is listed under other, country $COUNTRY"
 
 vpn connect "$UUID"
 vekrona-dev until --timeout "$VPN_STEP_TIMEOUT_SEC" -- vpn_up
-vpn_status_is ".armed and .connection.uuid == \"$UUID\" and .connection.vendor == \"proton\"" || die "status must say armed and name the connection: $(vpn_status)"
+vpn_status_is ".armed and .connection.uuid == \"$UUID\" and .connection.vendor == \"other\"" || die "status must say armed and name the connection: $(vpn_status)"
 [[ "$(vekrona-dev run stat -c '%U %a' /run/vekrona-vpn/state.json)" == "root 644" ]] || die "state.json must be root-owned and world-readable"
 state_file_says ".armed == true and .uuid == \"$UUID\"" || die "state.json must say the same as status"
 PROTON_IP="$(guest_exit_ip)"
 [[ "$PROTON_IP" != "$OWN_IP" ]] || die "the exit address is still the guest's own ($OWN_IP) with the tunnel up"
-log "ok: Proton connects through $COUNTRY, the exit address is $PROTON_IP and the kill switch is armed"
+log "ok: the configuration connects through $COUNTRY, the exit address is $PROTON_IP and the kill switch is armed"
 
 vpn_mullvad_login
 vpn list | jq -e '.vendors[] | select(.id == "mullvad") | .countries | any(.[]; .code == "SE")' >/dev/null || die "Mullvad's relay list must name Sweden"

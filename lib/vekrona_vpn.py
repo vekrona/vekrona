@@ -16,9 +16,10 @@ import re
 import secrets
 import stat
 import subprocess
+import time
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Dict, Iterator, List, Optional, Sequence, Tuple, TypeGuard
+from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple, TypeGuard
 
 import vekrona_cli
 import vekrona_countries
@@ -50,7 +51,12 @@ VENDOR_MULLVAD = "mullvad"
 VENDOR_PROTON = "proton"
 VENDOR_OTHER = "other"
 VENDOR_LABELS = {VENDOR_MULLVAD: "Mullvad", VENDOR_PROTON: "Proton VPN", VENDOR_OTHER: "Other"}
-IMPORT_VENDORS = (VENDOR_PROTON, VENDOR_OTHER)
+# The last segment of the id of a connection that vekrona generates for Proton (vekrona-vpn/proton/<CC or FREE>/signed-in). Only an
+# import of `proton` before WP3 has another last segment, and such a connection is never replaced by a connect.
+PROTON_GENERATED_NAME = "signed-in"
+IMPORT_VENDORS = (VENDOR_OTHER,)
+# The vendors whose countries come from a catalog that the vendor's API answers (a cache, no configurations): the country is the choice.
+CATALOG_VENDORS = (VENDOR_MULLVAD, VENDOR_PROTON)
 
 RUN_DIR = "/run/vekrona-vpn"
 APPLY_UNIT = "vekrona-vpn-apply@%s.service"
@@ -96,7 +102,9 @@ KNOWN_KEYS = frozenset(name.lower() for name in (
 
 
 COUNTRY_CODE_RE = re.compile(r"[a-z]{2}")  # a country as the relay list spells it
-CONNECTION_COUNTRY_RE = re.compile(r"[A-Z]{2}")  # and in a connection id
+# A country in a connection id: a code in capitals, or FREE for Proton's free servers, which belong to no country.
+FREE_COUNTRY = "FREE"
+CONNECTION_COUNTRY_RE = re.compile(r"[A-Z]{2}|%s" % FREE_COUNTRY)
 
 
 def label_of(word: str) -> str:
@@ -177,7 +185,7 @@ def _items(values: Sequence[str], key: str) -> List[str]:
     return items
 
 
-def _wg_key(value: str, key: str) -> str:
+def wg_key(value: str, key: str) -> str:
     try:
         raw = base64.b64decode(value, validate=True)
     except ValueError:  # binascii.Error, and the ValueError for text that is not ASCII
@@ -271,12 +279,12 @@ def parse_conf(text: str) -> WgConf:
         raise VpnError("AllowedIPs must contain 0.0.0.0/0: the kill switch lets only the tunnel carry traffic")
     mtu = interface.get("MTU")
     return WgConf(
-        private_key=_wg_key(interface["PrivateKey"][0], "PrivateKey"),
+        private_key=wg_key(interface["PrivateKey"][0], "PrivateKey"),
         addresses=addresses,
         dns=dns,
         mtu=_integer(mtu[0], "MTU", MIN_MTU, MAX_MTU) if mtu else None,
-        peer_public_key=_wg_key(peer["PublicKey"][0], "PublicKey"),
-        preshared_key=_wg_key(peer["PresharedKey"][0], "PresharedKey") if "PresharedKey" in peer else None,
+        peer_public_key=wg_key(peer["PublicKey"][0], "PublicKey"),
+        preshared_key=wg_key(peer["PresharedKey"][0], "PresharedKey") if "PresharedKey" in peer else None,
         endpoint=parse_endpoint(peer["Endpoint"][0]),
         allowed_ips=allowed,
         keepalive=_keepalive(peer.get("PersistentKeepalive")),
@@ -369,7 +377,7 @@ def validate_relay(relay: object) -> Relay:
         raise VpnError("a relay hostname is not lowercase letters, digits and -")
     if not COUNTRY_CODE_RE.fullmatch(relay["country"]):
         raise VpnError("a relay country is not a two-letter code")
-    _wg_key(relay["public_key"], "a relay's public_key")
+    wg_key(relay["public_key"], "a relay's public_key")
     try:
         ipaddress.IPv4Address(relay["ipv4"])
     except ValueError:
@@ -384,7 +392,7 @@ def validate_device(device: object) -> Device:
         raise VpnError("a device has the wrong shape")
     if not all(isinstance(value, str) for value in device.values()):
         raise VpnError("a device field is not text")
-    _wg_key(device["private_key"], "a device's private_key")
+    wg_key(device["private_key"], "a device's private_key")
     try:
         ipaddress.IPv4Interface(_unscoped(device["ipv4_address"]))
         ipaddress.IPv6Interface(_unscoped(device["ipv6_address"]))
@@ -402,7 +410,7 @@ def validate_keys(doc: object) -> Dict[str, str]:
         raise VpnError("the keys have the wrong shape")
     if not all(isinstance(value, str) for value in doc.values()):
         raise VpnError("a key is not text")
-    return {name: _wg_key(value, name) for name, value in doc.items()}
+    return {name: wg_key(value, name) for name, value in doc.items()}
 
 
 def mullvad_conf(device: Device, relay: Relay) -> WgConf:
@@ -643,7 +651,7 @@ def sealed_peers(peers: str) -> str:
 
 def peer_public_key(peers: str) -> str:
     tokens = peers.split()
-    return _wg_key(tokens[0] if tokens else "", "the peer's public key")
+    return wg_key(tokens[0] if tokens else "", "the peer's public key")
 
 
 def nm_seal_settings(uuid: str) -> List[str]:
@@ -898,6 +906,31 @@ def lookup_tor_uid() -> Optional[int]:
     return int(fields[2])
 
 
+# ---- Caches -------------------------------------------------------------------------------------------------------------
+
+def read_cache(path: str, validate: Callable[[object], dict]) -> Optional[dict]:
+    """The document the cache at `path` holds, checked by `validate`; None when there is no cache, an error when there is one that
+    cannot be used."""
+    try:
+        with open(path) as handle:
+            return validate(json.load(handle))
+    except FileNotFoundError:
+        return None
+    except (OSError, VpnError, *JSON_ERRORS) as exc:
+        raise VpnError("the cache %s is unusable: %s" % (path, exc))
+
+
+def write_cache(path: str, value: dict) -> None:
+    write_atomic(path, json.dumps(value) + "\n", PRIVATE_FILE_MODE)
+
+
+def cache_is_stale(path: str, max_age_sec: int) -> bool:
+    try:
+        return time.time() - os.stat(path).st_mtime > max_age_sec
+    except FileNotFoundError:
+        return True
+
+
 # ---- State and requests -------------------------------------------------------------------------------------------------
 
 def run_path(name: str) -> str:
@@ -967,12 +1000,17 @@ def write_request(uid: int, doc: dict) -> None:
     write_atomic(request_path(uid), json.dumps({"schema": SCHEMA, **doc}), PRIVATE_FILE_MODE, directory_mode=PRIVATE_DIR_MODE)
 
 
-def remove_request(uid: int) -> None:
-    with files_reported("remove " + request_path(uid)):
+def remove_if_present(path: str) -> None:
+    """Removes the file at `path`; a file that is not there is removed already."""
+    with files_reported("remove " + path):
         try:
-            os.unlink(request_path(uid))
+            os.unlink(path)
         except FileNotFoundError:
             pass
+
+
+def remove_request(uid: int) -> None:
+    remove_if_present(request_path(uid))
 
 
 def sealed_name(uid: int) -> str:
@@ -1094,11 +1132,11 @@ def require_served(uid: int, op: str, nonce: str) -> None:
 
 
 @contextlib.contextmanager
-def exclusive_lock(directory: str, directory_mode: int) -> Iterator[None]:
-    """Hold the lock file LOCK_NAME of `directory` (made if missing) until the block ends, waiting for whoever holds it now."""
+def exclusive_lock(directory: str, directory_mode: int, name: str = LOCK_NAME) -> Iterator[None]:
+    """Hold the lock file `name` of `directory` (made if missing) until the block ends, waiting for whoever holds it now."""
     with files_reported("take the lock in " + directory):
         os.makedirs(directory, mode=directory_mode, exist_ok=True)
-        fd = os.open(os.path.join(directory, LOCK_NAME), os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, PRIVATE_FILE_MODE)
+        fd = os.open(os.path.join(directory, name), os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, PRIVATE_FILE_MODE)
     with os.fdopen(fd, "w") as lock:
         with files_reported("take the lock in " + directory):
             fcntl.flock(lock, fcntl.LOCK_EX)
@@ -1110,6 +1148,17 @@ def user_lock(uid: int) -> Iterator[None]:
     """The user's lock: held while a request is handed to the helper, and across several hand-overs that must not interleave with
     another call's (seal). Whoever asks for root work queues here; `status` and `list` never come here."""
     with exclusive_lock(user_dir(uid), PRIVATE_DIR_MODE):
+        yield
+
+
+PROTON_LOCK_NAME = "proton.lock"
+
+
+@contextlib.contextmanager
+def proton_lock(uid: int) -> Iterator[None]:
+    """The lock of the Proton session: held while a call of Proton may refresh the session, so that two of them (a connect and the
+    renewal) never refresh with the same refresh token. Its own file: the user's lock is taken by the operations of the helper inside it."""
+    with exclusive_lock(user_dir(uid), PRIVATE_DIR_MODE, PROTON_LOCK_NAME):
         yield
 
 
@@ -1190,7 +1239,7 @@ def active_connection(connections: Sequence[Connection], state: State) -> Option
     return next((connection for connection in connections if state.armed and connection.uuid == state.uuid), None)
 
 
-def status_json(connections: Sequence[Connection], state: State) -> dict:
+def status_json(connections: Sequence[Connection], state: State, proton: dict) -> dict:
     current = active_connection(connections, state)
     tunnel = {"activated": "up", "activating": "activating"}.get(current.state if current else None, "down")
     return {
@@ -1200,17 +1249,18 @@ def status_json(connections: Sequence[Connection], state: State) -> dict:
         "connection": None if current is None else {
             "uuid": current.uuid, "vendor": current.vendor, "country": current.country, "name": current.name},
         "mullvad": {"logged_in": any(connection.vendor == VENDOR_MULLVAD for connection in connections)},
+        "proton": proton,
     }
 
 
-def list_json(connections: Sequence[Connection], mullvad_countries: Dict[str, str]) -> dict:
-    """The vendors with their countries. Mullvad's come from its relay list (code -> name) and hold no configurations: the
-    country is the choice. The others are the countries of the configurations imported."""
+def list_json(connections: Sequence[Connection], catalogs: Dict[str, Dict[str, str]]) -> dict:
+    """The vendors with their countries. The catalog vendors' come from their catalogs (vendor -> code -> name) and hold no
+    configurations: the country is the choice. The others are the countries of the configurations imported."""
     vendors = []
     for vendor in VENDOR_LABELS:
         countries: Dict[str, dict] = {}
-        if vendor == VENDOR_MULLVAD:
-            for code, name in mullvad_countries.items():
+        if vendor in CATALOG_VENDORS:
+            for code, name in catalogs[vendor].items():
                 countries[code.upper()] = {"code": code.upper(), "name": name, "configs": []}
         else:
             for connection in connections:

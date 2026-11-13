@@ -49,7 +49,7 @@ LauncherModule {
         })
     readonly property var settingRows: buildRows()
     // What the Wi-Fi, Bluetooth, audio, keyboard and VPN views show, to tell the host to re-query only when it changes.
-    readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Wireless.scanning, Shell.Wireless.unpairedDevices.map(device => [device.address, device.name, device.pairing]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? "", Shell.Keyboard?.layouts.map(layout => [layout.id, layout.name]) ?? [], Shell.Keyboard?.activeIndex ?? -1, Shell.VpnState.mullvadLoggedIn, Shell.VpnState.catalog, Shell.VpnState.listFailure])
+    readonly property string subviewState: JSON.stringify([Shell.Wireless.wifiNetworks.map(network => [network.name, network.connected, network.known]), Shell.Wireless.scanning, Shell.Wireless.unpairedDevices.map(device => [device.address, device.name, device.pairing]), Shell.Audio.sinks.map(sink => sink.name), Shell.Audio.sink?.name ?? "", Shell.Keyboard?.layouts.map(layout => [layout.id, layout.name]) ?? [], Shell.Keyboard?.activeIndex ?? -1, Shell.VpnState.mullvadLoggedIn, Shell.VpnState.protonLoggedIn, Shell.VpnState.catalog, Shell.VpnState.listFailure])
 
     function setting(key: string, heading: string, icon: string, fields: var): var {
         return Object.assign({
@@ -371,9 +371,9 @@ LauncherModule {
         return rows;
     }
 
-    // The connections of `vekrona-vpn list`, flat: a Mullvad country is one row (none while Mullvad is logged out, as the bar's
-    // popout shows its login field instead), any other vendor's configuration is one, and the first row turns the VPN off. The
-    // bar's popout walks the same tree level by level.
+    // The connections of `vekrona-vpn list`, flat: a Mullvad or Proton country is one row (none while that vendor is logged out,
+    // as the bar's popout shows its login field or its "Sign in" instead), any other vendor's configuration is one, and the first
+    // row turns the VPN off. The bar's popout walks the same tree level by level.
     function vpnRows(): var {
         if (Shell.VpnState.listFailure !== "")
             return [errorRow("list the VPN connections", Shell.VpnState.listFailure)];

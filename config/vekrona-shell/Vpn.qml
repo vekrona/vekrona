@@ -14,6 +14,22 @@ BarPill {
             configuration: "vpn_key"
         })
 
+    // The levels of Proton's NetShield, in the order of the choice: the number is what `proton netshield` takes.
+    readonly property var netshieldChoices: [
+        {
+            level: 0,
+            label: "Off"
+        },
+        {
+            level: 1,
+            label: "Malware"
+        },
+        {
+            level: 2,
+            label: "Malware, ads and trackers"
+        }
+    ]
+
     // Why the last command of the popout failed, "" while none did.
     property string failure: ""
     // Where the popout is in the tree vendor > country > configuration: "" at the top, the vendor's id, then the country's code.
@@ -26,8 +42,11 @@ BarPill {
     readonly property var country: vendor?.countries.find(candidate => candidate.code === countryCode) ?? null
     // 0 at the vendors, 1 in a vendor, 2 in a country.
     readonly property int level: vendor === null ? 0 : country === null ? 1 : 2
-    // The account field is shown, and so takes the keyboard without a click: the popout asks for typing then.
-    readonly property bool loginShown: VpnState.needsLogin(vendorId)
+    // The account field is shown, and so takes the keyboard without a click: the popout asks for typing then. Proton signs in in
+    // the browser, so it has no field.
+    readonly property bool loginShown: vendorId === VpnState.mullvadId && VpnState.needsLogin(vendorId)
+    // The choice of NetShield and the "Sign out" row are shown, inside Proton while signed in.
+    readonly property bool protonShown: level === 1 && vendorId === VpnState.protonId && VpnState.protonLoggedIn
     // The rows of the level the popout is at.
     readonly property var rows: level === 0 ? vendorRows() : level === 1 ? countryRows() : configurationRows()
     readonly property string backLabel: level === 2 ? country.name : vendor?.label ?? ""
@@ -44,6 +63,12 @@ BarPill {
     function runClosing(args: list<string>): void {
         bar.openPopout = null;
         VpnState.command(args, stdout => {}, reason => Exec.check(["notify-send", "-a", "vekrona", "VPN", reason]));
+    }
+
+    // Signs out of Proton. The popout closes first, as for every command that may prompt the keyring; it opens at the vendors again,
+    // where the list (loaded again on open, since it is empty now) says "Sign in".
+    function signOut(): void {
+        runClosing(["proton", "logout"]);
     }
 
     // Stores the account number in the keyring, which may prompt: the popout closes first, as runClosing does.
@@ -68,20 +93,24 @@ BarPill {
     }
 
     function vendorRows(): var {
-        return VpnState.catalog.map(entry => ({
-                    key: entry.id,
-                    icon: levelIcons.vendor,
-                    label: entry.label,
-                    trailing: VpnState.needsLogin(entry.id) ? "Not logged in" : entry.countries.length + (entry.countries.length === 1 ? " country" : " countries"),
-                    emphasized: isCurrent(connection => connection.vendor === entry.id),
-                    ariaName: "Open " + entry.label,
-                    forgettable: false,
-                    activate: () => vendorId = entry.id
-                }));
+        return VpnState.catalog.map(entry => {
+            // Proton signs in in the browser, which the row starts instead of opening the vendor.
+            const signIn = entry.id === VpnState.protonId && VpnState.needsLogin(entry.id);
+            return {
+                key: entry.id,
+                icon: levelIcons.vendor,
+                label: entry.label,
+                trailing: signIn ? "Sign in" : VpnState.needsLogin(entry.id) ? "Not logged in" : entry.countries.length + (entry.countries.length === 1 ? " country" : " countries"),
+                emphasized: isCurrent(connection => connection.vendor === entry.id),
+                ariaName: (signIn ? "Sign in to " : "Open ") + entry.label,
+                forgettable: false,
+                activate: signIn ? () => runClosing(["proton", "login"]) : () => vendorId = entry.id
+            };
+        });
     }
 
     function countryRows(): var {
-        if (loginShown)
+        if (VpnState.needsLogin(vendorId))
             return [];
         return vendor.countries.map(entry => {
             const choices = VpnState.connectChoices(vendor, entry);
@@ -265,6 +294,41 @@ BarPill {
             }
 
             PopoutSection {
+                title: "NetShield, from the next connect"
+                visible: root.protonShown
+
+                VpnNote {
+                    danger: true
+                    text: VpnState.protonNetshieldError
+                }
+
+                Repeater {
+                    model: root.netshieldChoices
+
+                    BarPill {
+                        required property var modelData
+
+                        Layout.fillWidth: true
+                        icon: "shield"
+                        value: modelData.label
+                        emphasized: VpnState.protonNetshield === modelData.level
+                        ariaName: "NetShield: " + modelData.label
+                        onClicked: root.run(["proton", "netshield", String(modelData.level)])
+                    }
+                }
+            }
+
+            BarPill {
+                visible: root.protonShown
+                Layout.fillWidth: true
+                Layout.topMargin: VekronaTheme.space2
+                icon: "logout"
+                value: "Sign out"
+                ariaName: "Sign out of Proton"
+                onClicked: root.signOut()
+            }
+
+            PopoutSection {
                 title: "Forget this configuration?"
                 visible: root.forgetTarget !== null
                 onVisibleChanged: if (visible)
@@ -298,14 +362,6 @@ BarPill {
             BarPill {
                 Layout.fillWidth: true
                 Layout.topMargin: VekronaTheme.space2
-                icon: "upload_file"
-                value: "Import Proton…"
-                ariaName: "Import a Proton configuration"
-                onClicked: root.runClosing(["import", "--vendor", "proton"])
-            }
-
-            BarPill {
-                Layout.fillWidth: true
                 icon: "upload_file"
                 value: "Import other…"
                 ariaName: "Import a configuration of another provider"

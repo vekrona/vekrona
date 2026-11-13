@@ -15,27 +15,27 @@ export VPN_STUB_PY VPN_STATE_DIR
 VPN_SCHEMA="$(sed -n 's/^SCHEMA = \([0-9][0-9]*\)$/\1/p' "$VEKRONA_ROOT/lib/vekrona_vpn.py")"
 [[ "$VPN_SCHEMA" =~ ^[0-9]+$ ]] || die "cannot read SCHEMA from lib/vekrona_vpn.py"
 
-# What `vekrona-vpn status` prints: vpn_status_json ARMED TUNNEL CONNECTION LOGGED_IN, where ARMED and LOGGED_IN are true or false and
-# CONNECTION is a JSON object or null.
+# What `vekrona-vpn status` prints: vpn_status_json ARMED TUNNEL CONNECTION LOGGED_IN, where ARMED and LOGGED_IN (Mullvad's) are true or
+# false and CONNECTION is a JSON object or null. Proton is signed out.
 vpn_status_json() {
   jq -nc --argjson schema "$VPN_SCHEMA" --argjson armed "$1" --arg tunnel "$2" --argjson connection "$3" --argjson logged_in "$4" \
-    '{schema: $schema, armed: $armed, tunnel: $tunnel, connection: $connection, mullvad: {logged_in: $logged_in}}'
+    '{schema: $schema, armed: $armed, tunnel: $tunnel, connection: $connection, mullvad: {logged_in: $logged_in}, proton: {logged_in: false, netshield: 1, error: ""}}'
 }
 # The answers of a stub that has nothing connected and no Mullvad account.
 VPN_STATUS_OFF="$(vpn_status_json false down null false)"
-# Two Mullvad countries, a Proton country with one configuration and one with two, and a configuration of another provider whose
-# country the tool could not tell. The names are words that OCR reads.
+# Two Mullvad countries, a signed-out Proton (no countries), and imported configurations, which `list` gives only to "other": a country
+# with one configuration, one with two, and one whose country the tool could not tell. The names are words that OCR reads.
 VPN_LIST="$(jq -c --argjson schema "$VPN_SCHEMA" '{schema: $schema} + .' <<'JSON'
 {"vendors":[
   {"id":"mullvad","label":"Mullvad","countries":[
     {"code":"NL","name":"Netherlands","configs":[]},
     {"code":"SE","name":"Sweden","configs":[]}]},
-  {"id":"proton","label":"Proton VPN","countries":[
+  {"id":"proton","label":"Proton VPN","countries":[]},
+  {"id":"other","label":"Other","countries":[
     {"code":"CH","name":"Switzerland","configs":[{"uuid":"11111111-1111-1111-1111-111111111111","name":"Zurich"}]},
     {"code":"JP","name":"Japan","configs":[
       {"uuid":"22222222-2222-2222-2222-222222222222","name":"Tokyo"},
-      {"uuid":"33333333-3333-3333-3333-333333333333","name":"Osaka"}]}]},
-  {"id":"other","label":"Other","countries":[
+      {"uuid":"33333333-3333-3333-3333-333333333333","name":"Osaka"}]},
     {"code":"??","name":"Unknown","configs":[{"uuid":"44444444-4444-4444-4444-444444444444","name":"Office"}]}]}]}
 JSON
 )"

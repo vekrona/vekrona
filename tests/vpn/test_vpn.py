@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -28,6 +29,7 @@ sys.path.insert(0, str(HERE))
 
 import vekrona_countries as countries  # noqa: E402
 import vekrona_mullvad as mullvad  # noqa: E402
+import vekrona_proton as proton  # noqa: E402
 import vekrona_secrets as secrets  # noqa: E402
 import vekrona_vpn as vpn  # noqa: E402
 from vpn_stub import ApiFixture, Stubs, unused_port_base  # noqa: E402
@@ -55,7 +57,7 @@ UUID_NEW = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 UUID_OLD = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 KEY_PSK = key(5)
 KEYS = {"private_key": KEY_PRIVATE}
-CONFIG_ID = "vekrona-vpn/proton/NL/NL-792"
+CONFIG_ID = "vekrona-vpn/other/NL/NL-792"
 DEVICE_DOC = {"private_key": KEY_PRIVATE, "ipv4_address": "10.66.0.5/32", "ipv6_address": "fc00:bbbb:bbbb:bb01::5/128"}
 # The fields `nmcli -s -g` reads of a connection that `seal` exports, in the order the helper asks for them.
 SEAL_FIELDS = ["wireguard.private-key-flags", "wireguard.private-key", "wireguard.peers", "ipv4.addresses", "ipv6.addresses"]
@@ -358,7 +360,7 @@ class KillSwitchTest(unittest.TestCase):
         return [line.strip() for line in text.splitlines()]
 
     def test_the_mark_the_tunnel_uses_is_the_mark_the_kill_switch_lets_through(self):
-        settings = vpn.nm_settings_for(vpn.parse_conf(PROTON_CONF), "vekrona-vpn/proton/NL/x")
+        settings = vpn.nm_settings_for(vpn.parse_conf(PROTON_CONF), "vekrona-vpn/other/NL/x")
         nm_mark = int(settings[settings.index("wireguard.fwmark") + 1], 16)  # nmcli reads hex, with or without 0x
         self.assertEqual(nm_mark, vpn.WG_FWMARK)
         nft_marks = re.findall(r"meta mark (0x[0-9a-f]+) ip6? daddr", self.rendered())
@@ -559,7 +561,7 @@ class Sandbox(unittest.TestCase):
         self.stubs = Stubs(self.tmp / "stubs")
         self.uid = os.getuid()
         env = {**self.stubs.env(), "PATH": "%s:%s" % (self.stubs.bin, os.environ["PATH"]),
-               "XDG_CACHE_HOME": str(self.tmp / "cache"), "HOME": str(self.tmp / "home")}
+               "XDG_CACHE_HOME": str(self.tmp / "cache"), "XDG_CONFIG_HOME": str(self.tmp / "config"), "HOME": str(self.tmp / "home")}
         patcher = mock.patch.dict(os.environ, env)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -851,48 +853,59 @@ class NetworkManagerTest(Sandbox):
             vpn.lookup_tor_uid()
 
 
+NO_PROTON = {"logged_in": False, "netshield": 1, "error": ""}
+
+
 class ShellJsonTest(unittest.TestCase):
     def conn(self, uuid, full_id, state=None):
         return vpn.Connection(uuid, full_id, state)
 
     def test_nothing_connected_and_nothing_armed(self):
-        status = vpn.status_json([], vpn.DISARMED)
-        self.assertEqual(status, {"schema": 1, "armed": False, "tunnel": "down", "connection": None, "mullvad": {"logged_in": False}})
+        status = vpn.status_json([], vpn.DISARMED, NO_PROTON)
+        self.assertEqual(status, {"schema": 1, "armed": False, "tunnel": "down", "connection": None, "mullvad": {"logged_in": False},
+                                  "proton": NO_PROTON})
+
+    def test_a_proton_sign_in_and_its_netshield_level_are_in_the_status(self):
+        proton_status = {"logged_in": True, "netshield": 2, "error": ""}
+        self.assertEqual(vpn.status_json([], vpn.DISARMED, proton_status)["proton"], proton_status)
+
+    def test_a_netshield_setting_that_cannot_be_read_is_said_and_leaves_no_level(self):
+        unreadable = {"logged_in": True, "netshield": None, "error": "the NetShield level in the settings is not one of 0, 1, 2"}
+        self.assertEqual(vpn.status_json([], vpn.DISARMED, unreadable)["proton"], unreadable)
 
     def test_an_active_connection_is_up_or_activating(self):
         connection = self.conn(UUID_A, "vekrona-vpn/mullvad/NL/nl-ams-wg-001", "activated")
-        up = vpn.status_json([connection], vpn.State(True, UUID_A))
+        up = vpn.status_json([connection], vpn.State(True, UUID_A), NO_PROTON)
         self.assertEqual((up["tunnel"], up["armed"], up["mullvad"]), ("up", True, {"logged_in": True}))
         self.assertEqual(up["connection"], {"uuid": UUID_A, "vendor": "mullvad", "country": "NL", "name": "nl-ams-wg-001"})
         activating = self.conn(UUID_A, "vekrona-vpn/other/??/home", "activating")
-        self.assertEqual(vpn.status_json([activating], vpn.State(True, UUID_A))["tunnel"], "activating")
+        self.assertEqual(vpn.status_json([activating], vpn.State(True, UUID_A), NO_PROTON)["tunnel"], "activating")
 
     def test_armed_with_a_tunnel_that_is_down_still_names_the_connection(self):
-        connection = self.conn(UUID_A, "vekrona-vpn/proton/NL/NL-792")
-        blocked = vpn.status_json([connection, self.conn(UUID_B, "vekrona-vpn/other/??/x")], vpn.State(True, UUID_A))
+        connection = self.conn(UUID_A, "vekrona-vpn/other/NL/NL-792")
+        blocked = vpn.status_json([connection, self.conn(UUID_B, "vekrona-vpn/other/??/x")], vpn.State(True, UUID_A), NO_PROTON)
         self.assertEqual((blocked["tunnel"], blocked["connection"]["uuid"]), ("down", UUID_A))
-        disarmed = vpn.status_json([connection], vpn.State(False, UUID_A))
+        disarmed = vpn.status_json([connection], vpn.State(False, UUID_A), NO_PROTON)
         self.assertIsNone(disarmed["connection"])
 
     def test_a_connection_that_was_forgotten_while_armed_is_no_connection(self):
-        self.assertIsNone(vpn.status_json([], vpn.State(True, UUID_A))["connection"])
+        self.assertIsNone(vpn.status_json([], vpn.State(True, UUID_A), NO_PROTON)["connection"])
 
-    def test_the_list_has_every_vendor_and_mullvads_countries_have_no_configurations(self):
-        connections = [self.conn(UUID_B, "vekrona-vpn/proton/NL/NL-9"), self.conn(UUID_A, "vekrona-vpn/proton/NL/NL-10"),
-                       self.conn(UUID_OLD, "vekrona-vpn/other/??/Zürich home"), self.conn(UUID_NEW, "vekrona-vpn/proton/DE/de-1")]
-        listing = vpn.list_json(connections, {"se": "Sweden", "nl": "Netherlands"})
+    def test_the_list_has_every_vendor_and_the_catalog_vendors_countries_are_their_catalogs_and_have_no_configurations(self):
+        connections = [self.conn(UUID_OLD, "vekrona-vpn/other/??/Zürich home"), self.conn(UUID_NEW, "vekrona-vpn/proton/DE/de-1")]
+        listing = vpn.list_json(connections, {"mullvad": {"se": "Sweden", "nl": "Netherlands"}, "proton": {"free": "Fastest free server"}})
         self.assertEqual(listing["schema"], 1)
         self.assertEqual([vendor["id"] for vendor in listing["vendors"]], ["mullvad", "proton", "other"])
-        mullvad_vendor, proton, other = listing["vendors"]
+        mullvad_vendor, proton_vendor, other = listing["vendors"]
         self.assertEqual(mullvad_vendor["countries"], [{"code": "NL", "name": "Netherlands", "configs": []},
                                                        {"code": "SE", "name": "Sweden", "configs": []}])
-        self.assertEqual([country["code"] for country in proton["countries"]], ["DE", "NL"])
-        self.assertEqual([config["name"] for config in proton["countries"][1]["configs"]], ["NL-10", "NL-9"])
+        # A Proton connection of an earlier install is not a configuration of the list: the catalog is.
+        self.assertEqual(proton_vendor["countries"], [{"code": "FREE", "name": "Fastest free server", "configs": []}])
         self.assertEqual(other["countries"], [{"code": "??", "name": "Unknown", "configs": [{"uuid": UUID_OLD, "name": "Zürich home"}]}])
-        self.assertEqual(proton["label"], "Proton VPN")
+        self.assertEqual(proton_vendor["label"], "Proton VPN")
 
     def test_an_empty_list_is_three_empty_vendors(self):
-        listing = vpn.list_json([], {})
+        listing = vpn.list_json([], {"mullvad": {}, "proton": {}})
         self.assertEqual([(v["id"], v["countries"]) for v in listing["vendors"]], [("mullvad", []), ("proton", []), ("other", [])])
 
 
@@ -900,7 +913,7 @@ class HelperTest(Sandbox):
     def apply(self, op):
         helper.apply(vpn.instance_name(op, self.uid))
 
-    def import_request(self, *files, vendor="proton"):
+    def import_request(self, *files, vendor="other"):
         self.request({"vendor": vendor, "files": [{"file": name, "text": text} for name, text in files]})
 
     def test_arming_lets_the_handshake_through_to_the_endpoint_and_publishes_the_connection(self):
@@ -1027,7 +1040,7 @@ class HelperTest(Sandbox):
         argv = modified["argv"]
         self.assertEqual(argv[:4], ["connection", "modify", "uuid", UUID_NEW])
         settings = dict(zip(argv[4::2], argv[5::2]))
-        self.assertEqual(settings["connection.id"], "vekrona-vpn/proton/NL/NL-792")
+        self.assertEqual(settings["connection.id"], "vekrona-vpn/other/NL/NL-792")
         self.assertEqual(settings["connection.interface-name"], vpn.INTERFACE)
         self.assertEqual(settings["connection.autoconnect"], "no")
         self.assertEqual(settings["wireguard.peer-routes"], "yes")
@@ -1052,7 +1065,7 @@ class HelperTest(Sandbox):
     def test_a_profile_is_born_on_an_interface_of_its_own_so_that_it_cannot_replace_the_tunnel_in_use(self):
         self.assertNotEqual(vpn.IMPORT_NAME, vpn.INTERFACE)
         self.assertLessEqual(len(vpn.IMPORT_NAME), 15)
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")], active=[(UUID_A, "activated")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")], active=[(UUID_A, "activated")])
         self.nm_imports_as(UUID_NEW)
         self.import_request(("DE-1.conf", PROTON_CONF))
         self.apply("import")
@@ -1062,7 +1075,7 @@ class HelperTest(Sandbox):
 
     def test_a_profile_left_unfinished_by_a_killed_import_is_deleted_before_the_next_import(self):
         self.stubs.behave("nmcli", ["-t", "-f", "UUID,TYPE,NAME", "connection", "show"],
-                          stdout="%s:wireguard:%s\n%s:wireguard:%s\n" % (UUID_OLD, vpn.IMPORT_NAME, UUID_A, terse("vekrona-vpn/proton/NL/NL-1")))
+                          stdout="%s:wireguard:%s\n%s:wireguard:%s\n" % (UUID_OLD, vpn.IMPORT_NAME, UUID_A, terse("vekrona-vpn/other/NL/NL-1")))
         self.nm_imports_as(UUID_NEW)
         self.import_request(("NL-792.conf", PROTON_CONF))
         self.apply("import")
@@ -1144,7 +1157,7 @@ class HelperTest(Sandbox):
         self.assertEqual(self.stubs.called("nmcli"), [])
 
     def test_importing_again_replaces_the_connection_of_the_same_id_after_the_new_one_exists(self):
-        self.nm_lists([(UUID_OLD, "vekrona-vpn/proton/NL/NL-792")])
+        self.nm_lists([(UUID_OLD, "vekrona-vpn/other/NL/NL-792")])
         self.nm_imports_as(UUID_NEW)
         self.import_request(("NL-792.conf", PROTON_CONF))
         self.apply("import")
@@ -1233,7 +1246,7 @@ class HelperTest(Sandbox):
         self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
 
     def test_connecting_to_what_is_not_a_connection_of_vekrona_vpn_does_nothing(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")])
         for doc in ({"uuid": UUID_B}, {"uuid": "../"}, {"uuid": ""}, {"uuid": 5}, {"uuid": UUID_A.upper()}, {}, {"mullvad": "x"}):
             self.request(doc)
             with self.subTest(doc=str(doc)), self.assertRaises(vpn.VpnError):
@@ -1283,7 +1296,7 @@ class HelperTest(Sandbox):
         self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/SE/se-got-wg-001"), (UUID_OLD, "vekrona-vpn/mullvad/NL/nl-ams-wg-009")])
         self.nm_imports_as(UUID_NEW)
         self.nm_peer_of(UUID_NEW, "198.51.100.7:51820")
-        self.request({"mullvad": relay_dict(), "device": DEVICE_DOC})
+        self.request({"vendor": "mullvad", "relay": relay_dict(), "device": DEVICE_DOC})
         self.apply("connect")
         (imported,) = self.stubs.called("nmcli", "connection", "import")
         conf = vpn.parse_conf(imported["file"].replace("Table = off\n", "").replace(vpn.PLACEHOLDER_KEY, KEY_PRIVATE))
@@ -1304,14 +1317,14 @@ class HelperTest(Sandbox):
         self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/SE/se-got-wg-001")])
         for bad in (relay_dict(hostname="nl\nPostUp = x"), relay_dict(public_key="short"), relay_dict(ipv4="vpn.example.com"),
                     relay_dict(country="nl\n"), {**relay_dict(), "extra": 1}):
-            self.request({"mullvad": bad, "device": DEVICE_DOC})
+            self.request({"vendor": "mullvad", "relay": bad, "device": DEVICE_DOC})
             with self.subTest(bad=str(bad)[:30]), self.assertRaises(vpn.VpnError):
                 self.apply("connect")
         self.assertEqual(self.nmcli_actions(), [])
 
     def test_logging_in_replaces_every_connection_of_the_old_account(self):
         self.nm_lists([(UUID_A, "vekrona-vpn/mullvad/SE/se-got-wg-001"), (UUID_B, "vekrona-vpn/mullvad/NL/nl-ams-wg-009"),
-                       (UUID_OLD, "vekrona-vpn/proton/NL/NL-792")])
+                       (UUID_OLD, "vekrona-vpn/other/NL/NL-792")])
         self.nm_imports_as(UUID_NEW)
         self.request({"device": {"private_key": KEY_PRIVATE, "ipv4_address": "10.66.0.5/32", "ipv6_address": "fc00:bbbb:bbbb:bb01::5/128"},
                       "relay": relay_dict()})
@@ -1335,7 +1348,7 @@ class HelperTest(Sandbox):
         self.assertEqual(self.stubs.called("nmcli", "connection"), [])
 
     def test_turning_off_takes_down_what_is_active_and_nothing_else_and_then_removes_the_kill_switch(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792"), (UUID_B, "vekrona-vpn/other/??/home")], active=[(UUID_A, "activating")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792"), (UUID_B, "vekrona-vpn/other/??/home")], active=[(UUID_A, "activating")])
         self.request({})
         self.apply("off")
         self.assertEqual(self.nmcli_actions(), [["connection", "down", "uuid", UUID_A]])
@@ -1345,14 +1358,14 @@ class HelperTest(Sandbox):
         self.assertEqual(self.state(), {"schema": 1, "armed": False, "uuid": None})
 
     def test_turning_off_with_nothing_active_still_removes_the_kill_switch(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")])
         self.request({})
         self.apply("off")
         self.assertEqual(self.nmcli_actions(), [])
         self.assertEqual(len(self.stubs.called("nft", "-f")), 1)
 
     def test_a_tunnel_that_cannot_be_taken_down_leaves_the_kill_switch_where_it_is(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")], active=[(UUID_A, "activated")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")], active=[(UUID_A, "activated")])
         self.stubs.behave("nmcli", ["connection", "down"], rc=1, stderr="Error: timeout\n")
         self.request({})
         with self.assertRaises(vpn.VpnError):
@@ -1361,13 +1374,13 @@ class HelperTest(Sandbox):
         self.assertFalse((self.tmp / "run" / "vekrona-vpn" / "state.json").exists())
 
     def test_forgetting_removes_the_connection_and_takes_it_down_first_when_active(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")], active=[(UUID_A, "activated")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")], active=[(UUID_A, "activated")])
         self.request({"uuid": UUID_A})
         self.apply("forget")
         self.assertEqual(self.nmcli_actions(), [["connection", "down", "uuid", UUID_A], ["connection", "delete", "uuid", UUID_A]])
 
     def test_forgetting_what_is_not_ours_removes_nothing(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")])
         for doc in ({"uuid": UUID_B}, {"uuid": "../"}, {"uuid": ""}, {"uuid": None}, {}):
             self.request(doc)
             with self.subTest(doc=str(doc)), self.assertRaises(vpn.VpnError):
@@ -1382,7 +1395,7 @@ class HelperTest(Sandbox):
         self.request({"phase": "export"})
         self.apply("seal")
         path = Path(vpn.sealed_path(self.uid))
-        self.assertEqual(json.loads(path.read_text()), [{"uuid": UUID_A, "id": CONFIG_ID, "vendor": "proton", "private_key": KEY_PRIVATE,
+        self.assertEqual(json.loads(path.read_text()), [{"uuid": UUID_A, "id": CONFIG_ID, "vendor": "other", "private_key": KEY_PRIVATE,
                                                          "preshared_key": KEY_PSK, "ipv4_address": "10.2.0.2/32", "ipv6_address": ""}])
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(path.stat().st_uid, self.uid)
@@ -1468,6 +1481,43 @@ class HelperTest(Sandbox):
                 self.assertEqual(helper.main(["vekrona-vpn-apply", *argv]), helper.EXIT_USAGE)
             self.assertIn("usage", stderr.getvalue())
         self.assertEqual(self.stubs.calls(), [])
+
+
+    def test_connecting_to_proton_replaces_every_generated_proton_connection_and_never_an_import_of_before_wp3(self):
+        # A generated connection of another country is replaced; an import of `proton` made before WP3 (any other last segment) is not.
+        self.nm_lists([(UUID_OLD, "vekrona-vpn/proton/DE/signed-in"), (UUID_B, "vekrona-vpn/proton/NL/NL-792")])
+        self.nm_imports_as(UUID_NEW)
+        self.nm_peer_of(UUID_NEW, "203.0.113.9:51820")
+        self.request({"vendor": "proton", "id": "vekrona-vpn/proton/NL/signed-in", "conf": PROTON_CONF, "private_key": KEY_PRIVATE})
+        self.apply("connect")
+        (imported,) = self.stubs.called("nmcli", "connection", "import")
+        self.assertIn(vpn.PLACEHOLDER_KEY, imported["file"])
+        self.assertNotIn(KEY_PRIVATE, imported["file"])
+        (modified,) = self.stubs.called("nmcli", "connection", "modify")
+        self.assertEqual(modified["argv"][5], "vekrona-vpn/proton/NL/signed-in")
+        self.assertEqual(self.stubs.called("nmcli", "--wait")[0]["stdin"], "wireguard.private-key:%s\n" % KEY_PRIVATE)
+        calls = self.stubs.argvs()
+        up = index_starting(calls, ["nmcli", "--wait", str(vpn.NM_UP_WAIT_SEC), "connection", "up", "uuid", UUID_NEW])
+        self.assertLess(up, calls.index(["nmcli", "connection", "delete", "uuid", UUID_OLD]))
+        self.assertNotIn(["nmcli", "connection", "delete", "uuid", UUID_B], calls)
+
+    def test_a_proton_request_with_a_foreign_id_a_key_of_another_configuration_or_no_configuration_is_refused_before_arming(self):
+        good = {"vendor": "proton", "id": "vekrona-vpn/proton/NL/signed-in", "conf": PROTON_CONF, "private_key": KEY_PRIVATE}
+        for changed in ({"id": "vekrona-vpn/other/NL/signed-in"}, {"id": "vekrona-vpn/proton/??/signed-in"}, {"id": "vekrona-vpn/proton/NL/NL#6"},
+                        {"id": "vekrona-vpn/proton/NL/signed-in "}, {"private_key": KEY_PSK}, {"conf": None}, {"conf": conf_without("PrivateKey")}):
+            with self.subTest(changed=str(changed)), self.assertRaises(vpn.VpnError):
+                self.request({**good, **changed})
+                self.apply("connect")
+        self.assertEqual(self.stubs.called("nft"), [])
+        self.assertEqual(self.nmcli_actions(), [])
+
+
+    def test_a_proton_request_whose_configuration_holds_a_preshared_key_is_refused_before_arming(self):
+        self.request({"vendor": "proton", "id": "vekrona-vpn/proton/NL/signed-in", "private_key": KEY_PRIVATE,
+                      "conf": PROTON_CONF.replace("AllowedIPs", "PresharedKey = %s\nAllowedIPs" % KEY_PSK)})
+        with self.assertRaisesRegex(vpn.VpnError, "preshared key"):
+            self.apply("connect")
+        self.assertEqual((self.stubs.called("nft"), self.nmcli_actions()), ([], []))
 
 
 def relay_list_doc(extra_relays=()):
@@ -1606,7 +1656,9 @@ class MullvadTest(MullvadSandbox):
             mullvad.new_key_pair()
 
 
-class CliTest(MullvadSandbox):
+class CliSandbox(MullvadSandbox):
+    """The user's commands run in process, with the helper's unit answered by the stubs (see setUp)."""
+
     def setUp(self):
         super().setUp()
         self.helper_leaves_a_receipt = True  # False: another job answered, as when a start merged into the job of an interrupted call
@@ -1656,12 +1708,14 @@ class CliTest(MullvadSandbox):
 
         return handed, mock.patch.object(vpn, "write_request", record)
 
+class CliTest(CliSandbox):
     def test_status_prints_one_json_object(self):
         self.nm_lists([(UUID_A, "vekrona-vpn/mullvad/NL/nl-ams-wg-001")], active=[(UUID_A, "activated")])
         self.write_state(True, UUID_A)
         code, out, err = self.run_cli("status")
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out), {"schema": 1, "armed": True, "tunnel": "up", "mullvad": {"logged_in": True},
+                                           "proton": {"logged_in": False, "netshield": 1, "error": ""},
                                            "connection": {"uuid": UUID_A, "vendor": "mullvad", "country": "NL", "name": "nl-ams-wg-001"}})
 
     def test_status_before_anything_was_armed(self):
@@ -1682,7 +1736,7 @@ class CliTest(MullvadSandbox):
                 self.assertEqual(len(err.strip().splitlines()), 1)
 
     def test_list_without_an_account_asks_mullvad_for_nothing(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")])
         code, out, err = self.run_cli("list")
         self.assertEqual(code, 0)
         self.assertEqual(self.api.requests, [])
@@ -1696,13 +1750,13 @@ class CliTest(MullvadSandbox):
         self.assertEqual(len(self.api.requests_to("GET", "/app/v1/relays")), 1)
 
     def test_list_with_an_account_and_no_way_to_reach_mullvad_still_lists_and_says_why(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/mullvad/NL/nl-ams-wg-001"), (UUID_B, "vekrona-vpn/proton/DE/de-1")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/mullvad/NL/nl-ams-wg-001"), (UUID_B, "vekrona-vpn/other/DE/de-1")])
         with mock.patch.object(mullvad, "MULLVAD_API", unused_port_base()):
             code, out, err = self.run_cli("list")
         self.assertEqual(code, 0)
         self.assertIn("no cache", err)
         vendors = json.loads(out)["vendors"]
-        self.assertEqual((vendors[0]["countries"], vendors[1]["countries"][0]["code"]), ([], "DE"))
+        self.assertEqual((vendors[0]["countries"], vendors[2]["countries"][0]["code"]), ([], "DE"))
 
     def test_connect_by_uuid_hands_the_uuid_and_its_keys_to_the_helper_and_takes_the_request_back(self):
         self.nm_lists([(UUID_A, CONFIG_ID)])
@@ -1721,7 +1775,7 @@ class CliTest(MullvadSandbox):
             code, _, err = self.run_cli("connect", "mullvad", "nl")
         self.assertEqual((code, err), (0, ""))
         device = self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID)
-        self.assertEqual(handed, [{"mullvad": relay_dict(), "device": device}])
+        self.assertEqual(handed, [{"vendor": "mullvad", "relay": relay_dict(), "device": device}])
     def test_connect_to_mullvad_without_a_device_in_the_keyring_says_not_logged_in_and_starts_nothing(self):
         self.stubs.keyring_file.write_text("[]")
         code, out, err = self.run_cli("connect", "mullvad", "nl")
@@ -1820,7 +1874,7 @@ class CliTest(MullvadSandbox):
         self.assertEqual(sorted(mullvad.read_cache(str(self.relay_cache))["names"]), ["nl", "se"])
 
     def test_list_with_a_cache_that_cannot_be_used_and_no_way_to_reach_mullvad_still_lists_the_other_vendors(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/mullvad/NL/nl-ams-wg-001"), (UUID_B, "vekrona-vpn/proton/DE/de-1")])
+        self.nm_lists([(UUID_A, "vekrona-vpn/mullvad/NL/nl-ams-wg-001"), (UUID_B, "vekrona-vpn/other/DE/de-1")])
         self.relay_cache.parent.mkdir(parents=True)
         self.relay_cache.write_text("{not json")
         with mock.patch.object(mullvad, "MULLVAD_API", unused_port_base()):
@@ -1828,16 +1882,16 @@ class CliTest(MullvadSandbox):
         self.assertEqual(code, 0)
         self.assertIn("unusable", err)
         vendors = json.loads(out)["vendors"]
-        self.assertEqual((vendors[0]["countries"], vendors[1]["countries"][0]["code"]), ([], "DE"))
+        self.assertEqual((vendors[0]["countries"], vendors[2]["countries"][0]["code"]), ([], "DE"))
 
     def test_list_without_an_account_and_a_cache_that_cannot_be_used_still_lists(self):
-        self.nm_lists([(UUID_B, "vekrona-vpn/proton/DE/de-1")])
+        self.nm_lists([(UUID_B, "vekrona-vpn/other/DE/de-1")])
         self.relay_cache.parent.mkdir(parents=True)
         self.relay_cache.write_text("{not json")
         code, out, err = self.run_cli("list")
         self.assertEqual(code, 0)
         self.assertIn("unusable", err)
-        self.assertEqual(json.loads(out)["vendors"][1]["countries"][0]["code"], "DE")
+        self.assertEqual(json.loads(out)["vendors"][2]["countries"][0]["code"], "DE")
 
     def test_connect_to_a_country_that_is_not_given_as_a_code_says_which_country_it_took_it_for(self):
         for query, said in (("Netherlands", "Netherlands (NL)"), ("swe", "Sweden (SE)"), ("holland", "Netherlands (NL)")):
@@ -1846,7 +1900,7 @@ class CliTest(MullvadSandbox):
                 code, out, err = self.run_cli("connect", "mullvad", query)
             with self.subTest(query=query):
                 self.assertEqual((code, out, err), (0, "", "vekrona-vpn: using %s\n" % said))
-                self.assertEqual(handed[0]["mullvad"]["country"], said[-3:-1].lower())
+                self.assertEqual(handed[0]["relay"]["country"], said[-3:-1].lower())
 
     def test_connect_to_a_country_mullvad_does_not_have_fails_with_one_line_and_starts_nothing(self):
         for country in ("Atlantis", "", "de", "fr"):
@@ -1938,9 +1992,9 @@ class CliTest(MullvadSandbox):
         good.write_text(PROTON_CONF)
         handed, patched = self.requests_handed_over()
         with patched:
-            code, _, _ = self.run_cli("import", "--vendor", "proton", str(good))
+            code, _, _ = self.run_cli("import", "--vendor", "other", str(good))
         self.assertEqual(code, 0)
-        self.assertEqual(handed, [{"vendor": "proton", "files": [{"file": "NL-792.conf", "text": PROTON_CONF}]}])
+        self.assertEqual(handed, [{"vendor": "other", "files": [{"file": "NL-792.conf", "text": PROTON_CONF}]}])
         self.assertEqual(self.stubs.argvs("systemctl")[0][-1], "vekrona-vpn-apply@import-%d.service" % self.uid)
         self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), KEYS)
 
@@ -1968,14 +2022,14 @@ class CliTest(MullvadSandbox):
 
     def test_import_through_the_chooser_does_nothing_when_it_is_cancelled(self):
         with mock.patch.object(cli.vekrona_cli, "choose_paths", return_value=[]) as chooser:
-            code, _, _ = self.run_cli("import", "--vendor", "proton")
+            code, _, _ = self.run_cli("import", "--vendor", "other")
         self.assertEqual(code, 0)
         chooser.assert_called_once()
         self.assertEqual(self.stubs.called("systemctl"), [])
 
     def test_import_through_a_chooser_that_is_missing_fails_with_its_reason(self):
         with mock.patch.object(cli.vekrona_cli, "choose_paths", side_effect=cli.vekrona_cli.PortalError("no portal")):
-            code, _, err = self.run_cli("import", "--vendor", "proton")
+            code, _, err = self.run_cli("import", "--vendor", "other")
         self.assertEqual((code, err), (1, "vekrona-vpn: no portal\n"))
 
     def test_logging_in_registers_a_device_and_hands_only_its_key_and_addresses_to_the_helper_and_keeps_both_in_the_keyring(self):
@@ -2095,7 +2149,7 @@ class CliTest(MullvadSandbox):
     def test_importing_a_file_stores_its_key_under_the_id_of_the_connection_the_helper_made(self):
         good = self.tmp / "NL-792.conf"
         good.write_text(PROTON_CONF)
-        code, _, _ = self.run_cli("import", "--vendor", "proton", str(good))
+        code, _, _ = self.run_cli("import", "--vendor", "other", str(good))
         self.assertEqual(code, 0)
         self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), KEYS)
 
@@ -2106,16 +2160,16 @@ class CliTest(MullvadSandbox):
         self.stubs.seed(secrets.CONFIG_KEY, CONFIG_ID, {"private_key": key(9)})
         self.stubs.behave("systemctl", ["--no-ask-password", "start"], rc=1)
         self.helper_failure = "file 2: nmcli connection modify failed"
-        code, _, err = self.run_cli("import", "--vendor", "proton", str(first), str(second))
+        code, _, err = self.run_cli("import", "--vendor", "other", str(first), str(second))
         self.assertEqual((code, err), (1, "vekrona-vpn: file 2: nmcli connection modify failed\n"))
         self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), {"private_key": key(9)})
-        self.assertIsNone(self.stubs.stored(secrets.CONFIG_KEY, "vekrona-vpn/proton/DE/DE-1"))
+        self.assertIsNone(self.stubs.stored(secrets.CONFIG_KEY, "vekrona-vpn/other/DE/DE-1"))
 
     def test_two_files_that_would_make_the_same_connection_are_refused_before_anything_is_stored(self):
         first, second = self.tmp / "NL-792.conf", self.tmp / "NL-792.CONF"
         first.write_text(PROTON_CONF)
         second.write_text(PROTON_CONF)
-        code, _, err = self.run_cli("import", "--vendor", "proton", str(first), str(second))
+        code, _, err = self.run_cli("import", "--vendor", "other", str(first), str(second))
         self.assertEqual(code, 1)
         self.assertEqual(err, "vekrona-vpn: NL-792.conf and NL-792.CONF would both make the connection %s\n" % CONFIG_ID)
         self.assertEqual([item for item in self.stubs.keyring() if item["attributes"]["kind"] == secrets.CONFIG_KEY], [])
@@ -2125,7 +2179,7 @@ class CliTest(MullvadSandbox):
         good = self.tmp / "NL-792.conf"
         good.write_text(PROTON_CONF)
         self.stubs.lock(True)
-        code, _, err = self.run_cli("import", "--vendor", "proton", str(good))
+        code, _, err = self.run_cli("import", "--vendor", "other", str(good))
         self.assertEqual(code, 1)
         self.assertIn("keyring locked", err)
         self.assertEqual(self.stubs.called("systemctl"), [])
@@ -2283,3 +2337,707 @@ class CliTest(MullvadSandbox):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---- Proton ---------------------------------------------------------------------------------------------------------------
+
+SELECTOR = "SELECTORSECRETVALUE0123456789ABCD"  # the sign-in's bearer secret: 32 characters
+SIGN_IN_PATH = "/auth/v4/sessions/forks/" + SELECTOR
+USER_CODE = "ABCD1234"
+SEED = bytes(range(1, 33))
+SEED_B64 = base64.b64encode(SEED).decode()
+PRIVATE_B64 = proton.private_key_text(SEED)  # the WireGuard private key of the seed: it reaches NetworkManager's stdin only
+SESSION_ITEM = {"uid": "UID1", "access_token": "ACCESS1", "refresh_token": "REFRESH1"}
+SESSION_ANSWER = {"UID": "UID1", "AccessToken": "ACCESS1", "RefreshToken": "REFRESH1"}
+REFRESH_TIME = 1800000000  # 2027-01-15 08:00:00 UTC
+CLOCK = 1790000000  # 2026-09-20 (the tests that look at the time): before the cache files the tests write, so they are young
+TIMER = "vekrona-vpn-proton-renew-1790003600.timer"
+PLAN_PLUS = {"VPN": {"MaxTier": 2, "PlanName": "plus"}}
+PLAN_FREE = {"VPN": {"MaxTier": 0, "PlanName": "free"}}
+# RFC 8032, section 7.1, test 1: the seed and the Ed25519 public key of it.
+RFC8032_SEED = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+RFC8032_PUBLIC = bytes.fromhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+
+
+def api_logical(name, country, tier, score, *, status=1, features=0, entry_ip="203.0.113.10", entry_country=None):
+    """A logical server as Proton's list answers it, with one server (the entry is in the exit's country unless told otherwise)."""
+    return {"Name": name, "EntryCountry": entry_country or country, "ExitCountry": country, "Tier": tier, "Features": features,
+            "Score": score, "Status": status, "Servers": [{"EntryIP": entry_ip, "X25519PublicKey": key(6), "Status": 1, "Label": "1"}]}
+
+
+LOGICALS = [
+    api_logical("CH#3", "CH", 0, 5.0, entry_ip="203.0.113.20"),
+    api_logical("NL#1", "NL", 0, 3.0, entry_ip="203.0.113.21"),
+    api_logical("US#2", "US", 2, 0.5, entry_ip="203.0.113.22"),
+    api_logical("NL#4", "NL", 2, 4.0, entry_ip="203.0.113.24"),
+    api_logical("NL#5", "NL", 2, 1.0, status=0, entry_ip="203.0.113.25"),
+    api_logical("NL#6", "NL", 2, 2.0, features=16, entry_ip="203.0.113.26"),
+    api_logical("DE#1", "DE", 2, 0.0, entry_ip="203.0.113.27"),
+    api_logical("NL#7", "NL", 3, 0.1, entry_ip="203.0.113.28"),
+]
+
+
+def certificate_answer(fingerprint=None, refresh_time=REFRESH_TIME):
+    return {"ClientKeyFingerprint": proton.fingerprint(SEED) if fingerprint is None else fingerprint, "RefreshTime": refresh_time,
+            "ExpirationTime": REFRESH_TIME + 86400}
+
+
+def fake_clock():
+    """A clock and a pause for await_session: the pause moves the clock on and is counted, so the wait of ten minutes takes no time."""
+    now = [0.0]
+    pauses = []
+
+    def pause(seconds):
+        pauses.append(seconds)
+        now[0] += seconds
+
+    return (lambda: now[0]), pause, pauses
+
+
+def session_of(item):
+    return proton.session_of_item(item)
+
+
+class ProtonCoreTest(unittest.TestCase):
+    def test_the_wireguard_key_of_a_seed_is_the_x25519_form_of_the_ed25519_public_key_of_the_same_seed(self):
+        # Both keys multiply the base point by the same clamped scalar, and the X25519 public key is the Montgomery u-coordinate of
+        # that point, u = (1 + y) / (1 - y) for the Edwards y-coordinate of the Ed25519 public key (RFC 7748, section 4.1).
+        p = 2 ** 255 - 19
+        y = int.from_bytes(RFC8032_PUBLIC, "little") & ((1 << 255) - 1)
+        u = (1 + y) * pow(1 - y, p - 2, p) % p
+        self.assertEqual(proton.x25519_public(proton.x25519_from_seed(RFC8032_SEED)), u.to_bytes(32, "little"))
+
+    def test_a_seed_that_is_not_32_bytes_of_base64_is_refused(self):
+        for bad in ({}, {"seed": "lizard"}, {"seed": base64.b64encode(bytes(31)).decode()}, {"seed": None}):
+            with self.subTest(bad=str(bad)), self.assertRaises(vpn.VpnError):
+                proton.seed_of_item(bad)
+
+    def test_a_server_renders_a_configuration_the_connection_accepts_with_ipv6_only_when_the_server_has_it(self):
+        for raw, ipv6 in ((LOGICALS[1], False), (LOGICALS[5], True)):
+            logical = proton.logical_of_answer(raw)
+            conf = vpn.parse_conf(proton.conf_text(logical, logical["servers"][0], SEED))
+            self.assertEqual((conf.has_ipv6, conf.private_key), (ipv6, PRIVATE_B64))
+            self.assertEqual(conf.endpoint, vpn.Endpoint(raw["Servers"][0]["EntryIP"], 51820))
+
+    def test_the_choices_of_the_account_are_its_countries_or_its_free_server(self):
+        catalog, left_out = proton.catalog_from_answers("plus", 2, LOGICALS)
+        self.assertEqual(left_out, [])
+        self.assertEqual(sorted(proton.countries_of(catalog)), ["ch", "de", "nl", "us"])
+        free, _ = proton.catalog_from_answers("free", 0, LOGICALS)
+        self.assertEqual(proton.countries_of(free), {"free": "Fastest free server (IPv4 only)"})
+        with_ipv6, _ = proton.catalog_from_answers("free", 0, LOGICALS + [api_logical("NL#8", "NL", 0, 9.0, features=16)])
+        self.assertEqual(proton.countries_of(with_ipv6), {"free": "Fastest free server"})
+
+    def test_free_takes_the_fastest_tier_zero_server_whatever_its_country(self):
+        catalog, _ = proton.catalog_from_answers("free", 0, LOGICALS)
+        choice = proton.choose(catalog, "free")
+        self.assertEqual((choice.country, choice.logical["name"]), ("FREE", "NL#1"))
+
+    def test_a_country_takes_the_fastest_usable_server_of_its_tier(self):
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
+        choice = proton.choose(catalog, "nl")
+        self.assertEqual((choice.country, choice.logical["name"]), ("NL", "NL#6"))
+
+    def test_secure_core_and_tor_servers_are_never_chosen_for_a_country(self):
+        extra = [api_logical("SC#1", "NL", 2, 0.1, entry_country="CH"), api_logical("SC#2", "NL", 2, 0.05, features=1),
+                 api_logical("TOR#1", "NL", 2, 0.2, features=2)]
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS + extra)
+        self.assertEqual(proton.choose(catalog, "nl").logical["name"], "NL#6")
+
+    def test_the_server_with_ipv6_wins_over_a_lower_score_without_it(self):
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS + [api_logical("P2P#1", "NL", 2, 0.3, features=4)])
+        self.assertEqual(proton.choose(catalog, "nl").logical["name"], "NL#6")
+
+    def test_a_country_with_only_ipv4_servers_serves_them_and_is_labelled(self):
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS + [api_logical("P2P#2", "IT", 2, 0.3, features=4)])
+        self.assertEqual(proton.choose(catalog, "it").logical["name"], "P2P#2")
+        self.assertTrue(proton.countries_of(catalog)["it"].endswith(proton.IPV4_ONLY))
+        self.assertFalse(proton.countries_of(catalog)["nl"].endswith(proton.IPV4_ONLY))
+
+    def test_a_country_without_a_usable_server_and_a_query_that_is_no_country_are_errors(self):
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
+        with self.assertRaisesRegex(vpn.VpnError, "no server for JP"):
+            proton.choose(catalog, "jp")
+        for query in ("", "N", "NLD", "??", "FREEX", "Netherlands"):
+            with self.subTest(query=query), self.assertRaisesRegex(vpn.VpnError, "Proton takes a country code"):
+                proton.choose(catalog, query)
+
+    def test_a_logical_server_whose_name_or_fields_are_not_plain_is_refused(self):
+        good = proton.logical_of_answer(LOGICALS[1])
+        for changed in ({"name": "NL#1\nPostUp = x"}, {"name": ""}, {"country": "FREE"}, {"country": "nl"}, {"entry_country": "??"},
+                        {"status": "1"}, {"score": True}, {"servers": None}, {"features": 1.5},
+                        {"servers": [{**good["servers"][0], "public_key": "lizard"}]}):
+            with self.subTest(changed=str(changed)), self.assertRaises(vpn.VpnError):
+                proton.validate_logical({**good, **changed})
+
+    def test_a_logical_server_the_tool_does_not_know_is_left_out_and_said(self):
+        catalog, left_out = proton.catalog_from_answers("plus", 2, [LOGICALS[1], {"Name": "NL#9"}])
+        self.assertEqual((len(catalog["logicals"]), len(left_out)), (1, 1))
+
+    def test_a_recorded_certificate_is_reused_only_for_its_netshield_and_while_it_has_an_hour_left(self):
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
+        catalog["certificate"] = {"refresh_time": REFRESH_TIME, "expiration_time": CLOCK + 2 * 3600, "netshield": 1}
+        self.assertEqual(proton.reusable_certificate(catalog, 1, CLOCK), proton.Certificate(REFRESH_TIME, CLOCK + 2 * 3600))
+        self.assertIsNone(proton.reusable_certificate(catalog, 2, CLOCK))
+        self.assertIsNone(proton.reusable_certificate(catalog, 1, CLOCK + 3600))
+        catalog["certificate"] = None
+        self.assertIsNone(proton.reusable_certificate(catalog, 1, CLOCK))
+        catalog["certificate"] = {"refresh_time": 1, "expiration_time": 2, "netshield": 5}
+        with self.assertRaisesRegex(vpn.VpnError, "NetShield level"):
+            proton.validate_catalog(catalog)
+
+
+class ProtonApiTest(unittest.TestCase):
+    def setUp(self):
+        self.api = ApiFixture()
+        self.api.start()
+        self.addCleanup(self.api.stop)
+        patched = mock.patch.object(proton, "PROTON_API", self.api.base)
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def test_the_sign_in_is_polled_every_five_seconds_until_the_code_is_entered(self):
+        self.api.answer_in_turn("GET", SIGN_IN_PATH, [(422, {"Code": 2001}), (422, {"Code": 2001}), (200, SESSION_ANSWER)])
+        now, pause, pauses = fake_clock()
+        session = proton.await_session(SELECTOR, now=now, pause=pause)
+        self.assertEqual((session.uid, pauses), ("UID1", [5, 5]))
+
+    def test_the_sign_in_gives_up_after_ten_minutes_by_the_clock(self):
+        self.api.answer("GET", SIGN_IN_PATH, {"Code": 2001}, status=422)
+        now, pause, pauses = fake_clock()
+        with self.assertRaisesRegex(vpn.VpnError, "sign-in timed out"):
+            proton.await_session(SELECTOR, now=now, pause=pause)
+        self.assertEqual(len(pauses), proton.SIGN_IN_TIMEOUT_SEC // proton.SIGN_IN_POLL_SEC)
+
+    def test_an_error_of_the_sign_in_names_no_selector(self):
+        self.api.answer("GET", SIGN_IN_PATH, None, status=500)
+        with self.assertRaises(vpn.VpnError) as caught:
+            proton.poll_fork(SELECTOR)
+        self.assertNotIn(SELECTOR, str(caught.exception))
+
+    def test_a_version_proton_no_longer_accepts_says_that_vekrona_needs_an_update(self):
+        self.api.answer("GET", "/auth/v4/sessions/forks", {"Code": 5003}, status=422)
+        with self.assertRaisesRegex(vpn.VpnError, "needs an update"):
+            proton.start_fork()
+
+    def test_a_sign_in_answer_without_a_selector_or_with_a_user_code_of_another_shape_is_refused(self):
+        for answer in ({"UserCode": USER_CODE}, {"Selector": SELECTOR, "UserCode": "AB"}, {"Selector": SELECTOR, "UserCode": "ABCD-1234"}):
+            with self.subTest(answer=str(answer)), self.assertRaises(vpn.VpnError):
+                self.api.answer("GET", "/auth/v4/sessions/forks", answer)
+                proton.start_fork()
+
+    def test_a_redirect_answer_is_an_error(self):
+        self.api.answer("GET", "/vpn/v2", None, status=302)
+        with self.assertRaisesRegex(vpn.VpnError, "HTTP 302"):
+            proton.plan_of(proton.Account(session_of(SESSION_ITEM), lambda: None, lambda session: None))
+
+    def test_an_access_token_proton_refuses_is_renewed_once_stored_and_the_call_retried_with_the_renewed_session(self):
+        self.api.answer_in_turn("GET", "/vpn/v2", [(401, None), (200, PLAN_PLUS)])
+        self.api.answer("POST", "/auth/v4/refresh", {"UID": "UID1", "AccessToken": "ACCESS2", "RefreshToken": "REFRESH2"})
+        saved = []
+        account = proton.Account(session_of(SESSION_ITEM), lambda: None, saved.append)
+        self.assertEqual(proton.plan_of(account), (2, "plus"))
+        self.assertEqual(saved, [proton.Session("UID1", "ACCESS2", "REFRESH2")])
+        self.assertEqual(self.api.requests_to("POST", "/auth/v4/refresh")[0]["body"]["RefreshToken"], "REFRESH1")
+        self.assertEqual([r["authorization"] for r in self.api.requests_to("GET", "/vpn/v2")], ["Bearer ACCESS1", "Bearer ACCESS2"])
+
+    def test_two_renewals_racing_with_the_same_refresh_token_renew_once_and_the_loser_adopts_the_stored_session(self):
+        # The winner renews (its refresh answer is 200) and stores the result; the loser, still holding REFRESH1, is refused with 10013
+        # and finds REFRESH2 in the keyring: it adopts that session and its retried call goes through.
+        self.api.answer_in_turn("GET", "/vpn/v2", [(401, None), (200, PLAN_PLUS), (401, None), (200, PLAN_PLUS)])
+        self.api.answer_in_turn("POST", "/auth/v4/refresh", [
+            (200, {"UID": "UID1", "AccessToken": "ACCESS2", "RefreshToken": "REFRESH2"}), (422, {"Code": 10013})])
+        keyring = [session_of(SESSION_ITEM)]
+        winner = proton.Account(session_of(SESSION_ITEM), lambda: keyring[0], keyring.append)
+        loser = proton.Account(session_of(SESSION_ITEM), lambda: keyring[-1], keyring.append)
+        self.assertEqual(proton.plan_of(winner), (2, "plus"))
+        self.assertEqual(proton.plan_of(loser), (2, "plus"))
+        self.assertEqual(len(self.api.requests_to("POST", "/auth/v4/refresh")), 2)
+        self.assertEqual(keyring[-1], proton.Session("UID1", "ACCESS2", "REFRESH2"))
+        self.assertEqual(self.api.requests_to("GET", "/vpn/v2")[-1]["authorization"], "Bearer ACCESS2")
+
+    def test_a_refusal_of_a_refresh_token_the_keyring_still_holds_ends_the_session(self):
+        self.api.answer_in_turn("GET", "/vpn/v2", [(401, None)])
+        self.api.answer("POST", "/auth/v4/refresh", {"Code": 10013}, status=422)
+        account = proton.Account(session_of(SESSION_ITEM), lambda: session_of(SESSION_ITEM), lambda session: None)
+        with self.assertRaises(proton.SessionEnded):
+            proton.plan_of(account)
+
+    def test_a_renewed_session_that_cannot_be_stored_says_the_session_is_lost(self):
+        self.api.answer_in_turn("GET", "/vpn/v2", [(401, None), (200, PLAN_PLUS)])
+        self.api.answer("POST", "/auth/v4/refresh", {"UID": "UID1", "AccessToken": "ACCESS2", "RefreshToken": "REFRESH2"})
+
+        def refuse(session):
+            raise vpn.VpnError("keyring locked")
+
+        with self.assertRaisesRegex(vpn.VpnError, "session is lost: sign in again"):
+            proton.plan_of(proton.Account(session_of(SESSION_ITEM), lambda: None, refuse))
+
+    def test_a_certificate_for_another_key_is_refused_and_the_request_names_the_key_and_the_netshield_level(self):
+        account = proton.Account(session_of(SESSION_ITEM), lambda: None, lambda session: None)
+        self.api.answer("POST", "/vpn/v1/certificate", certificate_answer("bogus"))
+        with self.assertRaisesRegex(vpn.VpnError, "another key"):
+            proton.certificate(account, SEED, 1)
+        self.api.answer("POST", "/vpn/v1/certificate", certificate_answer())
+        certificate = proton.certificate(account, SEED, 2)
+        self.assertEqual((certificate.refresh_time, certificate.expiration_time), (REFRESH_TIME, REFRESH_TIME + 86400))
+        (request,) = self.api.requests_to("POST", "/vpn/v1/certificate")[1:]
+        self.assertEqual(request["body"]["ClientPublicKey"], proton.ed25519_public_pem(SEED))
+        self.assertEqual(request["body"]["Features"]["NetShieldLevel"], 2)
+
+
+class ProtonTest(CliSandbox):
+    """The Proton commands through the CLI, with Proton's API as a local fixture and the keyring as the stubs keep it."""
+
+    def setUp(self):
+        super().setUp()
+        patched = mock.patch.object(proton, "PROTON_API", self.api.base)
+        patched.start()
+        self.addCleanup(patched.stop)
+        # No sign-in waits unless a test says so. The renewal timers are whatever `list-units` says (none unless a test says so).
+        self.stubs.behave("systemctl", ["--user", "is-active"], rc=3)
+        self.stubs.seed(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID, SESSION_ITEM)
+        self.stubs.seed(secrets.PROTON_KEY, secrets.PROTON_KEY_ID, {"seed": SEED_B64})
+        self.api.answer("GET", "/vpn/v2", PLAN_PLUS)
+        self.api.answer("GET", "/vpn/v1/logicals", {"LogicalServers": LOGICALS})
+        self.api.answer("POST", "/vpn/v1/certificate", certificate_answer())
+
+    @contextlib.contextmanager
+    def fake_time(self):
+        """time.monotonic and time.sleep of the sign-in's unit: the clock moves only when the wait asks, and nothing sleeps."""
+        now, pause, pauses = fake_clock()
+        with mock.patch("time.monotonic", now), mock.patch("time.sleep", pause):
+            yield pauses
+
+    @contextlib.contextmanager
+    def clock_at(self, now):
+        with mock.patch("time.time", lambda: now):
+            yield
+
+    def start_sign_in(self):
+        """`proton login` with an empty keyring: the code is shown (notification 42) and the selector is left for the unit."""
+        self.stubs.keyring_file.write_text("[]")
+        self.stubs.behave("notify-send", ["--print-id"], stdout="42\n")
+        self.api.answer("GET", "/auth/v4/sessions/forks", {"Selector": SELECTOR, "UserCode": USER_CODE})
+        self.api.answer("GET", SIGN_IN_PATH, SESSION_ANSWER)
+        self.assertEqual(self.run_cli("proton", "login"), (0, USER_CODE + "\n", ""))
+
+    def systemd_run_unit(self, ending):
+        """The one systemd-run call whose argv ends with `ending` (the order of the calls is not the point)."""
+        (call,) = [call for call in self.stubs.called("systemd-run") if call["argv"][-len(ending):] == ending]
+        return call
+
+    def browser_unit(self):
+        return self.systemd_run_unit(["xdg-open", proton.SIGN_IN_URL])
+
+    def await_unit(self):
+        return self.systemd_run_unit(["proton", "await"])
+
+    def connect(self, *argv):
+        handed, patched = self.requests_handed_over()
+        with patched:
+            code, _, err = self.run_cli("connect", "proton", *argv)
+        return code, err, handed
+
+    def write_catalog(self, certificate=None):
+        """The catalog cache as a sign-in leaves it, recording `certificate` (its three fields, or None)."""
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
+        catalog["certificate"] = certificate
+        vpn.write_cache(cli.proton_catalog_path(), catalog)
+
+    def assert_no_secret_leaks(self, *texts):
+        """No file, output, argument or environment of the run holds a secret of the account. The keyring file keeps the items, which is
+        what it is for. The stdin of secret-tool is the keyring's own input, and the stdin of nmcli carries a connection's private key to
+        NetworkManager: neither is looked at. Every other stdin is."""
+        words = [SELECTOR, "UID1", "ACCESS1", "ACCESS2", "REFRESH1", "REFRESH2", SEED_B64, PRIVATE_B64]
+        for text in texts:
+            for word in words:
+                self.assertNotIn(word, text)
+        for call in self.stubs.calls():
+            for word in words:
+                self.assertNotIn(word, json.dumps(call["argv"]), call["tool"])
+                self.assertNotIn(word, json.dumps(call["env"]), call["tool"])
+                if call["tool"] not in ("secret-tool", "nmcli"):
+                    self.assertNotIn(word, call["stdin"], call["tool"])
+        for path in self.tmp.rglob("*"):
+            if path.is_file() and path.name not in ("keyring.json", "behaviors.json", "calls.jsonl"):
+                text = path.read_text(errors="replace")
+                for word in words:
+                    self.assertNotIn(word, text, str(path))
+
+    def test_a_sign_in_keeps_the_session_and_the_seed_and_no_selector_or_token_reaches_an_argument_or_a_file(self):
+        self.start_sign_in()
+        self.assertEqual(self.await_unit()["argv"][-2:], ["proton", "await"])
+        code, out, err = self.run_cli("proton", "await")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID), SESSION_ITEM)
+        seed = base64.b64decode(self.stubs.stored(secrets.PROTON_KEY, secrets.PROTON_KEY_ID)["seed"])
+        self.assertEqual(len(seed), 32)
+        self.assertIn(["notify-send", "--app-name=vekrona", "--replace-id=42", "VPN", "Signed in to Proton (plus)"],
+                      self.stubs.argvs("notify-send"))
+        self.assertFalse(Path(cli.login_path(self.uid)).exists())
+        self.assert_no_secret_leaks(out, err)
+
+    def test_a_second_sign_in_is_refused_while_the_first_waits(self):
+        self.stubs.behave("systemctl", ["--user", "is-active", "--quiet", "vekrona-vpn-proton-login.service"], rc=0)
+        code, _, err = self.run_cli("proton", "login")
+        self.assertEqual((code, err), (1, "vekrona-vpn: a Proton sign-in is already waiting\n"))
+        self.assertEqual(self.api.requests_to("GET", "/auth/v4/sessions/forks"), [])
+
+    def test_a_sign_in_that_cannot_start_closes_its_notification_and_keeps_no_selector(self):
+        self.stubs.behave("notify-send", ["--print-id"], stdout="42\n")
+        self.api.answer("GET", "/auth/v4/sessions/forks", {"Selector": SELECTOR, "UserCode": USER_CODE})
+        self.stubs.behave("systemd-run", [], rc=1, stderr="Failed to start unit\n")
+        code, out, err = self.run_cli("proton", "login")
+        self.assertEqual(code, 1)
+        self.assertIn(["busctl", "--user", "call", "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                       "org.freedesktop.Notifications", "CloseNotification", "u", "42"], self.stubs.argvs())
+        self.assertFalse(Path(cli.login_path(self.uid)).exists())
+        self.assert_no_secret_leaks(out, err)
+
+    def test_the_sign_in_is_polled_every_five_seconds_until_the_code_is_entered(self):
+        self.start_sign_in()
+        self.api.answer_in_turn("GET", SIGN_IN_PATH, [(422, {"Code": 2001}), (422, {"Code": 2001}), (200, SESSION_ANSWER)])
+        with self.fake_time() as pauses:
+            self.assertEqual(self.run_cli("proton", "await")[0], 0)
+        self.assertEqual(pauses, [5, 5])
+        self.assertEqual(len(self.api.requests_to("GET", SIGN_IN_PATH)), 3)
+
+    def test_a_sign_in_the_person_never_completes_times_out_and_keeps_nothing(self):
+        self.start_sign_in()
+        self.api.answer("GET", SIGN_IN_PATH, {"Code": 2001}, status=422)
+        with self.fake_time() as pauses:
+            code, _, _ = self.run_cli("proton", "await")
+        self.assertEqual((code, len(pauses)), (1, 120))
+        self.assertIn(["notify-send", "--app-name=vekrona", "--replace-id=42", "VPN", "Proton sign-in failed: sign-in timed out"],
+                      self.stubs.argvs("notify-send"))
+        self.assertIsNone(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID))
+
+    def test_a_sign_in_whose_catalog_cannot_be_had_keeps_neither_the_session_nor_the_seed_it_made(self):
+        self.start_sign_in()
+        self.api.answer("GET", "/vpn/v2", None, status=500)
+        code, out, err = self.run_cli("proton", "await")
+        self.assertEqual(code, 1)
+        self.assertIsNone(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID))
+        self.assertIsNone(self.stubs.stored(secrets.PROTON_KEY, secrets.PROTON_KEY_ID))
+        self.assertIn(["notify-send", "--app-name=vekrona", "--replace-id=42", "VPN",
+                       "Proton sign-in failed: read the Proton plan: HTTP 500; nothing of this sign-in was kept"],
+                      self.stubs.argvs("notify-send"))
+        self.assert_no_secret_leaks(out, err)
+
+    def test_connecting_to_free_hands_the_fastest_free_server_and_its_key_to_the_helper(self):
+        self.api.answer("GET", "/vpn/v2", PLAN_FREE)
+        code, err, handed = self.connect("free")
+        self.assertEqual((code, err), (0, ""))
+        (doc,) = handed
+        self.assertEqual((doc["vendor"], doc["id"]), ("proton", "vekrona-vpn/proton/FREE/signed-in"))
+        self.assertEqual(doc["private_key"], PRIVATE_B64)
+        conf = vpn.parse_conf(doc["conf"])
+        self.assertEqual((conf.private_key, conf.endpoint), (doc["private_key"], vpn.Endpoint("203.0.113.21", 51820)))
+        self.assertEqual(self.stubs.argvs("systemctl")[0][-1], "vekrona-vpn-apply@connect-%d.service" % self.uid)
+        self.assertFalse(Path(vpn.request_path(self.uid)).exists())
+
+    def test_connecting_to_a_country_hands_its_fastest_usable_server_with_the_ipv6_it_has_and_refuses_what_is_no_country(self):
+        code, err, handed = self.connect("nl")
+        self.assertEqual((code, err), (0, ""))
+        (doc,) = handed
+        self.assertEqual(doc["id"], "vekrona-vpn/proton/NL/signed-in")
+        self.assertTrue(vpn.parse_conf(doc["conf"]).has_ipv6)
+        self.assertEqual(self.run_cli("connect", "proton", "lizard")[0], 1)
+
+    def test_a_certificate_for_another_key_stops_connecting_before_the_helper_starts(self):
+        self.api.answer("POST", "/vpn/v1/certificate", certificate_answer("bogus"))
+        code, err, handed = self.connect("nl")
+        self.assertEqual(code, 1)
+        self.assertIn("another key", err)
+        self.assertEqual((handed, self.stubs.argvs("systemctl")), ([], []))
+
+    def test_a_locked_keyring_stops_connecting_before_anything_is_asked_of_proton(self):
+        self.stubs.lock(True)
+        code, _, err = self.run_cli("connect", "proton", "nl")
+        self.assertEqual((code, err.startswith("vekrona-vpn: keyring locked")), (1, True))
+        self.assertEqual(self.api.requests, [])
+
+    def test_a_session_that_proton_ended_is_forgotten_here_and_said(self):
+        self.api.answer("GET", "/vpn/v2", None, status=401)
+        self.api.answer("POST", "/auth/v4/refresh", {"Code": 10013}, status=422)
+        code, _, err = self.run_cli("connect", "proton", "nl")
+        self.assertEqual((code, err), (1, "vekrona-vpn: the Proton session has ended; sign in again\n"))
+        self.assertIsNone(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID))
+        self.assertFalse(Path(cli.proton_catalog_path()).exists())
+
+    def test_a_renewed_session_is_stored_before_the_retry_and_the_renewed_one_is_used_after(self):
+        self.api.answer_in_turn("GET", "/vpn/v2", [(401, None), (200, PLAN_PLUS)])
+        self.api.answer("POST", "/auth/v4/refresh", {"UID": "UID1", "AccessToken": "ACCESS2", "RefreshToken": "REFRESH2"})
+        code, err, _ = self.connect("nl")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID),
+                         {"uid": "UID1", "access_token": "ACCESS2", "refresh_token": "REFRESH2"})
+        self.assertEqual(self.api.requests_to("POST", "/auth/v4/refresh")[0]["body"]["RefreshToken"], "REFRESH1")
+        self.assertEqual([r["authorization"] for r in self.api.requests_to("GET", "/vpn/v2")], ["Bearer ACCESS1", "Bearer ACCESS2"])
+        self.assertEqual(self.api.requests_to("GET", "/vpn/v1/logicals")[0]["authorization"], "Bearer ACCESS2")
+        self.assert_no_secret_leaks()
+
+    def test_a_connect_with_a_recorded_certificate_that_is_good_makes_no_request_to_proton(self):
+        self.write_catalog({"refresh_time": REFRESH_TIME, "expiration_time": CLOCK + 10 * 3600, "netshield": 1})
+        with mock.patch.object(proton, "PROTON_API", unused_port_base()), self.clock_at(CLOCK):
+            code, err, handed = self.connect("nl")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(handed[0]["id"], "vekrona-vpn/proton/NL/signed-in")
+        self.assertEqual(self.api.requests, [])
+
+    def test_a_browser_is_started_through_a_unit_that_is_not_waited_for(self):
+        self.stubs.behave("notify-send", ["--print-id"], stdout="42\n")
+        self.api.answer("GET", "/auth/v4/sessions/forks", {"Selector": SELECTOR, "UserCode": USER_CODE})
+        code, out, err = self.run_cli("proton", "login")
+        self.assertEqual((code, out, err), (0, USER_CODE + "\n", ""))
+        self.assertEqual(self.browser_unit()["argv"][-2:], ["xdg-open", proton.SIGN_IN_URL])
+        self.assertEqual(self.await_unit()["argv"][-2:], ["proton", "await"])
+
+    def test_a_browser_that_cannot_start_is_an_error_and_closes_the_notification(self):
+        self.stubs.behave("notify-send", ["--print-id"], stdout="42\n")
+        self.api.answer("GET", "/auth/v4/sessions/forks", {"Selector": SELECTOR, "UserCode": USER_CODE})
+        self.stubs.behave("systemd-run", ["--user", "--collect", "--quiet", "xdg-open"], rc=1, stderr="Failed to start unit\n")
+        code, _, err = self.run_cli("proton", "login")
+        self.assertEqual(code, 1)
+        self.assertTrue(err.startswith("vekrona-vpn: cannot start the browser: systemd-run --user --collect failed with status 1"), err)
+        self.assertIn(["busctl", "--user", "call", "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                       "org.freedesktop.Notifications", "CloseNotification", "u", "42"], self.stubs.argvs())
+        self.assertFalse(Path(cli.login_path(self.uid)).exists())
+
+    def test_a_connect_that_needs_proton_while_the_vpn_blocks_it_says_to_turn_the_vpn_off(self):
+        with mock.patch.object(proton, "PROTON_API", unused_port_base()):
+            code, _, err = self.run_cli("connect", "proton", "nl")
+        self.assertEqual((code, err), (1, "vekrona-vpn: Proton needs the network to issue a certificate: turn the VPN off, then connect\n"))
+        self.assertEqual(self.stubs.argvs("systemctl"), [])
+
+    def test_connecting_arms_one_renewal_at_refresh_time_and_replaces_the_ones_there_are(self):
+        self.stubs.behave("systemctl", ["--user", "list-units"], stdout="%s loaded active waiting\n" % TIMER)
+        code, err, _ = self.connect("nl")
+        self.assertEqual((code, err), (0, ""))
+        calls = self.stubs.argvs()
+        stop = calls.index(["systemctl", "--user", "stop", TIMER])
+        scheduled = index_starting(calls, ["systemd-run", "--user", "--collect", "--on-calendar=2027-01-15 08:00:00 UTC",
+                                           "--unit=vekrona-vpn-proton-renew-%d" % REFRESH_TIME])
+        self.assertLess(stop, scheduled)
+        self.assertEqual(self.stubs.called("systemd-run")[0]["argv"][-2:], ["proton", "renew"])
+
+    def test_a_refresh_time_that_has_passed_is_armed_a_minute_from_now(self):
+        self.api.answer("POST", "/vpn/v1/certificate", certificate_answer(refresh_time=CLOCK - 500))
+        with self.clock_at(CLOCK):
+            code, err, _ = self.connect("nl")
+        self.assertEqual((code, err), (0, ""))
+        when = CLOCK + 60
+        self.assertEqual(self.stubs.called("systemd-run")[0]["argv"][:4],
+                         ["--user", "--collect", "--on-calendar=" + datetime.fromtimestamp(when, tz=timezone.utc).strftime(
+                             "%Y-%m-%d %H:%M:%S UTC"), "--unit=vekrona-vpn-proton-renew-%d" % when])
+
+    def test_a_renewal_that_runs_arms_the_next_one_without_stopping_itself(self):
+        self.write_catalog({"refresh_time": REFRESH_TIME, "expiration_time": CLOCK + 3 * 3600, "netshield": 1})
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL#6")], active=[(UUID_A, "activated")])
+        self.stubs.behave("systemctl", ["--user", "list-units"], stdout="%s loaded active\n" % TIMER)
+        with self.clock_at(CLOCK):
+            code, out, err = self.run_cli("proton", "renew")
+        self.assertEqual((code, err), (0, ""))
+        stops = [call["argv"][-1] for call in self.stubs.called("systemctl", "--user", "stop")]
+        self.assertEqual(stops, [TIMER])
+        self.assertIn("--unit=vekrona-vpn-proton-renew-%d" % REFRESH_TIME, self.stubs.called("systemd-run")[0]["argv"])
+        (request,) = self.api.requests_to("POST", "/vpn/v1/certificate")
+        self.assertEqual((request["body"]["ClientPublicKey"], request["body"]["Features"]["NetShieldLevel"]),
+                         (proton.ed25519_public_pem(SEED), 1))
+        recorded = json.loads(Path(cli.proton_catalog_path()).read_text())["certificate"]
+        self.assertEqual(recorded, {"refresh_time": REFRESH_TIME, "expiration_time": REFRESH_TIME + 86400, "netshield": 1})
+        self.assert_no_secret_leaks(out, err)
+
+    def test_a_renewal_that_fails_tells_the_person_when_the_tunnel_stops_and_retries_once_in_half_an_hour(self):
+        self.write_catalog({"refresh_time": REFRESH_TIME, "expiration_time": CLOCK + 3 * 3600, "netshield": 1})
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL#6")], active=[(UUID_A, "activated")])
+        self.api.answer("POST", "/vpn/v1/certificate", None, status=500)
+        with self.clock_at(CLOCK):
+            code, _, _ = self.run_cli("proton", "renew")
+        expiry = datetime.fromtimestamp(CLOCK + 3 * 3600).strftime("%H:%M")
+        self.assertEqual(code, 1)
+        self.assertIn(["notify-send", "--app-name=vekrona", "VPN", "Proton certificate could not be renewed: request a Proton certificate: "
+                       "HTTP 500; the tunnel stops working at %s" % expiry], self.stubs.argvs("notify-send"))
+        self.assertEqual([call["argv"][3] for call in self.stubs.called("systemd-run")], ["--unit=vekrona-vpn-proton-renew-%d" % (CLOCK + 1800)])
+
+    def test_a_renewal_after_the_expiry_says_so_and_tries_no_more(self):
+        self.write_catalog({"refresh_time": REFRESH_TIME, "expiration_time": CLOCK + 3 * 3600, "netshield": 1})
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL#6")], active=[(UUID_A, "activated")])
+        self.api.answer("POST", "/vpn/v1/certificate", None, status=500)
+        with self.clock_at(CLOCK + 4 * 3600):
+            code, _, _ = self.run_cli("proton", "renew")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.stubs.called("systemd-run"), [])
+        self.assertTrue(any("stops working" in call["argv"][-1] for call in self.stubs.called("notify-send")))
+
+    def test_a_renewal_with_no_proton_connection_up_does_nothing(self):
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL#6")])
+        self.assertEqual(self.run_cli("proton", "renew")[0], 0)
+        self.assertEqual((self.api.requests, self.stubs.called("systemd-run")), ([], []))
+
+    def test_off_stops_the_renewal_timers_and_no_service_while_a_proton_connection_is_there(self):
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/signed-in")], active=[(UUID_A, "activated")])
+        self.stubs.behave("systemctl", ["--user", "list-units"], stdout="%s loaded active\n" % TIMER)
+        self.assertEqual(self.run_cli("off")[0], 0)
+        self.assertEqual([call["argv"] for call in self.stubs.called("systemctl", "--user", "stop")], [["--user", "stop", TIMER]])
+
+    def test_off_without_a_proton_connection_asks_systemd_for_no_timer(self):
+        self.stubs.behave("systemctl", ["--user", "list-units"], stdout="%s loaded active\n" % TIMER)
+        self.assertEqual(self.run_cli("off")[0], 0)
+        self.assertEqual(self.stubs.called("systemctl", "--user", "list-units"), [])
+
+    def test_forgetting_a_proton_connection_keeps_the_renewal_while_another_proton_connection_is_up(self):
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL#6"), (UUID_B, "vekrona-vpn/proton/DE/DE#1")], active=[(UUID_B, "activated")])
+        self.assertEqual(self.run_cli("forget", UUID_A)[0], 0)
+        self.assertEqual(self.stubs.called("systemctl", "--user", "list-units"), [])
+
+    def test_logout_ends_the_session_with_proton_and_clears_the_keyring_and_the_catalog(self):
+        vpn.write_cache(cli.proton_catalog_path(), proton.catalog_from_answers("plus", 2, LOGICALS)[0])
+        self.api.answer("DELETE", "/auth/v4", None)
+        code, out, err = self.run_cli("proton", "logout")
+        self.assertEqual((code, err), (0, ""))
+        (request,) = self.api.requests_to("DELETE", "/auth/v4")
+        self.assertEqual(request["authorization"], "Bearer ACCESS1")
+        self.assertIsNone(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID))
+        self.assertIsNone(self.stubs.stored(secrets.PROTON_KEY, secrets.PROTON_KEY_ID))
+        self.assertFalse(Path(cli.proton_catalog_path()).exists())
+        self.assert_no_secret_leaks(out, err)
+
+    def test_logout_clears_both_items_and_the_catalog_even_when_proton_refuses_to_end_the_session(self):
+        vpn.write_cache(cli.proton_catalog_path(), proton.catalog_from_answers("plus", 2, LOGICALS)[0])
+        self.api.answer("DELETE", "/auth/v4", None, status=500)
+        code, _, err = self.run_cli("proton", "logout")
+        self.assertEqual(code, 1)
+        self.assertIn("did not end the session", err)
+        self.assertIsNone(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID))
+        self.assertIsNone(self.stubs.stored(secrets.PROTON_KEY, secrets.PROTON_KEY_ID))
+        self.assertFalse(Path(cli.proton_catalog_path()).exists())
+
+    def test_list_reads_the_catalog_cache_and_never_the_keyring_or_the_network(self):
+        vpn.write_cache(cli.proton_catalog_path(), proton.catalog_from_answers("plus", 2, LOGICALS)[0])
+        code, out, err = self.run_cli("list")
+        proton_vendor = next(vendor for vendor in json.loads(out)["vendors"] if vendor["id"] == "proton")
+        self.assertEqual(sorted(country["code"] for country in proton_vendor["countries"]), ["CH", "DE", "NL", "US"])
+        self.assertEqual((code, self.stubs.called("secret-tool"), self.api.requests), (0, [], []))
+        Path(cli.proton_catalog_path()).unlink()
+        proton_vendor = next(vendor for vendor in json.loads(self.run_cli("list")[1])["vendors"] if vendor["id"] == "proton")
+        self.assertEqual(proton_vendor["countries"], [])
+
+    def test_netshield_is_kept_in_the_settings_and_status_shows_it_and_a_level_out_of_range_is_refused(self):
+        self.assertEqual(self.run_cli("proton", "netshield", "2")[0], 0)
+        self.assertEqual(json.loads(Path(cli.settings_path()).read_text()), {"proton": {"netshield": 2}})
+        self.assertEqual(json.loads(self.run_cli("status")[1])["proton"], {"logged_in": False, "netshield": 2, "error": ""})
+        self.assertEqual(self.run_cli("proton", "netshield", "3")[0], 2)
+
+    def test_a_settings_file_that_cannot_be_read_is_said_by_status_and_the_status_still_answers(self):
+        settings = Path(cli.settings_path())
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps({"proton": {"netshield": 7}}))
+        code, out, err = self.run_cli("status")
+        self.assertEqual(code, 0)
+        proton_status = json.loads(out)["proton"]
+        self.assertIsNone(proton_status["netshield"])
+        self.assertIn("NetShield level", proton_status["error"])
+
+    def test_importing_a_proton_configuration_is_refused_since_proton_signs_in(self):
+        conf = self.tmp / "NL-792.conf"
+        conf.write_text(PROTON_CONF)
+        self.assertEqual(self.run_cli("import", "--vendor", "proton", str(conf))[0], 2)
+        self.assertEqual(self.stubs.argvs("systemctl"), [])
+
+    def test_status_names_a_generated_connection_by_the_catalog_server_at_its_endpoint(self):
+        self.write_catalog(None)
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/signed-in")], active=[(UUID_A, "activated")])
+        self.nm_peer_of(UUID_A, "203.0.113.26:51820")
+        self.write_state(True, UUID_A)
+        self.assertEqual(json.loads(self.run_cli("status")[1])["connection"]["name"], "NL#6")
+        self.assertEqual(self.stubs.called("secret-tool"), [])
+
+    def test_status_shows_a_generated_connection_as_signed_in_when_no_server_of_the_catalog_matches(self):
+        self.write_catalog(None)
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/signed-in")], active=[(UUID_A, "activated")])
+        self.nm_peer_of(UUID_A, "198.51.100.99:51820")
+        self.write_state(True, UUID_A)
+        self.assertEqual(json.loads(self.run_cli("status")[1])["connection"]["name"], "signed-in")
+
+    def test_connecting_to_a_proton_connection_by_its_uuid_is_refused_since_proton_connects_by_country(self):
+        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL#6")])
+        code, _, err = self.run_cli("connect", UUID_A)
+        self.assertEqual((code, err), (1, "vekrona-vpn: Proton connections are made by country: connect proton CC, or connect proton free\n"))
+
+
+# ---- The output the shell reads -------------------------------------------------------------------------------------------
+
+SHAPE = json.loads((REPO / "config" / "vekrona-shell" / "vpn-output.json").read_text())
+
+
+def shape_problem(shape, value, path="$"):
+    """The first way `value` does not have `shape`, or None. The shape language is that of config/vekrona-shell/vpn-output.json, which
+    the shell's VpnState.qml reads with the same rules (its shapeProblem)."""
+    if isinstance(shape, str):
+        ok = {"boolean": isinstance(value, bool), "string": isinstance(value, str),
+              "integer": isinstance(value, int) and not isinstance(value, bool)}[shape]
+        return None if ok else "%s is not a %s" % (path, shape)
+    if "enum" in shape:
+        return None if any(type(value) is type(option) and value == option for option in shape["enum"]) else "%s is not one of %s" % (path, shape["enum"])
+    if "nullable" in shape:
+        return None if value is None else shape_problem(shape["nullable"], value, path)
+    if "list" in shape:
+        if not isinstance(value, list):
+            return "%s is not a list" % path
+        for index, item in enumerate(value):
+            problem = shape_problem(shape["list"], item, "%s[%d]" % (path, index))
+            if problem is not None:
+                return problem
+        return None
+    if not isinstance(value, dict):
+        return "%s is not an object" % path
+    if sorted(value) != sorted(shape["object"]):
+        return "%s has the keys %s, not %s" % (path, ", ".join(sorted(value)), ", ".join(sorted(shape["object"])))
+    for key, sub_shape in shape["object"].items():
+        problem = shape_problem(sub_shape, value[key], "%s.%s" % (path, key))
+        if problem is not None:
+            return problem
+    return None
+
+
+class ShellOutputTest(CliSandbox):
+    """The output of `status` and `list`, from the real CLI through the stubs in every state the shell can meet, checked against the one
+    shape description the shell reads (vpn-output.json)."""
+
+    def arrange(self, catalog, listed, active, settings):
+        shutil.rmtree(self.tmp / "cache", ignore_errors=True)
+        shutil.rmtree(self.tmp / "config", ignore_errors=True)
+        self.relay_cache.parent.mkdir(parents=True, exist_ok=True)
+        self.relay_cache.write_text(json.dumps({"names": {"nl": "Netherlands"}, "relays": []}))
+        if catalog is not None:
+            vpn.write_cache(cli.proton_catalog_path(), catalog)
+        if settings is not None:
+            Path(cli.settings_path()).parent.mkdir(parents=True, exist_ok=True)
+            Path(cli.settings_path()).write_text(json.dumps(settings))
+        self.nm_lists(listed, active=active)
+        self.nm_peer_of(UUID_A, "203.0.113.26:51820")
+        self.write_state(bool(active), UUID_A if active else None)
+
+    def test_status_and_list_have_the_shape_the_shell_reads_in_every_state(self):
+        catalogs = {"no catalog": None,
+                    "free": proton.catalog_from_answers("free", 0, LOGICALS)[0],
+                    "paid": proton.catalog_from_answers("plus", 2, LOGICALS)[0]}
+        connections = {
+            "signed out": ([], []),
+            "mullvad up": ([(UUID_A, "vekrona-vpn/mullvad/NL/nl-ams-wg-001")], [(UUID_A, "activated")]),
+            "proton connecting": ([(UUID_A, "vekrona-vpn/proton/NL/signed-in")], [(UUID_A, "activating")]),
+            "proton up": ([(UUID_A, "vekrona-vpn/proton/NL/signed-in")], [(UUID_A, "activated")]),
+            "other configuration": ([(UUID_A, "vekrona-vpn/other/??/Office")], []),
+        }
+        settings_states = {"settings readable": None, "settings unreadable": {"proton": {"netshield": 7}}}
+        for catalog_name, catalog in catalogs.items():
+            for connection_name, (listed, active) in connections.items():
+                for settings_name, settings in settings_states.items():
+                    with self.subTest(catalog=catalog_name, connections=connection_name, settings=settings_name):
+                        self.arrange(catalog, listed, active, settings)
+                        for command, which in ((("status",), "status"), (("list",), "list")):
+                            code, out, err = self.run_cli(*command)
+                            self.assertEqual(code, 0, err)
+                            self.assertIsNone(shape_problem(SHAPE[which], json.loads(out), which), which)

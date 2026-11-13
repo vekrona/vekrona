@@ -16,8 +16,11 @@ Singleton {
     readonly property int schemaVersion: 1
     // The country code that the backend (bin/vekrona-vpn, `import`) gives a configuration whose country it could not tell.
     readonly property string unknownCountry: "??"
-    // The vendor whose countries come from a relay list, need a login and have no configurations of their own.
+    // The country that the backend gives a connection to a Proton free server: the connection's name is then the server.
+    readonly property string freeCountry: "FREE"
+    // The vendors whose countries come from a catalog, need a login and have no configurations of their own.
     readonly property string mullvadId: "mullvad"
+    readonly property string protonId: "proton"
     readonly property var tunnels: ["down", "activating", "up"]
     // What each phase shows. off: no tunnel, no kill switch. activating: a tunnel coming up. on: the tunnel up and the kill switch
     // armed (filled icon). exposed: a tunnel up that the kill switch does not guard, one brought up outside `vekrona-vpn`, so
@@ -63,6 +66,11 @@ Singleton {
             connection: null,
             mullvad: {
                 logged_in: false
+            },
+            proton: {
+                logged_in: false,
+                netshield: 0,
+                error: ""
             }
         })
     // `vekrona-vpn status` rarely takes long; one that hangs must not stop every later refresh.
@@ -81,6 +89,13 @@ Singleton {
     // Whether a `status` runs, and whether something changed since it started (the next one then starts when it ends).
     property bool statusRunning: false
     property bool statusStale: false
+    // The shape of `status` and `list`, from vpn-output.json; null until it is loaded. Until then no command runs: the first read of each
+    // comes on the load (or, for the list, when it is first asked for after the load), so no output is read twice.
+    property var outputShape: null
+    // Why the shape file cannot be loaded, "" while it can (or has not been tried yet); the state is unknown then.
+    property string shapeFailure: ""
+    // Whether the list was asked for before the shape loaded: it is read once the shape has loaded.
+    property bool listWanted: false
     // Whether `nmcli monitor` runs. While it does not, changes of the network go unseen, so the state may be stale.
     property bool monitorAlive: false
     // The wait before the next start of the monitor.
@@ -95,7 +110,7 @@ Singleton {
     property var listRun: null
 
     // Why the state cannot be trusted, "" while it can.
-    readonly property string unknownReason: statusFailure !== "" ? statusFailure : monitorAlive ? "" : "nmcli monitor is not running: changes of the network go unseen"
+    readonly property string unknownReason: shapeFailure !== "" ? shapeFailure : statusFailure !== "" ? statusFailure : monitorAlive ? "" : "nmcli monitor is not running: changes of the network go unseen"
     readonly property string phase: unknownReason !== "" || !statusSettled ? "unknown"
         : status.tunnel === "up" ? (status.armed ? "on" : "exposed")
         : status.tunnel === "activating" ? "activating"
@@ -103,21 +118,25 @@ Singleton {
     // The icon, text and detail of the phase.
     readonly property var look: phases[phase]
     readonly property bool mullvadLoggedIn: status.mullvad.logged_in
+    readonly property bool protonLoggedIn: status.proton.logged_in
+    // The NetShield level the next Proton connect uses: 0 off, 1 malware, 2 malware, ads and trackers.
+    // Null when the NetShield setting cannot be read: then the level is not shown, and the error is (protonNetshieldError).
+    readonly property var protonNetshield: status.proton.netshield
+    readonly property string protonNetshieldError: status.proton.error
     // "Vendor, country, name" of the connection in use, "" without one.
     readonly property string connectionLabel: {
         const connection = status.connection;
         if (connection === null)
             return "";
         const vendorLabel = catalog.find(candidate => candidate.id === connection.vendor)?.label ?? connection.vendor;
-        return [vendorLabel, connection.country === unknownCountry ? "" : connection.country, connection.name].filter(part => part !== "").join(", ");
+        return [vendorLabel, connection.country === unknownCountry || connection.country === freeCountry ? "" : connection.country, connection.name].filter(part => part !== "").join(", ");
     }
 
     // Turns the text of `vekrona-vpn status` into the status; throws on text that is not valid.
     function parseStatus(text: string): var {
         const next = JSON.parse(text);
         checkSchema(next);
-        if (typeof next.armed !== "boolean" || !tunnels.includes(next.tunnel) || typeof next.mullvad?.logged_in !== "boolean")
-            throw new Error("unexpected status " + text.trim());
+        checkShape("status", next);
         return next;
     }
 
@@ -125,9 +144,10 @@ Singleton {
     function parseList(text: string): var {
         const next = JSON.parse(text);
         checkSchema(next);
+        checkShape("list", next);
         for (const entry of next.vendors) {
             for (const place of entry.countries) {
-                if (entry.id !== mullvadId && place.configs.length === 0)
+                if (!isCatalogVendor(entry.id) && place.configs.length === 0)
                     throw new Error(entry.label + " lists " + place.name + " without a configuration");
             }
         }
@@ -156,9 +176,56 @@ Singleton {
             throw new Error("vekrona-vpn speaks schema " + parsed.schema + " and this shell reads " + schemaVersion + ": update vekrona");
     }
 
+    // Throws when the parsed output of `vekrona-vpn` (which is "status" or "list") does not have the shape that vpn-output.json describes.
+    // The backend's tests check its real output against that same file.
+    function checkShape(which: string, parsed: var): void {
+        if (outputShape === null)
+            throw new Error("the output shape is not loaded yet");
+        const problem = shapeProblem(outputShape[which], parsed, "$");
+        if (problem !== "")
+            throw new Error("unexpected " + which + " output: " + problem);
+    }
+
+    // The first way `value` does not have `shape`, or "" when it has it. The shape language: a type name ("boolean", "string" or
+    // "integer"), {"enum": [...]}, {"nullable": shape}, {"list": shape} and {"object": {key: shape}}, where an object has exactly those keys.
+    function shapeProblem(shape: var, value: var, path: string): string {
+        if (typeof shape === "string") {
+            const ok = shape === "integer" ? Number.isInteger(value) : typeof value === shape;
+            return ok ? "" : path + " is not a " + shape;
+        }
+        if (shape.enum !== undefined)
+            return shape.enum.includes(value) ? "" : path + " is not one of " + JSON.stringify(shape.enum);
+        if (shape.nullable !== undefined)
+            return value === null ? "" : shapeProblem(shape.nullable, value, path);
+        if (shape.list !== undefined) {
+            if (!Array.isArray(value))
+                return path + " is not a list";
+            for (let index = 0; index < value.length; index++) {
+                const problem = shapeProblem(shape.list, value[index], path + "[" + index + "]");
+                if (problem !== "")
+                    return problem;
+            }
+            return "";
+        }
+        if (value === null || typeof value !== "object" || Array.isArray(value))
+            return path + " is not an object";
+        const keys = Object.keys(shape.object).sort();
+        const actual = Object.keys(value).sort();
+        if (JSON.stringify(keys) !== JSON.stringify(actual))
+            return path + " has the keys " + actual.join(", ") + ", not " + keys.join(", ");
+        for (const key of keys) {
+            const problem = shapeProblem(shape.object[key], value[key], path + "." + key);
+            if (problem !== "")
+                return problem;
+        }
+        return "";
+    }
+
     // Asks for the state again; a change that comes while the answer is awaited asks once more when it arrives, so a burst of
     // changes costs at most two runs.
     function refresh(): void {
+        if (outputShape === null)
+            return;
         if (statusRunning) {
             statusStale = true;
             return;
@@ -184,6 +251,10 @@ Singleton {
     }
 
     function loadList(): void {
+        if (outputShape === null) {
+            listWanted = true;
+            return;
+        }
         listRun?.kill();
         listRun = Exec.runOr(["vekrona-vpn", "list"], stdout => {
             const read = readOutput("list", parseList, stdout);
@@ -220,17 +291,22 @@ Singleton {
         });
     }
 
-    // Whether the vendor lists nothing until the account is logged in.
-    function needsLogin(vendorId: string): bool {
-        return vendorId === mullvadId && !mullvadLoggedIn;
+    // Whether the vendor takes its countries from a catalog (and so has no configurations of its own).
+    function isCatalogVendor(vendorId: string): bool {
+        return vendorId === mullvadId || vendorId === protonId;
     }
 
-    // The ways to connect to `country` of `vendor`, the one place that knows them: Mullvad connects by the country's code, one
-    // choice; any other vendor has a configuration per choice. A choice is {key, name, detail (what a row of the country shows
-    // when it is the only one), context (where a flat list places it), uuid (null for Mullvad: nothing to forget), args (the
-    // arguments of the `vekrona-vpn` call that connects)}.
+    // Whether the vendor lists nothing until the account is logged in.
+    function needsLogin(vendorId: string): bool {
+        return vendorId === mullvadId ? !mullvadLoggedIn : vendorId === protonId && !protonLoggedIn;
+    }
+
+    // The ways to connect to `country` of `vendor`, the one place that knows them: Mullvad and Proton connect by the country's
+    // code, one choice; any other vendor has a configuration per choice. A choice is {key, name, detail (what a row of the country
+    // shows when it is the only one), context (where a flat list places it), uuid (null for a catalog vendor: nothing to forget),
+    // args (the arguments of the `vekrona-vpn` call that connects)}.
     function connectChoices(vendor: var, country: var): var {
-        if (vendor.id === mullvadId) {
+        if (isCatalogVendor(vendor.id)) {
             return [
                 {
                     key: country.code,
@@ -238,7 +314,7 @@ Singleton {
                     detail: country.code,
                     context: vendor.label,
                     uuid: null,
-                    args: ["connect", mullvadId, country.code]
+                    args: ["connect", vendor.id, country.code]
                 }
             ];
         }
@@ -267,6 +343,21 @@ Singleton {
     StateFile {
         path: "/run/vekrona-vpn/state.json"
         onRefreshed: root.refresh()
+    }
+
+    // The shape of the output (vpn-output.json, next to this file). Until it is loaded no command runs and the state is unknown; the
+    // status is read once it is loaded, and the list when it was asked for.
+    FileView {
+        path: Qt.resolvedUrl("vpn-output.json")
+        onLoaded: {
+            root.outputShape = JSON.parse(text());
+            root.refresh();
+            if (root.listWanted) {
+                root.listWanted = false;
+                root.loadList();
+            }
+        }
+        onLoadFailed: root.shapeFailure = "the output shape vpn-output.json next to VpnState.qml cannot be read"
     }
 
     Process {

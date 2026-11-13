@@ -28,6 +28,7 @@ from typing import List, Optional, Tuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
+import vekrona_countries
 import vekrona_vpn as vpn
 from vekrona_vpn import VpnError
 
@@ -192,14 +193,62 @@ def op_login(request: dict) -> None:
         raise undo_made(made, exc)
 
 
-def mullvad_connection_for(relay: vpn.Relay, device: vpn.Device, made: List[str]) -> Tuple[str, List[vpn.Connection]]:
-    """(uuid, the connections to delete once it is in use) for a connection to `relay` with the Mullvad `device` of the request. The
-    connections of the relay's country are the ones to delete, and only after the new one exists, so that the device key is never
-    in fewer places than one. `made` gets the new uuid (see import_conf)."""
-    country = relay.country.upper()
-    older = [connection for connection in vpn.nm_connections() if connection.vendor == vpn.VENDOR_MULLVAD]
-    uuid = import_conf(vpn.mullvad_conf(device, relay), vpn.ConnectionId(vpn.VENDOR_MULLVAD, country, relay.hostname), made)
-    return uuid, [connection for connection in older if connection.country == country]
+def request_conf(text: object) -> vpn.WgConf:
+    if not isinstance(text, str):
+        raise VpnError("the request holds no configuration")
+    _, conf = vpn.check_conf(vpn.encode_conf(text))
+    return conf
+
+
+def request_proton_id(value: object) -> vpn.ConnectionId:
+    """The connection id of a generated Proton connection: vekrona-vpn/proton/<country or FREE>/signed-in, spelled as it is made."""
+    if not isinstance(value, str):
+        raise VpnError("the request holds no connection id")
+    ident = vpn.parse_connection_id(value)
+    if (ident.vendor != vpn.VENDOR_PROTON or str(ident) != value or ident.country == vekrona_countries.UNKNOWN_COUNTRY
+            or ident.name != vpn.PROTON_GENERATED_NAME):
+        raise VpnError("the request holds no usable Proton connection id")
+    return ident
+
+
+def provider_connection(request: dict) -> Tuple[vpn.WgConf, vpn.ConnectionId, dict]:
+    """(configuration, connection id, keys) of a new connection of the request. The vendor is looked at once, here: each vendor's
+    request is checked as the vendor's own answer, and what comes out is one shape for every path below. A Mullvad request carries
+    the relay and the device and the configuration is made here; a Proton request carries the configuration itself (its address and
+    peer), its connection id and the private key, which must be the configuration's."""
+    vendor = request.get("vendor")
+    if vendor == vpn.VENDOR_MULLVAD:
+        relay = request_relay(request.get("relay"))
+        device = request_device(request.get("device"))
+        return (vpn.mullvad_conf(device, relay), vpn.ConnectionId(vpn.VENDOR_MULLVAD, relay.country.upper(), relay.hostname),
+                {"private_key": device.private_key})
+    if vendor == vpn.VENDOR_PROTON:
+        conf = request_conf(request.get("conf"))
+        if conf.preshared_key is not None:
+            # Proton's configurations carry no preshared key: one here is not what this connect was made for.
+            raise VpnError("a Proton configuration holds a preshared key, which Proton does not issue")
+        keys = vpn.validate_keys({"private_key": request.get("private_key")})
+        if keys["private_key"] != conf.private_key:
+            raise VpnError("the private key is not the one of the configuration")
+        return conf, request_proton_id(request.get("id")), keys
+    raise VpnError("not a vendor that connects")
+
+
+def replaced_by(ident: vpn.ConnectionId, connection: vpn.Connection) -> bool:
+    """Whether a new connection under `ident` replaces `connection`: every generated Proton connection, whatever its country (an import
+    before WP3 is never one of them), and for the other vendors the connections of the same vendor and country."""
+    if ident.vendor == vpn.VENDOR_PROTON:
+        return connection.vendor == vpn.VENDOR_PROTON and connection.name == vpn.PROTON_GENERATED_NAME
+    return connection.vendor == ident.vendor and connection.country == ident.country
+
+
+def connection_for(conf: vpn.WgConf, ident: vpn.ConnectionId, made: List[str]) -> Tuple[str, List[vpn.Connection]]:
+    """(uuid, the connections to delete once it is in use) for a new connection of `conf` under `ident`. Those are the connections it
+    replaces (see replaced_by). They are deleted only after the new one exists, so that its key is never in fewer places than one.
+    `made` gets the new uuid (see import_conf)."""
+    older = [connection for connection in vpn.nm_connections() if replaced_by(ident, connection)]
+    uuid = import_conf(conf, ident, made)
+    return uuid, older
 
 
 def op_connect(request: dict) -> None:
@@ -214,13 +263,12 @@ def op_connect(request: dict) -> None:
         keys = vpn.validate_keys(request.get("keys"))
         vpn.require_bound_to_tunnel(uuid, connections[uuid].full_id)
     else:
-        device = request_device(request.get("device"))
+        conf, ident, keys = provider_connection(request)
         made: List[str] = []
         try:
-            uuid, delete_after = mullvad_connection_for(request_relay(request.get("mullvad")), device, made)
+            uuid, delete_after = connection_for(conf, ident, made)
         except VpnError as exc:
             raise undo_made(made, exc)
-        keys = {"private_key": device.private_key}
     arm(uuid, vpn.nm_endpoint(uuid))
     for connection in vpn.nm_connections():
         if connection.is_active and connection.uuid != uuid:

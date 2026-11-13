@@ -8,25 +8,28 @@ leaves traffic blocked. The changes that need root run as vekrona-vpn-apply@<ope
 the arguments reach it through a file in /run/user/<uid>/vekrona-vpn/. Commands that change something wait for each other (a lock
 in that directory), and the helper holds a lock of its own, so a connect and an off never interleave. status and list never wait.
 
-The keys (of each configuration, and the Mullvad device) and the Mullvad account number live in the keyring (gnome-keyring, through
+The keys (of each configuration, and the Mullvad device), the Mullvad account number and the Proton session and seed live in the keyring (gnome-keyring, through
 secret-tool, see lib/vekrona_secrets.py). Only the commands that need a key touch it; status and list never do. A key goes to the
 helper in its request file and from there to nmcli on stdin, so NetworkManager keeps none of them.
 
   status                 one JSON object on stdout:
                            {"schema":1,"armed":bool,"tunnel":"down"|"activating"|"up",
                             "connection":null|{"uuid":str,"vendor":"mullvad"|"proton"|"other","country":"NL","name":str},
-                            "mullvad":{"logged_in":bool}}
+                            "mullvad":{"logged_in":bool},"proton":{"logged_in":bool,"netshield":0|1|2}}
                          connection is the one in use, or the one the kill switch was armed for while its tunnel is down
   list                   one JSON object on stdout:
                            {"schema":1,"vendors":[{"id":"mullvad"|"proton"|"other","label":str,
                              "countries":[{"code":"NL"|"??","name":str,"configs":[{"uuid":str,"name":str}]}]}]}
-                         Mullvad's countries come from its relay list and have "configs":[]: connect to them by country. The
-                         relay list is asked for again when it is older than a day and Mullvad is logged in
+                         Mullvad's countries come from its relay list and Proton's from its catalog (cached by `proton login` and
+                         `connect`); both have "configs":[]: connect to them by country. The relay list is asked for again when
+                         it is older than a day and Mullvad is logged in
   connect UUID           arm the kill switch and bring that configuration up (its key comes from the keyring, which may prompt)
   connect mullvad CC     the same for a random Mullvad relay of the country CC (a code, or a name such as Netherlands). When CC is
                          not a code, the country it was taken for is printed on stderr: "using Netherlands (NL)"
+  connect proton CC|free the same for a Proton server: CC is a country code (the usable server with the lowest score), free the
+                         fastest free server. A fresh certificate is requested for the key, and renewed while the tunnel is up
   off                    take the tunnel down, then remove the kill switch
-  import --vendor proton|other [FILE...]
+  import --vendor other [FILE...]
                          add the WireGuard configurations FILE... (no FILE: the file chooser, several .conf files). The country
                          is the first two-letter token of the file name that is an ISO country ("NL-792.conf"), else "??". The
                          keys go to the keyring
@@ -35,33 +38,55 @@ helper in its request file and from there to nmcli on stdin, so NetworkManager k
                          device with Mullvad, and keep the number and the device's key in the keyring. A device it replaces is
                          removed from the account
   mullvad logout         remove this device from the Mullvad account, forget the Mullvad connections and clear the keyring of them
+  proton login           start a sign-in: the code is shown in a notification and printed on stdout, and the browser opens
+                         account.protonvpn.com/tv. A transient unit waits up to ten minutes for the code and keeps the session
+                         (the session and the seed go to the keyring; the catalog to the cache). One sign-in waits at a time
+  proton logout          end the Proton session, forget the Proton connections and clear the keyring and the catalog
+  proton netshield 0|1|2 NetShield level for the next connect: 0 off, 1 malware, 2 malware, ads and trackers
   seal                   move the keys that NetworkManager's keyfiles still hold into the keyring and take them out of the keyfiles
                          (connect does this first when there is one; the install does it once)
 
 A failure exits non-zero with one line on stderr. The shell also watches /run/vekrona-vpn/state.json (root-owned:
 {"schema":1,"armed":bool,"uuid":str|null}) and runs `status` again when it changes, or when `nmcli monitor` reports a change."""
 import argparse
+import contextlib
 import dataclasses
 import json
 import os
 import sys
-from typing import List, Optional, Tuple
+import time
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Tuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
 import vekrona_cli
 import vekrona_countries
 import vekrona_mullvad as mullvad
+import vekrona_proton as proton
 import vekrona_secrets as secrets
 import vekrona_vpn as vpn
 from vekrona_vpn import VpnError
 
 PROG = "vekrona-vpn"
+SCRIPT = os.path.realpath(__file__)
 IMPORT_TITLE = "Import WireGuard configurations"
+PROTON_LOGIN_UNIT = "vekrona-vpn-proton-login"  # the transient unit that waits for the code of a sign-in
+# The transient timers that renew the certificate of a Proton connection are named RENEW_UNIT_PREFIX + the time they fire (below).
+LOGIN_NAME = "proton-login.json"  # in the user's runtime directory: the selector of the sign-in the unit waits for
+NETSHIELD_DEFAULT = 1  # Malware: NetShield blocks malware (the level the Proton apps start with)
 
 
 def relay_cache():
     return os.path.join(vekrona_cli.xdg_dir("XDG_CACHE_HOME", (".cache",)), "vekrona", "vpn-relays.json")
+
+
+def proton_catalog_path():
+    return os.path.join(vekrona_cli.xdg_dir("XDG_CACHE_HOME", (".cache",)), "vekrona", "vpn-proton.json")
+
+
+def settings_path():
+    return os.path.join(vekrona_cli.vekrona_config_dir(), "vpn.json")
 
 
 def helper_failure(uid, nonce, exc):
@@ -101,13 +126,37 @@ def run_held(uid, op, request):
         start_helper(op, uid, nonce)
 
 
+def status_connections(connections):
+    """The connections as `status` names them. A generated Proton connection is "signed-in" in its id: the name shown is that of the
+    catalog's server whose entry address is the connection's endpoint, which is how the connection was made. A catalog that cannot be
+    read is said on stderr and the id's name is shown."""
+    if not any(connection.vendor == vpn.VENDOR_PROTON and connection.is_active and connection.name == vpn.PROTON_GENERATED_NAME
+               for connection in connections):
+        return connections
+    try:
+        catalog = read_catalog()
+    except VpnError as exc:
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        catalog = None
+    named = []
+    for connection in connections:
+        if connection.vendor == vpn.VENDOR_PROTON and connection.is_active and connection.name == vpn.PROTON_GENERATED_NAME and catalog:
+            address = vpn.nm_endpoint(connection.uuid).address
+            logical = next((logical for logical in catalog["logicals"] for server in logical["servers"] if server["entry_ip"] == address), None)
+            if logical is not None:
+                name = logical["name"] + ("" if proton.has_ipv6(logical) else proton.IPV4_ONLY)
+                connection = dataclasses.replace(connection, full_id=str(vpn.ConnectionId(vpn.VENDOR_PROTON, connection.country, name)))
+        named.append(connection)
+    return named
+
+
 def command_status(args):
-    print(json.dumps(vpn.status_json(vpn.nm_connections(), vpn.read_state())))
+    print(json.dumps(vpn.status_json(status_connections(vpn.nm_connections()), vpn.read_state(), proton_status())))
 
 
-def listed_countries(connections):
+def mullvad_countries(connections):
     """Mullvad's countries (code -> name) from the relay list cache, refreshed when it is old and there is an account. A list that
-    cannot be had is said on stderr and leaves Mullvad without countries: the other vendors are still listed."""
+    cannot be had is said on stderr and leaves Mullvad without countries."""
     cache = relay_cache()
     try:
         if any(connection.vendor == vpn.VENDOR_MULLVAD for connection in connections):
@@ -120,9 +169,25 @@ def listed_countries(connections):
     return (relays or mullvad.NO_RELAYS)["names"]
 
 
+def proton_countries() -> Dict[str, str]:
+    """Proton's countries (code -> name) from the catalog cache, which only a sign-in or a connect writes: nothing is asked of the network.
+    A cache that cannot be used is said on stderr and leaves Proton without countries."""
+    try:
+        catalog = vpn.read_cache(proton_catalog_path(), proton.validate_catalog)
+    except VpnError as exc:
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        return {}
+    return {} if catalog is None else proton.countries_of(catalog)
+
+
+def catalog_countries(connections) -> Dict[str, Dict[str, str]]:
+    """The countries of each vendor that has a catalog (vendor -> code -> name)."""
+    return {vpn.VENDOR_MULLVAD: mullvad_countries(connections), vpn.VENDOR_PROTON: proton_countries()}
+
+
 def command_list(args):
     connections = vpn.nm_connections()
-    print(json.dumps(vpn.list_json(connections, listed_countries(connections))))
+    print(json.dumps(vpn.list_json(connections, catalog_countries(connections))))
 
 
 def mullvad_relay_for(query):
@@ -169,18 +234,24 @@ def connection_keys(connection: vpn.Connection) -> dict:
 
 
 def command_connect(args):
-    if args.target == "mullvad":
+    if args.target == vpn.VENDOR_MULLVAD:
         if args.country is None:
             raise VpnError("connect mullvad needs a country")
         seal_pending()
         device = device_of_item(logged_in_device())
         relay = mullvad_relay_for(args.country)
-        run_apply("connect", {"mullvad": dataclasses.asdict(relay), "device": dataclasses.asdict(device)})
+        run_apply("connect", {"vendor": vpn.VENDOR_MULLVAD, "relay": dataclasses.asdict(relay), "device": dataclasses.asdict(device)})
+    elif args.target == vpn.VENDOR_PROTON:
+        if args.country is None:
+            raise VpnError("connect proton needs a country code or free")
+        connect_proton(args.country)
     elif args.country is not None:
-        raise VpnError("connect takes a uuid, or mullvad and a country")
+        raise VpnError("connect takes a uuid, or mullvad or proton and a country")
     else:
         uuid = vpn.require_uuid(args.target)
         connection = connection_of(uuid)
+        if connection.vendor == vpn.VENDOR_PROTON:
+            raise VpnError("Proton connections are made by country: connect proton CC, or connect proton free")
         # Checked before any keyring access, so that a refused connect neither prompts nor changes anything (the helper checks it too).
         vpn.require_bound_to_tunnel(uuid, connection.full_id)
         seal_pending()
@@ -284,6 +355,8 @@ def sealed_items(entries: List[dict]) -> Tuple[List[secrets.Item], List[str], Li
 def command_forget(args):
     connection = connection_of(vpn.require_uuid(args.uuid))
     run_apply("forget", {"uuid": connection.uuid})
+    if connection.vendor == vpn.VENDOR_PROTON and not proton_connection_active():
+        stop_renewal()
     if connection.vendor != vpn.VENDOR_MULLVAD:
         try:
             secrets.clear(secrets.CONFIG_KEY, connection.full_id)
@@ -331,6 +404,10 @@ def command_import(args):
 
 def command_off(args):
     run_apply("off", None)
+    # A renewal timer exists only for a Proton connection, and that connection stays in NetworkManager until it is forgotten: when there is
+    # none, there is no timer to stop, and this costs no systemctl call.
+    if any(connection.vendor == vpn.VENDOR_PROTON for connection in vpn.nm_connections()):
+        stop_renewal()
 
 
 def undo_keyring(exc: VpnError, previous: List[secrets.Previous]) -> VpnError:
@@ -416,6 +493,382 @@ def command_mullvad_logout(args):
     secrets.clear(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID)
 
 
+# ---- Proton: the sign-in, the session, the certificate and its renewal -------------------------------------------------
+
+RENEW_UNIT_PREFIX = "vekrona-vpn-proton-renew-"  # one timer per arming, named after the time it fires
+RENEW_ARM_DELAY_SEC = 60  # a renewal that is due in the past is armed this far ahead
+RENEW_RETRY_SEC = 30 * 60  # the retry after a failed renewal comes this long after it
+RENEW_EXPIRY_MARGIN_SEC = 5 * 60  # ... or this long before the certificate expires, when that is sooner
+CATALOG_MAX_AGE_SEC = 60 * 60  # a connect uses the catalog cache while it is younger than this, without asking Proton
+
+
+def self_command(*args):
+    """The argv that runs this tool with `args`, for a transient unit: the interpreter that runs it and its path."""
+    return [sys.executable, SCRIPT, *args]
+
+
+def utc_text(when: int) -> str:
+    return datetime.fromtimestamp(when, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def proton_signed_in() -> bool:
+    """Whether a sign-in is kept: its catalog is, and signing out removes both."""
+    return os.path.exists(proton_catalog_path())
+
+
+def proton_status() -> dict:
+    """What `status` says of Proton. A NetShield setting that cannot be read is said in `error` and does not fail the status."""
+    try:
+        return {"logged_in": proton_signed_in(), "netshield": netshield_pref(), "error": ""}
+    except VpnError as exc:
+        return {"logged_in": proton_signed_in(), "netshield": None, "error": str(exc)}
+
+
+def keyring_session() -> Optional[proton.Session]:
+    """The session the keyring holds now, None when there is none."""
+    item = secrets.lookup_optional(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID)
+    return None if item is None else proton.session_of_item(item)
+
+
+def save_session(session: proton.Session) -> None:
+    secrets.store(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID, proton.item_of_session(session))
+
+
+def proton_account() -> proton.Account:
+    """The account of the keyring's session. The caller holds the Proton lock: the session is read under it."""
+    session = keyring_session()
+    if session is None:
+        raise VpnError("not signed in to Proton: run vekrona-vpn proton login")
+    return proton.Account(session, keyring_session, save_session)
+
+
+def proton_seed() -> bytes:
+    return proton.seed_of_item(secrets.lookup(secrets.PROTON_KEY, secrets.PROTON_KEY_ID))
+
+
+def read_catalog() -> Optional[dict]:
+    return vpn.read_cache(proton_catalog_path(), proton.validate_catalog)
+
+
+def recorded_certificate() -> Optional[dict]:
+    """The certificate the catalog cache records. A cache that cannot be read records none: the refresh that follows writes it again."""
+    try:
+        catalog = read_catalog()
+    except VpnError as exc:
+        print(f"{PROG}: {exc}; the catalog is asked for again", file=sys.stderr)
+        return None
+    return None if catalog is None else catalog["certificate"]
+
+
+def refresh_catalog(account: proton.Account) -> dict:
+    """The account's plan and logical servers, asked of Proton and cached: `list` and `status` read the cache, and a connect uses it
+    while it is young. A logical server that does not fit is said on stderr and left out. The certificate the cache records is kept."""
+    max_tier, plan = proton.plan_of(account)
+    catalog, left_out = proton.catalog_from_answers(plan, max_tier, proton.logicals_of(account))
+    for reason in left_out:
+        print(f"{PROG}: ignoring {reason}", file=sys.stderr)
+    catalog["certificate"] = recorded_certificate()
+    vpn.write_cache(proton_catalog_path(), catalog)
+    return catalog
+
+
+def fresh_catalog(account: proton.Account) -> dict:
+    """The cached catalog while it is younger than CATALOG_MAX_AGE_SEC, else one asked of Proton (which needs the network)."""
+    if not vpn.cache_is_stale(proton_catalog_path(), CATALOG_MAX_AGE_SEC):
+        try:
+            catalog = read_catalog()
+        except VpnError as exc:
+            print(f"{PROG}: {exc}; the catalog is asked for again", file=sys.stderr)
+            catalog = None
+        if catalog is not None:
+            return catalog
+    return refresh_catalog(account)
+
+
+def issue_certificate(account: proton.Account, seed: bytes, netshield: int) -> proton.Certificate:
+    """A certificate for the key, recorded in the catalog (its times only: the key is never kept there)."""
+    cert = proton.certificate(account, seed, netshield)
+    catalog = read_catalog()
+    if catalog is None:
+        raise VpnError("no catalog of the Proton account is kept: sign in again")
+    catalog["certificate"] = {"refresh_time": cert.refresh_time, "expiration_time": cert.expiration_time, "netshield": netshield}
+    vpn.write_cache(proton_catalog_path(), catalog)
+    return cert
+
+
+def forget_proton_here() -> None:
+    """What signing out leaves on this machine: the renewal stops, the session and the seed leave the keyring, the catalog goes."""
+    stop_renewal()
+    secrets.clear(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID)
+    secrets.clear(secrets.PROTON_KEY, secrets.PROTON_KEY_ID)
+    vpn.remove_if_present(proton_catalog_path())
+
+
+@contextlib.contextmanager
+def proton_session_ended():
+    """A Proton call that found its session ended: the sign-in is forgotten here too, so the bar offers Sign in again."""
+    try:
+        yield
+    except proton.SessionEnded:
+        forget_proton_here()
+        raise
+
+
+def sign_in_text(user_code: str) -> str:
+    return "Enter code %s-%s at account.protonvpn.com/tv" % (user_code[:4], user_code[4:])
+
+
+def login_path(uid: int) -> str:
+    return os.path.join(vpn.user_dir(uid), LOGIN_NAME)
+
+
+def write_login(uid: int, doc: dict) -> None:
+    vpn.write_atomic(login_path(uid), json.dumps(doc), vpn.PRIVATE_FILE_MODE, directory_mode=vpn.PRIVATE_DIR_MODE)
+
+
+def take_login(uid: int) -> dict:
+    """The sign-in the foreground left for the unit (selector and notification id), removed as it is read."""
+    path = login_path(uid)
+    with vpn.files_reported("read " + path):
+        with open(path) as handle:
+            text = handle.read()
+    vpn.remove_if_present(path)
+    try:
+        doc = json.loads(text)
+    except vpn.JSON_ERRORS:
+        raise VpnError("the sign-in request is not JSON")
+    if not (isinstance(doc, dict) and isinstance(doc.get("selector"), str) and isinstance(doc.get("notification"), str)):
+        raise VpnError("the sign-in request is in a layout this tool does not know")
+    return doc
+
+
+def notify_outcome(notification: str, text: str) -> None:
+    """Replaces the sign-in's notification with `text`."""
+    vpn.run(["notify-send", "--app-name=vekrona", "--replace-id=" + notification, "VPN", text])
+
+
+def open_browser(url: str) -> None:
+    """Starts the browser on `url` through a transient unit, and does not wait for it: xdg-open stays alive as long as the browser it
+    started. systemd-run returns once the unit has started, so nothing is left to reap. A failure to start is an error."""
+    try:
+        vpn.run(["systemd-run", "--user", "--collect", "--quiet", "xdg-open", url])
+    except VpnError as exc:
+        raise VpnError("cannot start the browser: %s" % exc)
+
+
+def close_notification(notification: str) -> None:
+    """Closes the notification of a sign-in that did not start."""
+    vpn.run(["busctl", "--user", "call", "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+             "org.freedesktop.Notifications", "CloseNotification", "u", notification])
+
+
+def command_proton_login(args):
+    """Starts a sign-in. The code is shown in a notification, the browser opens the page for it, and the code goes to stdout. A
+    transient unit waits for the person to enter it (see command_proton_await), so this command returns at once. One sign-in waits at
+    a time: a second is refused while the first is still waiting. When the sign-in cannot start, its notification is closed."""
+    uid = os.getuid()
+    with vpn.user_lock(uid):
+        if vpn.execute(["systemctl", "--user", "is-active", "--quiet", PROTON_LOGIN_UNIT + ".service"]).returncode == 0:
+            raise VpnError("a Proton sign-in is already waiting")
+        selector, user_code = proton.start_fork()
+        notification = vpn.run(["notify-send", "--print-id", "--app-name=vekrona", "--expire-time=0", "VPN",
+                                sign_in_text(user_code)]).strip()
+        try:
+            open_browser(proton.SIGN_IN_URL)
+            write_login(uid, {"selector": selector, "notification": notification})
+            vpn.run(["systemd-run", "--user", "--collect", "--unit=" + PROTON_LOGIN_UNIT, *self_command("proton", "await")])
+        except VpnError as exc:
+            problems = [str(exc)]
+            try:
+                vpn.remove_if_present(login_path(uid))
+                close_notification(notification)
+            except VpnError as left:
+                problems.append(str(left))
+            raise VpnError("; ".join(problems)) from exc
+    print(user_code)
+
+
+def command_proton_await(args):
+    """The transient unit of a sign-in: waits for the code, keeps the session and, when there is none yet, the seed, and the catalog,
+    and replaces the notification with the outcome. When the catalog cannot be had, what this sign-in stored is cleared again. The
+    selector only ever travels in the file the foreground wrote."""
+    login = take_login(os.getuid())
+    try:
+        session = proton.await_session(login["selector"], now=time.monotonic, pause=time.sleep)
+        created_seed = secrets.lookup_optional(secrets.PROTON_KEY, secrets.PROTON_KEY_ID) is None
+        items = [(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID, proton.item_of_session(session))]
+        if created_seed:
+            items.append((secrets.PROTON_KEY, secrets.PROTON_KEY_ID, proton.item_of_seed(proton.new_seed())))
+        secrets.store_all(items)
+        try:
+            catalog = refresh_catalog(proton.Account(session, keyring_session, save_session))
+        except VpnError as exc:
+            raise undo_sign_in(exc, created_seed)
+    except VpnError as exc:
+        try:
+            notify_outcome(login["notification"], "Proton sign-in failed: %s" % exc)
+        except VpnError as shown:
+            raise VpnError("%s; and the notification could not show it: %s" % (exc, shown))
+        raise
+    notify_outcome(login["notification"], "Signed in to Proton (%s)" % catalog["plan"])
+
+
+def undo_sign_in(exc: VpnError, created_seed: bool) -> VpnError:
+    """The error for a sign-in whose catalog could not be had: the session it stored is cleared, and the seed too when this sign-in made it."""
+    problems = [str(exc), "nothing of this sign-in was kept"]
+    try:
+        secrets.clear(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID)
+        if created_seed:
+            secrets.clear(secrets.PROTON_KEY, secrets.PROTON_KEY_ID)
+    except VpnError as left:
+        problems.append("and clearing it failed: %s" % left)
+    return VpnError("; ".join(problems))
+
+
+def command_proton_logout(args):
+    """Forgets the Proton connections, ends the session with Proton and clears the keyring and the catalog here. A session that Proton
+    cannot end is said after the rest is done: this machine is signed out either way. Holds the Proton lock: a renewal must not run
+    with the session this removes."""
+    with vpn.proton_lock(os.getuid()):
+        session = keyring_session()
+        for connection in vpn.nm_connections():
+            if connection.vendor == vpn.VENDOR_PROTON:
+                run_apply("forget", {"uuid": connection.uuid})
+        failure = None
+        if session is not None:
+            try:
+                proton.logout(proton.Account(session, keyring_session, save_session))
+            except proton.SessionEnded:
+                pass  # Proton has ended the session already: that is the state a logout asks for
+            except VpnError as exc:
+                failure = exc
+        forget_proton_here()
+    if failure is not None:
+        raise VpnError("signed out on this machine, but Proton did not end the session: %s" % failure)
+
+
+def read_settings() -> dict:
+    """The preferences of vekrona-vpn (not secret): {"proton": {"netshield": 0|1|2}}; none when there is no file."""
+    path = settings_path()
+    try:
+        with open(path) as handle:
+            doc = json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except (OSError, *vpn.JSON_ERRORS) as exc:
+        raise VpnError("cannot read %s: %s" % (path, exc))
+    if not isinstance(doc, dict) or not isinstance(doc.get("proton", {}), dict):
+        raise VpnError("%s is not a settings object" % path)
+    return doc
+
+
+def netshield_pref() -> int:
+    level = read_settings().get("proton", {}).get("netshield", NETSHIELD_DEFAULT)
+    if level not in proton.NETSHIELD_LEVELS:
+        raise VpnError("the NetShield level in the settings is not one of %s" % ", ".join(map(str, proton.NETSHIELD_LEVELS)))
+    return level
+
+
+def command_proton_netshield(args):
+    settings = read_settings()
+    settings["proton"] = {**settings.get("proton", {}), "netshield": args.level}
+    vpn.write_atomic(settings_path(), json.dumps(settings) + "\n", vpn.PRIVATE_FILE_MODE, directory_mode=vpn.PRIVATE_DIR_MODE)
+    if proton_connection_active():
+        print(f"{PROG}: reconnect to apply", file=sys.stderr)
+
+
+def proton_connection_active() -> bool:
+    return any(connection.vendor == vpn.VENDOR_PROTON and connection.is_active for connection in vpn.nm_connections())
+
+
+def renewal_timers() -> List[str]:
+    """The renewal timers there are (not the renewals that run: a running renewal may be the one that arms the next timer)."""
+    text = vpn.run(["systemctl", "--user", "list-units", "--plain", "--no-legend", "--type=timer", RENEW_UNIT_PREFIX + "*"])
+    return [line.split()[0] for line in text.splitlines() if line.strip()]
+
+
+def stop_renewal() -> None:
+    """Stops every renewal timer. A renewal that is running is not stopped: it may be the one arming the next timer."""
+    for unit in renewal_timers():
+        vpn.run(["systemctl", "--user", "stop", unit])
+
+
+def schedule_renewal(at: int) -> None:
+    """Replaces the renewal timers with one that fires at `at`, or RENEW_ARM_DELAY_SEC from now when `at` has passed. The unit is named
+    after the time it fires, so the renewal that is running can arm the next one: a unit cannot replace itself."""
+    stop_renewal()
+    when = max(at, int(time.time()) + RENEW_ARM_DELAY_SEC)
+    vpn.run(["systemd-run", "--user", "--collect", "--on-calendar=" + utc_text(when), "--unit=%s%d" % (RENEW_UNIT_PREFIX, when),
+             *self_command("proton", "renew")])
+
+
+def renewal_failed(exc: VpnError, expiry: int) -> None:
+    """Tells the person that the certificate could not be renewed and when the tunnel stops working, and arms the one retry: RENEW_RETRY_SEC
+    from now, or RENEW_EXPIRY_MARGIN_SEC before the expiry if that is sooner. After the expiry nothing is tried again."""
+    now = time.time()
+    notify = "Proton certificate could not be renewed: %s; the tunnel stops working at %s" % (
+        exc, datetime.fromtimestamp(expiry).strftime("%H:%M"))
+    vpn.run(["notify-send", "--app-name=vekrona", "VPN", notify])
+    if now < expiry:
+        retry = max(min(now + RENEW_RETRY_SEC, expiry - RENEW_EXPIRY_MARGIN_SEC), now + RENEW_ARM_DELAY_SEC)
+        if retry < expiry:
+            schedule_renewal(retry)
+
+
+def command_proton_renew(args):
+    """The renewal timer's command: while a Proton connection is up, a new certificate for the same key and NetShield level, recorded, and
+    the next renewal at its RefreshTime. Otherwise nothing. A failure is said to the person, with one retry (see renewal_failed)."""
+    if not proton_connection_active():
+        return
+    uid = os.getuid()
+    expiry = recorded_expiry()
+    try:
+        with vpn.proton_lock(uid), proton_session_ended():
+            cert = issue_certificate(proton_account(), proton_seed(), netshield_pref())
+    except proton.SessionEnded:
+        raise
+    except VpnError as exc:
+        renewal_failed(exc, expiry)
+        raise
+    schedule_renewal(cert.refresh_time)
+
+
+def recorded_expiry() -> int:
+    """The expiry of the certificate the connection in use was made with (the catalog records it)."""
+    catalog = read_catalog()
+    if catalog is None or catalog["certificate"] is None:
+        raise VpnError("no certificate of the Proton connection is recorded")
+    return catalog["certificate"]["expiration_time"]
+
+
+def reusable_or_issued(account: proton.Account, catalog: dict, seed: bytes, netshield: int) -> proton.Certificate:
+    """The recorded certificate while it is good for longer than CERTIFICATE_MIN_LEFT_SEC (no request to Proton), else a new one."""
+    reused = proton.reusable_certificate(catalog, netshield, time.time())
+    return reused if reused is not None else issue_certificate(account, seed, netshield)
+
+
+def connect_proton(query: str) -> None:
+    """Connects to the Proton server that `query` chooses (a country code, or free): the catalog (the cache while it is young), a certificate
+    (the recorded one while it is good), and the helper's connect. The renewal is scheduled once the connection is handed over. When Proton
+    cannot be reached (the kill switch blocks it) and a request to it is needed, that is said: turn the VPN off, then connect."""
+    seal_pending()
+    try:
+        with vpn.proton_lock(os.getuid()), proton_session_ended():
+            account = proton_account()
+            seed = proton_seed()
+            netshield = netshield_pref()
+            catalog = fresh_catalog(account)
+            choice = proton.choose(catalog, query)
+            cert = reusable_or_issued(account, catalog, seed, netshield)
+    except proton.Unreachable as exc:
+        raise VpnError("Proton needs the network to issue a certificate: turn the VPN off, then connect") from exc
+    ident = vpn.ConnectionId(vpn.VENDOR_PROTON, choice.country, vpn.PROTON_GENERATED_NAME)
+    run_apply("connect", {"vendor": vpn.VENDOR_PROTON, "id": str(ident), "conf": proton.conf_text(choice.logical, choice.server, seed),
+                          "private_key": proton.private_key_text(seed)})
+    schedule_renewal(cert.refresh_time)
+
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(prog=PROG, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -436,6 +889,15 @@ def parse_args(argv):
     mullvad_parser = commands.add_parser("mullvad").add_subparsers(dest="mullvad_command", required=True)
     mullvad_parser.add_parser("login").set_defaults(handler=command_mullvad_login)
     mullvad_parser.add_parser("logout").set_defaults(handler=command_mullvad_logout)
+    proton_parser = commands.add_parser("proton").add_subparsers(dest="proton_command", required=True)
+    proton_parser.add_parser("login").set_defaults(handler=command_proton_login)
+    proton_parser.add_parser("logout").set_defaults(handler=command_proton_logout)
+    netshield = proton_parser.add_parser("netshield")
+    netshield.add_argument("level", type=int, choices=proton.NETSHIELD_LEVELS)
+    netshield.set_defaults(handler=command_proton_netshield)
+    proton_parser.add_parser("renew").set_defaults(handler=command_proton_renew)
+    # The unit of a sign-in runs this; it is not a command for a person.
+    proton_parser.add_parser("await", help=argparse.SUPPRESS).set_defaults(handler=command_proton_await)
     commands.add_parser("seal").set_defaults(handler=command_seal)
     return parser.parse_args(argv)
 

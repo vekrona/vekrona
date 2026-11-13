@@ -1,6 +1,6 @@
-"""Test doubles for vekrona-vpn: stub system binaries and a local HTTP fixture for Mullvad's API.
+"""Test doubles for vekrona-vpn: stub system binaries and a local HTTP fixture for the providers' APIs (Mullvad and Proton).
 
-The stubs stand in for nmcli, nft, systemctl, getent, wg, secret-tool and busctl. Each logs its argv and stdin as one JSON line (and the
+The stubs stand in for nmcli, nft, systemctl, getent, wg, secret-tool, busctl, notify-send, xdg-open and systemd-run. Each logs its argv and stdin as one JSON line (and the
 content of the file an `nmcli ... file PATH` names, which the helper deletes right after the import) and then behaves as the
 first matching rule of behaviors.json says (default: exit 0, no output). A rule matches when its argv is a prefix of the call's;
 `times` limits how often it answers, and later `behave` calls win over earlier ones. secret-tool, when no rule answers, keeps
@@ -20,14 +20,14 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 
-STUBBED_TOOLS = ("nmcli", "nft", "systemctl", "getent", "wg", "secret-tool", "busctl")
+STUBBED_TOOLS = ("nmcli", "nft", "systemctl", "getent", "wg", "secret-tool", "busctl", "notify-send", "xdg-open", "systemd-run")
 
 STUB_SOURCE = """#!{python} -S
 import json, os, sys
 tool = os.path.basename(sys.argv[0])
 argv = sys.argv[1:]
 stdin = "" if sys.stdin.isatty() else sys.stdin.read()
-entry = {{"tool": tool, "argv": argv, "stdin": stdin}}
+entry = {{"tool": tool, "argv": argv, "stdin": stdin, "env": dict(os.environ)}}
 if "file" in argv and argv.index("file") + 1 < len(argv):
     with open(argv[argv.index("file") + 1]) as handle:
         entry["file"] = handle.read()
@@ -164,7 +164,8 @@ class Stubs:
 
 
 class ApiFixture:
-    """A local HTTP server with canned answers, recording every request."""
+    """A local HTTP server with canned answers, recording every request. An answer is (status, body), or a list of them that are given
+    in turn, the last one for good (a poll that is pending twice, then answers)."""
 
     def __init__(self) -> None:
         self.requests: List[dict] = []
@@ -179,7 +180,7 @@ class ApiFixture:
                 fixture.requests.append({"method": self.command, "path": path,
                                          "authorization": self.headers.get("Authorization"),
                                          "body": json.loads(raw) if raw else None})
-                status, body = fixture.routes.get((self.command, path), (404, {"code": "NOT_FOUND"}))
+                status, body = fixture.next_answer(self.command, path)
                 payload = b"" if body is None else json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -206,6 +207,20 @@ class ApiFixture:
 
     def answer(self, method: str, path: str, body: object, status: int = 200) -> None:
         self.routes[(method, path)] = (status, body)
+
+    def answer_in_turn(self, method: str, path: str, answers: List[tuple]) -> None:
+        """`answers` is [(status, body), ...]: each request gets the next one, and the last one serves every request after it."""
+        self.routes[(method, path)] = list(answers)
+
+    def next_answer(self, method: str, path: str) -> tuple:
+        answer = self.routes.get((method, path))
+        if answer is None:
+            return 404, {"code": "NOT_FOUND"}
+        if not isinstance(answer, list):
+            return answer
+        if len(answer) > 1:
+            return answer.pop(0)
+        return answer[0]
 
     def requests_to(self, method: str, path: str) -> List[dict]:
         return [r for r in self.requests if (r["method"], r["path"]) == (method, path)]

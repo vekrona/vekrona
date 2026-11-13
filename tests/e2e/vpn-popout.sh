@@ -25,8 +25,8 @@ STEP_TIMEOUT_SEC=90
 ZURICH=11111111-1111-1111-1111-111111111111
 TOKYO=22222222-2222-2222-2222-222222222222
 OSAKA=33333333-3333-3333-3333-333333333333
-# While a connection is up the popout names it above the vendors ("Proton VPN, JP, Osaka"), so the row of the vendor is the last word
-# "Proton" of the screen.
+# While a connection is up the popout names it above the vendors ("Other, JP, Osaka"), so the row of the vendor is the last word
+# "Other" of the screen.
 # Words as OCR reads them in the bold face: the double l of Mullvad for an l and a t, the ff of Off for an f and a t.
 MULLVAD='^Mul[lt]vad$'
 OFF='^[Oo]f[ft]$'
@@ -73,7 +73,7 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Not\s+logged\s+in
 snap vendors
 log "ok: the popout lists the vendors, says the VPN is off and that Mullvad has no account"
 
-click_word --last '^Proton$'
+click_word --last '^Other$'
 await_word '^Switzerland$'
 await_word '^Japan$'
 click_word '^Switzerland$'
@@ -85,7 +85,7 @@ vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Zurich'
 snap connected
 log "ok: a country with one configuration connects at once; the popout closes for the keyring, and reopened it says which is up"
 
-click_word --last '^Proton$'
+click_word --last '^Other$'
 await_word '^Switzerland$'
 vekrona-dev key esc
 await_word "$MULLVAD"
@@ -93,7 +93,7 @@ await_gone '^Switzerland$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- popout_open
 log "ok: Esc steps back out of a vendor"
 
-click_word --last '^Proton$'
+click_word --last '^Other$'
 click_word '^Japan$'
 await_word '^Tokyo$'
 await_word '^Osaka$'
@@ -111,7 +111,7 @@ await_gone '^Connected$'
 log "ok: Off turns the VPN off"
 
 # Back to Japan, then Back, Tokyo, and its Forget are the first three stops of Tab, since Off is gone.
-click_word --last '^Proton$'
+click_word --last '^Other$'
 click_word '^Japan$'
 await_word '^Tokyo$'
 vekrona-dev key tab
@@ -130,7 +130,7 @@ log "ok: Tab and Enter reach Forget, which asks first; the popout closes for the
 # Japan has one configuration left, so its row connects at once and carries its own Forget: Switzerland is the same, and at the
 # vendor's level Back, Switzerland and its Forget are the first three stops of Tab.
 reopen_popout
-click_word --last '^Proton$'
+click_word --last '^Other$'
 await_word '^Switzerland$'
 vekrona-dev key tab
 vekrona-dev key tab
@@ -179,8 +179,8 @@ log "ok: a Mullvad country connects by its code"
 open_popout
 click_word '^Import$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open
-await_called "import --vendor proton"
-log "ok: Import Proton closes the popout and calls the tool"
+await_called "import --vendor other"
+log "ok: Import other closes the popout and calls the tool"
 
 vekrona-dev run bash -c 'echo "no portal here" >"$HOME/.cache/vekrona-vpn-stub/import-fails"'
 open_popout
@@ -194,7 +194,7 @@ log "ok: a failed import comes as a notification"
 # A failed connect is a notification: the popout is closed by then, as it is for every connect.
 vekrona-dev run bash -c 'echo "no key in the keyring" >"$HOME/.cache/vekrona-vpn-stub/connect-fails"'
 open_popout
-click_word --last '^Proton$'
+click_word --last '^Other$'
 click_word '^Switzerland$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open || die "a connect must close the popout, even when it fails"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'no\s+key\s+in\s+the\s+keyring'
@@ -204,7 +204,7 @@ log "ok: a failed connect from the popout comes as a notification"
 
 # A click into the popout gives it the keyboard.
 open_popout
-click_word --last '^Proton$'
+click_word --last '^Other$'
 vekrona-dev key esc
 await_word "$MULLVAD"
 vekrona-dev key esc

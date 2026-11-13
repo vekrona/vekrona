@@ -1,5 +1,5 @@
-"""The secrets vekrona-vpn keeps for the user: the Mullvad account number and device, and the keys of imported configurations. They
-live in the Secret Service (the login collection of gnome-keyring) and nowhere else. secret-tool takes a value on stdin and gives it
+"""The secrets vekrona-vpn keeps for the user: the Mullvad account number and device, the Proton session and seed, and the keys of
+imported configurations. They live in the Secret Service (the login collection of gnome-keyring) and nowhere else. secret-tool takes a value on stdin and gives it
 back on stdout, so a key never reaches an argument of a process. Only user-side code calls this module; the root helper never does.
 
 An item has the attributes application, kind and id, and its secret is one JSON object. An error names the item by its kind and
@@ -18,8 +18,12 @@ SECRET_PROMPT_WAIT_SEC = 600
 MULLVAD_ACCOUNT = "mullvad-account"
 MULLVAD_DEVICE = "mullvad-device"
 CONFIG_KEY = "config-key"
+PROTON_SESSION = "proton-session"
+PROTON_KEY = "proton-key"
 MULLVAD_ACCOUNT_ID = "account"
 MULLVAD_DEVICE_ID = "device"
+PROTON_SESSION_ID = "session"
+PROTON_KEY_ID = "key"
 # `secret-tool lookup` and `clear` exit with this status and print nothing when no item matches, and also when a prompt to unlock the
 # collection is dismissed: the two cannot be told apart from secret-tool's answer, so the lock is asked for (locked).
 NOT_FOUND = 1

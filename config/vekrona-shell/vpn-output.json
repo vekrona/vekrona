@@ -1,0 +1,31 @@
+{
+  "status": {"object": {
+    "schema": "integer",
+    "armed": "boolean",
+    "tunnel": {"enum": ["down", "activating", "up"]},
+    "connection": {"nullable": {"object": {
+      "uuid": "string",
+      "vendor": {"enum": ["mullvad", "proton", "other"]},
+      "country": "string",
+      "name": "string"
+    }}},
+    "mullvad": {"object": {"logged_in": "boolean"}},
+    "proton": {"object": {
+      "logged_in": "boolean",
+      "netshield": {"nullable": {"enum": [0, 1, 2]}},
+      "error": "string"
+    }}
+  }},
+  "list": {"object": {
+    "schema": "integer",
+    "vendors": {"list": {"object": {
+      "id": {"enum": ["mullvad", "proton", "other"]},
+      "label": "string",
+      "countries": {"list": {"object": {
+        "code": "string",
+        "name": "string",
+        "configs": {"list": {"object": {"uuid": "string", "name": "string"}}}
+      }}}
+    }}}
+  }}
+}
