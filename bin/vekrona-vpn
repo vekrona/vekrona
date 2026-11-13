@@ -13,16 +13,20 @@ secret-tool, see lib/vekrona_secrets.py). Only the commands that need a key touc
 helper in its request file and from there to nmcli on stdin, so NetworkManager keeps none of them.
 
   status                 one JSON object on stdout:
-                           {"schema":1,"armed":bool,"tunnel":"down"|"activating"|"up",
-                            "connection":null|{"uuid":str,"vendor":"mullvad"|"proton"|"other","country":"NL","name":str},
-                            "mullvad":{"logged_in":bool},"proton":{"logged_in":bool,"netshield":0|1|2}}
-                         connection is the one in use, or the one the kill switch was armed for while its tunnel is down
+                           {"schema":2,"armed":bool,"tunnel":"down"|"activating"|"up",
+                            "connection":null|{"uuid":str,"vendor":"mullvad"|"proton"|"other","country":"NL","name":str,"ipv6":bool},
+                            "mullvad":{"logged_in":bool},"proton":{"logged_in":bool,"netshield":0|1|2,"error":str}}
+                         connection is the one in use, or the one the kill switch was armed for while its tunnel is down; ipv6
+                         says whether its tunnel carries IPv6 (the shell labels a tunnel without it "IPv4 only")
   list                   one JSON object on stdout:
-                           {"schema":1,"vendors":[{"id":"mullvad"|"proton"|"other","label":str,
-                             "countries":[{"code":"NL"|"??","name":str,"configs":[{"uuid":str,"name":str}]}]}]}
+                           {"schema":2,"vendors":[{"id":"mullvad"|"proton"|"other","label":str,
+                             "countries":[{"code":"NL"|"??","name":str,"load":0-100|null,"ipv6":bool|null,
+                               "configs":[{"uuid":str,"name":str,"ipv6":bool}]}]}]}
                          Mullvad's countries come from its relay list and Proton's from its catalog (cached by `proton login` and
-                         `connect`); both have "configs":[]: connect to them by country. The relay list is asked for again when
-                         it is older than a day and Mullvad is logged in
+                         `connect`); both have "configs":[]: connect to them by country. A Mullvad country has no load (null) and
+                         IPv6; a Proton country's load and IPv6 are those of the server a connect to it picks. The relay list is asked
+                         for again when it is older than a day and Mullvad is logged in. Proton's loads are asked for again when they
+                         are older than 15 minutes, which only `list` does; when Proton cannot be asked, the loads kept are shown
   connect UUID           arm the kill switch and bring that configuration up (its key comes from the keyring, which may prompt)
   connect mullvad CC     the same for a random Mullvad relay of the country CC (a code, or a name such as Netherlands). When CC is
                          not a code, the country it was taken for is printed on stderr: "using Netherlands (NL)"
@@ -85,6 +89,10 @@ def proton_catalog_path():
     return os.path.join(vekrona_cli.xdg_dir("XDG_CACHE_HOME", (".cache",)), "vekrona", "vpn-proton.json")
 
 
+def proton_loads_path():
+    return os.path.join(vekrona_cli.xdg_dir("XDG_CACHE_HOME", (".cache",)), "vekrona", "vpn-proton-loads.json")
+
+
 def settings_path():
     return os.path.join(vekrona_cli.vekrona_config_dir(), "vpn.json")
 
@@ -144,8 +152,7 @@ def status_connections(connections):
             address = vpn.nm_endpoint(connection.uuid).address
             logical = next((logical for logical in catalog["logicals"] for server in logical["servers"] if server["entry_ip"] == address), None)
             if logical is not None:
-                name = logical["name"] + ("" if proton.has_ipv6(logical) else proton.IPV4_ONLY)
-                connection = dataclasses.replace(connection, full_id=str(vpn.ConnectionId(vpn.VENDOR_PROTON, connection.country, name)))
+                connection = dataclasses.replace(connection, full_id=str(vpn.ConnectionId(vpn.VENDOR_PROTON, connection.country, logical["name"])))
         named.append(connection)
     return named
 
@@ -154,8 +161,8 @@ def command_status(args):
     print(json.dumps(vpn.status_json(status_connections(vpn.nm_connections()), vpn.read_state(), proton_status())))
 
 
-def mullvad_countries(connections):
-    """Mullvad's countries (code -> name) from the relay list cache, refreshed when it is old and there is an account. A list that
+def mullvad_countries(connections) -> Dict[str, vpn.Offer]:
+    """Mullvad's countries (code -> Offer) from the relay list cache, refreshed when it is old and there is an account. A list that
     cannot be had is said on stderr and leaves Mullvad without countries."""
     cache = relay_cache()
     try:
@@ -165,23 +172,49 @@ def mullvad_countries(connections):
             relays = mullvad.read_cache(cache)
     except VpnError as exc:
         print(f"{PROG}: {exc}", file=sys.stderr)
-        return mullvad.NO_RELAYS["names"]
-    return (relays or mullvad.NO_RELAYS)["names"]
+        return mullvad.offers_of(mullvad.NO_RELAYS)
+    return mullvad.offers_of(relays or mullvad.NO_RELAYS)
 
 
-def proton_countries() -> Dict[str, str]:
-    """Proton's countries (code -> name) from the catalog cache, which only a sign-in or a connect writes: nothing is asked of the network.
-    A cache that cannot be used is said on stderr and leaves Proton without countries."""
+def proton_loads() -> Dict[str, int]:
+    """The loads of Proton's servers by logical id: the cache while it is younger than LOADS_MAX_AGE_SEC, else asked of Proton and cached.
+    When Proton cannot be asked, the cache is kept however old it is, and said on stderr with its age; with no cache there are no loads.
+    A cache that cannot be used is said and asked for again. The loads are public: no session is involved."""
+    path = proton_loads_path()
+    try:
+        cached = vpn.read_cache(path, proton.validate_loads)
+    except VpnError as exc:
+        print(f"{PROG}: {exc}; the loads are asked for again", file=sys.stderr)
+        cached = None
+    if cached is not None and not vpn.cache_is_stale(path, LOADS_MAX_AGE_SEC):
+        return cached
+    try:
+        loads = proton.loads_of()
+    except VpnError as exc:
+        if cached is None:
+            print(f"{PROG}: cannot read the Proton server loads: {exc}", file=sys.stderr)
+            return {}
+        with vpn.files_reported("read " + path):
+            minutes = int(vpn.cache_age_sec(path) // 60)
+        print(f"{PROG}: cannot read the Proton server loads ({exc}); the loads of {minutes} minutes ago are kept", file=sys.stderr)
+        return cached
+    vpn.write_cache(path, loads)
+    return loads
+
+
+def proton_countries() -> Dict[str, vpn.Offer]:
+    """Proton's countries (code -> Offer) from the catalog cache, which only a sign-in or a connect writes, with the loads of their servers
+    (proton_loads). A cache that cannot be used is said on stderr and leaves Proton without countries."""
     try:
         catalog = vpn.read_cache(proton_catalog_path(), proton.validate_catalog)
     except VpnError as exc:
         print(f"{PROG}: {exc}", file=sys.stderr)
         return {}
-    return {} if catalog is None else proton.countries_of(catalog)
+    return {} if catalog is None else proton.countries_of(catalog, proton_loads())
 
 
-def catalog_countries(connections) -> Dict[str, Dict[str, str]]:
-    """The countries of each vendor that has a catalog (vendor -> code -> name)."""
+def catalog_countries(connections) -> Dict[str, Dict[str, vpn.Offer]]:
+    """The countries of each vendor that has a catalog (vendor -> code -> Offer)."""
     return {vpn.VENDOR_MULLVAD: mullvad_countries(connections), vpn.VENDOR_PROTON: proton_countries()}
 
 
@@ -500,6 +533,7 @@ RENEW_ARM_DELAY_SEC = 60  # a renewal that is due in the past is armed this far 
 RENEW_RETRY_SEC = 30 * 60  # the retry after a failed renewal comes this long after it
 RENEW_EXPIRY_MARGIN_SEC = 5 * 60  # ... or this long before the certificate expires, when that is sooner
 CATALOG_MAX_AGE_SEC = 60 * 60  # a connect uses the catalog cache while it is younger than this, without asking Proton
+LOADS_MAX_AGE_SEC = 15 * 60  # `list` asks Proton for the server loads again when the cached ones are older than this
 
 
 def self_command(*args):
@@ -597,11 +631,12 @@ def issue_certificate(account: proton.Account, seed: bytes, netshield: int) -> p
 
 
 def forget_proton_here() -> None:
-    """What signing out leaves on this machine: the renewal stops, the session and the seed leave the keyring, the catalog goes."""
+    """What signing out leaves on this machine: the renewal stops, the session and the seed leave the keyring, the catalog and the loads go."""
     stop_renewal()
     secrets.clear(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID)
     secrets.clear(secrets.PROTON_KEY, secrets.PROTON_KEY_ID)
     vpn.remove_if_present(proton_catalog_path())
+    vpn.remove_if_present(proton_loads_path())
 
 
 @contextlib.contextmanager

@@ -43,6 +43,7 @@ def fail(reason):
 
 def connection_of(vendor, country, config):
     return {"uuid": config["uuid"] if config else "", "vendor": vendor["id"], "country": country["code"],
+            "ipv6": config["ipv6"] if config else country["ipv6"],
             "name": config["name"] if config else country["name"]}
 
 

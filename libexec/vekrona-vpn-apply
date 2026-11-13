@@ -187,7 +187,8 @@ def op_login(request: dict) -> None:
     older = [connection for connection in vpn.nm_connections() if connection.vendor == vpn.VENDOR_MULLVAD]
     made: List[str] = []
     try:
-        import_conf(vpn.mullvad_conf(device, relay), vpn.ConnectionId(vpn.VENDOR_MULLVAD, relay.country.upper(), relay.hostname), made)
+        conf = vpn.mullvad_conf(device, relay, vpn.mullvad_endpoint(relay, vpn.uplink_families()))
+        import_conf(conf, vpn.ConnectionId(vpn.VENDOR_MULLVAD, relay.country.upper(), relay.hostname), made)
         delete_all(older)
     except VpnError as exc:
         raise undo_made(made, exc)
@@ -220,10 +221,11 @@ def provider_connection(request: dict) -> Tuple[vpn.WgConf, vpn.ConnectionId, di
     if vendor == vpn.VENDOR_MULLVAD:
         relay = request_relay(request.get("relay"))
         device = request_device(request.get("device"))
-        return (vpn.mullvad_conf(device, relay), vpn.ConnectionId(vpn.VENDOR_MULLVAD, relay.country.upper(), relay.hostname),
-                {"private_key": device.private_key})
+        conf = vpn.mullvad_conf(device, relay, vpn.mullvad_endpoint(relay, vpn.uplink_families()))
+        return conf, vpn.ConnectionId(vpn.VENDOR_MULLVAD, relay.country.upper(), relay.hostname), {"private_key": device.private_key}
     if vendor == vpn.VENDOR_PROTON:
         conf = request_conf(request.get("conf"))
+        vpn.require_route(conf.endpoint, vpn.uplink_families(), vendor)
         if conf.preshared_key is not None:
             # Proton's configurations carry no preshared key: one here is not what this connect was made for.
             raise VpnError("a Proton configuration holds a preshared key, which Proton does not issue")
@@ -253,7 +255,8 @@ def connection_for(conf: vpn.WgConf, ident: vpn.ConnectionId, made: List[str]) -
 
 def op_connect(request: dict) -> None:
     """Arm the kill switch for the connection's endpoint, then bring the connection up with the keys of the request. Arming comes
-    first, and a failure after it leaves traffic blocked: the person tries again or turns the VPN off."""
+    first, and a failure after it leaves traffic blocked: the person tries again or turns the VPN off. What cannot reach its endpoint
+    over the uplink is refused before anything changes (the routes are checked before the import and before the arming)."""
     delete_after: List[vpn.Connection] = []
     if "uuid" in request:
         uuid = vpn.require_uuid(request["uuid"])
@@ -262,6 +265,8 @@ def op_connect(request: dict) -> None:
             raise VpnError("not a connection of vekrona-vpn")
         keys = vpn.validate_keys(request.get("keys"))
         vpn.require_bound_to_tunnel(uuid, connections[uuid].full_id)
+        endpoint = vpn.nm_endpoint(uuid)
+        vpn.require_route(endpoint, vpn.uplink_families(), connections[uuid].vendor)
     else:
         conf, ident, keys = provider_connection(request)
         made: List[str] = []
@@ -269,7 +274,8 @@ def op_connect(request: dict) -> None:
             uuid, delete_after = connection_for(conf, ident, made)
         except VpnError as exc:
             raise undo_made(made, exc)
-    arm(uuid, vpn.nm_endpoint(uuid))
+        endpoint = vpn.nm_endpoint(uuid)
+    arm(uuid, endpoint)
     for connection in vpn.nm_connections():
         if connection.is_active and connection.uuid != uuid:
             vpn.nm_down(connection.uuid)

@@ -47,7 +47,6 @@ FREE_NAME = "Fastest free server"
 # servers; the others are Proton's documented values, not verified against the live API (docs/vpn.md, "Server choice"). A P2P or
 # Streaming server stays choosable; Secure Core and Tor servers are left out.
 IPV6_FEATURE = 16
-IPV4_ONLY = " (IPv4 only)"  # the label of a choice whose servers carry no IPv6: the person sees that IPv6 sites will not work through it
 SECURE_CORE_FEATURE = 1
 TOR_FEATURE = 2
 # A certificate that has less than this left is not reused: a connect with it would not last the connection.
@@ -262,6 +261,30 @@ def logicals_of(account: Account) -> List[dict]:
     return logicals
 
 
+def loads_of() -> Dict[str, int]:
+    """The load, in percent, of each logical server by its id, as Proton answers it. The answer is public: no session is sent."""
+    try:
+        doc = _request("GET", "/vpn/v1/loads", name="read the Proton server loads")
+    except ApiError as err:
+        raise _refusal(err)
+    logicals = _field(doc, "LogicalServers")
+    if not isinstance(logicals, list):
+        raise VpnError("Proton's server loads are in a shape this tool does not know")
+    loads = {}
+    for raw in logicals:
+        if not (isinstance(raw, dict) and isinstance(raw.get("ID"), str) and _int(raw.get("Load")) and 0 <= raw["Load"] <= 100):
+            raise VpnError("Proton's server loads are in a shape this tool does not know")
+        loads[raw["ID"]] = raw["Load"]
+    return loads
+
+
+def validate_loads(doc: object) -> Dict[str, int]:
+    """The loads as the cache keeps them: a percent for each logical id."""
+    if not isinstance(doc, dict) or not all(isinstance(key, str) and _int(value) and 0 <= value <= 100 for key, value in doc.items()):
+        raise VpnError("not a Proton load list")
+    return doc
+
+
 def logout(account: Account) -> None:
     account.call("DELETE", "/auth/v4", name="end the Proton session")
 
@@ -331,6 +354,7 @@ def certificate(account: Account, seed: bytes, netshield: int) -> Certificate:
 
 # ---- The catalog: the logical servers the account may connect to, as the cache keeps them -------------------------------
 
+# A logical server's id is optional: a catalog written before the loads has none, and its countries have no load (None).
 LOGICAL_FIELDS = frozenset({"name", "country", "entry_country", "tier", "features", "score", "status", "servers"})
 SERVER_FIELDS = frozenset({"entry_ip", "public_key", "status"})
 CATALOG_FIELDS = frozenset({"plan", "max_tier", "logicals", "certificate"})
@@ -355,9 +379,12 @@ def validate_server(doc: object) -> dict:
 
 
 def validate_logical(doc: object) -> dict:
-    """A logical server as the cache keeps it. Its name lands in a connection id and in a connection name, so it is a plain name."""
-    if not isinstance(doc, dict) or set(doc) != LOGICAL_FIELDS:
+    """A logical server as the cache keeps it. Its name lands in a connection id and in a connection name, so it is a plain name. Its id
+    is Proton's, and is what the loads are matched by; a cache from before the loads has none."""
+    if not isinstance(doc, dict) or set(doc) - {"id"} != LOGICAL_FIELDS:
         raise VpnError("a logical server has the wrong shape")
+    if "id" in doc and not (isinstance(doc["id"], str) and doc["id"] != ""):
+        raise VpnError("a logical server's id is not text")
     if not (isinstance(doc["name"], str) and LOGICAL_NAME_RE.fullmatch(doc["name"])):
         raise VpnError("a logical server's name is not a plain name")
     for field in ("country", "entry_country"):
@@ -402,7 +429,7 @@ def logical_of_answer(raw: object) -> dict:
     try:
         servers = [{"entry_ip": server["EntryIP"], "public_key": server["X25519PublicKey"], "status": server["Status"]}
                    for server in raw["Servers"]]
-        return validate_logical({"name": raw["Name"], "country": raw["ExitCountry"], "entry_country": raw["EntryCountry"], "tier": raw["Tier"],
+        return validate_logical({"id": raw["ID"], "name": raw["Name"], "country": raw["ExitCountry"], "entry_country": raw["EntryCountry"], "tier": raw["Tier"],
                                  "features": raw["Features"], "score": raw["Score"], "status": raw["Status"], "servers": servers})
     except (KeyError, TypeError, AttributeError) as err:
         raise VpnError("a logical server has an unexpected shape (%r)" % (err,))
@@ -441,24 +468,29 @@ def has_ipv6(logical: dict) -> bool:
     return bool(logical["features"] & IPV6_FEATURE)
 
 
-def countries_of(catalog: dict) -> Dict[str, str]:
-    """The choices of the account (code -> name, the codes in lower case as the relay lists spell them): `free` for the free plan's
-    fastest server, else each country with a usable server. A choice whose servers carry no IPv6 is labelled IPV4_ONLY."""
+def countries_of(catalog: dict, loads: Dict[str, int]) -> Dict[str, vekrona_vpn.Offer]:
+    """The choices of the account (code -> Offer, the codes in lower case as the relay lists spell them): `free` for the free plan's
+    fastest server, else each country with a usable server. What a choice shows is the server that a connect to it picks (choose):
+    its load, from `loads` by logical id, and whether that server has IPv6 (the shell labels a choice without it "IPv4 only")."""
     servers = usable(catalog)
     if catalog["max_tier"] == FREE_TIER:
-        free = [logical for logical in servers if logical["tier"] == FREE_TIER]
-        if not free:
-            return {}
-        return {vekrona_vpn.FREE_COUNTRY.lower(): FREE_NAME + ("" if any(has_ipv6(logical) for logical in free) else IPV4_ONLY)}
-    with_ipv6 = {logical["country"] for logical in servers if has_ipv6(logical)}
-    return {country.lower(): vekrona_countries.display_name(country.lower(), {}) + ("" if country in with_ipv6 else IPV4_ONLY)
-            for country in {logical["country"] for logical in servers}}
+        queries = [vekrona_vpn.FREE_COUNTRY] if any(logical["tier"] == FREE_TIER for logical in servers) else []
+    else:
+        queries = sorted({logical["country"] for logical in servers})
+    offers = {}
+    for query in queries:
+        choice = choose(catalog, query)
+        ipv6 = has_ipv6(choice.logical)
+        name = FREE_NAME if query == vekrona_vpn.FREE_COUNTRY else vekrona_countries.display_name(query.lower(), {})
+        offers[query.lower()] = vekrona_vpn.Offer(name, loads.get(choice.logical.get("id")), ipv6)
+    return offers
 
 
 def choose(catalog: dict, query: str) -> Choice:
     """The logical and the server of a connection to `query`: a country code or `free`. Among the usable servers the ones with IPv6 come first
     (IPv6 sites do not work through an IPv4-only tunnel), and the lowest score among those wins; only when no server has IPv6 does an
-    IPv4-only one serve, and the choice is labelled so (countries_of)."""
+    IPv4-only one serve, and the choice is labelled so (countries_of). The list of countries and a connect both come from here, so they
+    never disagree about which server a country is."""
     code = query.upper()
     free = code == vekrona_vpn.FREE_COUNTRY
     if not (free or vekrona_vpn.CONNECTION_COUNTRY_RE.fullmatch(code)):

@@ -29,7 +29,8 @@ The number goes to Mullvad over stdin and is kept in the keyring, with the devic
 registers it as a device of the account and keeps the key in the keyring. The list shows Mullvad's countries from its relay list (refreshed when it is older than
 a day and you are logged in, and `connect` and `login` use the cache too while it is younger than that, so a connect does not
 download the whole list, a megabyte, over a network that is not the VPN yet; a cache that cannot be used is asked for again); you
-connect to a country, never to a relay. Each connect picks a random active relay of that country,
+connect to a country, never to a relay. A relay is reached at its IPv4 address when the uplink has an IPv4 default route, else at its
+IPv6 address (see [IPv6](#ipv6)). Each connect picks a random active relay of that country,
 makes a connection for it, brings it up and then deletes the older connection of that country. If the account already has the
 maximum number of devices, login stops and says so; it removes nothing. If the root step or the keyring fails after the device was
 registered, the device is removed again: its key is kept nowhere else, so it would be of no use. Once the new device works, the
@@ -42,9 +43,13 @@ browser, and nothing is typed into vekrona. A transient unit (`vekrona-vpn-proto
 five seconds, and then replaces the notification with "Signed in to Proton (plan)" or the reason it failed. One sign-in waits at a time.
 The session is kept in the keyring and the logical server list in `~/.cache/vekrona/vpn-proton.json`; the list shows the countries of
 your plan. A free account gets one choice, "Fastest free server"; a paid one gets its countries (each connect picks the usable server of
-the country with the lowest score).
+the country with the lowest score). Each country row of the list shows the load of the server a connect to it picks, in percent, in
+place of its code; a country whose server is IPv4 only shows the label "IPv4 only" instead (the label wins over the load). Proton's loads are asked for again when the
+cached ones are older than 15 minutes, and only by `list`, which the popout and the launcher run when they are opened, so status never
+asks; they are kept in `~/.cache/vekrona/vpn-proton-loads.json`. When Proton cannot be asked, the loads kept are shown and their age is
+said on stderr.
 
-Server choice: a country is the usable server with the lowest score among its exits, and servers with IPv6 come first (IPv6 sites do not work through an IPv4-only tunnel). A country or the free plan with only IPv4 servers is labelled "(IPv4 only)" in the list and status. Secure Core servers (entry and exit in different
+Server choice: a country is the usable server with the lowest score among its exits, and servers with IPv6 come first (IPv6 sites do not work through an IPv4-only tunnel). `list` and a connect use the same choice (`choose` in `lib/vekrona_proton.py`), so the load shown is the load of the server that connects. A country or the free plan with only IPv4 servers carries `ipv6: false` in the list, and the shell shows "IPv4 only" for it. Secure Core servers (entry and exit in different
 countries, or Features 1) and Tor servers (Features 2) are left out; P2P and Streaming servers stay. Proton's Features values are not
 verified against the live API: SecureCore 1, Tor 2, P2P 4, Streaming 8 and IPv6 16 (the spike inferred IPv6). The values are constants in
 `lib/vekrona_proton.py`.
@@ -265,13 +270,45 @@ The popout shows the state, the connection in use, an Off button while the kill 
 configurations, Import buttons, and the Mullvad account field while you are logged out. A country with one configuration connects
 on a click; a Forget button asks first.
 
+## IPv6
+
+IPv6 inside the tunnel depends on the configuration, never on the uplink: a configuration whose tunnel carries IPv6 sends IPv6
+through it, whatever IPv6 the network has. `list` and `status` carry `ipv6` for each configuration and connection, and names stay
+as they are; the shell shows "IPv4 only" for a tunnel without IPv6 (`ipv4Only` in `config/vekrona-shell/VpnState.qml`, the one place the
+label is made). The tunnel's IPv6 is decided per vendor:
+
+- Mullvad: every relay's configuration carries the device's IPv6 address and `::/0`, so IPv6 always goes through the tunnel.
+- Proton: the server's IPv6 feature decides. A country whose server has none shows "IPv4 only", and its IPv6 fails at once (the kill switch rejects it).
+- Other: a configuration with an IPv6 `Address` and `::/0` in `AllowedIPs` has IPv6. Any other gets `ipv6.method disabled`.
+
+The uplink decides where the handshake goes. `uplink_families` (`lib/vekrona_vpn.py`) is the one place that asks: the IPv4 and IPv6
+default routes of the main table on a device other than `vvpn0`.
+
+- IPv4 default route: every endpoint is reachable. A Mullvad relay is reached at its IPv4 address.
+- IPv6 only: a Mullvad relay is reached at its IPv6 address, so Mullvad works on an IPv6-only network. Proton has no IPv6
+  endpoint, so a Proton connect is refused before anything changes: "Proton servers are reachable over IPv4 only, and this network
+  has no IPv4 route". Another configuration whose `Endpoint` is IPv4 is refused the same way; one whose `Endpoint` is IPv6 connects.
+- No default route: nothing is reachable, and a Mullvad connect says so.
+
+The check is made before the kill switch is armed, so a refused connect changes nothing. The kill switch's endpoint rule follows the
+endpoint's family: the handshake passes only to the endpoint's address in its own family set (`endpoint4` or `endpoint6`).
+
+Tests: `tests/e2e/vpn-ipv6.sh` connects a configuration with an IPv6 address (it needs the keyring item of `tests/e2e/lib/vpn.sh`)
+and checks that `curl -6` to an IPv6 literal answers 200 through `vvpn0`, from an address that is not the uplink's. It removes the uplink's
+global IPv6 addresses for its length and puts them back, since a VM on a Proton host gets the host's tunnel address from passt
+(TODO.md). `tests/e2e/vpn-leaks.sh` needs no provider: an `other` configuration with a throwaway key and a peer at 192.0.2.1 (it never
+answers). With the tunnel up, the same probes wait inside the tunnel, and a capture on the uplink (`tcpdump -Q out`) holds only the
+handshake to 192.0.2.1:51820, ARP, and what the kill switch lets out of the uplink (DHCPv4 and DHCPv6 clients, neighbour and router solicitation, neighbour advertisement and MLD reports; router advertisement is not in the set). With the tunnel gone, every probe is rejected at once and the capture holds
+the same things. `off` then makes the internet reachable again. A machine with IPv6 switched off (`disable_ipv6`, or a kernel without
+IPv6) has no IPv6 uplink, and `ip -6` is not asked (`ipv6_enabled` in `lib/vekrona_vpn.py`).
+
 ## Commands
 
 All of them are for a terminal as well; a failure exits non-zero with one line on stderr.
 
 ```
 vekrona-vpn status                    # JSON: kill switch armed, tunnel down|activating|up, the connection
-vekrona-vpn list                      # JSON: vendors, countries, configurations
+vekrona-vpn list                      # JSON (schema 2): vendors, countries (with load and ipv6), configurations (with ipv6)
 vekrona-vpn connect UUID              # arm the kill switch, bring that configuration up
 vekrona-vpn connect mullvad NL        # the same for a random Mullvad relay of a country (a code, or a name; a name is echoed: "using Netherlands (NL)")
 vekrona-vpn off                       # tunnel down, then the kill switch off

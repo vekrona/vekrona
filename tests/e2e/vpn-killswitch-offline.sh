@@ -17,9 +17,6 @@ source "$ROOT/tests/e2e/lib/vpn.sh"
 CONF_NAME=NL-offline
 GUEST_CONF="$VPN_GUEST_DIR/$CONF_NAME.conf"
 
-other_conf_uuid() {
-  vpn list | jq -r --arg name "$CONF_NAME" '[.vendors[] | select(.id == "other") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty'
-}
 write_conf() {
   vekrona-dev run bash -c 'umask 077 && mkdir -p "$(dirname "$1")" \
     && printf "[Interface]\nPrivateKey = %s\nAddress = 10.99.0.2/32\nDNS = 10.99.0.1\n\n[Peer]\nPublicKey = %s\nEndpoint = 192.0.2.1:51820\nAllowedIPs = 0.0.0.0/0\n" \
@@ -51,7 +48,7 @@ START="$(vekrona-dev run date '+%x %T')"
 
 write_conf
 vpn import --vendor other "$GUEST_CONF"
-UUID="$(other_conf_uuid)"
+UUID="$(vpn_other_uuid "$CONF_NAME")"
 vpn_record_made "$UUID"
 [[ -n "$UUID" ]] || die "the imported configuration $CONF_NAME is not in vekrona-vpn list under other"
 
@@ -67,4 +64,4 @@ absent avc_denied_since "$START" || die "SELinux denied the helper (comm vekrona
 log "ok: SELinux denied the helper nothing"
 
 vpn forget "$UUID"
-[[ -z "$(other_conf_uuid)" ]] || die "forget must remove the configuration"
+[[ -z "$(vpn_other_uuid "$CONF_NAME")" ]] || die "forget must remove the configuration"

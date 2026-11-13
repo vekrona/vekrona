@@ -17,7 +17,7 @@ source "$ROOT/tests/e2e/lib/vpn-popout.sh"
 
 STEP_TIMEOUT_SEC=90
 STILL_LOOKS=6
-CONNECTION='{"uuid":"11111111-1111-1111-1111-111111111111","vendor":"proton","country":"CH","name":"Zurich"}'
+CONNECTION='{"uuid":"11111111-1111-1111-1111-111111111111","vendor":"proton","country":"CH","name":"Zurich","ipv6":true}'
 CENTRE=
 export CENTRE
 

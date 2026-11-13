@@ -401,7 +401,7 @@ LauncherModule {
                     rows.push({
                         id: "settings:vpn:" + vendor.id + ":" + choice.key,
                         title: choice.name,
-                        subtitle: choice.context,
+                        subtitle: [choice.context, Shell.VpnState.ipv4Only(choice.ipv6)].filter(part => part !== "").join(", "),
                         glyph: "vpn_lock",
                         kind: "VPN connection",
                         keywords: ["vpn", vendor.label, country.name, country.code],

@@ -12,8 +12,8 @@ export VPN_STUB_PY VPN_STATE_DIR
 
 # The layout of the answers (`"schema"`) is the backend's own number, read from its source, so that a scenario fails where the
 # shell and the backend disagree about it (VpnState.schemaVersion).
-VPN_SCHEMA="$(sed -n 's/^SCHEMA = \([0-9][0-9]*\)$/\1/p' "$VEKRONA_ROOT/lib/vekrona_vpn.py")"
-[[ "$VPN_SCHEMA" =~ ^[0-9]+$ ]] || die "cannot read SCHEMA from lib/vekrona_vpn.py"
+VPN_SCHEMA="$(sed -n 's/^OUTPUT_SCHEMA = \([0-9][0-9]*\)$/\1/p' "$VEKRONA_ROOT/lib/vekrona_vpn.py")"
+[[ "$VPN_SCHEMA" =~ ^[0-9]+$ ]] || die "cannot read OUTPUT_SCHEMA from lib/vekrona_vpn.py"
 
 # What `vekrona-vpn status` prints: vpn_status_json ARMED TUNNEL CONNECTION LOGGED_IN, where ARMED and LOGGED_IN (Mullvad's) are true or
 # false and CONNECTION is a JSON object or null. Proton is signed out.
@@ -28,15 +28,15 @@ VPN_STATUS_OFF="$(vpn_status_json false down null false)"
 VPN_LIST="$(jq -c --argjson schema "$VPN_SCHEMA" '{schema: $schema} + .' <<'JSON'
 {"vendors":[
   {"id":"mullvad","label":"Mullvad","countries":[
-    {"code":"NL","name":"Netherlands","configs":[]},
-    {"code":"SE","name":"Sweden","configs":[]}]},
+    {"code":"NL","name":"Netherlands","load":null,"ipv6":true,"configs":[]},
+    {"code":"SE","name":"Sweden","load":null,"ipv6":true,"configs":[]}]},
   {"id":"proton","label":"Proton VPN","countries":[]},
   {"id":"other","label":"Other","countries":[
-    {"code":"CH","name":"Switzerland","configs":[{"uuid":"11111111-1111-1111-1111-111111111111","name":"Zurich"}]},
-    {"code":"JP","name":"Japan","configs":[
-      {"uuid":"22222222-2222-2222-2222-222222222222","name":"Tokyo"},
-      {"uuid":"33333333-3333-3333-3333-333333333333","name":"Osaka"}]},
-    {"code":"??","name":"Unknown","configs":[{"uuid":"44444444-4444-4444-4444-444444444444","name":"Office"}]}]}]}
+    {"code":"CH","name":"Switzerland","load":null,"ipv6":null,"configs":[{"uuid":"11111111-1111-1111-1111-111111111111","name":"Zurich","ipv6":true}]},
+    {"code":"JP","name":"Japan","load":null,"ipv6":null,"configs":[
+      {"uuid":"22222222-2222-2222-2222-222222222222","name":"Tokyo","ipv6":true},
+      {"uuid":"33333333-3333-3333-3333-333333333333","name":"Osaka","ipv6":true}]},
+    {"code":"??","name":"Unknown","load":null,"ipv6":null,"configs":[{"uuid":"44444444-4444-4444-4444-444444444444","name":"Office","ipv6":true}]}]}]}
 JSON
 )"
 export VPN_STATUS_OFF VPN_LIST

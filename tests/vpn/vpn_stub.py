@@ -1,6 +1,6 @@
 """Test doubles for vekrona-vpn: stub system binaries and a local HTTP fixture for the providers' APIs (Mullvad and Proton).
 
-The stubs stand in for nmcli, nft, systemctl, getent, wg, secret-tool, busctl, notify-send, xdg-open and systemd-run. Each logs its argv and stdin as one JSON line (and the
+The stubs stand in for nmcli, nft, ip, systemctl, getent, wg, secret-tool, busctl, notify-send, xdg-open and systemd-run. Each logs its argv and stdin as one JSON line (and the
 content of the file an `nmcli ... file PATH` names, which the helper deletes right after the import) and then behaves as the
 first matching rule of behaviors.json says (default: exit 0, no output). A rule matches when its argv is a prefix of the call's;
 `times` limits how often it answers, and later `behave` calls win over earlier ones. secret-tool, when no rule answers, keeps
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 
-STUBBED_TOOLS = ("nmcli", "nft", "systemctl", "getent", "wg", "secret-tool", "busctl", "notify-send", "xdg-open", "systemd-run")
+STUBBED_TOOLS = ("nmcli", "nft", "ip", "systemctl", "getent", "wg", "secret-tool", "busctl", "notify-send", "xdg-open", "systemd-run")
 
 STUB_SOURCE = """#!{python} -S
 import json, os, sys
@@ -102,6 +102,8 @@ class Stubs:
         self.behaviors: Dict[str, List[dict]] = {
             # No tor user, as on a machine without tor.
             "getent": [{"argv": ["passwd"], "rc": 2}],
+            # An uplink with IPv4 and no IPv6 default route, the usual network; a test that needs another route table says so.
+            "ip": [{"argv": ["-4", "route"], "stdout": "default via 192.0.2.254 dev eth0 proto dhcp metric 100\n"}],
         }
         self._save()
         for tool in STUBBED_TOOLS:

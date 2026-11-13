@@ -10,10 +10,10 @@ import "Vekrona"
 Singleton {
     id: root
 
-    // The layout of `vekrona-vpn status` and `list` that this file reads. The backend keeps its own copy of the number (SCHEMA in
+    // The layout of `vekrona-vpn status` and `list` that this file reads. The backend keeps its own copy of the number (OUTPUT_SCHEMA in
     // lib/vekrona_vpn.py): raise both together. The scenarios of tests/e2e read the backend's number for their stand-in's answers,
     // so one that finds the two apart fails.
-    readonly property int schemaVersion: 1
+    readonly property int schemaVersion: 2
     // The country code that the backend (bin/vekrona-vpn, `import`) gives a configuration whose country it could not tell.
     readonly property string unknownCountry: "??"
     // The country that the backend gives a connection to a Proton free server: the connection's name is then the server.
@@ -123,13 +123,25 @@ Singleton {
     // Null when the NetShield setting cannot be read: then the level is not shown, and the error is (protonNetshieldError).
     readonly property var protonNetshield: status.proton.netshield
     readonly property string protonNetshieldError: status.proton.error
-    // "Vendor, country, name" of the connection in use, "" without one.
+    // "Vendor, country, name, IPv4 only" of the connection in use, "" without one.
     readonly property string connectionLabel: {
         const connection = status.connection;
         if (connection === null)
             return "";
         const vendorLabel = catalog.find(candidate => candidate.id === connection.vendor)?.label ?? connection.vendor;
-        return [vendorLabel, connection.country === unknownCountry || connection.country === freeCountry ? "" : connection.country, connection.name].filter(part => part !== "").join(", ");
+        return [vendorLabel, connection.country === unknownCountry || connection.country === freeCountry ? "" : connection.country, connection.name, ipv4Only(connection.ipv6)].filter(part => part !== "").join(", ");
+    }
+    // The label of a tunnel without IPv6 (IPv6 sites do not work through it). The one place the label is made: the popout, the bar and
+    // the launcher show it through this function, and it is "" for a tunnel that has IPv6.
+    readonly property string ipv4OnlyText: "IPv4 only"
+    function ipv4Only(ipv6: bool): string {
+        return ipv6 ? "" : ipv4OnlyText;
+    }
+    // The trailing text of a row: the label of a tunnel without IPv6 wins over the load of its server, which wins over `fallback`.
+    function trailingOf(ipv6: bool, load, fallback: string): string {
+        if (!ipv6)
+            return ipv4OnlyText;
+        return load !== null ? load + "%" : fallback;
     }
 
     // Turns the text of `vekrona-vpn status` into the status; throws on text that is not valid.
@@ -302,7 +314,7 @@ Singleton {
     }
 
     // The ways to connect to `country` of `vendor`, the one place that knows them: Mullvad and Proton connect by the country's
-    // code, one choice; any other vendor has a configuration per choice. A choice is {key, name, detail (what a row of the country
+    // code, one choice; any other vendor has a configuration per choice. A choice is {key, name, ipv6, detail (what a row of the country
     // shows when it is the only one), context (where a flat list places it), uuid (null for a catalog vendor: nothing to forget),
     // args (the arguments of the `vekrona-vpn` call that connects)}.
     function connectChoices(vendor: var, country: var): var {
@@ -311,7 +323,8 @@ Singleton {
                 {
                     key: country.code,
                     name: country.name,
-                    detail: country.code,
+                    ipv6: country.ipv6,
+                    detail: trailingOf(country.ipv6, country.load, country.code),
                     context: vendor.label,
                     uuid: null,
                     args: ["connect", vendor.id, country.code]
@@ -321,7 +334,8 @@ Singleton {
         return country.configs.map(config => ({
                     key: config.uuid,
                     name: config.name,
-                    detail: config.name,
+                    ipv6: config.ipv6,
+                    detail: trailingOf(config.ipv6, null, config.name),
                     context: vendor.label + ", " + country.name,
                     uuid: config.uuid,
                     args: ["connect", config.uuid]

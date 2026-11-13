@@ -136,7 +136,7 @@ BarPill {
                     key: choice.key,
                     icon: levelIcons.configuration,
                     label: choice.name,
-                    trailing: "",
+                    trailing: VpnState.ipv4Only(choice.ipv6),
                     emphasized: isCurrent(connection => connection.uuid === choice.uuid),
                     ariaName: "Connect with " + choice.name,
                     forgettable: true,

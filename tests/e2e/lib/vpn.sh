@@ -14,8 +14,10 @@
 # for a local session, and the ssh session of vekrona-dev is neither.
 VPN_GUEST_DIR=/tmp/vekrona-e2e-vpn
 VPN_STEP_TIMEOUT_SEC=90
-# A rejected connection answers in a few milliseconds; a dropped one takes the curl timeout.
-VPN_FAST_FAIL_MS=1000
+# A rejected connection answers in a few milliseconds; a dropped one takes its tool's timeout (at least 5 s, so the two never overlap).
+# The bound is 2.5 s, not 1 s, because the kernel rate-limits the ICMP errors that a reject sends (net.ipv4.icmp_ratelimit and
+# net.ipv6.icmp.ratelimit, 1000 ms): back-to-back rejections of one family wait about a second for the next error.
+VPN_FAST_FAIL_MS=2500
 VPN_PROBE_URL_V4=https://1.1.1.1
 VPN_PROBE_URL_V6='https://[2606:4700:4700::1111]'
 VPN_EXIT_IP_URL=https://api.ipify.org
@@ -38,10 +40,16 @@ require_vpn_account() {
   [[ -n "${VEKRONA_VPN_E2E_ACCOUNT:-}" ]] || skip "no Mullvad account number: store one in the keyring (see tests/e2e/lib/vpn.sh) and set VEKRONA_VPN_E2E_ACCOUNT to its id"
   vpn_mullvad_account_text >/dev/null || skip "no Mullvad account number $VEKRONA_VPN_E2E_ACCOUNT in the keyring"
 }
-# The Proton configuration must have no IPv6 address for the scenarios that look at what IPv6 does then.
+# The Proton configuration must have no IPv6 address for the scenarios that look at what IPv6 does then, and must have one for the
+# scenarios that send IPv6 through the tunnel.
 require_vpn_conf_without_ipv6() {
   if vpn_conf_text | grep -iE '^[[:space:]]*Address[[:space:]]*=.*:' >/dev/null; then
     skip "$VPN_CONF_NAME has an IPv6 address; this scenario needs a configuration without one"
+  fi
+}
+require_vpn_conf_with_ipv6() {
+  if ! vpn_conf_text | grep -iE '^[[:space:]]*Address[[:space:]]*=.*:' >/dev/null; then
+    skip "$VPN_CONF_NAME has no IPv6 address; this scenario needs a configuration with one"
   fi
 }
 
@@ -59,16 +67,19 @@ vpn_import_conf() {
   vpn_conf_text | vpn_guest_write "$VPN_GUEST_DIR/$VPN_CONF_NAME.conf"
   vpn import --vendor other "$VPN_GUEST_DIR/$VPN_CONF_NAME.conf"
 }
-vpn_conf_uuid() {
-  vpn list | jq -r --arg name "$VPN_CONF_NAME" '[.vendors[] | select(.id == "other") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty'
+# The uuid of the `other` configuration named NAME in `vekrona-vpn list`, or nothing.
+vpn_other_uuid() {
+  vpn list | jq -r --arg name "$1" '[.vendors[] | select(.id == "other") | .countries[].configs[] | select(.name == $name) | .uuid][0] // empty'
 }
-# Imports the configuration and prints its uuid; dies when vekrona-vpn list does not show the configuration under its country.
+vpn_conf_uuid() { vpn_other_uuid "$VPN_CONF_NAME"; }
+# Imports the configuration and prints its uuid. The uuid is recorded as soon as the list shows it, before anything that can fail, so
+# that cleanup forgets the configuration even when the scenario dies after this.
 vpn_import_conf_uuid() {
   local uuid
   vpn_import_conf
   uuid="$(vpn_conf_uuid)"
-  [[ -n "$uuid" ]] || die "the imported configuration $VPN_CONF_NAME is not in vekrona-vpn list"
   vpn_record_made "$uuid"
+  [[ -n "$uuid" ]] || die "the imported configuration $VPN_CONF_NAME is not in vekrona-vpn list"
   printf '%s\n' "$uuid"
 }
 vpn_mullvad_login() {
@@ -77,10 +88,22 @@ vpn_mullvad_login() {
 guest_exit_ip() { vekrona-dev run curl -4 -sS --max-time 20 "$VPN_EXIT_IP_URL"; }
 export -f vpn_conf_uuid guest_exit_ip
 
-# Runs curl in the guest with the arguments given and prints "<curl exit status> <milliseconds it took>", measured in the guest.
-guest_curl_timed() {
-  vekrona-dev run bash -c 'start=$EPOCHREALTIME; curl -sS --max-time 10 -o /dev/null "$@" >/dev/null 2>&1; status=$?; end=$EPOCHREALTIME
+# Runs the command in the guest with its output dropped and prints "<exit status> <milliseconds it took>", measured in the guest.
+guest_timed() {
+  vekrona-dev run bash -c 'start=$EPOCHREALTIME; "$@" >/dev/null 2>&1; status=$?; end=$EPOCHREALTIME
     echo "$status $(( (${end/./} - ${start/./}) / 1000 ))"' _ "$@"
+}
+guest_curl_timed() { guest_timed curl -sS --max-time 10 -o /dev/null "$@"; }
+# A tool the scenario needs, which vekrona does not ship: installed in the guest when it is missing (dnf runs in the guest only, never on
+# the host). Fails when the tool is still missing after that.
+guest_tool() {
+  vekrona-dev run bash -c '
+    if ! command -v "$1" >/dev/null; then sudo dnf -y install "$2" >/dev/null; fi
+    command -v "$1" >/dev/null' _ "$1" "$2"
+}
+# The device of the IPv4 default route that is not the tunnel's: the uplink.
+vpn_uplink_device() {
+  vekrona-dev run ip -4 route show table main default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev" && $(i + 1) != "vvpn0") { print $(i + 1); exit } }'
 }
 # Fails unless curl failed, and failed at once: not by its timeout (status 28), and within VPN_FAST_FAIL_MS.
 expect_fails_fast() {

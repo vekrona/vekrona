@@ -1,12 +1,12 @@
-"""Sends one DNS query over UDP to the address given and exits 0 when the attempt fails within a second for any reason but a
+"""Sends one DNS query over UDP to the address given and exits 0 when the attempt fails within 2.5 seconds (the kernel rate-limits ICMP errors to one a second) for any reason but a
 timeout (the kill switch rejects it), 1 when something answered, 2 when it ran into the timeout, 3 when it failed too slowly."""
 import socket
 import sys
 import time
 
 QUERY = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01"
-FAST_SEC = 1
-TIMEOUT_SEC = 3
+FAST_SEC = 2.5
+TIMEOUT_SEC = 5
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(TIMEOUT_SEC)

@@ -60,7 +60,7 @@ def relay_list_from_api(doc: Any) -> dict:
                 continue
             country = raw["location"].split("-", 1)[0]
             relay = {"hostname": raw["hostname"], "country": country, "public_key": raw["public_key"],
-                     "ipv4": raw["ipv4_addr_in"]}
+                     "ipv4": raw["ipv4_addr_in"], "ipv6": raw["ipv6_addr_in"]}
             try:
                 vekrona_vpn.validate_relay(relay)
             except VpnError as err:
@@ -73,9 +73,28 @@ def relay_list_from_api(doc: Any) -> dict:
     return validate_relay_list({"names": names, "relays": relays})
 
 
+def offers_of(relay_list: dict) -> Dict[str, vekrona_vpn.Offer]:
+    """The countries of the relay list as the offers `list` shows: every relay's configuration carries an IPv6 address (the device's), and
+    the relay list has no load to show."""
+    return {code: vekrona_vpn.Offer(name, None, True) for code, name in relay_list["names"].items()}
+
+
+# The relay fields of a cache from before the relays had IPv6 addresses.
+RELAY_FIELDS_BEFORE_IPV6 = vekrona_vpn.RELAY_FIELDS - {"ipv6"}
+
+
+def validate_cached_relay_list(doc: object) -> Optional[dict]:
+    """The relay list of a cache, or None for a cache from before the relays had IPv6 addresses: that one is stale, so it reads as no
+    cache and the next list asks the API for the relays again."""
+    relays = doc.get("relays") if isinstance(doc, dict) else None
+    if isinstance(relays, list) and any(isinstance(relay, dict) and set(relay) == RELAY_FIELDS_BEFORE_IPV6 for relay in relays):
+        return None
+    return validate_relay_list(doc)
+
+
 def read_cache(cache: str) -> Optional[dict]:
-    """The cached relay list, None when there is none, an error when there is one that cannot be used."""
-    return vekrona_vpn.read_cache(cache, validate_relay_list)
+    """The cached relay list, None when there is none (or it is stale), an error when there is one that cannot be used."""
+    return vekrona_vpn.read_cache(cache, validate_cached_relay_list)
 
 
 def load_relays(cache: str) -> dict:

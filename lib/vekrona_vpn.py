@@ -19,12 +19,17 @@ import subprocess
 import time
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple, TypeGuard
+from typing import Callable, Dict, FrozenSet, Iterator, List, Optional, Sequence, Tuple, TypeGuard
 
 import vekrona_cli
 import vekrona_countries
 
-SCHEMA = 1
+# The layouts that change independently: the output of `status` and `list` (what the shell reads, described by vpn-output.json), the
+# state file the helper publishes (state.json, which the tmpfiles entry creates too), and the request the client hands to the helper.
+# Each has its own number, raised only when its own shape changes.
+OUTPUT_SCHEMA = 2
+STATE_SCHEMA = 1
+REQUEST_SCHEMA = 1
 
 # Who may read what: a file only its owner can read (a key, a request), one anyone can read (the state and the receipt the shell
 # and the client look at), and the same for the directories that hold them.
@@ -118,8 +123,21 @@ class Endpoint:
     address: str
     port: int
 
+    @property
+    def family(self) -> int:
+        return ipaddress.ip_address(self.address).version
+
     def __str__(self) -> str:
         return "[%s]:%d" % (self.address, self.port) if ":" in self.address else "%s:%d" % (self.address, self.port)
+
+
+@dataclass(frozen=True)
+class Offer:
+    """A country (or Proton's free servers) of a catalog vendor, as `list` shows it: its name, the load of the server that a connect to it
+    picks (None when none is known, and for Mullvad, whose relay list has none) and whether that server has IPv6 inside the tunnel."""
+    name: str
+    load: Optional[int]
+    ipv6: bool
 
 
 @dataclass(frozen=True)
@@ -360,14 +378,15 @@ class Relay:
     country: str
     public_key: str
     ipv4: str
+    ipv6: str
 
 
-RELAY_FIELDS = frozenset({"hostname", "country", "public_key", "ipv4"})
+RELAY_FIELDS = frozenset({"hostname", "country", "public_key", "ipv4", "ipv6"})
 DEVICE_FIELDS = frozenset({"private_key", "ipv4_address", "ipv6_address"})
 
 
 def validate_relay(relay: object) -> Relay:
-    """Raise VpnError unless `relay` (a dict of the four Relay fields) is safe to write into a configuration: the relay list
+    """Raise VpnError unless `relay` (a dict of the five Relay fields) is safe to write into a configuration: the relay list
     is the API's word, and its fields land in a file that is read line by line."""
     if not isinstance(relay, dict) or set(relay) != RELAY_FIELDS:
         raise VpnError("a relay has the wrong shape")
@@ -382,6 +401,10 @@ def validate_relay(relay: object) -> Relay:
         ipaddress.IPv4Address(relay["ipv4"])
     except ValueError:
         raise VpnError("a relay's ipv4 is not an IPv4 address")
+    try:
+        ipaddress.IPv6Address(relay["ipv6"])
+    except ValueError:
+        raise VpnError("a relay's ipv6 is not an IPv6 address")
     return Relay(**relay)
 
 
@@ -413,7 +436,17 @@ def validate_keys(doc: object) -> Dict[str, str]:
     return {name: wg_key(value, name) for name, value in doc.items()}
 
 
-def mullvad_conf(device: Device, relay: Relay) -> WgConf:
+def mullvad_endpoint(relay: Relay, families: FrozenSet[int]) -> Endpoint:
+    """The relay's address in a family the uplink has a default route for: IPv4 when there is one, else IPv6 (an IPv6-only network).
+    Neither family reaches the relay, so the connect is refused here, before the kill switch is armed."""
+    if 4 in families:
+        return Endpoint(relay.ipv4, MULLVAD_PORT)
+    if 6 in families:
+        return Endpoint(relay.ipv6, MULLVAD_PORT)
+    raise VpnError("this network has no default route, so the Mullvad relay cannot be reached")
+
+
+def mullvad_conf(device: Device, relay: Relay, endpoint: Endpoint) -> WgConf:
     return WgConf(
         private_key=device.private_key,
         addresses=(device.ipv4_address, device.ipv6_address),
@@ -421,7 +454,7 @@ def mullvad_conf(device: Device, relay: Relay) -> WgConf:
         mtu=None,
         peer_public_key=relay.public_key,
         preshared_key=None,
-        endpoint=Endpoint(relay.ipv4, MULLVAD_PORT),
+        endpoint=endpoint,
         allowed_ips=("0.0.0.0/0", "::/0"),
         keepalive=None,
     )
@@ -511,6 +544,14 @@ class Connection:
     @property
     def is_active(self) -> bool:
         return self.state is not None
+
+    @cached_property
+    def ipv6(self) -> bool:
+        """Whether a connect from this connection gets IPv6 inside the tunnel: NetworkManager's copy of the configuration has an IPv6
+        address and an allowed range for ::/0. Read when it is asked for (one nmcli call, no secret), so only `list` and `status` pay."""
+        addresses, peers = nm_get(self.uuid, ["ipv6.addresses", "wireguard.peers"])
+        allowed = [part for token in peers.split() if token.startswith("allowed-ips=") for part in token[len("allowed-ips="):].split(";")]
+        return addresses.strip() != "" and "::/0" in allowed
 
     @property
     def vendor(self) -> str:
@@ -861,7 +902,7 @@ def forward_rules() -> List[str]:
 
 def _endpoint_set(name: str, address_type: str, endpoint: Optional[Endpoint], version: int) -> List[str]:
     lines = ["set %s {" % name, "  type %s . inet_service" % address_type]
-    if endpoint is not None and ipaddress.ip_address(endpoint.address).version == version:
+    if endpoint is not None and endpoint.family == version:
         lines.append("  elements = { %s . %d }" % (endpoint.address, endpoint.port))
     return lines + ["}"]
 
@@ -906,6 +947,70 @@ def lookup_tor_uid() -> Optional[int]:
     return int(fields[2])
 
 
+# ---- The uplink ---------------------------------------------------------------------------------------------------------
+
+LOOPBACK = "lo"
+
+
+def default_devices(listing: str) -> List[str]:
+    """The devices of the default routes in `ip route` output: the one of a `default` route and of each `nexthop` of a multipath one. A
+    route of another type (unreachable, blackhole, prohibit) does not forward, and its nexthops are none of the uplink's; the loopback is
+    never an uplink."""
+    devices = []
+    forwarding = False
+    for line in listing.splitlines():
+        words = line.split()
+        if not words:
+            continue
+        if words[0] != "nexthop":
+            forwarding = words[0] == "default"  # a route's own line: `default` forwards, the other route types do not
+        if forwarding:
+            devices += [device for key, device in zip(words, words[1:]) if key == "dev" and device != LOOPBACK]
+    return devices
+
+
+# The switch of IPv6 for all interfaces: 0 when the kernel runs IPv6, 1 when it is switched off.
+IPV6_DISABLED_SYSCTL = "/proc/sys/net/ipv6/conf/all/disable_ipv6"
+
+
+def ipv6_enabled() -> bool:
+    """Whether this machine runs IPv6. A kernel without IPv6 has no such switch (it is absent), and a switched-off one says 1: neither has
+    an IPv6 uplink, so `ip -6` is not asked (on such a machine it has no routes to report, or fails)."""
+    try:
+        with open(IPV6_DISABLED_SYSCTL) as handle:
+            return handle.read().strip() == "0"
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise VpnError("cannot read %s: %s" % (IPV6_DISABLED_SYSCTL, exc.strerror))
+
+
+def uplink_families() -> FrozenSet[int]:
+    """The IP families (4, 6) that the main table has a default route for on a device other than INTERFACE: the uplink. The tunnel's
+    own default route is on INTERFACE while it is up, so it does not count. An endpoint is reachable only in one of these families."""
+    families = set()
+    for family in (4, 6):
+        if family == 6 and not ipv6_enabled():
+            continue
+        listing = run(["ip", "-%d" % family, "route", "show", "table", "main", "default"])
+        if any(device != INTERFACE for device in default_devices(listing)):
+            families.add(family)
+    return frozenset(families)
+
+
+def require_route(endpoint: Endpoint, families: FrozenSet[int], vendor: str) -> None:
+    """Raise VpnError unless the uplink has a default route in the endpoint's family: a handshake to an address of another family never
+    leaves, and the kill switch would hold the tunnel down with no reason shown. Proton has no IPv6 endpoint, so its message says so."""
+    if endpoint.family in families:
+        return
+    if vendor == VENDOR_PROTON:
+        raise VpnError("Proton servers are reachable over IPv4 only, and this network has no IPv4 route")
+    if vendor == VENDOR_MULLVAD:
+        raise VpnError("the Mullvad relay %s is IPv%d, and this network has no IPv%d route: connect to the country again (connect mullvad CC), "
+                       "which takes a relay address this network can reach" % (endpoint, endpoint.family, endpoint.family))
+    raise VpnError("the endpoint %s is IPv%d, and this network has no IPv%d route" % (endpoint, endpoint.family, endpoint.family))
+
+
 # ---- Caches -------------------------------------------------------------------------------------------------------------
 
 def read_cache(path: str, validate: Callable[[object], dict]) -> Optional[dict]:
@@ -924,9 +1029,14 @@ def write_cache(path: str, value: dict) -> None:
     write_atomic(path, json.dumps(value) + "\n", PRIVATE_FILE_MODE)
 
 
+def cache_age_sec(path: str) -> float:
+    """Seconds since the cache at `path` was written; FileNotFoundError when there is none."""
+    return time.time() - os.stat(path).st_mtime
+
+
 def cache_is_stale(path: str, max_age_sec: int) -> bool:
     try:
-        return time.time() - os.stat(path).st_mtime > max_age_sec
+        return cache_age_sec(path) > max_age_sec
     except FileNotFoundError:
         return True
 
@@ -948,7 +1058,7 @@ DISARMED = State(False, None)
 
 
 def state_text(state: State) -> str:
-    return json.dumps({"schema": SCHEMA, "armed": state.armed, "uuid": state.uuid}) + "\n"
+    return json.dumps({"schema": STATE_SCHEMA, "armed": state.armed, "uuid": state.uuid}) + "\n"
 
 
 def read_state() -> State:
@@ -962,7 +1072,7 @@ def read_state() -> State:
     except (OSError, *JSON_ERRORS) as exc:
         raise VpnError("cannot read %s: %s" % (path, exc))
     uuid = doc.get("uuid") if isinstance(doc, dict) else None
-    if (not isinstance(doc, dict) or doc.get("schema") != SCHEMA or not isinstance(doc.get("armed"), bool)
+    if (not isinstance(doc, dict) or doc.get("schema") != STATE_SCHEMA or not isinstance(doc.get("armed"), bool)
             or not (uuid is None or is_uuid(uuid))):
         raise VpnError("%s is not a state this tool knows" % path)
     return State(doc["armed"], uuid)
@@ -997,7 +1107,7 @@ def request_path(uid: int) -> str:
 
 def write_request(uid: int, doc: dict) -> None:
     """Hand `doc` to the helper: a file in the user's own runtime directory, which only the user and root can enter."""
-    write_atomic(request_path(uid), json.dumps({"schema": SCHEMA, **doc}), PRIVATE_FILE_MODE, directory_mode=PRIVATE_DIR_MODE)
+    write_atomic(request_path(uid), json.dumps({"schema": REQUEST_SCHEMA, **doc}), PRIVATE_FILE_MODE, directory_mode=PRIVATE_DIR_MODE)
 
 
 def remove_if_present(path: str) -> None:
@@ -1224,7 +1334,7 @@ def read_request(uid: int) -> dict:
         doc = json.loads(raw)
     except JSON_ERRORS:
         raise VpnError("the request is not JSON")
-    if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
+    if not isinstance(doc, dict) or doc.get("schema") != REQUEST_SCHEMA:
         raise VpnError("the request is not in the layout this tool knows")
     return doc
 
@@ -1243,35 +1353,38 @@ def status_json(connections: Sequence[Connection], state: State, proton: dict) -
     current = active_connection(connections, state)
     tunnel = {"activated": "up", "activating": "activating"}.get(current.state if current else None, "down")
     return {
-        "schema": SCHEMA,
+        "schema": OUTPUT_SCHEMA,
         "armed": state.armed,
         "tunnel": tunnel,
         "connection": None if current is None else {
-            "uuid": current.uuid, "vendor": current.vendor, "country": current.country, "name": current.name},
+            "uuid": current.uuid, "vendor": current.vendor, "country": current.country, "name": current.name,
+            "ipv6": current.ipv6},
         "mullvad": {"logged_in": any(connection.vendor == VENDOR_MULLVAD for connection in connections)},
         "proton": proton,
     }
 
 
-def list_json(connections: Sequence[Connection], catalogs: Dict[str, Dict[str, str]]) -> dict:
-    """The vendors with their countries. The catalog vendors' come from their catalogs (vendor -> code -> name) and hold no
-    configurations: the country is the choice. The others are the countries of the configurations imported."""
+def list_json(connections: Sequence[Connection], offers: Dict[str, Dict[str, Offer]]) -> dict:
+    """The vendors with their countries. The catalog vendors' come from their offers (vendor -> code -> Offer) and hold no
+    configurations: the country is the choice, and its load and IPv6 are the server's. The others are the countries of the configurations
+    imported, whose load is None: each configuration says whether it has IPv6."""
     vendors = []
     for vendor in VENDOR_LABELS:
         countries: Dict[str, dict] = {}
         if vendor in CATALOG_VENDORS:
-            for code, name in catalogs[vendor].items():
-                countries[code.upper()] = {"code": code.upper(), "name": name, "configs": []}
+            for code, offer in offers[vendor].items():
+                countries[code.upper()] = {"code": code.upper(), "name": offer.name, "configs": [], "load": offer.load, "ipv6": offer.ipv6}
         else:
             for connection in connections:
                 if connection.vendor != vendor:
                     continue
                 code = connection.country
                 entry = countries.setdefault(code, {"code": code, "name": vekrona_countries.UNKNOWN_COUNTRY_NAME if code == vekrona_countries.UNKNOWN_COUNTRY
-                                                    else vekrona_countries.display_name(code.lower(), {}), "configs": []})
-                entry["configs"].append({"uuid": connection.uuid, "name": connection.name})
+                                                    else vekrona_countries.display_name(code.lower(), {}), "configs": [], "load": None, "ipv6": None})
+                entry["configs"].append({"uuid": connection.uuid, "name": connection.name,
+                                         "ipv6": connection.ipv6})
         for entry in countries.values():
             entry["configs"].sort(key=lambda config: config["name"].casefold())
         vendors.append({"id": vendor, "label": VENDOR_LABELS[vendor],
                         "countries": sorted(countries.values(), key=lambda entry: entry["name"].casefold())})
-    return {"schema": SCHEMA, "vendors": vendors}
+    return {"schema": OUTPUT_SCHEMA, "vendors": vendors}

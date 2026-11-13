@@ -7,7 +7,8 @@
       "uuid": "string",
       "vendor": {"enum": ["mullvad", "proton", "other"]},
       "country": "string",
-      "name": "string"
+      "name": "string",
+      "ipv6": "boolean"
     }}},
     "mullvad": {"object": {"logged_in": "boolean"}},
     "proton": {"object": {
@@ -24,7 +25,9 @@
       "countries": {"list": {"object": {
         "code": "string",
         "name": "string",
-        "configs": {"list": {"object": {"uuid": "string", "name": "string"}}}
+        "load": {"nullable": "integer"},
+        "ipv6": {"nullable": "boolean"},
+        "configs": {"list": {"object": {"uuid": "string", "name": "string", "ipv6": "boolean"}}}
       }}}
     }}}
   }}

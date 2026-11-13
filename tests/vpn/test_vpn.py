@@ -83,8 +83,8 @@ def conf_without(line_start):
     return "".join(line for line in PROTON_CONF.splitlines(True) if not line.startswith(line_start))
 
 
-def relay_dict(hostname="nl-ams-wg-001", country="nl", public_key=KEY_RELAY, ipv4="198.51.100.7"):
-    return {"hostname": hostname, "country": country, "public_key": public_key, "ipv4": ipv4}
+def relay_dict(hostname="nl-ams-wg-001", country="nl", public_key=KEY_RELAY, ipv4="198.51.100.7", ipv6="2001:db8:5::7"):
+    return {"hostname": hostname, "country": country, "public_key": public_key, "ipv4": ipv4, "ipv6": ipv6}
 
 
 def terse(text):
@@ -387,6 +387,10 @@ class KillSwitchTest(unittest.TestCase):
         self.assertEqual(v6.count("elements"), 1)
         self.assertNotIn("elements", self.rendered())
 
+    def test_a_handshake_to_an_ipv6_endpoint_is_let_through_by_the_mark_and_the_ipv6_set_only(self):
+        self.assertIn("meta mark %s ip6 daddr . udp dport @endpoint6 accept" % vpn.WG_FWMARK_HEX,
+                      self.rules(self.rendered(vpn.Endpoint("2001:db8::1", 51820))))
+
     def chain(self, name, tor_uid=None):
         lines = self.rules(self.rendered(tor_uid=tor_uid))
         start = lines.index("chain %s {" % name)
@@ -570,6 +574,12 @@ class Sandbox(unittest.TestCase):
             patched.start()
             self.addCleanup(patched.stop)
         self.relay_cache = self.tmp / "cache" / "vekrona" / "vpn-relays.json"
+        # The kernel's IPv6 switch is the test's own: no test depends on whether the machine that runs it has IPv6.
+        self.ipv6_switch = self.tmp / "disable_ipv6"
+        self.ipv6_switch.write_text("0\n")
+        patched = mock.patch.object(vpn, "IPV6_DISABLED_SYSCTL", str(self.ipv6_switch))
+        patched.start()
+        self.addCleanup(patched.stop)
         self.keyfiles = self.tmp / "system-connections"
         self.keyfiles.mkdir()
         patched = mock.patch.object(vpn, "NM_KEYFILE_DIR", str(self.keyfiles))
@@ -582,6 +592,8 @@ class Sandbox(unittest.TestCase):
                           stdout="".join("%s:wireguard:%s\n" % (uuid, terse(full_id)) for uuid, full_id in connections))
         self.stubs.behave("nmcli", ["-t", "-f", "UUID,STATE", "connection", "show", "--active"],
                           stdout="".join("%s:%s\n" % pair for pair in active))
+        for uuid, _ in connections:
+            self.nm_ipv6_of(uuid, True)
 
     def nm_imports_as(self, uuid):
         self.stubs.behave("nmcli", ["connection", "import"], stdout="Connection '%s' (%s) successfully added.\n" % (vpn.IMPORT_NAME, uuid))
@@ -592,6 +604,11 @@ class Sandbox(unittest.TestCase):
                           stdout="%s allowed-ips=0.0.0.0/0;::/0; endpoint=%s\n" % (KEY_PEER, endpoint))
         self.stubs.behave("nmcli", ["-e", "no", "-g", "connection.interface-name", "connection", "show", "uuid", uuid],
                           stdout="%s\n" % interface)
+
+    def nm_ipv6_of(self, uuid, ipv6):
+        """What nmcli answers for the IPv6 of the connection `uuid`: an address and ::/0 among its allowed IPs when `ipv6`, neither when not."""
+        addresses, allowed = ("2001:db8:1::2/128", "0.0.0.0/0;::/0") if ipv6 else ("", "0.0.0.0/0")
+        self.nm_read(uuid, ["ipv6.addresses", "wireguard.peers"], [addresses, "%s allowed-ips=%s endpoint=203.0.113.9:51820" % (KEY_PEER, allowed)])
 
     def nm_read(self, uuid, fields, values, with_secrets=False):
         """What nmcli answers for `-g FIELDS connection show uuid UUID` (with -s when with_secrets), one line per field."""
@@ -627,7 +644,7 @@ class RequestTest(Sandbox):
 
     def test_a_request_round_trips_and_is_private(self):
         vpn.write_request(self.uid, {"uuid": UUID_A})
-        self.assertEqual(vpn.read_request(self.uid), {"schema": 1, "uuid": UUID_A})
+        self.assertEqual(vpn.read_request(self.uid), {"schema": vpn.REQUEST_SCHEMA, "uuid": UUID_A})
         self.assertEqual(stat.S_IMODE(self.path().stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.path().parent.stat().st_mode), 0o700)
         vpn.remove_request(self.uid)
@@ -658,7 +675,7 @@ class RequestTest(Sandbox):
     def test_an_operation_without_arguments_hands_over_only_its_nonce_and_still_queues(self):
         with vpn.handed_over(self.uid, None) as nonce:
             self.assertTrue(self.lock_is_held_by_someone())
-            self.assertEqual(vpn.read_request(self.uid), {"schema": 1, "nonce": nonce})
+            self.assertEqual(vpn.read_request(self.uid), {"schema": vpn.REQUEST_SCHEMA, "nonce": nonce})
 
     def test_every_call_hands_over_a_nonce_of_its_own(self):
         with vpn.handed_over(self.uid, {"uuid": UUID_A}) as first:
@@ -705,7 +722,7 @@ class RequestTest(Sandbox):
 
     def test_a_link_is_not_followed(self):
         target = self.tmp / "target.json"
-        target.write_text(json.dumps({"schema": 1, "uuid": UUID_A}))
+        target.write_text(json.dumps({"schema": vpn.REQUEST_SCHEMA, "uuid": UUID_A}))
         self.path().parent.mkdir(parents=True)
         self.path().symlink_to(target)
         with self.assertRaises(vpn.VpnError):
@@ -714,7 +731,7 @@ class RequestTest(Sandbox):
     def test_a_file_of_another_user_is_refused(self):
         other = self.uid + 1
         self.path(other).parent.mkdir(parents=True)
-        self.path(other).write_text(json.dumps({"schema": 1}))
+        self.path(other).write_text(json.dumps({"schema": vpn.REQUEST_SCHEMA}))
         with self.assertRaisesRegex(vpn.VpnError, "not owned"):
             vpn.read_request(other)
 
@@ -733,7 +750,7 @@ class RequestTest(Sandbox):
     def test_a_request_that_is_not_json_or_has_another_layout_is_refused_without_its_content(self):
         self.path().parent.mkdir(parents=True)
         # 500000 nested lists make json.loads raise RecursionError, not ValueError.
-        for text in ("", "not json " + SECRET_WORD, "[]", "null", json.dumps({"schema": 2, "x": SECRET_WORD}), json.dumps({"x": 1}),
+        for text in ("", "not json " + SECRET_WORD, "[]", "null", json.dumps({"schema": vpn.REQUEST_SCHEMA + 1, "x": SECRET_WORD}), json.dumps({"x": 1}),
                      "[" * 500000):
             self.path().write_text(text)
             with self.subTest(text=text[:20]), self.assertRaises(vpn.VpnError) as raised:
@@ -856,14 +873,19 @@ class NetworkManagerTest(Sandbox):
 NO_PROTON = {"logged_in": False, "netshield": 1, "error": ""}
 
 
-class ShellJsonTest(unittest.TestCase):
+class ShellJsonTest(Sandbox):
+    def setUp(self):
+        super().setUp()
+        for uuid in (UUID_A, UUID_B, UUID_OLD, UUID_NEW):
+            self.nm_ipv6_of(uuid, True)
+
     def conn(self, uuid, full_id, state=None):
         return vpn.Connection(uuid, full_id, state)
 
     def test_nothing_connected_and_nothing_armed(self):
         status = vpn.status_json([], vpn.DISARMED, NO_PROTON)
-        self.assertEqual(status, {"schema": 1, "armed": False, "tunnel": "down", "connection": None, "mullvad": {"logged_in": False},
-                                  "proton": NO_PROTON})
+        self.assertEqual(status, {"schema": vpn.OUTPUT_SCHEMA, "armed": False, "tunnel": "down", "connection": None,
+                                  "mullvad": {"logged_in": False}, "proton": NO_PROTON})
 
     def test_a_proton_sign_in_and_its_netshield_level_are_in_the_status(self):
         proton_status = {"logged_in": True, "netshield": 2, "error": ""}
@@ -877,7 +899,7 @@ class ShellJsonTest(unittest.TestCase):
         connection = self.conn(UUID_A, "vekrona-vpn/mullvad/NL/nl-ams-wg-001", "activated")
         up = vpn.status_json([connection], vpn.State(True, UUID_A), NO_PROTON)
         self.assertEqual((up["tunnel"], up["armed"], up["mullvad"]), ("up", True, {"logged_in": True}))
-        self.assertEqual(up["connection"], {"uuid": UUID_A, "vendor": "mullvad", "country": "NL", "name": "nl-ams-wg-001"})
+        self.assertEqual(up["connection"], {"uuid": UUID_A, "vendor": "mullvad", "country": "NL", "name": "nl-ams-wg-001", "ipv6": True})
         activating = self.conn(UUID_A, "vekrona-vpn/other/??/home", "activating")
         self.assertEqual(vpn.status_json([activating], vpn.State(True, UUID_A), NO_PROTON)["tunnel"], "activating")
 
@@ -888,20 +910,31 @@ class ShellJsonTest(unittest.TestCase):
         disarmed = vpn.status_json([connection], vpn.State(False, UUID_A), NO_PROTON)
         self.assertIsNone(disarmed["connection"])
 
+    def test_a_connection_whose_tunnel_has_no_ipv6_says_so_in_status_and_in_list_and_keeps_its_name(self):
+        self.nm_ipv6_of(UUID_OLD, False)
+        connection = self.conn(UUID_OLD, "vekrona-vpn/other/NL/Zürich home", "activated")
+        status = vpn.status_json([connection], vpn.State(True, UUID_OLD), NO_PROTON)
+        self.assertEqual((status["connection"]["name"], status["connection"]["ipv6"]), ("Zürich home", False))
+        listing = vpn.list_json([connection], {"mullvad": {}, "proton": {}})
+        self.assertEqual(listing["vendors"][2]["countries"][0]["configs"], [{"uuid": UUID_OLD, "name": "Zürich home", "ipv6": False}])
+
     def test_a_connection_that_was_forgotten_while_armed_is_no_connection(self):
         self.assertIsNone(vpn.status_json([], vpn.State(True, UUID_A), NO_PROTON)["connection"])
 
-    def test_the_list_has_every_vendor_and_the_catalog_vendors_countries_are_their_catalogs_and_have_no_configurations(self):
+    def test_the_list_has_every_vendor_and_the_catalog_vendors_countries_are_their_offers_and_have_no_configurations(self):
         connections = [self.conn(UUID_OLD, "vekrona-vpn/other/??/Zürich home"), self.conn(UUID_NEW, "vekrona-vpn/proton/DE/de-1")]
-        listing = vpn.list_json(connections, {"mullvad": {"se": "Sweden", "nl": "Netherlands"}, "proton": {"free": "Fastest free server"}})
-        self.assertEqual(listing["schema"], 1)
+        listing = vpn.list_json(connections, {
+            "mullvad": {"se": vpn.Offer("Sweden", None, True), "nl": vpn.Offer("Netherlands", None, True)},
+            "proton": {"free": vpn.Offer("Fastest free server", 40, True)}})
+        self.assertEqual(listing["schema"], vpn.OUTPUT_SCHEMA)
         self.assertEqual([vendor["id"] for vendor in listing["vendors"]], ["mullvad", "proton", "other"])
         mullvad_vendor, proton_vendor, other = listing["vendors"]
-        self.assertEqual(mullvad_vendor["countries"], [{"code": "NL", "name": "Netherlands", "configs": []},
-                                                       {"code": "SE", "name": "Sweden", "configs": []}])
+        self.assertEqual(mullvad_vendor["countries"], [{"code": "NL", "name": "Netherlands", "configs": [], "load": None, "ipv6": True},
+                                                       {"code": "SE", "name": "Sweden", "configs": [], "load": None, "ipv6": True}])
         # A Proton connection of an earlier install is not a configuration of the list: the catalog is.
-        self.assertEqual(proton_vendor["countries"], [{"code": "FREE", "name": "Fastest free server", "configs": []}])
-        self.assertEqual(other["countries"], [{"code": "??", "name": "Unknown", "configs": [{"uuid": UUID_OLD, "name": "Zürich home"}]}])
+        self.assertEqual(proton_vendor["countries"], [{"code": "FREE", "name": "Fastest free server", "configs": [], "load": 40, "ipv6": True}])
+        self.assertEqual(other["countries"], [{"code": "??", "name": "Unknown", "load": None, "ipv6": None,
+                                               "configs": [{"uuid": UUID_OLD, "name": "Zürich home", "ipv6": True}]}])
         self.assertEqual(proton_vendor["label"], "Proton VPN")
 
     def test_an_empty_list_is_three_empty_vendors(self):
@@ -922,7 +955,7 @@ class HelperTest(Sandbox):
         (call,) = self.stubs.called("nft")
         self.assertEqual(call["argv"], ["-f", "-"])
         self.assertEqual(call["stdin"], vpn.render_killswitch(vpn.Endpoint("203.0.113.9", 51820), 970))
-        self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": UUID_A})
 
     def test_a_kill_switch_that_nft_refuses_leaves_the_state_it_found(self):
         for before in (vpn.State(False, None), vpn.State(True, UUID_OLD), None):
@@ -933,14 +966,14 @@ class HelperTest(Sandbox):
             with self.subTest(before=before), self.assertRaisesRegex(vpn.VpnError, "nft -f - failed"):
                 helper.arm(UUID_A, vpn.Endpoint("203.0.113.9", 51820))
             expected = before or vpn.DISARMED
-            self.assertEqual(self.state(), {"schema": 1, "armed": expected.armed, "uuid": expected.uuid})
+            self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": expected.armed, "uuid": expected.uuid})
 
     def test_an_arm_that_cannot_publish_loads_no_table(self):
         helper.publish(vpn.DISARMED)
         with mock.patch.object(helper, "publish", side_effect=vpn.VpnError("disk full")), self.assertRaises(vpn.VpnError):
             helper.arm(UUID_A, vpn.Endpoint("203.0.113.9", 51820))
         self.assertEqual(self.stubs.called("nft"), [])
-        self.assertEqual(self.state(), {"schema": 1, "armed": False, "uuid": None})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": False, "uuid": None})
 
     def test_a_kill_switch_that_nft_refuses_and_a_state_that_cannot_be_restored_say_both(self):
         helper.publish(vpn.DISARMED)
@@ -961,7 +994,7 @@ class HelperTest(Sandbox):
         helper.disarm()
         (call,) = self.stubs.called("nft")
         self.assertEqual(call["stdin"], vpn.render_disarm())
-        self.assertEqual(self.state(), {"schema": 1, "armed": False, "uuid": None})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": False, "uuid": None})
         helper.disarm()
 
     def test_a_disarm_that_cannot_publish_leaves_the_table_and_the_state_where_they_are(self):
@@ -969,7 +1002,7 @@ class HelperTest(Sandbox):
         with mock.patch.object(helper, "publish", side_effect=vpn.VpnError("disk full")), self.assertRaises(vpn.VpnError):
             helper.disarm()
         self.assertEqual(self.stubs.called("nft"), [])
-        self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": UUID_A})
 
     def test_a_table_that_nft_cannot_delete_is_never_published_as_disarmed(self):
         for before in (vpn.State(True, UUID_A), vpn.State(True, None), None):
@@ -978,7 +1011,7 @@ class HelperTest(Sandbox):
                 helper.publish(before)
             with self.subTest(before=before), self.assertRaisesRegex(vpn.VpnError, "nft -f - failed"):
                 helper.disarm()
-            self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": before.uuid if before else None})
+            self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": before.uuid if before else None})
 
     def test_a_table_that_cannot_be_deleted_and_a_state_that_cannot_be_restored_say_both(self):
         helper.publish(vpn.State(True, UUID_A))
@@ -1198,7 +1231,7 @@ class HelperTest(Sandbox):
         self.assertLess(recheck, up)
         self.assertIn("elements = { 203.0.113.9 . 51820 }", self.stubs.called("nft", "-f")[0]["stdin"])
         self.assertEqual(self.stubs.called("nmcli", "--wait")[0]["stdin"], "wireguard.private-key:%s\n" % KEY_PRIVATE)
-        self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": UUID_A})
         self.assertEqual(len([c for c in calls if c[:3] == ["nmcli", "connection", "down"]]), 1)
 
     def test_connecting_refuses_keys_that_are_not_wireguard_keys_before_arming(self):
@@ -1221,7 +1254,7 @@ class HelperTest(Sandbox):
         self.assertEqual(self.stubs.called("wg", "set")[0]["stdin"], KEY_PSK + "\n")
         self.assertEqual(self.stubs.called("nmcli", "--wait")[0]["stdin"], "wireguard.private-key:%s\n" % KEY_PRIVATE)
         self.assertNotIn(KEY_PSK, json.dumps(self.stubs.argvs()))
-        self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": UUID_A})
 
     def test_connecting_to_a_profile_bound_to_another_interface_is_refused_before_anything_is_armed(self):
         self.nm_lists([(UUID_A, CONFIG_ID)])
@@ -1243,7 +1276,7 @@ class HelperTest(Sandbox):
             self.apply("connect")
         self.assertNotIn(KEY_PSK, str(raised.exception))
         self.assertIn(["nmcli", "connection", "down", "uuid", UUID_A], self.stubs.argvs())
-        self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": UUID_A})
 
     def test_connecting_to_what_is_not_a_connection_of_vekrona_vpn_does_nothing(self):
         self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")])
@@ -1263,7 +1296,7 @@ class HelperTest(Sandbox):
             self.apply("connect")
         (load,) = self.stubs.called("nft", "-f")
         self.assertIn("table inet vekrona-vpn {", load["stdin"])
-        self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": UUID_A})
 
     def test_a_kill_switch_that_is_gone_before_the_tunnel_comes_up_keeps_the_tunnel_down(self):
         self.nm_lists([(UUID_A, CONFIG_ID)])
@@ -1316,11 +1349,50 @@ class HelperTest(Sandbox):
     def test_a_relay_with_a_newline_in_a_field_is_refused(self):
         self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/SE/se-got-wg-001")])
         for bad in (relay_dict(hostname="nl\nPostUp = x"), relay_dict(public_key="short"), relay_dict(ipv4="vpn.example.com"),
-                    relay_dict(country="nl\n"), {**relay_dict(), "extra": 1}):
+                    relay_dict(country="nl\n"), relay_dict(ipv6="198.51.100.7"), {**relay_dict(), "extra": 1}):
             self.request({"vendor": "mullvad", "relay": bad, "device": DEVICE_DOC})
             with self.subTest(bad=str(bad)[:30]), self.assertRaises(vpn.VpnError):
                 self.apply("connect")
         self.assertEqual(self.nmcli_actions(), [])
+
+    def test_a_mullvad_relay_is_reached_at_its_ipv6_address_when_the_uplink_has_no_ipv4_route(self):
+        self.stubs.behave("ip", ["-4"], stdout="")
+        self.stubs.behave("ip", ["-6"], stdout="default via fe80::1 dev wlp2s0 proto ra metric 600\n")
+        self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/SE/se-got-wg-001")])
+        self.nm_imports_as(UUID_NEW)
+        self.nm_peer_of(UUID_NEW, "[2001:db8:5::7]:51820")
+        self.request({"vendor": "mullvad", "relay": relay_dict(), "device": DEVICE_DOC})
+        self.apply("connect")
+        (imported,) = self.stubs.called("nmcli", "connection", "import")
+        self.assertIn("Endpoint = [2001:db8:5::7]:51820", imported["file"])
+        (armed,) = self.stubs.called("nft", "-f", "-")
+        self.assertIn("elements = { 2001:db8:5::7 . 51820 }", armed["stdin"])
+
+    def test_a_network_without_a_default_route_refuses_a_mullvad_connect_before_anything_changes(self):
+        self.stubs.behave("ip", ["-4"], stdout="")
+        self.stubs.behave("ip", ["-6"], stdout="")
+        self.request({"vendor": "mullvad", "relay": relay_dict(), "device": DEVICE_DOC})
+        with self.assertRaisesRegex(vpn.VpnError, "no default route"):
+            self.apply("connect")
+        self.assertEqual((self.stubs.called("nft"), self.nmcli_actions()), ([], []))
+
+    def test_proton_is_refused_on_an_ipv6_only_uplink_before_anything_changes(self):
+        self.stubs.behave("ip", ["-4"], stdout="")
+        self.stubs.behave("ip", ["-6"], stdout="default via fe80::1 dev wlp2s0 proto ra metric 600\n")
+        self.request({"vendor": "proton", "id": "vekrona-vpn/proton/NL/signed-in", "conf": PROTON_CONF, "private_key": KEY_PRIVATE})
+        with self.assertRaisesRegex(vpn.VpnError, "Proton servers are reachable over IPv4 only, and this network has no IPv4 route"):
+            self.apply("connect")
+        self.assertEqual((self.stubs.called("nft"), self.nmcli_actions()), ([], []))
+
+    def test_an_ipv4_endpoint_is_refused_on_an_ipv6_only_uplink_before_the_kill_switch_is_armed(self):
+        self.stubs.behave("ip", ["-4"], stdout="")
+        self.stubs.behave("ip", ["-6"], stdout="default via fe80::1 dev wlp2s0 proto ra metric 600\n")
+        self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")])
+        self.nm_peer_of(UUID_A, "203.0.113.9:51820")
+        self.request({"uuid": UUID_A, "keys": KEYS})
+        with self.assertRaisesRegex(vpn.VpnError, "the endpoint 203.0.113.9:51820 is IPv4, and this network has no IPv4 route"):
+            self.apply("connect")
+        self.assertEqual((self.stubs.called("nft"), self.nmcli_actions()), ([], []))
 
     def test_logging_in_replaces_every_connection_of_the_old_account(self):
         self.nm_lists([(UUID_A, "vekrona-vpn/mullvad/SE/se-got-wg-001"), (UUID_B, "vekrona-vpn/mullvad/NL/nl-ams-wg-009"),
@@ -1355,7 +1427,7 @@ class HelperTest(Sandbox):
         calls = self.stubs.argvs()
         self.assertLess(calls.index(["nmcli", "connection", "down", "uuid", UUID_A]), calls.index(["nft", "-f", "-"]))
         self.assertEqual(self.stubs.called("nft", "-f")[0]["stdin"], vpn.render_disarm())
-        self.assertEqual(self.state(), {"schema": 1, "armed": False, "uuid": None})
+        self.assertEqual(self.state(), {"schema": vpn.STATE_SCHEMA, "armed": False, "uuid": None})
 
     def test_turning_off_with_nothing_active_still_removes_the_kill_switch(self):
         self.nm_lists([(UUID_A, "vekrona-vpn/other/NL/NL-792")])
@@ -1520,11 +1592,59 @@ class HelperTest(Sandbox):
         self.assertEqual((self.stubs.called("nft"), self.nmcli_actions()), ([], []))
 
 
+class UplinkTest(Sandbox):
+    """The uplink is the default route outside the tunnel, and an endpoint is reached only over a family the uplink has."""
+
+    def test_the_uplink_families_are_those_with_a_default_route_outside_the_tunnel(self):
+        self.stubs.behave("ip", ["-4"], stdout="default dev vvpn0 scope link\n")
+        self.assertEqual(vpn.uplink_families(), frozenset())
+        self.stubs.behave("ip", ["-6"], stdout="default via fe80::1 dev wlp2s0 proto ra metric 600\n")
+        self.assertEqual(vpn.uplink_families(), frozenset({6}))
+        self.stubs.behave("ip", ["-4"], stdout="default via 192.0.2.254 dev eth0 proto dhcp metric 100\ndefault dev vvpn0 scope link\n")
+        self.assertEqual(vpn.uplink_families(), frozenset({4, 6}))
+
+    def test_a_machine_with_ipv6_switched_off_has_no_ipv6_uplink_and_ip_is_not_asked_about_it(self):
+        self.stubs.behave("ip", ["-4"], stdout="default via 192.0.2.254 dev eth0 proto dhcp metric 100\n")
+        self.stubs.behave("ip", ["-6"], stdout="default via fe80::1 dev wlp2s0 proto ra metric 600\n")
+        self.ipv6_switch.write_text("1\n")
+        self.assertEqual(vpn.uplink_families(), frozenset({4}))
+        self.ipv6_switch.unlink()  # a kernel built without IPv6 has no switch at all
+        self.assertEqual(vpn.uplink_families(), frozenset({4}))
+        self.assertEqual([call for call in self.stubs.argvs("ip") if "-6" in call], [])
+        self.ipv6_switch.write_text("0\n")
+        self.assertEqual(vpn.uplink_families(), frozenset({4, 6}))
+
+    def test_a_relay_is_reached_over_ipv4_when_there_is_a_route_and_over_ipv6_when_only_ipv6_is_routed(self):
+        relay = vpn.Relay("nl-ams-wg-001", "nl", KEY_RELAY, "198.51.100.7", "2001:db8:5::7")
+        self.assertEqual(vpn.mullvad_endpoint(relay, frozenset({4, 6})), vpn.Endpoint("198.51.100.7", vpn.MULLVAD_PORT))
+        self.assertEqual(vpn.mullvad_endpoint(relay, frozenset({6})), vpn.Endpoint("2001:db8:5::7", vpn.MULLVAD_PORT))
+        with self.assertRaisesRegex(vpn.VpnError, "no default route"):
+            vpn.mullvad_endpoint(relay, frozenset())
+
+    def test_a_multipath_default_counts_each_nexthop_and_routes_that_do_not_forward_or_loop_back_do_not(self):
+        self.assertEqual(vpn.default_devices("default proto static metric 100\n\tnexthop via 10.0.0.1 dev eth0 weight 1\n"
+                                             "\tnexthop via 10.0.1.1 dev eth1 weight 1\n"), ["eth0", "eth1"])
+        self.assertEqual(vpn.default_devices("unreachable default metric 4294967295\nblackhole default proto static\n"
+                                             "\tnexthop via 10.9.9.9 dev eth7 weight 1\nprohibit default dev eth8\n"
+                                             "throw default dev eth9\ndefault dev lo scope host\n"), [])
+        self.assertEqual(vpn.default_devices("default via 192.0.2.254 dev eth0 proto dhcp\nunreachable default metric 4294967295\n"),
+                         ["eth0"])
+
+    def test_a_mullvad_relay_on_a_network_without_its_family_says_to_connect_the_country_again(self):
+        with self.assertRaisesRegex(vpn.VpnError, "connect to the country again \\(connect mullvad CC\\)"):
+            vpn.require_route(vpn.Endpoint("198.51.100.7", 51820), frozenset({6}), vpn.VENDOR_MULLVAD)
+
+    def test_an_endpoint_is_refused_unless_the_uplink_has_a_route_of_its_family(self):
+        vpn.require_route(vpn.Endpoint("2001:db8::1", 51820), frozenset({6}), vpn.VENDOR_OTHER)
+        with self.assertRaisesRegex(vpn.VpnError, "the endpoint 203.0.113.9:51820 is IPv4, and this network has no IPv4 route"):
+            vpn.require_route(vpn.Endpoint("203.0.113.9", 51820), frozenset({6}), vpn.VENDOR_OTHER)
+
+
 def relay_list_doc(extra_relays=()):
     relays = [
-        {"hostname": "nl-ams-wg-001", "location": "nl-ams", "active": True, "public_key": KEY_RELAY, "ipv4_addr_in": "198.51.100.7"},
-        {"hostname": "nl-ams-wg-002", "location": "nl-ams", "active": False, "public_key": KEY_RELAY, "ipv4_addr_in": "198.51.100.8"},
-        {"hostname": "se-got-wg-001", "location": "se-got", "active": True, "public_key": KEY_PEER, "ipv4_addr_in": "198.51.100.9"},
+        {"hostname": "nl-ams-wg-001", "location": "nl-ams", "active": True, "public_key": KEY_RELAY, "ipv4_addr_in": "198.51.100.7", "ipv6_addr_in": "2001:db8:5::7"},
+        {"hostname": "nl-ams-wg-002", "location": "nl-ams", "active": False, "public_key": KEY_RELAY, "ipv4_addr_in": "198.51.100.8", "ipv6_addr_in": "2001:db8:5::7"},
+        {"hostname": "se-got-wg-001", "location": "se-got", "active": True, "public_key": KEY_PEER, "ipv4_addr_in": "198.51.100.9", "ipv6_addr_in": "2001:db8:5::7"},
         *extra_relays,
     ]
     return {"locations": {"nl-ams": {"country": "Netherlands"}, "se-got": {"country": "Sweden"}, "de-fra": {"country": "Germany"}},
@@ -1549,6 +1669,14 @@ class MullvadSandbox(Sandbox):
 
 
 class MullvadTest(MullvadSandbox):
+    def test_a_relay_cache_from_before_the_ipv6_addresses_is_stale_and_the_next_list_asks_the_api_again(self):
+        old = {"names": {"nl": "Netherlands"}, "relays": [{"hostname": "nl-ams-wg-001", "country": "nl", "public_key": KEY_RELAY, "ipv4": "198.51.100.7"}]}
+        self.relay_cache.parent.mkdir(parents=True, exist_ok=True)
+        self.relay_cache.write_text(json.dumps(old))
+        self.assertIsNone(mullvad.read_cache(str(self.relay_cache)))
+        relays = mullvad.current_relays(str(self.relay_cache))
+        self.assertEqual({relay["ipv6"] for relay in relays["relays"]}, {"2001:db8:5::7"})
+
     def stderr_of(self, function, *args):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
@@ -1563,7 +1691,7 @@ class MullvadTest(MullvadSandbox):
         self.assertEqual(stat.S_IMODE(self.relay_cache.stat().st_mode), 0o600)
 
     def test_a_relay_whose_fields_could_inject_a_line_is_left_out_and_said(self):
-        evil = {"hostname": "nl-evil\nPostUp = x", "location": "nl-ams", "active": True, "public_key": KEY_RELAY, "ipv4_addr_in": "198.51.100.1"}
+        evil = {"hostname": "nl-evil\nPostUp = x", "location": "nl-ams", "active": True, "public_key": KEY_RELAY, "ipv4_addr_in": "198.51.100.1", "ipv6_addr_in": "2001:db8:5::7"}
         self.api.answer("GET", "/app/v1/relays", relay_list_doc([evil]))
         relays, stderr = self.stderr_of(mullvad.load_relays, str(self.relay_cache))
         self.assertEqual(len(relays["relays"]), 2)
@@ -1714,9 +1842,9 @@ class CliTest(CliSandbox):
         self.write_state(True, UUID_A)
         code, out, err = self.run_cli("status")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(json.loads(out), {"schema": 1, "armed": True, "tunnel": "up", "mullvad": {"logged_in": True},
+        self.assertEqual(json.loads(out), {"schema": vpn.OUTPUT_SCHEMA, "armed": True, "tunnel": "up", "mullvad": {"logged_in": True},
                                            "proton": {"logged_in": False, "netshield": 1, "error": ""},
-                                           "connection": {"uuid": UUID_A, "vendor": "mullvad", "country": "NL", "name": "nl-ams-wg-001"}})
+                                           "connection": {"uuid": UUID_A, "vendor": "mullvad", "country": "NL", "name": "nl-ams-wg-001", "ipv6": True}})
 
     def test_status_before_anything_was_armed(self):
         self.nm_lists([])
@@ -1726,9 +1854,9 @@ class CliTest(CliSandbox):
     def test_status_with_a_state_file_it_does_not_know_fails_with_one_line(self):
         self.nm_lists([])
         (self.tmp / "run" / "vekrona-vpn").mkdir(parents=True)
-        for text in ("{nope", "[" * 500000, "[]", json.dumps({"schema": 2, "armed": False, "uuid": None}),
-                     json.dumps({"schema": 1, "armed": "yes", "uuid": None}), json.dumps({"schema": 1, "armed": True, "uuid": "../"}),
-                     json.dumps({"schema": 1, "armed": True, "uuid": 5})):
+        for text in ("{nope", "[" * 500000, "[]", json.dumps({"schema": vpn.STATE_SCHEMA + 1, "armed": False, "uuid": None}),
+                     json.dumps({"schema": vpn.STATE_SCHEMA, "armed": "yes", "uuid": None}), json.dumps({"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": "../"}),
+                     json.dumps({"schema": vpn.STATE_SCHEMA, "armed": True, "uuid": 5})):
             (self.tmp / "run" / "vekrona-vpn" / "state.json").write_text(text)
             code, out, err = self.run_cli("status")
             with self.subTest(text=text[:30]):
@@ -2361,7 +2489,7 @@ RFC8032_PUBLIC = bytes.fromhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325
 
 def api_logical(name, country, tier, score, *, status=1, features=0, entry_ip="203.0.113.10", entry_country=None):
     """A logical server as Proton's list answers it, with one server (the entry is in the exit's country unless told otherwise)."""
-    return {"Name": name, "EntryCountry": entry_country or country, "ExitCountry": country, "Tier": tier, "Features": features,
+    return {"ID": "id-" + name, "Name": name, "EntryCountry": entry_country or country, "ExitCountry": country, "Tier": tier, "Features": features,
             "Score": score, "Status": status, "Servers": [{"EntryIP": entry_ip, "X25519PublicKey": key(6), "Status": 1, "Label": "1"}]}
 
 
@@ -2375,6 +2503,9 @@ LOGICALS = [
     api_logical("DE#1", "DE", 2, 0.0, entry_ip="203.0.113.27"),
     api_logical("NL#7", "NL", 3, 0.1, entry_ip="203.0.113.28"),
 ]
+
+
+LOADS = {"LogicalServers": [{"ID": "id-NL#6", "Load": 37, "Score": 2.0, "Status": 1}]}
 
 
 def certificate_answer(fingerprint=None, refresh_time=REFRESH_TIME):
@@ -2422,11 +2553,11 @@ class ProtonCoreTest(unittest.TestCase):
     def test_the_choices_of_the_account_are_its_countries_or_its_free_server(self):
         catalog, left_out = proton.catalog_from_answers("plus", 2, LOGICALS)
         self.assertEqual(left_out, [])
-        self.assertEqual(sorted(proton.countries_of(catalog)), ["ch", "de", "nl", "us"])
+        self.assertEqual(sorted(proton.countries_of(catalog, {})), ["ch", "de", "nl", "us"])
         free, _ = proton.catalog_from_answers("free", 0, LOGICALS)
-        self.assertEqual(proton.countries_of(free), {"free": "Fastest free server (IPv4 only)"})
+        self.assertEqual(proton.countries_of(free, {}), {"free": vpn.Offer("Fastest free server", None, False)})
         with_ipv6, _ = proton.catalog_from_answers("free", 0, LOGICALS + [api_logical("NL#8", "NL", 0, 9.0, features=16)])
-        self.assertEqual(proton.countries_of(with_ipv6), {"free": "Fastest free server"})
+        self.assertEqual(proton.countries_of(with_ipv6, {}), {"free": vpn.Offer("Fastest free server", None, True)})
 
     def test_free_takes_the_fastest_tier_zero_server_whatever_its_country(self):
         catalog, _ = proton.catalog_from_answers("free", 0, LOGICALS)
@@ -2437,6 +2568,12 @@ class ProtonCoreTest(unittest.TestCase):
         catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
         choice = proton.choose(catalog, "nl")
         self.assertEqual((choice.country, choice.logical["name"]), ("NL", "NL#6"))
+
+    def test_a_country_shows_the_load_and_ipv6_of_the_server_that_a_connect_to_it_picks(self):
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
+        offer = proton.countries_of(catalog, {"id-NL#6": 37, "id-NL#1": 5})["nl"]
+        self.assertEqual((offer.load, offer.ipv6), (37, True))
+        self.assertEqual(proton.choose(catalog, "nl").logical["id"], "id-NL#6")
 
     def test_secure_core_and_tor_servers_are_never_chosen_for_a_country(self):
         extra = [api_logical("SC#1", "NL", 2, 0.1, entry_country="CH"), api_logical("SC#2", "NL", 2, 0.05, features=1),
@@ -2451,8 +2588,8 @@ class ProtonCoreTest(unittest.TestCase):
     def test_a_country_with_only_ipv4_servers_serves_them_and_is_labelled(self):
         catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS + [api_logical("P2P#2", "IT", 2, 0.3, features=4)])
         self.assertEqual(proton.choose(catalog, "it").logical["name"], "P2P#2")
-        self.assertTrue(proton.countries_of(catalog)["it"].endswith(proton.IPV4_ONLY))
-        self.assertFalse(proton.countries_of(catalog)["nl"].endswith(proton.IPV4_ONLY))
+        self.assertFalse(proton.countries_of(catalog, {})["it"].ipv6)
+        self.assertTrue(proton.countries_of(catalog, {})["nl"].ipv6)
 
     def test_a_country_without_a_usable_server_and_a_query_that_is_no_country_are_errors(self):
         catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
@@ -2464,7 +2601,7 @@ class ProtonCoreTest(unittest.TestCase):
 
     def test_a_logical_server_whose_name_or_fields_are_not_plain_is_refused(self):
         good = proton.logical_of_answer(LOGICALS[1])
-        for changed in ({"name": "NL#1\nPostUp = x"}, {"name": ""}, {"country": "FREE"}, {"country": "nl"}, {"entry_country": "??"},
+        for changed in ({"name": "NL#1\nPostUp = x"}, {"name": ""}, {"id": ""}, {"country": "FREE"}, {"country": "nl"}, {"entry_country": "??"},
                         {"status": "1"}, {"score": True}, {"servers": None}, {"features": 1.5},
                         {"servers": [{**good["servers"][0], "public_key": "lizard"}]}):
             with self.subTest(changed=str(changed)), self.assertRaises(vpn.VpnError):
@@ -2473,6 +2610,14 @@ class ProtonCoreTest(unittest.TestCase):
     def test_a_logical_server_the_tool_does_not_know_is_left_out_and_said(self):
         catalog, left_out = proton.catalog_from_answers("plus", 2, [LOGICALS[1], {"Name": "NL#9"}])
         self.assertEqual((len(catalog["logicals"]), len(left_out)), (1, 1))
+
+    def test_a_catalog_from_before_the_loads_has_no_id_its_countries_have_no_load_and_keep_their_ipv6(self):
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
+        for logical in catalog["logicals"]:
+            del logical["id"]
+        proton.validate_catalog(catalog)
+        offer = proton.countries_of(catalog, {"id-NL#6": 37})["nl"]
+        self.assertEqual((offer.load, offer.ipv6), (None, True))
 
     def test_a_recorded_certificate_is_reused_only_for_its_netshield_and_while_it_has_an_hour_left(self):
         catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
@@ -2485,6 +2630,13 @@ class ProtonCoreTest(unittest.TestCase):
         catalog["certificate"] = {"refresh_time": 1, "expiration_time": 2, "netshield": 5}
         with self.assertRaisesRegex(vpn.VpnError, "NetShield level"):
             proton.validate_catalog(catalog)
+
+
+    def test_a_load_list_holds_a_percent_for_each_logical_id_and_nothing_else(self):
+        self.assertEqual(proton.validate_loads({"id-NL#6": 37}), {"id-NL#6": 37})
+        for bad in ({"id-NL#6": 101}, {"id-NL#6": -1}, {"id-NL#6": True}, {"id-NL#6": "37"}, {1: 5}, [("id-NL#6", 37)]):
+            with self.subTest(bad=str(bad)), self.assertRaises(vpn.VpnError):
+                proton.validate_loads(bad)
 
 
 class ProtonApiTest(unittest.TestCase):
@@ -2586,6 +2738,15 @@ class ProtonApiTest(unittest.TestCase):
         self.assertEqual(request["body"]["Features"]["NetShieldLevel"], 2)
 
 
+    def test_the_loads_are_asked_without_a_session_and_a_load_out_of_range_is_refused(self):
+        self.api.answer("GET", "/vpn/v1/loads", LOADS)
+        self.assertEqual(proton.loads_of(), {"id-NL#6": 37})
+        self.assertIsNone(self.api.requests[-1]["authorization"])
+        self.api.answer("GET", "/vpn/v1/loads", {"LogicalServers": [{"ID": "id-NL#6", "Load": 101, "Score": 2.0, "Status": 1}]})
+        with self.assertRaises(vpn.VpnError):
+            proton.loads_of()
+
+
 class ProtonTest(CliSandbox):
     """The Proton commands through the CLI, with Proton's API as a local fixture and the keyring as the stubs keep it."""
 
@@ -2600,6 +2761,7 @@ class ProtonTest(CliSandbox):
         self.stubs.seed(secrets.PROTON_KEY, secrets.PROTON_KEY_ID, {"seed": SEED_B64})
         self.api.answer("GET", "/vpn/v2", PLAN_PLUS)
         self.api.answer("GET", "/vpn/v1/logicals", {"LogicalServers": LOGICALS})
+        self.api.answer("GET", "/vpn/v1/loads", LOADS)
         self.api.answer("POST", "/vpn/v1/certificate", certificate_answer())
 
     @contextlib.contextmanager
@@ -2765,6 +2927,7 @@ class ProtonTest(CliSandbox):
         self.assertEqual((code, err), (1, "vekrona-vpn: the Proton session has ended; sign in again\n"))
         self.assertIsNone(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID))
         self.assertFalse(Path(cli.proton_catalog_path()).exists())
+        self.assertFalse(Path(cli.proton_loads_path()).exists())
 
     def test_a_renewed_session_is_stored_before_the_retry_and_the_renewed_one_is_used_after(self):
         self.api.answer_in_turn("GET", "/vpn/v2", [(401, None), (200, PLAN_PLUS)])
@@ -2902,6 +3065,7 @@ class ProtonTest(CliSandbox):
         self.assertIsNone(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID))
         self.assertIsNone(self.stubs.stored(secrets.PROTON_KEY, secrets.PROTON_KEY_ID))
         self.assertFalse(Path(cli.proton_catalog_path()).exists())
+        self.assertFalse(Path(cli.proton_loads_path()).exists())
         self.assert_no_secret_leaks(out, err)
 
     def test_logout_clears_both_items_and_the_catalog_even_when_proton_refuses_to_end_the_session(self):
@@ -2913,16 +3077,74 @@ class ProtonTest(CliSandbox):
         self.assertIsNone(self.stubs.stored(secrets.PROTON_SESSION, secrets.PROTON_SESSION_ID))
         self.assertIsNone(self.stubs.stored(secrets.PROTON_KEY, secrets.PROTON_KEY_ID))
         self.assertFalse(Path(cli.proton_catalog_path()).exists())
+        self.assertFalse(Path(cli.proton_loads_path()).exists())
 
-    def test_list_reads_the_catalog_cache_and_never_the_keyring_or_the_network(self):
+    def netherlands_load(self, listing):
+        """The load that the output of `list` shows for Netherlands under Proton."""
+        proton_vendor = next(vendor for vendor in json.loads(listing)["vendors"] if vendor["id"] == "proton")
+        return next(country["load"] for country in proton_vendor["countries"] if country["code"] == "NL")
+
+    def loads_written_at(self, when):
+        os.utime(cli.proton_loads_path(), (when, when))
+
+    def test_list_reads_the_catalog_cache_and_the_keyring_never_and_asks_the_network_only_for_the_loads(self):
         vpn.write_cache(cli.proton_catalog_path(), proton.catalog_from_answers("plus", 2, LOGICALS)[0])
         code, out, err = self.run_cli("list")
         proton_vendor = next(vendor for vendor in json.loads(out)["vendors"] if vendor["id"] == "proton")
         self.assertEqual(sorted(country["code"] for country in proton_vendor["countries"]), ["CH", "DE", "NL", "US"])
-        self.assertEqual((code, self.stubs.called("secret-tool"), self.api.requests), (0, [], []))
+        self.assertEqual((code, self.stubs.called("secret-tool")), (0, []))
+        self.assertEqual([request["path"] for request in self.api.requests], ["/vpn/v1/loads"])
         Path(cli.proton_catalog_path()).unlink()
         proton_vendor = next(vendor for vendor in json.loads(self.run_cli("list")[1])["vendors"] if vendor["id"] == "proton")
         self.assertEqual(proton_vendor["countries"], [])
+
+    def test_list_shows_a_catalog_from_before_the_loads_with_its_countries_and_no_load(self):
+        catalog, _ = proton.catalog_from_answers("plus", 2, LOGICALS)
+        for logical in catalog["logicals"]:
+            del logical["id"]
+        vpn.write_cache(cli.proton_catalog_path(), catalog)
+        code, out, err = self.run_cli("list")
+        proton_vendor = next(vendor for vendor in json.loads(out)["vendors"] if vendor["id"] == "proton")
+        self.assertEqual((code, sorted(country["code"] for country in proton_vendor["countries"])), (0, ["CH", "DE", "NL", "US"]))
+        self.assertIsNone(self.netherlands_load(out))
+
+    def test_list_asks_proton_for_the_loads_only_when_they_are_older_than_fifteen_minutes(self):
+        vpn.write_cache(cli.proton_catalog_path(), proton.catalog_from_answers("plus", 2, LOGICALS)[0])
+        with self.clock_at(CLOCK):
+            self.assertEqual(self.netherlands_load(self.run_cli("list")[1]), 37)
+        self.loads_written_at(CLOCK)
+        with self.clock_at(CLOCK + 14 * 60):
+            self.assertEqual(self.netherlands_load(self.run_cli("list")[1]), 37)
+        self.assertEqual(len(self.api.requests), 1)
+        with self.clock_at(CLOCK + 16 * 60):
+            self.assertEqual(self.netherlands_load(self.run_cli("list")[1]), 37)
+        self.assertEqual(len(self.api.requests), 2)
+
+    def test_when_proton_cannot_be_asked_the_loads_kept_are_shown_and_their_age_is_said(self):
+        vpn.write_cache(cli.proton_catalog_path(), proton.catalog_from_answers("plus", 2, LOGICALS)[0])
+        with self.clock_at(CLOCK):
+            self.run_cli("list")
+        self.loads_written_at(CLOCK)
+        self.api.answer("GET", "/vpn/v1/loads", {"code": "UNAVAILABLE"}, status=500)
+        with self.clock_at(CLOCK + 20 * 60):
+            code, out, err = self.run_cli("list")
+        self.assertEqual((code, self.netherlands_load(out)), (0, 37))
+        self.assertIn("the loads of 20 minutes ago are kept", err)
+
+    def test_with_no_loads_and_no_way_to_ask_for_them_the_countries_have_no_load_and_it_is_said(self):
+        vpn.write_cache(cli.proton_catalog_path(), proton.catalog_from_answers("plus", 2, LOGICALS)[0])
+        self.api.answer("GET", "/vpn/v1/loads", {"code": "UNAVAILABLE"}, status=500)
+        code, out, err = self.run_cli("list")
+        self.assertEqual((code, self.netherlands_load(out)), (0, None))
+        self.assertIn("cannot read the Proton server loads", err)
+
+    def test_status_never_asks_for_the_loads(self):
+        self.nm_lists([])
+        vpn.write_cache(cli.proton_loads_path(), {"id-NL#6": 37})
+        self.loads_written_at(CLOCK - 3600)
+        with self.clock_at(CLOCK):
+            code, _, _ = self.run_cli("status")
+        self.assertEqual((code, self.api.requests), (0, []))
 
     def test_netshield_is_kept_in_the_settings_and_status_shows_it_and_a_level_out_of_range_is_refused(self):
         self.assertEqual(self.run_cli("proton", "netshield", "2")[0], 0)
@@ -3005,6 +3227,13 @@ def shape_problem(shape, value, path="$"):
 class ShellOutputTest(CliSandbox):
     """The output of `status` and `list`, from the real CLI through the stubs in every state the shell can meet, checked against the one
     shape description the shell reads (vpn-output.json)."""
+
+    def setUp(self):
+        super().setUp()
+        # A catalog is listed with its loads, which are asked of Proton: no network here, so the request is refused at once.
+        patched = mock.patch.object(proton, "PROTON_API", unused_port_base())
+        patched.start()
+        self.addCleanup(patched.stop)
 
     def arrange(self, catalog, listed, active, settings):
         shutil.rmtree(self.tmp / "cache", ignore_errors=True)
