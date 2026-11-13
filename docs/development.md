@@ -109,6 +109,17 @@ the VM through `vekrona-dev` and read like specifications of what the user
 sees. A scenario must fail against the commit before its fix
 (`vekrona-dev install --rev <commit>`) and pass after it.
 
+The VPN scenarios need two secrets from the host's keyring, stored once with `secret-tool` (the header of `tests/e2e/lib/vpn.sh`
+says the same), and never kept in a file:
+
+```
+secret-tool store --label="vekrona-vpn e2e conf" application vekrona-vpn kind e2e-conf id NL-12 < NL-12.conf
+printf '%s' 1234567890123456 | secret-tool store --label="vekrona-vpn e2e account" application vekrona-vpn kind e2e-mullvad-account id NAME
+export VEKRONA_VPN_E2E_CONF=NL-12 VEKRONA_VPN_E2E_ACCOUNT=NAME
+```
+
+Without them the VPN scenarios that need them are skipped with the reason.
+
 ## Guest checks
 
 `vm/` holds checks that run inside a vekrona guest: `session-check.sh`,

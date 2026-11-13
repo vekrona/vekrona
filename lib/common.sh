@@ -2348,10 +2348,10 @@ rune_rpm_sha256() {
 
 VEKRONA_DESKTOP_PKGS=(
   adw-gtk3-theme 1password 1password-cli NetworkManager NetworkManager-wifi accountsservice atkinson-hyperlegible-next-fonts bluez brightnessctl btop cliphist
-  dconf ffmpeg firefox firewalld flatpak gamemode gamescope ghostty
+  dconf ffmpeg firefox firewalld flatpak gamemode gamescope gcr3 ghostty
   geoclue2 geoclue2-libs gnome-keyring gnome-keyring-pam greetd grim gstreamer1-plugin-libav gstreamer1-plugin-openh264 gstreamer1-plugins-bad-freeworld gstreamer1-plugins-ugly herdr inotify-tools intel-media-driver irqbalance
   jq kanshi khal
-  libnotify mangohud mesa-va-drivers-freeworld mozilla-openh264 openh264 pipewire pipewire-pulseaudio pipewire-utils playerctl polkit policycoreutils-python-utils
+  libnotify libsecret mangohud mesa-va-drivers-freeworld mozilla-openh264 openh264 pipewire pipewire-pulseaudio pipewire-utils playerctl polkit policycoreutils-python-utils
   python3 python3-gobject python3-pyyaml python3-vdf qalculate qrencode qt6ct quickshell ripgrep rofi rsms-inter-fonts slurp steam swappy sway sway-config-fedora
   sway-systemd swayidle syncthing tailscale tor tuigreet tuned-ppd vdirsyncer wf-recorder wireplumber wl-clipboard wlr-randr wlsunset
   wireguard-tools wpa_supplicant xdg-desktop-portal-gtk xdg-desktop-portal-wlr xdg-utils xremap-wlroots

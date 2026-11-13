@@ -2,8 +2,11 @@
 """The root side of vekrona-vpn: every change to NetworkManager's WireGuard connections and to the kill switch.
 
   apply INSTANCE      one operation of a user, from vekrona-vpn-apply@INSTANCE.service. INSTANCE is "<op>-<uid>": the op is one
-                      of a closed set (import, login, connect, off, forget) and the uid is the user whose request file
+                      of a closed set (import, login, connect, off, forget, seal) and the uid is the user whose request file
                       /run/user/<uid>/vekrona-vpn/request.json holds the arguments, which are checked again here.
+
+This helper never talks to the keyring: the keys of a connection come in the request (the user's tmpfs file, for one operation)
+and go to nmcli on stdin. Only `seal` hands keys out, to the user, in a file of the user's runtime directory that the user removes.
 
 Every operation runs under one lock (/run/vekrona-vpn/lock), the kill switch's loading and removal included: connect loads the
 table itself, so an off cannot land between its arming and the tunnel coming up, and a tunnel never comes up unprotected. There
@@ -21,11 +24,10 @@ two apart. The failure line is also how the client learns why: it does not read 
 Publishes /run/vekrona-vpn/state.json for the shell: {"schema":1,"armed":bool,"uuid":str|null}."""
 import os
 import sys
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
-import vekrona_countries
 import vekrona_vpn as vpn
 from vekrona_vpn import VpnError
 
@@ -76,10 +78,11 @@ def remove_import_file(path: str) -> None:
         os.unlink(path)
 
 
-def import_conf(conf: vpn.WgConf, ident: vpn.ConnectionId) -> str:
+def import_conf(conf: vpn.WgConf, ident: vpn.ConnectionId, made: List[str]) -> str:
     """Make a NetworkManager connection of `conf` under the id `ident` and return its uuid. The configuration passes through a file
     that only root can enter and that exists only for the import. A profile that an earlier import left unfinished (the helper was
-    killed between the import and the change that names it) is deleted first: it holds a private key and would autoconnect."""
+    killed between the import and the change that names it) is deleted first: it holds a placeholder key and would autoconnect.
+    `made` gets the uuid as soon as NetworkManager has the connection, so that the caller can delete it when a later step fails."""
     for leftover in vpn.nm_unfinished_imports():
         vpn.nm_delete(leftover)
     directory = vpn.run_path("import")
@@ -92,6 +95,7 @@ def import_conf(conf: vpn.WgConf, ident: vpn.ConnectionId) -> str:
             os.fchmod(handle.fileno(), vpn.PRIVATE_FILE_MODE)
             handle.write(vpn.render_import_conf(conf))
         uuid = vpn.nm_import(path)
+        made.append(uuid)
     except BaseException as exc:
         try:
             remove_import_file(path)
@@ -106,6 +110,7 @@ def import_conf(conf: vpn.WgConf, ident: vpn.ConnectionId) -> str:
             vpn.nm_delete(uuid)
         except VpnError as cleanup:
             raise VpnError("%s; and the half-made connection %s could not be removed: %s" % (exc, uuid, cleanup))
+        made.remove(uuid)
         raise
     # NetworkManager may have autoconnected the profile before the modify. It had no routes, but a tunnel that is up and not
     # chosen would show as the connection in use.
@@ -119,22 +124,30 @@ def delete_all(connections: List[vpn.Connection]) -> None:
         vpn.nm_delete(connection.uuid)
 
 
-def device_of(connection: vpn.Connection) -> vpn.Device:
-    """The Mullvad device (key and addresses) that a Mullvad connection holds: NetworkManager is where the key lives."""
-    private_key, ipv4, ipv6 = vpn.nm_get(
-        connection.uuid, ["wireguard.private-key", "ipv4.addresses", "ipv6.addresses"], secrets=True)
-    try:
-        return vpn.validate_device({"private_key": private_key, "ipv4_address": ipv4.split(",")[0].strip(),
-                                    "ipv6_address": ipv6.split(",")[0].strip()})
-    except VpnError as exc:
-        raise VpnError("the Mullvad connection %s holds no usable device (%s); log in again" % (connection.uuid, exc))
-
-
 def request_relay(doc: object) -> vpn.Relay:
     try:
         return vpn.validate_relay(doc)
     except VpnError as exc:
         raise VpnError("the request holds no usable relay: %s" % exc)
+
+
+def request_device(doc: object) -> vpn.Device:
+    try:
+        return vpn.validate_device(doc)
+    except VpnError as exc:
+        raise VpnError("the request holds no usable device: %s" % exc)
+
+
+def undo_made(made: List[str], exc: VpnError) -> VpnError:
+    """The error for an operation that failed with `exc` after it made connections: they are deleted again, so that no connection is
+    left without its key. A deletion that fails is said in the error too."""
+    problems = []
+    for uuid in made:
+        try:
+            vpn.nm_delete(uuid)
+        except VpnError as cleanup:
+            problems.append("%s: %s" % (uuid, cleanup))
+    return exc if not problems else VpnError("%s; and these connections could not be removed: %s" % (exc, "; ".join(problems)))
 
 
 def op_import(request: dict) -> None:
@@ -149,59 +162,119 @@ def op_import(request: dict) -> None:
             if not isinstance(entry, dict) or not isinstance(entry.get("file"), str) or not isinstance(entry.get("text"), str):
                 raise VpnError("not a file entry")
             _, conf = vpn.check_conf(vpn.encode_conf(entry["text"]))
-        country = vekrona_countries.country_in_file_name(entry["file"])
-        checked.append((conf, vpn.ConnectionId(vendor, country, vpn.connection_name(entry["file"]))))
+        checked.append((conf, vpn.import_id(vendor, entry["file"])))
+    vpn.require_distinct_ids([(ident, entry["file"]) for (_, ident), entry in zip(checked, files)])
+    made: List[str] = []
+    replaced: List[vpn.Connection] = []
     for done, (conf, ident) in enumerate(checked):
+        replaced += [connection for connection in vpn.nm_connections() if connection.full_id == str(ident)]
         try:
-            older = [connection for connection in vpn.nm_connections() if connection.full_id == str(ident)]
-            import_conf(conf, ident)
-            delete_all(older)
+            import_conf(conf, ident, made)
         except VpnError as exc:
-            # The files are checked before the first is imported, so what fails here is NetworkManager: say how far it got.
-            raise VpnError("file %d: %s (%d of %d files were imported before it)" % (done + 1, exc, done, len(checked)))
+            # The files are checked before the first is imported, so what fails here is NetworkManager: say how far it got, and
+            # delete what this import made, so that no connection is left without its key.
+            raise undo_made(made, VpnError("file %d: %s (%d of %d files were imported before it)" % (done + 1, exc, done, len(checked))))
+    try:
+        delete_all(replaced)
+    except VpnError as exc:
+        raise undo_made(made, exc)
 
 
 def op_login(request: dict) -> None:
-    try:
-        device = vpn.validate_device(request.get("device"))
-    except VpnError as exc:
-        raise VpnError("the request holds no usable device: %s" % exc)
+    device = request_device(request.get("device"))
     relay = request_relay(request.get("relay"))
     older = [connection for connection in vpn.nm_connections() if connection.vendor == vpn.VENDOR_MULLVAD]
-    import_conf(vpn.mullvad_conf(device, relay), vpn.ConnectionId(vpn.VENDOR_MULLVAD, relay.country.upper(), relay.hostname))
-    delete_all(older)
+    made: List[str] = []
+    try:
+        import_conf(vpn.mullvad_conf(device, relay), vpn.ConnectionId(vpn.VENDOR_MULLVAD, relay.country.upper(), relay.hostname), made)
+        delete_all(older)
+    except VpnError as exc:
+        raise undo_made(made, exc)
 
 
-def mullvad_connection_for(relay: vpn.Relay) -> Tuple[str, List[vpn.Connection]]:
-    """(uuid, the connections to delete once it is in use) for a connection to `relay`, made from the device that the connections
-    Mullvad already has hold. The connections of the relay's country are the ones to delete, and only after the new one exists, so
-    that the device key is never in fewer places than one."""
+def mullvad_connection_for(relay: vpn.Relay, device: vpn.Device, made: List[str]) -> Tuple[str, List[vpn.Connection]]:
+    """(uuid, the connections to delete once it is in use) for a connection to `relay` with the Mullvad `device` of the request. The
+    connections of the relay's country are the ones to delete, and only after the new one exists, so that the device key is never
+    in fewer places than one. `made` gets the new uuid (see import_conf)."""
     country = relay.country.upper()
-    mullvad = [connection for connection in vpn.nm_connections() if connection.vendor == vpn.VENDOR_MULLVAD]
-    if not mullvad:
-        raise VpnError("Mullvad is not logged in")
-    uuid = import_conf(vpn.mullvad_conf(device_of(mullvad[0]), relay), vpn.ConnectionId(vpn.VENDOR_MULLVAD, country, relay.hostname))
-    delete_after = [connection for connection in mullvad if connection.country == country]
-    return uuid, delete_after
+    older = [connection for connection in vpn.nm_connections() if connection.vendor == vpn.VENDOR_MULLVAD]
+    uuid = import_conf(vpn.mullvad_conf(device, relay), vpn.ConnectionId(vpn.VENDOR_MULLVAD, country, relay.hostname), made)
+    return uuid, [connection for connection in older if connection.country == country]
 
 
 def op_connect(request: dict) -> None:
-    """Arm the kill switch for the connection's endpoint, then bring the connection up. Arming comes first, and a failure after it
-    leaves traffic blocked: the person tries again or turns the VPN off."""
+    """Arm the kill switch for the connection's endpoint, then bring the connection up with the keys of the request. Arming comes
+    first, and a failure after it leaves traffic blocked: the person tries again or turns the VPN off."""
     delete_after: List[vpn.Connection] = []
     if "uuid" in request:
         uuid = vpn.require_uuid(request["uuid"])
-        if uuid not in {connection.uuid for connection in vpn.nm_connections()}:
+        connections = {connection.uuid: connection for connection in vpn.nm_connections()}
+        if uuid not in connections:
             raise VpnError("not a connection of vekrona-vpn")
+        keys = vpn.validate_keys(request.get("keys"))
+        vpn.require_bound_to_tunnel(uuid, connections[uuid].full_id)
     else:
-        uuid, delete_after = mullvad_connection_for(request_relay(request.get("mullvad")))
+        device = request_device(request.get("device"))
+        made: List[str] = []
+        try:
+            uuid, delete_after = mullvad_connection_for(request_relay(request.get("mullvad")), device, made)
+        except VpnError as exc:
+            raise undo_made(made, exc)
+        keys = {"private_key": device.private_key}
     arm(uuid, vpn.nm_endpoint(uuid))
     for connection in vpn.nm_connections():
         if connection.is_active and connection.uuid != uuid:
             vpn.nm_down(connection.uuid)
     vpn.require_kill_switch()
-    vpn.nm_up(uuid)
+    vpn.nm_up(uuid, keys["private_key"])
+    if "preshared_key" in keys:
+        try:
+            vpn.wg_set_preshared(uuid, keys["preshared_key"])
+        except VpnError as exc:
+            # A tunnel without its preshared key carries nothing: it goes down, and the kill switch stays armed.
+            try:
+                vpn.nm_down(uuid)
+            except VpnError as down:
+                raise VpnError("the preshared key of the peer could not be set (%s), and the tunnel could not be taken down: %s" % (exc, down))
+            raise VpnError("the preshared key of the peer could not be set, so the tunnel is down and the kill switch stays armed (%s)" % exc)
     delete_all([connection for connection in delete_after if connection.uuid != uuid])
+
+
+def sealed_entry(connection: vpn.Connection) -> Optional[dict]:
+    """The keys of a connection whose keyfile holds its private key, for the user to store; None when its key is sealed already."""
+    flags, private_key, peers, ipv4, ipv6 = vpn.nm_get(
+        connection.uuid, ["wireguard.private-key-flags", "wireguard.private-key", "wireguard.peers", "ipv4.addresses", "ipv6.addresses"],
+        secrets=True)
+    if not vpn.key_in_keyfile(vpn.key_flags_of(flags)):
+        return None
+    entry = {"uuid": connection.uuid, "id": connection.full_id, "vendor": connection.vendor, "private_key": private_key,
+             "ipv4_address": ipv4.split(",")[0].strip(), "ipv6_address": ipv6.split(",")[0].strip()}
+    preshared = vpn.preshared_key_in(peers)
+    if preshared is not None:
+        entry["preshared_key"] = preshared
+    return entry
+
+
+def op_seal(uid: int, request: dict) -> None:
+    """`export`: the keys of every connection whose keyfile still holds one go to the user, in sealed.json. `strip`: the connections
+    named by the request lose their keys from NetworkManager, and their keyfiles are checked to hold none."""
+    phase = request.get("phase")
+    if phase == "export":
+        entries = [entry for entry in (sealed_entry(connection) for connection in vpn.nm_connections()) if entry is not None]
+        vpn.write_sealed(uid, entries)
+    elif phase == "strip":
+        uuids = request.get("uuids")
+        if not isinstance(uuids, list) or not all(vpn.is_uuid(uuid) for uuid in uuids):
+            raise VpnError("the request holds no list of connection uuids")
+        known = {connection.uuid for connection in vpn.nm_connections()}
+        for uuid in uuids:
+            if uuid not in known:
+                raise VpnError("not a connection of vekrona-vpn")
+            vpn.nm_modify(uuid, vpn.nm_seal_settings(uuid))
+        for uuid in uuids:
+            vpn.require_keyfile_without_secrets(uuid)
+    else:
+        raise VpnError("seal has no phase of that name")
 
 
 def op_off(request: dict) -> None:
@@ -226,13 +299,23 @@ def op_forget(request: dict) -> None:
 OPERATIONS = {"import": op_import, "login": op_login, "connect": op_connect, "off": op_off, "forget": op_forget}
 
 
+def run_operation(op: str, uid: int, request: dict) -> None:
+    """Only `seal` writes into the user's runtime directory, so only it is given the user's uid."""
+    if op == "seal":
+        op_seal(uid, request)
+    else:
+        OPERATIONS[op](request)
+
+
 def apply(instance: str) -> None:
     op, uid = vpn.parse_instance(instance)
     with vpn.exclusive_lock(vpn.RUN_DIR, vpn.PUBLIC_DIR_MODE):
+        # An export of `seal` that nothing took back (its client died) does not outlive the next operation of its user.
+        vpn.remove_sealed(uid)
         request = vpn.read_request(uid)
         nonce = vpn.require_nonce(request.get("nonce"))
         try:
-            OPERATIONS[op](request)
+            run_operation(op, uid, request)
         except VpnError as exc:
             try:
                 vpn.record_receipt(uid, vpn.Receipt(nonce, str(exc)))

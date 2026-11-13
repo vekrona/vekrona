@@ -290,3 +290,29 @@ fi
 # shell reads the checkout's QML at once (and shows "out of date" for the watcher's sync.json).
 ensure_user_unit_enabled vekrona-sync.service
 systemctl --user restart vekrona-sync.service || die "vekrona-sync.service failed to start"
+
+# Whether a vekrona-vpn profile keeps its private key in its keyfile: the secret flags of the key read 0 then (no secret is read, as
+# `vekrona-vpn connect` checks it too).
+vekrona_profile_keeps_key() {
+  local uuid type name flags
+  while IFS=: read -r uuid type name; do
+    [[ "$type" == wireguard && "$name" == vekrona-vpn/* ]] || continue
+    flags="$(nmcli -g wireguard.private-key-flags connection show uuid "$uuid")" || die "cannot read the secret flags of $uuid"
+    [[ "$flags" == 0* ]] && return 0
+  done < <(nmcli -t -f UUID,TYPE,NAME connection show)
+  return 1
+}
+
+# A key that an earlier vekrona left in a NetworkManager keyfile moves to the keyring. The seal runs as a transient user unit, the
+# request its helper makes is accepted from the user's systemd manager only (polkit), and it needs the keyring of the session. NetworkManager
+# must run for the connections to be listed; without it, or without such a key, there is nothing to seal.
+if systemctl is-active --quiet NetworkManager; then
+  if vekrona_profile_keeps_key; then
+    systemd-run --user --wait --pipe --quiet "$VEKRONA_ROOT/bin/vekrona-vpn" seal \
+      || die "vekrona-vpn seal failed: keys stay in NetworkManager's keyfiles until it succeeds"
+  else
+    log "no vekrona-vpn profile keeps a key in its keyfile: nothing to seal"
+  fi
+else
+  log "skipping vekrona-vpn seal: NetworkManager is not running"
+fi

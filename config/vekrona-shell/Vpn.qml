@@ -38,25 +38,27 @@ BarPill {
         VpnState.command(args, stdout => onOk?.(), reason => failure = reason);
     }
 
-    // Runs a vekrona-vpn command that opens a dialog of its own: the popout closes first, so that the dialog is not under
-    // the Catcher, and a failure comes as a notification, like the keep-awake ones.
+    // Runs a vekrona-vpn command that may open a dialog of its own or a keyring prompt (connect, forget, import): the popout
+    // closes first, so that the dialog is not under the Catcher and the prompt gets the keyboard, and a failure comes as a
+    // notification, like the keep-awake ones.
     function runClosing(args: list<string>): void {
         bar.openPopout = null;
         VpnState.command(args, stdout => {}, reason => Exec.check(["notify-send", "-a", "vekrona", "VPN", reason]));
     }
 
+    // Stores the account number in the keyring, which may prompt: the popout closes first, as runClosing does.
     function logIn(): void {
         const account = accountField.text.trim();
         if (account === "")
             return;
-        failure = "";
-        VpnState.logIn(account, () => accountField.text = "", reason => failure = reason);
+        bar.openPopout = null;
+        VpnState.logIn(account, () => {}, reason => Exec.check(["notify-send", "-a", "vekrona", "VPN", reason]));
     }
 
     function forget(): void {
         const uuid = forgetTarget.uuid;
         forgetTarget = null;
-        run(["forget", uuid], () => VpnState.loadList());
+        runClosing(["forget", uuid]);
     }
 
     // Whether the tunnel of the row's connection is the one that is up or coming up.
@@ -95,7 +97,7 @@ BarPill {
                 forgettable: forgettable,
                 forgetUuid: forgettable ? choices[0].uuid : "",
                 forgetName: forgettable ? choices[0].name : "",
-                activate: single ? () => run(choices[0].args) : () => countryCode = entry.code
+                activate: single ? () => runClosing(choices[0].args) : () => countryCode = entry.code
             };
         });
     }
@@ -111,7 +113,7 @@ BarPill {
                     forgettable: true,
                     forgetUuid: choice.uuid,
                     forgetName: choice.name,
-                    activate: () => run(choice.args)
+                    activate: () => runClosing(choice.args)
                 }));
     }
 

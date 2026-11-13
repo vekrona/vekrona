@@ -10,6 +10,7 @@ keeps its state in STUB_DIR, which the scenario writes and reads:
   login.stdin   what `mullvad login` read on its stdin
   status.gate   a fifo: while it exists, `status` waits until somebody opens it for writing, so a scenario holds the first answer back
   import-fails  while this file exists, `import` fails with the text in it
+  connect-fails while this file exists, `connect` fails with the text in it (and changes nothing)
 
 `connect` and `off` change status.json as the real tool changes the state; `mullvad login` accepts ACCOUNT only."""
 import json
@@ -58,6 +59,9 @@ def find(args):
 
 
 def connect(args):
+    if os.path.exists(path("connect-fails")):
+        with open(path("connect-fails"), encoding="utf-8") as handle:
+            fail(handle.read().strip())
     connection = find(args)
     if connection is None:
         fail("no such configuration: " + " ".join(args))

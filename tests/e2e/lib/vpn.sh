@@ -1,14 +1,17 @@
 # shellcheck shell=bash
 # Sourced by the VPN scenarios, after tests/lib.sh (so it lives in lib/, out of reach of a glob that runs every scenario).
 #
-# The credentials stay on the host, never in the repo and never printed, in $VPN_SECRETS_DIR (default ~/.cache/vekrona-vpn-secrets):
-#   *.conf            a WireGuard configuration of Proton VPN (or any provider) whose Address has no IPv6 address, as Proton's
-#                     downloads do; the first one by name is used. Its file name should start with the country ("NL-12.conf")
-#   mullvad-account   the Mullvad account number
+# The credentials stay on the host, never in the repo, never printed and never in a file of the host:
+#   the WireGuard configuration of Proton VPN (or any provider) whose Address has no IPv6 address, as Proton's downloads do, is an item
+#                     of the host's keyring (gnome-keyring): application vekrona-vpn, kind e2e-conf, id VEKRONA_VPN_E2E_CONF, which names
+#                     the configuration as it imports ("NL-12"). Store it with
+#                       secret-tool store --label="vekrona-vpn e2e conf" application vekrona-vpn kind e2e-conf id NL-12 <NL-12.conf
+#   the Mullvad account number is an item of the same keyring: application vekrona-vpn, kind e2e-mullvad-account, id
+#                     VEKRONA_VPN_E2E_ACCOUNT (the name you choose). Store it with
+#                       printf '%s' 1234567890123456 | secret-tool store --label="vekrona-vpn e2e account" application vekrona-vpn kind e2e-mullvad-account id NAME
 # A scenario that needs one that is not there is skipped with the reason. `vekrona-vpn` runs in the guest as a systemd user
 # service (systemd-run --user), as the bar's popout runs it: polkit lets the units of vekrona-vpn start for the user manager and
 # for a local session, and the ssh session of vekrona-dev is neither.
-VPN_SECRETS_DIR="${VEKRONA_VPN_SECRETS_DIR:-$HOME/.cache/vekrona-vpn-secrets}"
 VPN_GUEST_DIR=/tmp/vekrona-e2e-vpn
 VPN_STEP_TIMEOUT_SEC=90
 # A rejected connection answers in a few milliseconds; a dropped one takes the curl timeout.
@@ -21,20 +24,24 @@ VPN_TAILNET_NETNS=vktail
 VPN_LAN_NETNS=vklan
 export VPN_GUEST_DIR VPN_STEP_TIMEOUT_SEC VPN_DNS_PROBE VPN_FAST_FAIL_MS VPN_PROBE_URL_V4 VPN_PROBE_URL_V6 VPN_EXIT_IP_URL VPN_TAILNET_NETNS VPN_LAN_NETNS
 
+# The configuration as the keyring holds it, on stdout: the text is a key, so it goes to a pipe and never to a file or a log.
+vpn_conf_text() { secret-tool lookup application vekrona-vpn kind e2e-conf id "$VEKRONA_VPN_E2E_CONF"; }
 require_vpn_conf() {
-  local files=("$VPN_SECRETS_DIR"/*.conf)
-  [[ -f "${files[0]}" ]] || skip "no WireGuard configuration: put a Proton *.conf in $VPN_SECRETS_DIR"
-  VPN_CONF="${files[0]}"
-  VPN_CONF_NAME="$(basename "$VPN_CONF" .conf)"
-  export VPN_CONF VPN_CONF_NAME
+  [[ -n "${VEKRONA_VPN_E2E_CONF:-}" ]] || skip "no WireGuard configuration: store one in the keyring (see tests/e2e/lib/vpn.sh) and set VEKRONA_VPN_E2E_CONF to its id"
+  vpn_conf_text >/dev/null || skip "no WireGuard configuration $VEKRONA_VPN_E2E_CONF in the keyring"
+  VPN_CONF_NAME="$VEKRONA_VPN_E2E_CONF"
+  export VPN_CONF_NAME
 }
+# The account number goes to the guest on a pipe, from the keyring of the host; it is never a file.
+vpn_mullvad_account_text() { secret-tool lookup application vekrona-vpn kind e2e-mullvad-account id "$VEKRONA_VPN_E2E_ACCOUNT"; }
 require_vpn_account() {
-  [[ -s "$VPN_SECRETS_DIR/mullvad-account" ]] || skip "no Mullvad account number: put it in $VPN_SECRETS_DIR/mullvad-account"
+  [[ -n "${VEKRONA_VPN_E2E_ACCOUNT:-}" ]] || skip "no Mullvad account number: store one in the keyring (see tests/e2e/lib/vpn.sh) and set VEKRONA_VPN_E2E_ACCOUNT to its id"
+  vpn_mullvad_account_text >/dev/null || skip "no Mullvad account number $VEKRONA_VPN_E2E_ACCOUNT in the keyring"
 }
 # The Proton configuration must have no IPv6 address for the scenarios that look at what IPv6 does then.
 require_vpn_conf_without_ipv6() {
-  if grep -iE '^[[:space:]]*Address[[:space:]]*=.*:' "$VPN_CONF" >/dev/null; then
-    skip "$VPN_CONF has an IPv6 address; this scenario needs a configuration without one"
+  if vpn_conf_text | grep -iE '^[[:space:]]*Address[[:space:]]*=.*:' >/dev/null; then
+    skip "$VPN_CONF_NAME has an IPv6 address; this scenario needs a configuration without one"
   fi
 }
 
@@ -45,10 +52,11 @@ vpn_up() { vpn_status_is '.tunnel == "up"'; }
 vpn_down() { vpn_status_is '.tunnel == "down"'; }
 export -f vpn vpn_status vpn_status_is vpn_up vpn_down
 
-# The configuration is copied into the guest for the import only, private, and removed by vpn_cleanup.
-vpn_guest_write() { vekrona-dev run bash -c 'umask 077 && mkdir -p "$(dirname "$1")" && cat >"$1"' _ "$2" <"$1"; }
+# The configuration is copied into the guest for the import only, private (stdin to the file, so no host file holds it), and removed by
+# vpn_cleanup.
+vpn_guest_write() { vekrona-dev run bash -c 'umask 077 && mkdir -p "$(dirname "$1")" && cat >"$1"' _ "$1"; }
 vpn_import_conf() {
-  vpn_guest_write "$VPN_CONF" "$VPN_GUEST_DIR/$VPN_CONF_NAME.conf"
+  vpn_conf_text | vpn_guest_write "$VPN_GUEST_DIR/$VPN_CONF_NAME.conf"
   vpn import --vendor proton "$VPN_GUEST_DIR/$VPN_CONF_NAME.conf"
 }
 vpn_conf_uuid() {
@@ -60,12 +68,11 @@ vpn_import_conf_uuid() {
   vpn_import_conf
   uuid="$(vpn_conf_uuid)"
   [[ -n "$uuid" ]] || die "the imported configuration $VPN_CONF_NAME is not in vekrona-vpn list"
+  vpn_record_made "$uuid"
   printf '%s\n' "$uuid"
 }
 vpn_mullvad_login() {
-  local account
-  account="$(<"$VPN_SECRETS_DIR/mullvad-account")"
-  printf '%s\n' "$account" | vpn mullvad login
+  { vpn_mullvad_account_text; printf '\n'; } | vpn mullvad login
 }
 guest_exit_ip() { vekrona-dev run curl -4 -sS --max-time 20 "$VPN_EXIT_IP_URL"; }
 export -f vpn_conf_uuid guest_exit_ip
@@ -110,28 +117,26 @@ export -f vpn_stand_in_up vpn_stand_in_down
 # Removes what a scenario made: the tunnel and the kill switch, every connection of vekrona-vpn (a Mullvad one first gives its
 # device back to the account), the stand-in networks and the copied configuration.
 vpn_guest_connections() { vekrona-dev run nmcli -t -f UUID,TYPE,NAME connection show | grep -E '^[0-9a-f-]{36}:wireguard:vekrona-vpn/' || true; }
-vpn_revoke_mullvad_devices() {
-  local line uuid pubkey token device
-  while IFS= read -r line; do
-    [[ "$line" == *':wireguard:vekrona-vpn/mullvad/'* ]] || continue
-    uuid="${line%%:*}"
-    pubkey="$(vekrona-dev run bash -c 'sudo nmcli -s -e no -g wireguard.private-key connection show uuid "$1" | wg pubkey' _ "$uuid")"
-    token="$(curl -fsS -X POST https://api.mullvad.net/auth/v1/token -H 'Content-Type: application/json' \
-      -d "$(jq -nc --arg account "$(<"$VPN_SECRETS_DIR/mullvad-account")" '{account_number: $account}')" | jq -r .access_token)"
-    device="$(curl -fsS https://api.mullvad.net/accounts/v1/devices -H "Authorization: Bearer $token" | jq -r --arg key "$pubkey" '.[] | select(.pubkey == $key) | .id')"
-    [[ -n "$device" ]] || die "Mullvad does not list the device of $uuid; remove it at https://mullvad.net/account"
-    curl -fsS -X DELETE "https://api.mullvad.net/accounts/v1/devices/$device" -H "Authorization: Bearer $token" >/dev/null
-  done < <(vpn_guest_connections)
+# Logs the device out of the Mullvad account: the guest's own keyring holds the account and the device, and `mullvad logout` removes
+# the device at Mullvad and forgets the Mullvad connections.
+vpn_mullvad_logout() { vpn mullvad logout; }
+# The connections this scenario made, by uuid, in the guest: every scenario records the ones it creates (vpn_record_made), and cleanup
+# forgets those and no other connection of the guest.
+vpn_record_made() {
+  [[ -n "$1" ]] || return 0
+  vekrona-dev run bash -c 'mkdir -p "$1" && printf "%s\n" "$2" >>"$1/made-connections"' _ "$VPN_GUEST_DIR" "$1"
 }
+vpn_made_connections() { vekrona-dev run bash -c 'cat "$1/made-connections" 2>/dev/null || true' _ "$VPN_GUEST_DIR"; }
 vpn_forget_all() {
-  local line
-  while IFS= read -r line; do
-    vpn forget "${line%%:*}"
-  done < <(vpn_guest_connections)
+  local uuid listed
+  listed="$(vpn_guest_connections | cut -d: -f1)"
+  while IFS= read -r uuid; do
+    if grep -qxF -- "$uuid" <<<"$listed"; then vpn forget "$uuid"; fi
+  done < <(vpn_made_connections)
 }
 vpn_cleanup() {
   local steps=(vpn_off)
-  if [[ -s "$VPN_SECRETS_DIR/mullvad-account" ]]; then steps+=(vpn_revoke_mullvad_devices); fi
+  if [[ -n "${VEKRONA_VPN_E2E_ACCOUNT:-}" ]]; then steps+=(vpn_mullvad_logout); fi
   run_cleanups "${steps[@]}" vpn_forget_all "vpn_stand_in_down $VPN_TAILNET_NETNS" "vpn_stand_in_down $VPN_LAN_NETNS" \
     'vekrona-dev run rm -rf "$VPN_GUEST_DIR"'
 }

@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import vekrona_vpn
 from vekrona_vpn import VpnError
@@ -25,7 +25,7 @@ HTTP_TIMEOUT_SEC = 15
 MAX_DEVICES_REACHED = "MAX_DEVICES_REACHED"
 # The API is asked again for the relay list when its cache is older than this.
 RELAYS_MAX_AGE_SEC = 24 * 60 * 60
-WG_TOOL = "wg"
+WG_TOOL = vekrona_vpn.WG_TOOL
 
 
 class ApiError(Exception):
@@ -202,10 +202,14 @@ def read_account(stdin: Any = None) -> str:
     return account
 
 
+def public_key_of(private_key: str) -> str:
+    return vekrona_vpn.run([WG_TOOL, "pubkey"], input_text=private_key + "\n", secret=True).strip()
+
+
 def new_key_pair() -> Tuple[str, str]:
     """(private key, public key) from `wg genkey` and `wg pubkey`."""
     private_key = vekrona_vpn.run([WG_TOOL, "genkey"], secret=True).strip()
-    return private_key, vekrona_vpn.run([WG_TOOL, "pubkey"], input_text=private_key + "\n", secret=True).strip()
+    return private_key, public_key_of(private_key)
 
 
 def api_token(account: str) -> str:
@@ -217,11 +221,18 @@ def api_token(account: str) -> str:
         raise VpnError("Mullvad's token answer has no access_token")
 
 
+def list_devices(token: str) -> List[Any]:
+    """The devices of the account as Mullvad lists them (id, name, pubkey, ...)."""
+    try:
+        return http_json("GET", "/accounts/v1/devices", token=token)
+    except ApiError as err:
+        raise VpnError("cannot list the devices of the account: %s" % err)
+
+
 def max_devices_message(token: str) -> str:
     try:
-        devices = http_json("GET", "/accounts/v1/devices", token=token)
-        listing = ", ".join(str(device.get("name")) for device in devices)
-    except (ApiError, AttributeError, TypeError) as err:
+        listing = ", ".join(str(device.get("name")) for device in list_devices(token))
+    except (VpnError, AttributeError, TypeError) as err:
         listing = "the list could not be read (%s)" % err
     return ("the account already has the maximum number of devices (%s); nothing was removed. Remove one at "
             "https://mullvad.net/account and try again" % listing)

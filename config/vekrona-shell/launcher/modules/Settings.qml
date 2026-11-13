@@ -409,7 +409,7 @@ LauncherModule {
                             {
                                 id: "connect",
                                 label: "Connect",
-                                run: () => root.vpnCommand(choice.args, "Connecting to " + choice.name, "Connected to " + choice.name)
+                                run: () => root.vpnClosingCommand(choice.args)
                             }
                         ]
                     });
@@ -433,6 +433,13 @@ LauncherModule {
         launcher.toast(progress);
         Shell.VpnState.command(args, stdout => launcher.toast(done), reason => launcher.toast(reason));
         return false;
+    }
+
+    // Runs a vekrona-vpn command that may prompt the keyring (a connect): the launcher closes first, so that the prompt gets the
+    // keyboard, and a failure is a notification, as the bar's popout reports it. Returns true: the launcher closes.
+    function vpnClosingCommand(args: list<string>): bool {
+        Shell.VpnState.command(args, stdout => {}, reason => Shell.Exec.check(["notify-send", "-a", "vekrona", "VPN", reason]));
+        return true;
     }
 
     // vekrona-agent list prints "<tool>  installed|not installed  default|-" per tool.

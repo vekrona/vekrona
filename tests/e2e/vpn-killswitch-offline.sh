@@ -52,6 +52,7 @@ START="$(vekrona-dev run date '+%x %T')"
 write_conf
 vpn import --vendor other "$GUEST_CONF"
 UUID="$(other_conf_uuid)"
+vpn_record_made "$UUID"
 [[ -n "$UUID" ]] || die "the imported configuration $CONF_NAME is not in vekrona-vpn list under other"
 
 vpn connect "$UUID" || die "connect must succeed: the helper could not run nft"

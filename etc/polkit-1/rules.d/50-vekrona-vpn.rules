@@ -9,7 +9,7 @@ polkit.addRule(function(action, subject) {
     return;
   }
   var unit = action.lookup("unit");
-  var applies = /^vekrona-vpn-apply@(import|login|connect|off|forget)-(0|[1-9][0-9]{0,8})\.service$/.test(unit);
+  var applies = /^vekrona-vpn-apply@(import|login|connect|off|forget|seal)-(0|[1-9][0-9]{0,8})\.service$/.test(unit);
   var atTheMachine = subject.active && subject.local;
   var inUserManager = /^user@[0-9]+\.service$/.test(subject.system_unit);
   if (applies && action.lookup("verb") == "start" && (atTheMachine || inUserManager) && subject.isInGroup("wheel")) {

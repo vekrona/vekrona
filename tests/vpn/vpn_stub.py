@@ -1,9 +1,15 @@
 """Test doubles for vekrona-vpn: stub system binaries and a local HTTP fixture for Mullvad's API.
 
-The stubs stand in for nmcli, nft, systemctl, getent and wg. Each logs its argv and stdin as one JSON line (and the
+The stubs stand in for nmcli, nft, systemctl, getent, wg, secret-tool and busctl. Each logs its argv and stdin as one JSON line (and the
 content of the file an `nmcli ... file PATH` names, which the helper deletes right after the import) and then behaves as the
 first matching rule of behaviors.json says (default: exit 0, no output). A rule matches when its argv is a prefix of the call's;
-`times` limits how often it answers, and later `behave` calls win over earlier ones."""
+`times` limits how often it answers, and later `behave` calls win over earlier ones. secret-tool, when no rule answers, keeps
+its items in keyring.json, next to the call log: `store` takes the secret on stdin, `lookup` and `clear` of a missing item exit 1
+with no output (as on the VM), and the secret of an item is never written to the call log's argv. The collection is locked when
+keyring.locked says so: then `lookup` and `clear` exit 1 with no output (a dismissed prompt), and `store` exits 1 with "Cannot create
+an item in a locked collection". busctl answers the lock of the default collection from keyring.locked, as the Secret Service does.
+nmcli refuses a `connection modify` of wireguard.peers that does not carry endpoint= and allowed-ips= (NetworkManager replaces the
+whole peer with the value given)."""
 
 import json
 import socket
@@ -14,7 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 
-STUBBED_TOOLS = ("nmcli", "nft", "systemctl", "getent", "wg")
+STUBBED_TOOLS = ("nmcli", "nft", "systemctl", "getent", "wg", "secret-tool", "busctl")
 
 STUB_SOURCE = """#!{python} -S
 import json, os, sys
@@ -29,6 +35,11 @@ with open(os.environ["VPN_STUB_LOG"], "a") as log:
     log.write(json.dumps(entry) + "\\n")
 with open(os.environ["VPN_STUB_BEHAVIORS"]) as handle:
     behaviors = json.load(handle)
+if tool == "nmcli" and "modify" in argv and "wireguard.peers" in argv:
+    peer = argv[argv.index("wireguard.peers") + 1]
+    if "endpoint=" not in peer or "allowed-ips=" not in peer:
+        sys.stderr.write("Error: the peer is replaced by the value given, which has no endpoint or allowed-ips\\n")
+        sys.exit(2)
 for rule in behaviors.get(tool, []):
     if argv[: len(rule["argv"])] == rule["argv"]:
         if rule.get("used", 0) == rule.get("times", -1):
@@ -39,6 +50,39 @@ for rule in behaviors.get(tool, []):
         sys.stdout.write(rule.get("stdout", ""))
         sys.stderr.write(rule.get("stderr", ""))
         sys.exit(rule.get("rc", 0))
+if tool == "busctl":
+    with open(os.environ["VPN_STUB_LOCKED"]) as handle:
+        sys.stdout.write("b " + handle.read().strip() + "\\n")
+    sys.exit(0)
+if tool == "secret-tool":
+    # The attributes are the pairs after the verb (and after --label for store): application, kind and id.
+    verb, rest = argv[0], [arg for arg in argv[1:] if not arg.startswith("--label=")]
+    attributes = dict(zip(rest[0::2], rest[1::2]))
+    keyring_path = os.environ["VPN_STUB_KEYRING"]
+    with open(keyring_path) as handle:
+        items = json.load(handle)
+    with open(os.environ["VPN_STUB_LOCKED"]) as handle:
+        locked = handle.read().strip() == "true"
+    matching = [item for item in items if item["attributes"] == attributes]
+    if verb == "store" and locked:
+        sys.stderr.write("Cannot create an item in a locked collection\\n")
+        sys.exit(1)
+    if verb == "lookup":
+        if locked or not matching:
+            sys.exit(1)
+        sys.stdout.write(matching[0]["secret"])
+        sys.exit(0)
+    if verb == "store":
+        items = [item for item in items if item["attributes"] != attributes]
+        items.append({{"attributes": attributes, "secret": stdin}})
+    elif verb == "clear":
+        if locked or not matching:
+            sys.exit(1)
+        items = [item for item in items if item["attributes"] != attributes]
+    else:
+        sys.exit(2)
+    with open(keyring_path, "w") as handle:
+        json.dump(items, handle)
 sys.exit(0)
 """
 
@@ -50,6 +94,10 @@ class Stubs:
         self.bin.mkdir(parents=True)
         self.log = directory / "calls.jsonl"
         self.log.touch()
+        self.keyring_file = directory / "keyring.json"
+        self.keyring_file.write_text("[]")
+        self.locked_file = directory / "keyring.locked"
+        self.locked_file.write_text("false")
         self.behaviors_file = directory / "behaviors.json"
         self.behaviors: Dict[str, List[dict]] = {
             # No tor user, as on a machine without tor.
@@ -74,7 +122,34 @@ class Stubs:
         self._save()
 
     def env(self) -> Dict[str, str]:
-        return {"VPN_STUB_LOG": str(self.log), "VPN_STUB_BEHAVIORS": str(self.behaviors_file)}
+        return {"VPN_STUB_LOG": str(self.log), "VPN_STUB_BEHAVIORS": str(self.behaviors_file),
+                "VPN_STUB_KEYRING": str(self.keyring_file), "VPN_STUB_LOCKED": str(self.locked_file)}
+
+    def lock(self, locked: bool = True) -> None:
+        """Locks the keyring's default collection (or unlocks it): what the Secret Service then answers, for secret-tool and busctl."""
+        self.locked_file.write_text("true" if locked else "false")
+
+    def keyring(self) -> List[dict]:
+        """Every item of the keyring: {"attributes": {...}, "secret": str}."""
+        return json.loads(self.keyring_file.read_text())
+
+    def stored(self, kind: str, ident: str) -> Optional[dict]:
+        """The secret of the keyring item of `kind` and `ident`, decoded, or None."""
+        for item in self.keyring():
+            if item["attributes"] == {"application": "vekrona-vpn", "kind": kind, "id": ident}:
+                return json.loads(item["secret"])
+        return None
+
+    def seed(self, kind: str, ident: str, value: dict) -> None:
+        """Puts an item into the keyring as if an earlier call had stored it."""
+        attributes = {"application": "vekrona-vpn", "kind": kind, "id": ident}
+        items = [item for item in self.keyring() if item["attributes"] != attributes]
+        items.append({"attributes": attributes, "secret": json.dumps(value)})
+        self.keyring_file.write_text(json.dumps(items))
+
+    def keyring_secrets(self) -> List[str]:
+        """The secret text of every keyring item."""
+        return [item["secret"] for item in self.keyring()]
 
     def calls(self, tool: Optional[str] = None) -> List[dict]:
         entries = [json.loads(line) for line in self.log.read_text().splitlines()]

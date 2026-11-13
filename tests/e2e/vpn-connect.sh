@@ -46,6 +46,7 @@ vpn_mullvad_login
 vpn list | jq -e '.vendors[] | select(.id == "mullvad") | .countries | any(.[]; .code == "SE")' >/dev/null || die "Mullvad's relay list must name Sweden"
 vpn_status_is '.mullvad.logged_in' || die "status must say that Mullvad is logged in"
 vpn connect mullvad se
+vpn_record_made "$(vpn_status | jq -r '.connection.uuid // empty')"
 vekrona-dev until --timeout "$VPN_STEP_TIMEOUT_SEC" -- vpn_up
 vpn_status_is '.connection.vendor == "mullvad" and .connection.country == "SE" and .armed' || die "status must name the Mullvad connection in SE: $(vpn_status)"
 vekrona-dev until --timeout "$VPN_STEP_TIMEOUT_SEC" -- mullvad_says_connected

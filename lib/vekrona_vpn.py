@@ -6,12 +6,12 @@ Every number and name that two sides must agree on is defined once here: the fwm
 own packets is the one the kill switch lets through to the endpoint, and the interface name is the one the kill switch
 accepts."""
 import base64
-import binascii
 import contextlib
 import fcntl
 import ipaddress
 import json
 import os
+import pwd
 import re
 import secrets
 import stat
@@ -180,7 +180,7 @@ def _items(values: Sequence[str], key: str) -> List[str]:
 def _wg_key(value: str, key: str) -> str:
     try:
         raw = base64.b64decode(value, validate=True)
-    except binascii.Error:
+    except ValueError:  # binascii.Error, and the ValueError for text that is not ASCII
         raw = b""
     if len(raw) != WG_KEY_BYTES:
         raise VpnError("%s is not a WireGuard key" % key)
@@ -289,19 +289,30 @@ def check_conf(raw: bytes) -> Tuple[str, WgConf]:
     return text, parse_conf(text)
 
 
+# What an import file carries in place of the private key: 32 zero bytes, a key that is public and means nothing. NetworkManager writes
+# what it imports into its keyfile, so the real key never goes there; nm_settings_for clears this one in the change that follows.
+PLACEHOLDER_KEY = base64.b64encode(bytes(WG_KEY_BYTES)).decode()
+# The secret flag of the private key that NetworkManager does not keep in its keyfile (nmcli's "not-saved", 0x2): the key is given
+# to `nmcli connection up` on stdin every time.
+SECRET_FLAG_NOT_SAVED = 2
+# The secret flag of a peer's preshared key that NetworkManager neither stores nor asks for (nmcli's "not-required", 0x4): the key is
+# set on the live interface by wg_set_preshared after the activation.
+SECRET_FLAG_NOT_REQUIRED = 4
+WG_TOOL = "wg"
+
+
 def render_import_conf(conf: WgConf) -> str:
     """The configuration as `nmcli connection import` reads it, in one fixed shape with only what parse_conf accepts, so that
-    nothing of the file the user chose except these fields reaches NetworkManager. It carries `Table = off`, which the importer
+    nothing of the file the user chose except these fields reaches NetworkManager. Neither key of the file is in it: the private
+    key is PLACEHOLDER_KEY, and the preshared key is left out. It carries `Table = off`, which the importer
     turns into wireguard.peer-routes=no. NetworkManager autoconnects a profile it has just been given, and the profile is born with
     autoconnect on and cannot be told otherwise by the import; without routes that tunnel carries nothing. nm_settings_for puts the
     routes back in the same change that turns autoconnect off, so no profile ever has both."""
-    lines = ["[Interface]", "PrivateKey = " + conf.private_key, "Address = " + ", ".join(conf.addresses),
+    lines = ["[Interface]", "PrivateKey = " + PLACEHOLDER_KEY, "Address = " + ", ".join(conf.addresses),
              "DNS = " + ", ".join(conf.dns)]
     if conf.mtu is not None:
         lines.append("MTU = %d" % conf.mtu)
     lines += ["Table = off", "", "[Peer]", "PublicKey = " + conf.peer_public_key]
-    if conf.preshared_key is not None:
-        lines.append("PresharedKey = " + conf.preshared_key)
     lines += ["Endpoint = %s" % conf.endpoint, "AllowedIPs = " + ", ".join(conf.allowed_ips)]
     if conf.keepalive is not None:
         lines.append("PersistentKeepalive = %d" % conf.keepalive)
@@ -315,6 +326,11 @@ def connection_name(file_name: str) -> str:
         stem = stem[: -len(".conf")]
     cleaned = "".join(char for char in stem if char.isprintable()).strip()
     return cleaned[:MAX_NAME_CHARS].strip() or "wireguard"
+
+
+def import_id(vendor: str, file_name: str) -> "ConnectionId":
+    """The connection id of a configuration of `vendor` imported from the file `file_name`: the one the helper and the client both give."""
+    return ConnectionId(vendor, vekrona_countries.country_in_file_name(file_name), connection_name(file_name))
 
 
 # ---- Mullvad: the device and the relay ----------------------------------------------------------------------------------
@@ -375,6 +391,18 @@ def validate_device(device: object) -> Device:
     except ValueError:
         raise VpnError("a device address is not an IPv4 or IPv6 address without a scope id")
     return Device(**device)
+
+
+KEY_FIELDS = frozenset({"private_key", "preshared_key"})
+
+
+def validate_keys(doc: object) -> Dict[str, str]:
+    """{"private_key", "preshared_key"?} of a request or of the keyring: WireGuard keys and nothing else. Raises VpnError otherwise."""
+    if not isinstance(doc, dict) or "private_key" not in doc or not set(doc) <= KEY_FIELDS:
+        raise VpnError("the keys have the wrong shape")
+    if not all(isinstance(value, str) for value in doc.values()):
+        raise VpnError("a key is not text")
+    return {name: _wg_key(value, name) for name, value in doc.items()}
 
 
 def mullvad_conf(device: Device, relay: Relay) -> WgConf:
@@ -531,7 +559,7 @@ def nm_connections() -> List[Connection]:
 
 def nm_unfinished_imports() -> List[str]:
     """The uuids of profiles that an import began and did not finish (the helper was killed between the import and the change that
-    names the connection): they hold a private key and are named IMPORT_NAME."""
+    names the connection): they hold only the placeholder key, and are named IMPORT_NAME."""
     return [uuid for uuid, kind, name in nm_listing() if kind == "wireguard" and name == IMPORT_NAME]
 
 
@@ -565,28 +593,127 @@ def nm_import(conf_path: str) -> str:
     return match.group(1)
 
 
+def peer_text(conf: WgConf) -> str:
+    """The value of wireguard.peers for the one peer of `conf`, with its preshared key marked not required and the key itself left out
+    (wg_set_preshared gives it to the interface at every connect)."""
+    attributes = ["endpoint=%s" % conf.endpoint, "allowed-ips=%s" % ";".join(conf.allowed_ips)]
+    if conf.keepalive is not None:
+        attributes.append("persistent-keepalive=%d" % conf.keepalive)
+    attributes.append("preshared-key-flags=%d" % SECRET_FLAG_NOT_REQUIRED)
+    return " ".join([conf.peer_public_key, *attributes])
+
+
 def nm_settings_for(conf: WgConf, full_id: str) -> List[str]:
     """The nmcli property/value arguments, for one `nmcli connection modify`, that turn a connection imported from
     render_import_conf into a vekrona-vpn one: named, on the interface of the tunnel in use, never started by NetworkManager
     itself (and its routes back, which the import left out so that an autoconnect before this change carries nothing), tunnel
     packets marked, all DNS through the tunnel, and no IPv6 of its own when the file has none (an IPv6 default route into a tunnel
-    that has no IPv6 address is a black hole; without it the kill switch rejects at once)."""
+    that has no IPv6 address is a black hole; without it the kill switch rejects at once). The private key is cleared and marked
+    not saved, and so is the preshared key of the peer, which the import never had: NetworkManager keeps no key of the connection."""
     settings = ["connection.id", full_id, "connection.interface-name", INTERFACE, "connection.autoconnect", "no",
                 "wireguard.peer-routes", "yes", "wireguard.fwmark", WG_FWMARK_HEX,
-                "ipv4.dns-priority", "-1", "ipv4.dns-search", "~."]
+                "ipv4.dns-priority", "-1", "ipv4.dns-search", "~.",
+                "wireguard.private-key", "", "wireguard.private-key-flags", str(SECRET_FLAG_NOT_SAVED)]
     if conf.has_ipv6:
         settings += ["ipv6.dns-priority", "-1", "ipv6.dns-search", "~."]
     else:
         settings += ["ipv6.method", "disabled"]
+    if conf.preshared_key is not None:
+        settings += ["wireguard.peers", peer_text(conf)]
     return settings
+
+
+PRESHARED_PREFIX = "preshared-key="
+
+
+def preshared_key_in(peers: str) -> Optional[str]:
+    """The preshared key of the one peer of a wireguard.peers value as `nmcli -s` prints it, None when there is none."""
+    for token in peers.split()[1:]:
+        if token.startswith(PRESHARED_PREFIX):
+            return token[len(PRESHARED_PREFIX):]
+    return None
+
+
+def sealed_peers(peers: str) -> str:
+    """The one peer of a wireguard.peers value, as `nmcli -s` prints it, with its preshared key taken out and marked not required."""
+    public_key, *attributes = peers.split()
+    kept = [attribute for attribute in attributes if not attribute.startswith("preshared-key")]
+    return " ".join([public_key, *kept, "preshared-key-flags=%d" % SECRET_FLAG_NOT_REQUIRED])
+
+
+def peer_public_key(peers: str) -> str:
+    tokens = peers.split()
+    return _wg_key(tokens[0] if tokens else "", "the peer's public key")
+
+
+def nm_seal_settings(uuid: str) -> List[str]:
+    """The nmcli property/value arguments that take the keys out of a connection of NetworkManager's keyfile: its private key is
+    cleared and marked not saved, and its peer's preshared key, when the peer has one, too. Nothing of them goes on the command line.
+    The connection is bound to the tunnel's interface: a profile imported outside vekrona-vpn may name another one, which the kill
+    switch (it accepts output on INTERFACE only) would block, so the profile is moved onto INTERFACE."""
+    (peers,) = nm_get(uuid, ["wireguard.peers"], secrets=True)
+    settings = ["connection.interface-name", INTERFACE,
+                "wireguard.private-key", "", "wireguard.private-key-flags", str(SECRET_FLAG_NOT_SAVED)]
+    if preshared_key_in(peers) is not None:
+        settings += ["wireguard.peers", sealed_peers(peers)]
+    return settings
+
+
+def key_in_keyfile(flags: int) -> bool:
+    """The one rule that says a profile still keeps its private key in its keyfile: its secret flags are 0 (nothing is marked not saved).
+    Without a secret, that is all that can be read: a profile flagged 0 with no key in it still needs the strip, which marks it."""
+    return flags == 0
+
+
+def key_flags_of(text: str) -> int:
+    """The number of NetworkManager's secret flags as nmcli prints them ("0 (none)", "2 (not-saved)"). Zero while the keyfile holds
+    the private key, SECRET_FLAG_NOT_SAVED once it is sealed."""
+    try:
+        return int(text.split()[0])
+    except (IndexError, ValueError):
+        raise VpnError("nmcli printed the secret flags of a connection in a shape this tool does not know")
+
+
+def nm_key_flags(uuid: str) -> int:
+    (flags,) = nm_get(uuid, ["wireguard.private-key-flags"])
+    return key_flags_of(flags)
 
 
 def nm_modify(uuid: str, settings: Sequence[str]) -> None:
     run(["nmcli", "connection", "modify", "uuid", uuid, *settings])
 
 
-def nm_up(uuid: str) -> None:
-    run(["nmcli", "--wait", str(NM_UP_WAIT_SEC), "connection", "up", "uuid", uuid])
+def nm_up(uuid: str, private_key: str) -> None:
+    """Bring the connection up with its private key, which nmcli takes from stdin (passwd-file): NetworkManager keeps no key.
+    nmcli's passwd-file cannot name a peer's secret (its parser ends a name at '=', and a base64 public key ends in one), so a
+    preshared key is set by wg_set_preshared after this."""
+    run(["nmcli", "--wait", str(NM_UP_WAIT_SEC), "connection", "up", "uuid", uuid, "passwd-file", "/dev/stdin"],
+        input_text="wireguard.private-key:%s\n" % private_key, secret=True)
+
+
+def wg_set_preshared(uuid: str, preshared_key: str) -> None:
+    """Set the preshared key of the connection's one peer on the live tunnel (INTERFACE). The key goes on stdin of `wg`, never on its
+    command line."""
+    (peers,) = nm_get(uuid, ["wireguard.peers"])
+    run([WG_TOOL, "set", INTERFACE, "peer", peer_public_key(peers), "preshared-key", "/dev/stdin"],
+        input_text=preshared_key + "\n", secret=True)
+
+
+def require_distinct_ids(pairs: Sequence[Tuple["ConnectionId", str]]) -> None:
+    """Raise VpnError when two files of one import would make the same connection: the second would replace the first."""
+    named: Dict[str, str] = {}
+    for ident, file_name in pairs:
+        if str(ident) in named:
+            raise VpnError("%s and %s would both make the connection %s" % (named[str(ident)], file_name, ident))
+        named[str(ident)] = file_name
+
+
+def require_bound_to_tunnel(uuid: str, full_id: str) -> None:
+    """Raise VpnError unless the connection is bound to INTERFACE: the kill switch accepts output on that interface only, and every
+    profile vekrona makes is bound to it (import, login and seal set it)."""
+    (name,) = nm_get(uuid, ["connection.interface-name"])
+    if name != INTERFACE:
+        raise VpnError("%s is bound to %s, not %s; vekrona-vpn connects only profiles it imported" % (full_id, name, INTERFACE))
 
 
 def nm_down(uuid: str) -> None:
@@ -595,6 +722,29 @@ def nm_down(uuid: str) -> None:
 
 def nm_delete(uuid: str) -> None:
     run(["nmcli", "connection", "delete", "uuid", uuid])
+
+
+NM_KEYFILE_DIR = "/etc/NetworkManager/system-connections"
+SECRET_LINE_RE = re.compile(r"^(private-key|preshared-key)=", re.MULTILINE)
+
+
+def require_keyfile_without_secrets(uuid: str) -> None:
+    """Raise VpnError unless the keyfile of the connection holds neither its private key nor a preshared key. The keyfile is the copy
+    that outlives the connection on disk and in snapshots, so this reads it as root and says nothing of what it holds."""
+    with files_reported("list " + NM_KEYFILE_DIR):
+        names = sorted(os.listdir(NM_KEYFILE_DIR))
+    texts = []
+    for name in names:
+        path = os.path.join(NM_KEYFILE_DIR, name)
+        with files_reported("read " + path):
+            with open(path) as handle:
+                text = handle.read()
+        if re.search(r"^uuid=%s$" % uuid, text, re.MULTILINE):
+            texts.append(text)
+    if not texts:
+        raise VpnError("no keyfile of the connection %s was found" % uuid)
+    if any(SECRET_LINE_RE.search(text) for text in texts):
+        raise VpnError("the keyfile of the connection %s still holds a key" % uuid)
 
 
 UUID_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -785,7 +935,7 @@ def read_state() -> State:
     return State(doc["armed"], uuid)
 
 
-OPS = ("import", "login", "connect", "off", "forget")
+OPS = ("import", "login", "connect", "off", "forget", "seal")
 INSTANCE_RE = re.compile(r"(%s)-(%s)" % ("|".join(OPS), UID_PATTERN))
 
 
@@ -809,7 +959,7 @@ def user_dir(uid: int) -> str:
 
 
 def request_path(uid: int) -> str:
-    return os.path.join(user_dir(uid), "request.json")
+    return os.path.join(user_dir(uid), REQUEST_NAME)
 
 
 def write_request(uid: int, doc: dict) -> None:
@@ -823,6 +973,67 @@ def remove_request(uid: int) -> None:
             os.unlink(request_path(uid))
         except FileNotFoundError:
             pass
+
+
+def sealed_name(uid: int) -> str:
+    return "%d.sealed" % uid
+
+
+def sealed_path(uid: int) -> str:
+    """Where the helper leaves the keys of `seal`'s export for user `uid`: next to the user's receipt, in the helper's directory. The
+    user reads the file (it is theirs, mode 0600, in tmpfs) and cannot remove it, so the helper removes it: the strip that follows
+    the export does, and so does the start of the next operation of the user (remove_sealed), whatever ended the seal."""
+    return os.path.join(served_dir(), sealed_name(uid))
+
+
+def open_served_dir(create: bool) -> int:
+    """A descriptor of the receipts' directory, opened without following a link and checked to belong to the helper and to be writable
+    by no other user. Names in it are then opened relative to the descriptor."""
+    path = served_dir()
+    with files_reported("open " + path):
+        if create:
+            os.makedirs(path, mode=PUBLIC_DIR_MODE, exist_ok=True)
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    info = os.fstat(fd)
+    if info.st_uid != os.geteuid() or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        os.close(fd)
+        raise VpnError("%s is not a directory of the helper alone" % path)
+    return fd
+
+
+def write_sealed(uid: int, entries: List[dict]) -> None:
+    """Leave the keys of the export for user `uid`: a new file, created relative to the checked directory with O_EXCL and O_NOFOLLOW,
+    mode 0600 and owned by the user."""
+    with files_reported("write " + sealed_path(uid)):
+        dir_fd = open_served_dir(create=True)
+        try:
+            _unlink_sealed(uid, dir_fd)
+            fd = os.open(sealed_name(uid), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, PRIVATE_FILE_MODE,
+                         dir_fd=dir_fd)
+        finally:
+            os.close(dir_fd)
+        with os.fdopen(fd, "w") as handle:
+            os.fchown(handle.fileno(), uid, pwd.getpwuid(uid).pw_gid)
+            handle.write(json.dumps(entries))
+
+
+def _unlink_sealed(uid: int, dir_fd: int) -> None:
+    try:
+        os.unlink(sealed_name(uid), dir_fd=dir_fd)
+    except FileNotFoundError:
+        pass
+
+
+def remove_sealed(uid: int) -> None:
+    """Remove the export of user `uid`, if one was left: the user cannot, the directory is the helper's."""
+    if not os.path.isdir(served_dir()):
+        return
+    dir_fd = open_served_dir(create=False)
+    try:
+        with files_reported("remove " + sealed_path(uid)):
+            _unlink_sealed(uid, dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 NONCE_BYTES = 16
@@ -843,8 +1054,13 @@ class Receipt:
     failure: Optional[str]
 
 
+def served_dir() -> str:
+    """The helper's receipts, and the export of `seal`: root's directory, which the users read and cannot write."""
+    return os.path.join(RUN_DIR, "served")
+
+
 def served_path(uid: int) -> str:
-    return os.path.join(RUN_DIR, "served", str(uid))
+    return os.path.join(served_dir(), str(uid))
 
 
 def record_receipt(uid: int, receipt: Receipt) -> None:
@@ -890,29 +1106,60 @@ def exclusive_lock(directory: str, directory_mode: int) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def handed_over(uid: int, doc: Optional[dict]) -> Iterator[str]:
-    """Hold the user's lock while an operation of the helper runs, with `doc` (None: the operation takes none) and a fresh nonce
-    as its request, and take the request back afterwards. The nonce is what the caller gives to require_served. The request is one
-    file for every operation, and the helper's unit is named after the operation alone, so two calls that overlapped (the popout,
-    the launcher, a terminal) would hand over each other's request or merge into one job. Whoever asks for root work queues here;
-    `status` and `list` never come here."""
+def user_lock(uid: int) -> Iterator[None]:
+    """The user's lock: held while a request is handed to the helper, and across several hand-overs that must not interleave with
+    another call's (seal). Whoever asks for root work queues here; `status` and `list` never come here."""
     with exclusive_lock(user_dir(uid), PRIVATE_DIR_MODE):
-        nonce = secrets.token_hex(NONCE_BYTES)
-        write_request(uid, {**(doc or {}), "nonce": nonce})
-        try:
-            yield nonce
-        finally:
-            remove_request(uid)
+        yield
+
+
+@contextlib.contextmanager
+def hand_over(uid: int, doc: Optional[dict]) -> Iterator[str]:
+    """Hand `doc` (None: the operation takes none) and a fresh nonce to the helper as the request, and take it back afterwards. The
+    caller holds user_lock. The nonce is what the caller gives to require_served. The request is one file for every operation, and the
+    helper's unit is named after the operation alone, so two calls that overlapped (the popout, the launcher, a terminal) would hand
+    over each other's request or merge into one job."""
+    nonce = secrets.token_hex(NONCE_BYTES)
+    write_request(uid, {**(doc or {}), "nonce": nonce})
+    try:
+        yield nonce
+    finally:
+        remove_request(uid)
+
+
+@contextlib.contextmanager
+def handed_over(uid: int, doc: Optional[dict]) -> Iterator[str]:
+    """user_lock and hand_over together: one operation of the helper at a time, for one request."""
+    with user_lock(uid), hand_over(uid, doc) as nonce:
+        yield nonce
+
+
+REQUEST_NAME = "request.json"
+
+
+def open_user_dir(uid: int) -> int:
+    """A descriptor of the user's runtime directory, opened without following a link and checked to be a directory of `uid` that no
+    other user can write. Names in it are then opened relative to the descriptor, so a link planted in the path cannot redirect them."""
+    path = user_dir(uid)
+    with files_reported("open " + path):
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    info = os.fstat(fd)
+    if info.st_uid != uid or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        os.close(fd)
+        raise VpnError("the request directory is not owned by user %d alone" % uid)
+    return fd
 
 
 def read_request(uid: int) -> dict:
-    """The request of user `uid`, read as root: the path is the user's, so the file is opened without following a link and
-    taken only if it is a regular file of that user and small. No error repeats what the file holds."""
-    path = request_path(uid)
+    """The request of user `uid`, read as root: its directory is checked (open_user_dir), the file is opened relative to it without
+    following a link, and taken only if it is a regular file of that user and small. No error repeats what the file holds."""
+    dir_fd = open_user_dir(uid)
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+        fd = os.open(REQUEST_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC, dir_fd=dir_fd)
     except OSError as exc:
         raise VpnError("cannot open the request: %s" % exc.strerror)
+    finally:
+        os.close(dir_fd)
     with os.fdopen(fd, "rb") as handle:
         info = os.fstat(handle.fileno())
         if not stat.S_ISREG(info.st_mode):

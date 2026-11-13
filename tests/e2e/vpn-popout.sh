@@ -8,7 +8,9 @@
 #   - Mullvad without an account shows the account field with the keyboard in it, refuses a wrong number in words, and passes the right
 #     one on the tool's stdin, never in its arguments;
 #   - a tunnel that is up without the kill switch (brought up outside vekrona-vpn) is called "Not protected" and the popout says why;
-#   - Import closes the popout before it calls the tool, and a failure of the tool comes as a notification.
+#   - Import closes the popout before it calls the tool, and a failure of the tool comes as a notification;
+#   - a connect, a forget, a login and an import close the popout, since their keyring prompt needs the keyboard, and a failed connect
+#     comes as a notification.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -76,11 +78,15 @@ await_word '^Switzerland$'
 await_word '^Japan$'
 click_word '^Switzerland$'
 await_called "connect $ZURICH"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open || die "a connect must close the popout, for the keyring prompt"
+open_popout
 await_word '^Connected$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Zurich'
 snap connected
-log "ok: a country with one configuration connects at once, and the popout says which connection is up"
+log "ok: a country with one configuration connects at once; the popout closes for the keyring, and reopened it says which is up"
 
+click_word --last '^Proton$'
+await_word '^Switzerland$'
 vekrona-dev key esc
 await_word "$MULLVAD"
 await_gone '^Switzerland$'
@@ -94,14 +100,20 @@ await_word '^Osaka$'
 snap configurations
 click_word '^Osaka$'
 await_called "connect $OSAKA"
-log "ok: a country with two configurations lists them, and one connects"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open || die "a connect must close the popout, for the keyring prompt"
+open_popout
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'Osaka'
+log "ok: a country with two configurations lists them, and one connects; the reopened popout names it"
 
 click_word "$OFF"
 await_called off
 await_gone '^Connected$'
 log "ok: Off turns the VPN off"
 
-# Back, Tokyo, and its Forget are the first three stops of Tab, since Off is gone.
+# Back to Japan, then Back, Tokyo, and its Forget are the first three stops of Tab, since Off is gone.
+click_word --last '^Proton$'
+click_word '^Japan$'
+await_word '^Tokyo$'
 vekrona-dev key tab
 vekrona-dev key tab
 vekrona-dev key tab
@@ -111,8 +123,9 @@ never_called "forget $TOKYO"
 snap forget-confirmation
 click_word --last '^Forget$'
 await_called "forget $TOKYO"
-await_gone '^Tokyo$'
-log "ok: Tab and Enter reach Forget, which asks first and then removes the configuration from the list"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open || die "a forget must close the popout, for the keyring"
+[[ "$(stub_file list.json)" != *"$TOKYO"* ]] || die "forget must remove the configuration from the tool's list"
+log "ok: Tab and Enter reach Forget, which asks first; the popout closes for the keyring and the tool no longer lists the configuration"
 
 # Japan has one configuration left, so its row connects at once and carries its own Forget: Switzerland is the same, and at the
 # vendor's level Back, Switzerland and its Forget are the first three stops of Tab.
@@ -138,24 +151,32 @@ absent word_shown '^Netherlands$' || die "Mullvad without an account must not of
 # The keyboard is in the field without a click: the popout asks for typing.
 vekrona-dev type 9999
 vekrona-dev key enter
+# Logging in closes the popout (the keyring may prompt), so the refusal is a notification.
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'unknown\s+account'
 snap login-refused
+reopen_popout
+click_word "$MULLVAD"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'account\s+number'
 absent word_shown '^Netherlands$' || die "a wrong account number must not open Mullvad's countries"
-vekrona-dev key ctrl-a
 vekrona-dev type "$ACCOUNT"
 vekrona-dev key enter
-await_word '^Netherlands$'
-await_word '^Sweden$'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open || die "a login must close the popout, for the keyring"
 [[ "$(stub_file login.stdin)" == "$ACCOUNT" ]] || die "the account number must reach the tool on its stdin, but it read: $(stub_file login.stdin)"
 calls="$(vpn_calls)"
 [[ "$calls" != *"$ACCOUNT"* ]] || die "the account number must not be in the arguments of any call"
+reopen_popout
+click_word "$MULLVAD"
+await_word '^Netherlands$'
+await_word '^Sweden$'
 snap login-accepted
-log "ok: the account field has the keyboard, a wrong number is refused in words, the right one goes over stdin and opens the countries"
+log "ok: the account field has the keyboard, a wrong number is refused in a notification, the right one goes over stdin and opens the countries"
 
 click_word '^Netherlands$'
 await_called "connect mullvad NL"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open || die "a connect must close the popout, for the keyring prompt"
 log "ok: a Mullvad country connects by its code"
 
+open_popout
 click_word '^Import$'
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open
 await_called "import --vendor proton"
@@ -169,6 +190,17 @@ await_called "import --vendor other"
 vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'no\s+portal\s+here'
 snap import-failed
 log "ok: a failed import comes as a notification"
+
+# A failed connect is a notification: the popout is closed by then, as it is for every connect.
+vekrona-dev run bash -c 'echo "no key in the keyring" >"$HOME/.cache/vekrona-vpn-stub/connect-fails"'
+open_popout
+click_word --last '^Proton$'
+click_word '^Switzerland$'
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- absent popout_open || die "a connect must close the popout, even when it fails"
+vekrona-dev until --timeout "$STEP_TIMEOUT_SEC" -- text_shown 'no\s+key\s+in\s+the\s+keyring'
+snap connect-failed
+vekrona-dev run bash -c 'rm -f "$HOME/.cache/vekrona-vpn-stub/connect-fails"'
+log "ok: a failed connect from the popout comes as a notification"
 
 # A click into the popout gives it the keyboard.
 open_popout

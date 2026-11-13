@@ -4,13 +4,14 @@
 Settings, VPN view are its UI; `bin/vekrona-vpn` is the command behind both. Proton's own VPN app is gone (stage `00-repos`
 removes its dnf repo and key): it sent IPv6 to a dummy device that dropped it silently, and that stalled Tor Browser Launcher
 ([the kill switch](#the-kill-switch) says why that matters). `wireguard-tools` (`wg`, for Mullvad's key pair) is the only package the
-VPN adds.
+VPN adds, and `libsecret` (`secret-tool`) the one for the keyring it keeps the keys in.
 
 ## How it works
 
 There is no VPN daemon of our own. Each configuration is a NetworkManager connection of type `wireguard`, named
-`vekrona-vpn/<vendor>/<country>/<name>`, with autoconnect off. NetworkManager keeps the private key in its root-only keyfile; nothing
-else stores it. A connection brings up the interface `vvpn0` (one tunnel at a time) and routes all traffic and all DNS
+`vekrona-vpn/<vendor>/<country>/<name>`, with autoconnect off. NetworkManager keeps no key: the keys live in the login keyring
+(gnome-keyring, the Secret Service), and a connect gives them to NetworkManager on stdin, for that one `nmcli connection up`
+([Keys](#keys)). A connection brings up the interface `vvpn0` (one tunnel at a time) and routes all traffic and all DNS
 (`dns-priority -1`, search domain `~.`) through it. The tunnel's own encrypted packets carry the fixed fwmark `0xca6c`, so the kill
 switch can recognize them before the tunnel exists.
 
@@ -24,19 +25,19 @@ removed) or when `nmcli monitor` reports a change (the tunnel came up or dropped
 A vendor is a way to get configurations. The popout is a tree: vendor, country, configuration.
 
 **Mullvad.** Enter the account number in the popout (or run `vekrona-vpn mullvad login`, which asks on the terminal without echo).
-The number goes to Mullvad over stdin and is never stored. vekrona generates a WireGuard key pair, registers it as a device of the
-account and keeps the key in NetworkManager. The list shows Mullvad's countries from its relay list (refreshed when it is older than
+The number goes to Mullvad over stdin and is kept in the keyring, with the device's key. vekrona generates a WireGuard key pair,
+registers it as a device of the account and keeps the key in the keyring. The list shows Mullvad's countries from its relay list (refreshed when it is older than
 a day and you are logged in, and `connect` and `login` use the cache too while it is younger than that, so a connect does not
 download the whole list, a megabyte, over a network that is not the VPN yet; a cache that cannot be used is asked for again); you
 connect to a country, never to a relay. Each connect picks a random active relay of that country,
 makes a connection for it, brings it up and then deletes the older connection of that country. If the account already has the
-maximum number of devices, login stops and says so; it removes nothing. If the root step fails after the device was registered, the
-device is removed again, unless NetworkManager already holds its key (the helper makes the new connection first and deletes the old
-ones after it): then the device stays on the account, because removing it would leave the newest connection with a key Mullvad
-refuses, and the error says so.
+maximum number of devices, login stops and says so; it removes nothing. If the root step or the keyring fails after the device was
+registered, the device is removed again: its key is kept nowhere else, so it would be of no use. Once the new device works, the
+device the keyring held before is removed from the account too (by its id, or for a key from before ids were kept, by its public
+key). That is how an old key stops working at Mullvad (see [Keys](#keys)).
 
 **Proton and other.** Import `.conf` files with Import Proton… or Import other… in the popout (the popout closes first, because
-the file chooser, a portal dialog, would be under it), or `vekrona-vpn import --vendor proton|other [FILE...]`. The vendor is the
+the file chooser, a portal dialog, would be under it, and the keyring may prompt), or `vekrona-vpn import --vendor proton|other [FILE...]`. The vendor is the
 button you pressed. The country is the first two-letter token in the file name that is an ISO country (`NL-792.conf`,
 `nl-ams-wg-001.conf` give NL; `wg0.conf` gives an unknown country, shown as `??`). The name is the file name without `.conf`.
 Importing a file with an id that exists replaces the old connection after the new one is made. Up to 32 files at a time.
@@ -56,16 +57,44 @@ An import is refused, with the line or key named and never its value, when the f
 Autoconnect: `nmcli connection import` cannot be told to turn autoconnect off, and NetworkManager autoconnects a profile it has just
 been given, which would bring a tunnel up before the kill switch exists. So the helper imports the configuration with `Table = off`
 (NetworkManager's `wireguard.peer-routes=no`: a tunnel without routes carries nothing) and one `nmcli connection modify` then sets
-the id, the interface `vvpn0`, autoconnect off, the routes back, the fwmark and the DNS together; if NetworkManager had brought the
-profile up in between, the helper takes it down again. (Passing the key to `nmcli connection add` instead would put it on a command
+the id, the interface `vvpn0`, autoconnect off, the routes back, the fwmark, the DNS, and the keys out of the profile, all together;
+if NetworkManager had brought the profile up in between, the helper takes it down again. The import file holds a placeholder in place
+of the private key and no preshared key, so the profile never holds a real key. (Passing the key to `nmcli connection add` instead would put it on a command
 line any process can read.) The import runs under the name `vvpn-import`, not `vvpn0`: a profile that is born on the interface of
 the tunnel in use could replace that tunnel when NetworkManager autoconnects it, so importing while connected must not touch it
 (`tests/e2e/vpn-import-while-connected.sh`). A helper that was killed between the import and the change leaves a profile named
-`vvpn-import` with the key; every import deletes such a profile first. A batch of files is checked as a whole before the first is
+`vvpn-import` with the placeholder key; every import deletes such a profile first. A batch of files is checked as a whole before the first is
 imported; if NetworkManager then fails on one, the error names its position and how many files were imported before it.
 
 A file whose `Address` has no IPv6 address gets `ipv6.method disabled` on its connection, so IPv6 fails at once (see the next
 section) instead of going into a tunnel that cannot carry it.
+
+## Keys
+
+Every key lives in one place: the login keyring, as an item of application `vekrona-vpn` (gnome-keyring, through `secret-tool`,
+`lib/vekrona_secrets.py`). There are three kinds: the Mullvad account number, the Mullvad device (its private key and addresses, and
+its id at Mullvad), and the key of each imported configuration (its private key and preshared key, under the connection's id).
+NetworkManager keeps none of them: each `nmcli connection up` gets the private key on stdin (`passwd-file /dev/stdin`); a preshared
+key is set on the live tunnel with `wg set` right after the activation (nmcli's passwd-file cannot name a peer's secret, see
+[TODO-UPSTREAM](../TODO-UPSTREAM.md)), so the peer keeps flag 4 (not required) and NetworkManager neither stores nor asks for it. The helper's
+request file holds them for that one operation, in tmpfs. `status` and `list` never touch the keyring. A locked keyring prompts the
+first time a command needs a key, so an unlock prompt can come after a FIDO login; the popout and the launcher close before such a
+command, so the prompt gets the keyboard. A dismissed or refused unlock looks like a missing item to secret-tool, so when it answers "nothing" the Secret Service is asked whether
+the collection is locked: locked fails the command with "keyring locked", before the kill switch is armed.
+
+`vekrona-vpn seal` moves the keys that an earlier vekrona left in NetworkManager's keyfiles into the keyring, and takes them out of
+the keyfiles, and binds each to the tunnel's interface `vvpn0` (a profile imported outside vekrona-vpn may name another one,
+which the kill switch would block; `connect` refuses such a profile before it arms anything). The helper writes the export to `/run/vekrona-vpn/served/<uid>.sealed`: in tmpfs, in the helper's own directory (the
+receipts' directory, root's, which you can read but not write), as a file of yours with mode 0600. The client reads it, stores the
+keys, and the strip that follows removes the file together with the keys from NetworkManager. The export lives from the export to the
+strip, and a seal that dies in between leaves it until the next operation of yours, which removes it first. The
+helper checks that no keyfile of WireGuard holds a key. `connect` runs the seal first when a key is still in a keyfile, and
+`stages/50-user.sh` runs it once on install, through `systemd-run --user` (polkit accepts the request from your user manager only).
+`stages/70-verify.sh` checks that no WireGuard keyfile holds a key.
+
+Keys written before this change stay in the btrfs snapshots that were taken before it, until they are rotated. Mullvad's device
+is replaced (and the old one removed from the account) at the next `vekrona-vpn mullvad login`. An imported configuration's key and
+a Proton key must be revoked at the provider.
 
 ## The kill switch
 
@@ -129,14 +158,14 @@ resolve without it, and nothing is then asked on `tailscale0` but the tailnet's 
 
 `bin/vekrona-vpn` runs as you. Everything that needs root runs as `vekrona-vpn-apply@<op>-<uid>.service`, a oneshot unit that runs
 the root-owned copy of `libexec/vekrona-vpn-apply` (`ensure_system_copy`, under `/usr/local/lib/vekrona`). `op` is one of `import`,
-`login`, `connect`, `off`, `forget`. `off` takes the tunnel down and removes the kill switch.
+`login`, `connect`, `off`, `forget`, `seal`. `off` takes the tunnel down and removes the kill switch.
 
 - **Polkit** (`etc/polkit-1/rules.d/50-vekrona-vpn.rules`): a member of `wheel` who is at the machine (an active local session) or
   runs inside the user manager (`user@UID.service`, which is what the shell is) may start an apply unit whose name matches that
   exact pattern (the uid has no leading zero, as the helper parses it, so a job has one name), with no password. No other unit and
   no other verb matches. Starting and stopping `tor.service` for the same subjects is the rule of its own,
   `50-vekrona-tor.rules`: it has nothing to do with the VPN's operations.
-- **The request.** The arguments (a configuration's text, a uuid, a Mullvad relay or device) go in
+- **The request.** The arguments (a configuration's text, a uuid and its keys, a Mullvad relay and device) go in
   `/run/user/<uid>/vekrona-vpn/request.json`, which only you and root can enter. The helper takes it only if it opens without
   following a link, is a regular file owned by the uid in the unit's name, is at most 1 MiB and is JSON of the schema it knows.
   The file is one for every operation, and the unit is named after the operation and the uid alone, so `bin/vekrona-vpn` holds a
@@ -152,8 +181,8 @@ the root-owned copy of `libexec/vekrona-vpn-apply` (`ensure_system_copy`, under 
   the receipt of its own request; without a receipt for it (polkit refused the start, the unit ran into its timeout) it reports
   systemctl's error and says that the helper did not serve the request. It never reads the journal, whose last line may belong to
   an earlier run.
-- **Nothing of your file reaches NetworkManager** except the checked fields: the helper parses the configuration again and writes it
-  out in one fixed shape, through a file in a root-only directory (`/run/vekrona-vpn/import`, 0700) that is deleted right after the
+- **Nothing of your file reaches NetworkManager** except the checked fields, and no key of it: the helper parses the configuration
+  again and writes it out in one fixed shape, with a placeholder for the key, through a file in a root-only directory (`/run/vekrona-vpn/import`, 0700) that is deleted right after the
   import. An error names a line or a key, never a value. A second lock (`/run/vekrona-vpn/lock`) serializes the helper's
   operations across users, the arming and the removal of the kill switch included.
 - **State.** The helper publishes `/run/vekrona-vpn/state.json` (root-owned, world-readable: whether the kill switch is armed and
@@ -215,15 +244,13 @@ vekrona-vpn connect mullvad NL        # the same for a random Mullvad relay of a
 vekrona-vpn off                       # tunnel down, then the kill switch off
 vekrona-vpn import --vendor proton [FILE...]   # no FILE: the file chooser; --vendor proton|other
 vekrona-vpn forget UUID               # remove a configuration
-vekrona-vpn mullvad login             # account number on stdin
+vekrona-vpn mullvad login             # account number on stdin; the number and the device's key go to the keyring
+vekrona-vpn mullvad logout            # remove this device from the Mullvad account, forget the Mullvad connections, clear the keyring of them
+vekrona-vpn seal                      # move the keys of NetworkManager's keyfiles into the keyring (connect does it first when needed)
 ```
 
 ## Known gaps
 
-- No Mullvad logout. The account's device stays registered at Mullvad and its connections stay in NetworkManager; the popout
-  cannot forget them, because a Mullvad country is a choice and not a configuration. To leave, remove the device on
-  `mullvad.net/account` and delete the `vekrona-vpn/mullvad/...` connections with `nmcli connection delete`. `TODO.md` ("vekrona-vpn,
-  no Mullvad logout") has the plan for a Log out button.
 - A tailnet that overrides local DNS can still send lookups out by DNS over HTTPS to a public resolver ([Tailscale and DNS](#tailscale-and-dns)).
 - Stopping `vekrona-vpn` with Ctrl-C while it waits for the helper does not stop the helper: the job runs on in systemd, and it finds its request gone
   if it had not read it yet. A call for the same operation that starts meanwhile fails with "another vekrona-vpn <op> was still running"

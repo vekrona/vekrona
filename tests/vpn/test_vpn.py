@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import pwd
 import re
 import shutil
 import stat
@@ -27,6 +28,7 @@ sys.path.insert(0, str(HERE))
 
 import vekrona_countries as countries  # noqa: E402
 import vekrona_mullvad as mullvad  # noqa: E402
+import vekrona_secrets as secrets  # noqa: E402
 import vekrona_vpn as vpn  # noqa: E402
 from vpn_stub import ApiFixture, Stubs, unused_port_base  # noqa: E402
 
@@ -51,6 +53,12 @@ UUID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 UUID_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 UUID_NEW = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 UUID_OLD = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+KEY_PSK = key(5)
+KEYS = {"private_key": KEY_PRIVATE}
+CONFIG_ID = "vekrona-vpn/proton/NL/NL-792"
+DEVICE_DOC = {"private_key": KEY_PRIVATE, "ipv4_address": "10.66.0.5/32", "ipv6_address": "fc00:bbbb:bbbb:bb01::5/128"}
+# The fields `nmcli -s -g` reads of a connection that `seal` exports, in the order the helper asks for them.
+SEAL_FIELDS = ["wireguard.private-key-flags", "wireguard.private-key", "wireguard.peers", "ipv4.addresses", "ipv6.addresses"]
 SECRET_WORD = "SUPERSECRETVALUE"
 NONCE = "0123456789abcdef0123456789abcdef"
 OTHER_NONCE = "fedcba9876543210fedcba9876543210"
@@ -81,13 +89,28 @@ def terse(text):
     return text.replace("\\", "\\\\").replace(":", "\\:")
 
 
+def index_starting(calls, prefix):
+    """The index of the first call whose argv starts with `prefix`."""
+    return next(i for i, call in enumerate(calls) if call[: len(prefix)] == prefix)
+
+
 class ConfTest(unittest.TestCase):
-    def test_a_proton_download_is_accepted_and_renders_back_to_the_same_configuration(self):
+    def test_a_proton_download_is_accepted_and_is_imported_with_the_placeholder_key_and_nothing_else_changed(self):
         conf = vpn.parse_conf(PROTON_CONF)
         self.assertEqual(conf.endpoint, vpn.Endpoint("203.0.113.9", 51820))
         self.assertEqual(conf.dns, ("10.2.0.1",))
         self.assertFalse(conf.has_ipv6)
-        self.assertEqual(vpn.parse_conf(vpn.render_import_conf(conf).replace("Table = off\n", "")), conf)
+        rendered = vpn.render_import_conf(conf)
+        self.assertIn("PrivateKey = " + vpn.PLACEHOLDER_KEY + "\n", rendered)
+        self.assertEqual(vpn.parse_conf(rendered.replace(vpn.PLACEHOLDER_KEY, KEY_PRIVATE).replace("Table = off\n", "")), conf)
+
+    def test_the_keys_of_a_configuration_never_reach_the_import_file(self):
+        with_psk = PROTON_CONF.replace("[Peer]\n", "[Peer]\nPresharedKey = %s\n" % KEY_PSK)
+        rendered = vpn.render_import_conf(vpn.parse_conf(with_psk))
+        self.assertNotIn(KEY_PRIVATE, rendered)
+        self.assertNotIn(KEY_PSK, rendered)
+        self.assertNotIn("PresharedKey", rendered)
+        self.assertEqual(vpn.parse_conf(with_psk).preshared_key, KEY_PSK)
 
     def test_what_is_not_a_configuration_is_refused(self):
         for text in ("", "   \n\n", "lizard", "\x00\x01\x02", "[Interface]", "[Evil]\nA = b", "PrivateKey = x", "[Peer]\n[Interface]"):
@@ -265,7 +288,7 @@ class InstanceTest(unittest.TestCase):
         polkit = re.compile(r"vekrona-vpn-apply@%s\.service" % match.group(1))
         for instance in ("import-1000", "login-0", "connect-1000", "off-1000", "disconnect-1000", "forget-1000", "", "../", "connect-;rm",
                          "connect-1000x", "arm-1000", "import-1234567890", "connect-1000\n", "x/../connect-1000", "connect-01000",
-                         "off-00", "off-999999999"):
+                         "off-00", "off-999999999", "seal-1000", "seal-x"):
             helper_accepts = True
             try:
                 vpn.parse_instance(instance)
@@ -307,6 +330,24 @@ class TorUserTest(unittest.TestCase):
     def test_the_tor_user_of_the_shell_scripts_is_the_one_the_kill_switch_exempts(self):
         names = re.findall(r"^VEKRONA_TOR_USER=(\w+)$", (REPO / "lib/tor.sh").read_text(), re.MULTILINE)
         self.assertEqual(names, [vpn.TOR_USER])
+
+
+class RestoreTest(unittest.TestCase):
+    def test_an_item_that_cannot_be_put_back_does_not_stop_the_others_and_is_named(self):
+        stored, cleared = [], []
+
+        def store(kind, ident, value):
+            if ident == "B":
+                raise vpn.VpnError("the keyring refused")
+            stored.append(ident)
+
+        previous = [("config-key", "A", {"private_key": "a"}), ("config-key", "B", {"private_key": "b"}), ("config-key", "C", None)]
+        with mock.patch.object(secrets, "store", side_effect=store), \
+                mock.patch.object(secrets, "clear", side_effect=lambda kind, ident: cleared.append(ident)):
+            problem = secrets.restore(previous)
+        self.assertEqual((stored, cleared), (["A"], ["C"]))
+        self.assertIn("config-key of B: the keyring refused", problem)
+        self.assertNotIn("of A", problem)
 
 
 class KillSwitchTest(unittest.TestCase):
@@ -527,6 +568,11 @@ class Sandbox(unittest.TestCase):
             patched.start()
             self.addCleanup(patched.stop)
         self.relay_cache = self.tmp / "cache" / "vekrona" / "vpn-relays.json"
+        self.keyfiles = self.tmp / "system-connections"
+        self.keyfiles.mkdir()
+        patched = mock.patch.object(vpn, "NM_KEYFILE_DIR", str(self.keyfiles))
+        patched.start()
+        self.addCleanup(patched.stop)
 
     def nm_lists(self, connections, active=()):
         """What nmcli shows: connections [(uuid, id)] (all WireGuard), active [(uuid, state)]."""
@@ -538,13 +584,21 @@ class Sandbox(unittest.TestCase):
     def nm_imports_as(self, uuid):
         self.stubs.behave("nmcli", ["connection", "import"], stdout="Connection '%s' (%s) successfully added.\n" % (vpn.IMPORT_NAME, uuid))
 
-    def nm_peer_of(self, uuid, endpoint):
+    def nm_peer_of(self, uuid, endpoint, interface=vpn.INTERFACE):
+        """The peer and the interface (the one the profile is bound to) that nmcli answers for the connection `uuid`."""
         self.stubs.behave("nmcli", ["-e", "no", "-g", "wireguard.peers", "connection", "show", "uuid", uuid],
                           stdout="%s allowed-ips=0.0.0.0/0;::/0; endpoint=%s\n" % (KEY_PEER, endpoint))
+        self.stubs.behave("nmcli", ["-e", "no", "-g", "connection.interface-name", "connection", "show", "uuid", uuid],
+                          stdout="%s\n" % interface)
 
-    def nm_device(self, uuid):
-        self.stubs.behave("nmcli", ["-s", "-e", "no", "-g", "wireguard.private-key,ipv4.addresses,ipv6.addresses", "connection",
-                                    "show", "uuid", uuid], stdout="%s\n10.66.0.5/32\nfc00:bbbb:bbbb:bb01::5/128\n" % KEY_PRIVATE)
+    def nm_read(self, uuid, fields, values, with_secrets=False):
+        """What nmcli answers for `-g FIELDS connection show uuid UUID` (with -s when with_secrets), one line per field."""
+        argv = (["-s"] if with_secrets else []) + ["-e", "no", "-g", ",".join(fields), "connection", "show", "uuid", uuid]
+        self.stubs.behave("nmcli", argv, stdout="".join(value + "\n" for value in values))
+
+    def keyfile(self, uuid, text=""):
+        """The keyfile of NetworkManager for the connection `uuid`: its uuid and `text`."""
+        (self.keyfiles / ("%s.nmconnection" % uuid)).write_text("[connection]\nuuid=%s\n%s" % (uuid, text))
 
     def nmcli_actions(self):
         """The nmcli calls that change something, as [verb, ...]."""
@@ -756,6 +810,35 @@ class NetworkManagerTest(Sandbox):
             self.assertEqual(settings[settings.index("ipv4.dns-search") + 1], "~.")
             self.assertEqual(settings[settings.index("ipv4.dns-priority") + 1], "-1")
 
+    def test_nm_up_gives_only_the_private_key_on_stdin_and_never_on_the_command_line(self):
+        vpn.nm_up(UUID_A, KEY_PRIVATE)
+        (call,) = self.stubs.called("nmcli", "--wait")
+        self.assertEqual(call["argv"], ["--wait", str(vpn.NM_UP_WAIT_SEC), "connection", "up", "uuid", UUID_A, "passwd-file", "/dev/stdin"])
+        self.assertEqual(call["stdin"], "wireguard.private-key:%s\n" % KEY_PRIVATE)
+
+    def test_the_preshared_key_is_set_on_the_tunnel_by_wg_with_the_key_on_stdin_and_never_on_its_command_line(self):
+        self.nm_peer_of(UUID_A, "203.0.113.9:51820")
+        vpn.wg_set_preshared(UUID_A, KEY_PSK)
+        (call,) = self.stubs.called("wg", "set")
+        self.assertEqual(call["argv"], ["set", vpn.INTERFACE, "peer", KEY_PEER, "preshared-key", "/dev/stdin"])
+        self.assertEqual(call["stdin"], KEY_PSK + "\n")
+        self.assertNotIn(KEY_PSK, json.dumps(self.stubs.argvs()))
+
+    def test_a_peer_is_always_written_whole_because_nmcli_replaces_it(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        with self.assertRaisesRegex(vpn.VpnError, "replaced"):
+            vpn.nm_modify(UUID_A, ["wireguard.peers", "%s preshared-key-flags=4" % KEY_PEER])
+        vpn.nm_modify(UUID_A, ["wireguard.peers", "%s endpoint=203.0.113.9:51820 allowed-ips=0.0.0.0/0 preshared-key-flags=4" % KEY_PEER])
+
+
+
+    def test_a_key_flag_is_a_number_however_nmcli_prints_it(self):
+        self.assertEqual(vpn.key_flags_of("0 (none)"), 0)
+        self.assertEqual(vpn.key_flags_of("2 (not-saved)"), vpn.SECRET_FLAG_NOT_SAVED)
+        for text in ("", "none"):
+            with self.subTest(text=text), self.assertRaises(vpn.VpnError):
+                vpn.key_flags_of(text)
+
     def test_the_tor_user_is_found_absent_or_an_error(self):
         self.assertIsNone(vpn.lookup_tor_uid())
         self.stubs.behave("getent", ["passwd", "toranon"], stdout="toranon:x:970:970:Tor:/var/lib/tor:/sbin/nologin\n")
@@ -948,6 +1031,8 @@ class HelperTest(Sandbox):
         self.assertEqual(settings["connection.interface-name"], vpn.INTERFACE)
         self.assertEqual(settings["connection.autoconnect"], "no")
         self.assertEqual(settings["wireguard.peer-routes"], "yes")
+        self.assertEqual(settings["wireguard.private-key"], "")
+        self.assertEqual(settings["wireguard.private-key-flags"], "2")
         self.assertEqual(int(settings["wireguard.fwmark"], 16), vpn.WG_FWMARK)
         self.assertEqual(settings["ipv4.dns-search"], "~.")
         self.assertEqual(list((self.tmp / "run" / "vekrona-vpn" / "import").iterdir()), [])
@@ -994,6 +1079,30 @@ class HelperTest(Sandbox):
         with self.assertRaisesRegex(vpn.VpnError, r"file 2: nmcli connection modify failed.*\(1 of 3 files were imported before it\)"):
             self.apply("import")
         self.assertEqual(len(self.stubs.called("nmcli", "connection", "import")), 2)
+        self.assertEqual(len(self.stubs.called("nmcli", "connection", "delete", "uuid", UUID_NEW)), 1)
+
+    def test_a_connection_that_a_failed_import_made_that_cannot_be_deleted_is_named_in_the_error(self):
+        self.nm_lists([])
+        self.nm_imports_as(UUID_B)
+        self.stubs.behave("nmcli", ["connection", "import"], times=1,
+                          stdout="Connection '%s' (%s) successfully added.\n" % (vpn.IMPORT_NAME, UUID_NEW))
+        self.stubs.behave("nmcli", ["connection", "modify", "uuid", UUID_B], rc=2, stderr="Error: invalid property\n")
+        self.stubs.behave("nmcli", ["connection", "delete", "uuid", UUID_NEW], rc=3, stderr="Error: busy\n")
+        self.import_request(("NL-1.conf", PROTON_CONF), ("NL-2.conf", PROTON_CONF))
+        with self.assertRaisesRegex(vpn.VpnError, r"file 2: .*\(1 of 2 files were imported before it\); and these connections could not "
+                                                  r"be removed: %s" % UUID_NEW):
+            self.apply("import")
+
+    def test_an_import_with_a_preshared_key_writes_the_whole_peer_with_flag_4_and_never_the_key(self):
+        self.nm_lists([])
+        self.nm_imports_as(UUID_NEW)
+        self.import_request(("NL-792.conf", PROTON_CONF.replace("[Peer]\n", "[Peer]\nPresharedKey = %s\n" % KEY_PSK)))
+        self.apply("import")
+        (modified,) = self.stubs.called("nmcli", "connection", "modify")
+        settings = dict(zip(modified["argv"][4::2], modified["argv"][5::2]))
+        self.assertEqual(settings["wireguard.peers"],
+                         "%s endpoint=203.0.113.9:51820 allowed-ips=0.0.0.0/0;::/0 preshared-key-flags=4" % KEY_PEER)
+        self.assertNotIn(KEY_PSK, json.dumps(self.stubs.argvs()))
 
     def test_a_profile_that_networkmanager_autoconnected_before_it_was_changed_is_taken_down(self):
         self.nm_lists([(UUID_NEW, "vekrona-vpn/other/??/just-imported")], active=[(UUID_NEW, "activated")])
@@ -1061,22 +1170,67 @@ class HelperTest(Sandbox):
         with self.assertRaisesRegex(vpn.VpnError, UUID_NEW):
             self.apply("import")
 
-    def test_connecting_arms_for_the_endpoint_first_then_takes_the_other_tunnel_down_and_brings_this_one_up(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792"), (UUID_B, "vekrona-vpn/other/??/home")], active=[(UUID_B, "activated")])
+    def test_connecting_arms_for_the_endpoint_first_then_takes_the_other_tunnel_down_and_brings_this_one_up_with_its_keys(self):
+        self.nm_lists([(UUID_A, CONFIG_ID), (UUID_B, "vekrona-vpn/other/??/home")], active=[(UUID_B, "activated")])
         self.nm_peer_of(UUID_A, "203.0.113.9:51820")
-        self.request({"uuid": UUID_A})
+        self.request({"uuid": UUID_A, "keys": KEYS})
         self.apply("connect")
         calls = self.stubs.argvs()
         arm = calls.index(["nft", "-f", "-"])
         down = calls.index(["nmcli", "connection", "down", "uuid", UUID_B])
         recheck = calls.index(["nft", "list", "table", "inet", "vekrona-vpn"])
-        up = calls.index(["nmcli", "--wait", str(vpn.NM_UP_WAIT_SEC), "connection", "up", "uuid", UUID_A])
+        up = index_starting(calls, ["nmcli", "--wait", str(vpn.NM_UP_WAIT_SEC), "connection", "up", "uuid", UUID_A])
         self.assertLess(arm, down)
         self.assertLess(down, recheck)
         self.assertLess(recheck, up)
         self.assertIn("elements = { 203.0.113.9 . 51820 }", self.stubs.called("nft", "-f")[0]["stdin"])
+        self.assertEqual(self.stubs.called("nmcli", "--wait")[0]["stdin"], "wireguard.private-key:%s\n" % KEY_PRIVATE)
         self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
         self.assertEqual(len([c for c in calls if c[:3] == ["nmcli", "connection", "down"]]), 1)
+
+    def test_connecting_refuses_keys_that_are_not_wireguard_keys_before_arming(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.request({"uuid": UUID_A, "keys": {"private_key": "lizard"}})
+        with self.assertRaisesRegex(vpn.VpnError, "private_key is not a WireGuard key"):
+            self.apply("connect")
+        self.assertEqual(self.stubs.called("nft"), [])
+
+    def test_connecting_with_a_preshared_key_sets_it_on_the_tunnel_after_the_activation(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.nm_peer_of(UUID_A, "203.0.113.9:51820")
+        self.nm_peer_of(UUID_A, "203.0.113.9:51820")
+        self.request({"uuid": UUID_A, "keys": {"private_key": KEY_PRIVATE, "preshared_key": KEY_PSK}})
+        self.apply("connect")
+        calls = self.stubs.argvs()
+        up = index_starting(calls, ["nmcli", "--wait", str(vpn.NM_UP_WAIT_SEC), "connection", "up", "uuid", UUID_A])
+        wg = index_starting(calls, ["wg", "set", vpn.INTERFACE, "peer", KEY_PEER, "preshared-key", "/dev/stdin"])
+        self.assertLess(up, wg)
+        self.assertEqual(self.stubs.called("wg", "set")[0]["stdin"], KEY_PSK + "\n")
+        self.assertEqual(self.stubs.called("nmcli", "--wait")[0]["stdin"], "wireguard.private-key:%s\n" % KEY_PRIVATE)
+        self.assertNotIn(KEY_PSK, json.dumps(self.stubs.argvs()))
+        self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
+
+    def test_connecting_to_a_profile_bound_to_another_interface_is_refused_before_anything_is_armed(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.nm_peer_of(UUID_A, "203.0.113.9:51820", interface="wp2c-probe")
+        self.request({"uuid": UUID_A, "keys": KEYS})
+        with self.assertRaisesRegex(vpn.VpnError, "%s is bound to wp2c-probe, not vvpn0" % CONFIG_ID):
+            self.apply("connect")
+        self.assertEqual(self.stubs.called("nft"), [])
+        self.assertEqual(self.stubs.called("nmcli", "--wait"), [])
+        self.assertFalse(self.state_file().exists())
+
+    def test_a_preshared_key_that_wg_refuses_takes_the_tunnel_down_and_keeps_the_kill_switch_armed(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.nm_peer_of(UUID_A, "203.0.113.9:51820")
+        self.nm_peer_of(UUID_A, "203.0.113.9:51820")
+        self.stubs.behave("wg", ["set"], rc=2, stderr="Error: invalid key\n")
+        self.request({"uuid": UUID_A, "keys": {"private_key": KEY_PRIVATE, "preshared_key": KEY_PSK}})
+        with self.assertRaisesRegex(vpn.VpnError, "kill switch stays armed") as raised:
+            self.apply("connect")
+        self.assertNotIn(KEY_PSK, str(raised.exception))
+        self.assertIn(["nmcli", "connection", "down", "uuid", UUID_A], self.stubs.argvs())
+        self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
 
     def test_connecting_to_what_is_not_a_connection_of_vekrona_vpn_does_nothing(self):
         self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")])
@@ -1088,10 +1242,10 @@ class HelperTest(Sandbox):
         self.assertEqual(self.nmcli_actions(), [])
 
     def test_a_failure_after_arming_leaves_the_kill_switch_armed(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")])
+        self.nm_lists([(UUID_A, CONFIG_ID)])
         self.nm_peer_of(UUID_A, "203.0.113.9:51820")
         self.stubs.behave("nmcli", ["--wait", str(vpn.NM_UP_WAIT_SEC), "connection", "up"], rc=4, stderr="Error: Connection activation failed\n")
-        self.request({"uuid": UUID_A})
+        self.request({"uuid": UUID_A, "keys": KEYS})
         with self.assertRaises(vpn.VpnError):
             self.apply("connect")
         (load,) = self.stubs.called("nft", "-f")
@@ -1099,10 +1253,10 @@ class HelperTest(Sandbox):
         self.assertEqual(self.state(), {"schema": 1, "armed": True, "uuid": UUID_A})
 
     def test_a_kill_switch_that_is_gone_before_the_tunnel_comes_up_keeps_the_tunnel_down(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")])
+        self.nm_lists([(UUID_A, CONFIG_ID)])
         self.nm_peer_of(UUID_A, "203.0.113.9:51820")
         self.stubs.behave("nft", ["list", "table"], rc=1, stderr="Error: No such file or directory\n")
-        self.request({"uuid": UUID_A})
+        self.request({"uuid": UUID_A, "keys": KEYS})
         with self.assertRaisesRegex(vpn.VpnError, "kill switch is not loaded"):
             self.apply("connect")
         self.assertEqual(self.stubs.called("nmcli", "--wait"), [])
@@ -1119,43 +1273,38 @@ class HelperTest(Sandbox):
                 else:
                     held.append(False)
 
-        with mock.patch.dict(helper.OPERATIONS, {op: probe for op in vpn.OPS}):
-            for op in vpn.OPS:
+        with mock.patch.dict(helper.OPERATIONS, {op: probe for op in vpn.OPS if op != "seal"}):
+            for op in (op for op in vpn.OPS if op != "seal"):
                 self.request({})
                 self.apply(op)
-        self.assertEqual(held, [True] * len(vpn.OPS))
+        self.assertEqual(held, [True] * (len(vpn.OPS) - 1))
 
-    def test_connecting_to_mullvad_builds_the_connection_from_the_device_the_account_already_has_and_replaces_the_countrys_old_one(self):
+    def test_connecting_to_mullvad_builds_the_connection_from_the_device_of_the_request_and_replaces_the_countrys_old_one(self):
         self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/SE/se-got-wg-001"), (UUID_OLD, "vekrona-vpn/mullvad/NL/nl-ams-wg-009")])
-        self.nm_device(UUID_B)
         self.nm_imports_as(UUID_NEW)
         self.nm_peer_of(UUID_NEW, "198.51.100.7:51820")
-        self.request({"mullvad": relay_dict()})
+        self.request({"mullvad": relay_dict(), "device": DEVICE_DOC})
         self.apply("connect")
         (imported,) = self.stubs.called("nmcli", "connection", "import")
-        conf = vpn.parse_conf(imported["file"].replace("Table = off\n", ""))
+        conf = vpn.parse_conf(imported["file"].replace("Table = off\n", "").replace(vpn.PLACEHOLDER_KEY, KEY_PRIVATE))
         self.assertEqual((conf.private_key, conf.peer_public_key, conf.endpoint), (KEY_PRIVATE, KEY_RELAY, vpn.Endpoint("198.51.100.7", 51820)))
         self.assertEqual(conf.addresses, ("10.66.0.5/32", "fc00:bbbb:bbbb:bb01::5/128"))
         (modified,) = self.stubs.called("nmcli", "connection", "modify")
         self.assertEqual(modified["argv"][5], "vekrona-vpn/mullvad/NL/nl-ams-wg-001")
+        self.assertEqual(self.stubs.called("nmcli", "--wait")[0]["stdin"], "wireguard.private-key:%s\n" % KEY_PRIVATE)
         calls = self.stubs.argvs()
-        up = calls.index(["nmcli", "--wait", str(vpn.NM_UP_WAIT_SEC), "connection", "up", "uuid", UUID_NEW])
+        up = index_starting(calls, ["nmcli", "--wait", str(vpn.NM_UP_WAIT_SEC), "connection", "up", "uuid", UUID_NEW])
         old = calls.index(["nmcli", "connection", "delete", "uuid", UUID_OLD])
         self.assertLess(up, old)
         self.assertNotIn(["nmcli", "connection", "delete", "uuid", UUID_B], calls)
 
-    def test_connecting_to_mullvad_without_an_account_is_an_error(self):
-        self.nm_lists([(UUID_A, "vekrona-vpn/proton/NL/NL-792")])
-        self.request({"mullvad": relay_dict()})
-        with self.assertRaisesRegex(vpn.VpnError, "not logged in"):
-            self.apply("connect")
-        self.assertEqual(self.nmcli_actions(), [])
+
 
     def test_a_relay_with_a_newline_in_a_field_is_refused(self):
         self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/SE/se-got-wg-001")])
         for bad in (relay_dict(hostname="nl\nPostUp = x"), relay_dict(public_key="short"), relay_dict(ipv4="vpn.example.com"),
                     relay_dict(country="nl\n"), {**relay_dict(), "extra": 1}):
-            self.request({"mullvad": bad})
+            self.request({"mullvad": bad, "device": DEVICE_DOC})
             with self.subTest(bad=str(bad)[:30]), self.assertRaises(vpn.VpnError):
                 self.apply("connect")
         self.assertEqual(self.nmcli_actions(), [])
@@ -1225,6 +1374,86 @@ class HelperTest(Sandbox):
                 self.apply("forget")
         self.assertEqual(self.nmcli_actions(), [])
 
+    def test_seal_export_hands_over_the_keys_of_the_connections_whose_keyfile_holds_them_and_nothing_else(self):
+        self.nm_lists([(UUID_A, CONFIG_ID), (UUID_B, "vekrona-vpn/other/??/sealed")])
+        self.nm_read(UUID_A, SEAL_FIELDS, ["0 (none)", KEY_PRIVATE, "%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820 preshared-key=%s"
+                                           % (KEY_PEER, KEY_PSK), "10.2.0.2/32", ""], with_secrets=True)
+        self.nm_read(UUID_B, SEAL_FIELDS, ["2 (not-saved)", "", "", "", ""], with_secrets=True)
+        self.request({"phase": "export"})
+        self.apply("seal")
+        path = Path(vpn.sealed_path(self.uid))
+        self.assertEqual(json.loads(path.read_text()), [{"uuid": UUID_A, "id": CONFIG_ID, "vendor": "proton", "private_key": KEY_PRIVATE,
+                                                         "preshared_key": KEY_PSK, "ipv4_address": "10.2.0.2/32", "ipv6_address": ""}])
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(path.stat().st_uid, self.uid)
+        self.assertEqual(path.stat().st_gid, pwd.getpwuid(self.uid).pw_gid)
+
+    def test_seal_export_with_every_key_sealed_already_hands_over_an_empty_list(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.nm_read(UUID_A, SEAL_FIELDS, ["2 (not-saved)", "", "", "", ""], with_secrets=True)
+        self.request({"phase": "export"})
+        self.apply("seal")
+        self.assertEqual(json.loads(Path(vpn.sealed_path(self.uid)).read_text()), [])
+
+    def test_seal_strip_clears_the_keys_of_the_connections_and_checks_that_no_keyfile_holds_one(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.nm_read(UUID_A, ["wireguard.peers"], ["%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820 preshared-key=%s"
+                                                   % (KEY_PEER, KEY_PSK)], with_secrets=True)
+        self.keyfile(UUID_A)
+        self.request({"phase": "strip", "uuids": [UUID_A]})
+        self.apply("seal")
+        (modified,) = self.stubs.called("nmcli", "connection", "modify")
+        settings = dict(zip(modified["argv"][4::2], modified["argv"][5::2]))
+        self.assertEqual(settings["wireguard.private-key"], "")
+        self.assertEqual(settings["wireguard.private-key-flags"], "2")
+        self.assertEqual(settings["wireguard.peers"], "%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820 preshared-key-flags=4" % KEY_PEER)
+        self.assertNotIn(KEY_PSK, json.dumps(modified["argv"]))
+
+    def test_seal_strip_moves_a_profile_onto_the_tunnel_interface_the_kill_switch_accepts(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.nm_read(UUID_A, ["wireguard.peers"], ["%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER], with_secrets=True)
+        self.keyfile(UUID_A)
+        self.request({"phase": "strip", "uuids": [UUID_A]})
+        self.apply("seal")
+        (modified,) = self.stubs.called("nmcli", "connection", "modify")
+        settings = dict(zip(modified["argv"][4::2], modified["argv"][5::2]))
+        self.assertEqual(settings["connection.interface-name"], vpn.INTERFACE)
+
+    def test_seal_strip_fails_while_a_keyfile_still_holds_a_key_and_never_says_which(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.nm_read(UUID_A, ["wireguard.peers"], ["%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER], with_secrets=True)
+        self.keyfile(UUID_A, "[wireguard]\nprivate-key=%s\n" % KEY_PRIVATE)
+        self.request({"phase": "strip", "uuids": [UUID_A]})
+        with self.assertRaisesRegex(vpn.VpnError, "still holds a key") as raised:
+            self.apply("seal")
+        self.assertNotIn(KEY_PRIVATE, str(raised.exception))
+
+    def test_seal_strip_refuses_a_connection_that_is_not_ours_and_a_phase_that_is_not_known(self):
+        self.nm_lists([])
+        self.request({"phase": "strip", "uuids": [UUID_A]})
+        with self.assertRaisesRegex(vpn.VpnError, "not a connection of vekrona-vpn"):
+            self.apply("seal")
+        self.request({"phase": "burn"})
+        with self.assertRaisesRegex(vpn.VpnError, "no phase of that name"):
+            self.apply("seal")
+        self.assertEqual(self.nmcli_actions(), [])
+
+    def test_a_stale_export_is_removed_by_the_next_operation_of_its_user(self):
+        vpn.write_sealed(self.uid, [{"uuid": UUID_A}])
+        self.assertTrue(Path(vpn.sealed_path(self.uid)).exists())
+        self.nm_lists([])
+        self.request({})
+        self.apply("off")
+        self.assertFalse(Path(vpn.sealed_path(self.uid)).exists())
+
+    def test_the_helper_refuses_a_batch_whose_files_make_the_same_connection(self):
+        self.nm_lists([])
+        self.import_request(("NL-792.conf", PROTON_CONF), ("NL-792.CONF", PROTON_CONF))
+        with self.assertRaisesRegex(vpn.VpnError, "would both make the connection"):
+            self.apply("import")
+        self.assertEqual(self.stubs.called("nmcli"), [])
+
+
     def test_main_refuses_to_run_without_root(self):
         stderr = io.StringIO()
         with mock.patch.object(os, "geteuid", return_value=1000), contextlib.redirect_stderr(stderr):
@@ -1264,6 +1493,7 @@ class MullvadSandbox(Sandbox):
         patched.start()
         self.addCleanup(patched.stop)
         self.api.answer("GET", "/app/v1/relays", relay_list_doc())
+        self.api.answer("GET", "/accounts/v1/devices", [])
         self.stubs.behave("wg", ["genkey"], stdout=KEY_PRIVATE + "\n")
         self.stubs.behave("wg", ["pubkey"], stdout=KEY_PUBLIC + "\n")
 
@@ -1394,6 +1624,10 @@ class CliTest(MullvadSandbox):
                     self.during_helper()
             return real_run(argv, **kwargs)
 
+        # Every connection has a key in the keyring already, so a connect or a forget has nothing to seal; the device is logged in.
+        self.stubs.behave("nmcli", ["-e", "no", "-g", "wireguard.private-key-flags"], stdout="2 (not-saved)\n")
+        self.stubs.behave("nmcli", ["-e", "no", "-g", "connection.interface-name"], stdout=vpn.INTERFACE + "\n")
+        self.stubs.seed(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, DEVICE_DOC)
         patched = mock.patch.object(vpn, "run", run_with_helper)
         patched.start()
         self.addCleanup(patched.stop)
@@ -1470,21 +1704,103 @@ class CliTest(MullvadSandbox):
         vendors = json.loads(out)["vendors"]
         self.assertEqual((vendors[0]["countries"], vendors[1]["countries"][0]["code"]), ([], "DE"))
 
-    def test_connect_by_uuid_hands_the_uuid_to_the_helper_and_takes_the_request_back(self):
+    def test_connect_by_uuid_hands_the_uuid_and_its_keys_to_the_helper_and_takes_the_request_back(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.seed(secrets.CONFIG_KEY, CONFIG_ID, KEYS)
         handed, patched = self.requests_handed_over()
         with patched:
             code, out, err = self.run_cli("connect", UUID_A)
         self.assertEqual((code, out, err), (0, "", ""))
-        self.assertEqual(handed, [{"uuid": UUID_A}])
+        self.assertEqual(handed, [{"uuid": UUID_A, "keys": KEYS}])
         self.assertEqual(self.stubs.argvs("systemctl"), [["systemctl", "--no-ask-password", "start", "vekrona-vpn-apply@connect-%d.service" % self.uid]])
         self.assertFalse(Path(vpn.request_path(self.uid)).exists())
 
-    def test_connect_to_a_mullvad_country_picks_a_relay_of_it(self):
+    def test_connect_to_a_mullvad_country_picks_a_relay_of_it_with_the_device_of_the_keyring(self):
         handed, patched = self.requests_handed_over()
         with patched:
             code, _, err = self.run_cli("connect", "mullvad", "nl")
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(handed, [{"mullvad": relay_dict()}])
+        device = self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID)
+        self.assertEqual(handed, [{"mullvad": relay_dict(), "device": device}])
+    def test_connect_to_mullvad_without_a_device_in_the_keyring_says_not_logged_in_and_starts_nothing(self):
+        self.stubs.keyring_file.write_text("[]")
+        code, out, err = self.run_cli("connect", "mullvad", "nl")
+        self.assertEqual((code, err), (1, "vekrona-vpn: Mullvad is not logged in\n"))
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def test_a_locked_keyring_fails_connect_with_keyring_locked_before_anything_is_armed(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.lock(True)
+        code, out, err = self.run_cli("connect", UUID_A)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("keyring locked", err)
+        self.assertEqual(self.stubs.called("nft"), [])
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def test_a_missing_item_that_secret_tool_reports_with_a_warning_is_still_missing(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.behave("secret-tool", ["lookup"], rc=1, stderr="(gcr-prompter) warning: something\n")
+        code, _, err = self.run_cli("connect", UUID_A)
+        self.assertEqual(code, 1)
+        self.assertIn("the keyring holds no config-key for %s" % CONFIG_ID, err)
+
+    def test_a_connection_without_a_key_in_an_unlocked_keyring_says_no_key_is_stored(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        code, out, err = self.run_cli("connect", UUID_A)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("the keyring holds no config-key for %s" % CONFIG_ID, err)
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def test_forgetting_without_a_key_in_an_unlocked_keyring_succeeds(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        code, _, err = self.run_cli("forget", UUID_A)
+        self.assertEqual((code, err), (0, ""))
+
+    def test_a_keyring_whose_lock_cannot_be_asked_fails_instead_of_reading_as_a_missing_item(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.behave("busctl", [], rc=1, stderr="Failed to connect to bus\n")
+        code, _, err = self.run_cli("connect", UUID_A)
+        self.assertEqual(code, 1)
+        self.assertIn("cannot ask the keyring whether it is locked", err)
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def test_connecting_seals_a_key_that_is_still_in_a_keyfile_before_it_connects(self):
+        self.unsealed_connection()
+        handed, patched = self.requests_handed_over()
+        with patched:
+            code, _, err = self.run_cli("connect", UUID_A)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(handed, [{"phase": "export"}, {"phase": "strip", "uuids": [UUID_A]}, {"uuid": UUID_A, "keys": KEYS}])
+
+    def test_connecting_to_a_profile_bound_to_another_interface_is_refused_before_the_keyring_is_touched(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.nm_peer_of(UUID_A, "203.0.113.9:51820", interface="wp2c-probe")
+        code, out, err = self.run_cli("connect", UUID_A)
+        self.assertEqual((code, out), (1, ""))
+        self.assertEqual(err, "vekrona-vpn: %s is bound to wp2c-probe, not vvpn0; vekrona-vpn connects only profiles it imported\n" % CONFIG_ID)
+        self.assertEqual(self.stubs.called("secret-tool"), [])
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def test_forgetting_a_configuration_removes_its_key_from_the_keyring(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.seed(secrets.CONFIG_KEY, CONFIG_ID, KEYS)
+        code, _, err = self.run_cli("forget", UUID_A)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIsNone(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID))
+
+    def test_forgetting_names_the_key_it_could_not_clear(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.seed(secrets.CONFIG_KEY, CONFIG_ID, KEYS)
+        self.stubs.lock(True)
+        code, _, err = self.run_cli("forget", UUID_A)
+        self.assertEqual(code, 1)
+        self.assertIn("secret-tool clear application vekrona-vpn kind config-key id %s" % CONFIG_ID, err)
+
+    def test_forgetting_a_mullvad_connection_keeps_the_device_the_account_shares(self):
+        self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/NL/nl-ams-wg-001")])
+        code, _, err = self.run_cli("forget", UUID_B)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID), DEVICE_DOC)
 
     def test_connecting_asks_mullvad_for_the_relay_list_only_when_the_cache_is_old_or_unusable(self):
         def relay_list_requests():
@@ -1556,6 +1872,8 @@ class CliTest(MullvadSandbox):
         self.assertFalse(Path(vpn.request_path(self.uid)).exists())
 
     def test_a_helper_that_fails_gives_its_own_line_and_the_request_is_still_taken_back(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.seed(secrets.CONFIG_KEY, CONFIG_ID, KEYS)
         self.stubs.behave("systemctl", ["--no-ask-password", "start"], rc=1, stderr="Job for x failed\n")
         self.helper_failure = "Mullvad is not logged in"
         code, out, err = self.run_cli("connect", UUID_A)
@@ -1572,12 +1890,14 @@ class CliTest(MullvadSandbox):
                               "authentication required. (the helper did not serve this request)\n")
 
     def test_a_start_that_failed_after_the_helper_succeeded_says_so(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
         self.stubs.behave("systemctl", ["--no-ask-password", "start"], rc=1, stderr="Connection timed out\n")
         code, _, err = self.run_cli("forget", UUID_A)
         self.assertEqual(code, 1)
         self.assertTrue(err.endswith("(the helper did serve this request)\n"), err)
 
     def test_a_receipt_that_cannot_be_read_is_said_with_the_failure_of_the_start(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
         self.stubs.behave("systemctl", ["--no-ask-password", "start"], rc=1)
         self.helper_leaves_a_receipt = False
         (self.tmp / "run" / "vekrona-vpn").mkdir(parents=True)
@@ -1596,6 +1916,8 @@ class CliTest(MullvadSandbox):
             ["systemctl", "--no-ask-password", "start", "vekrona-vpn-apply@off-%d.service" % self.uid]])
 
     def test_a_start_that_merged_into_the_job_of_an_interrupted_call_fails_instead_of_pretending_to_succeed(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.seed(secrets.CONFIG_KEY, CONFIG_ID, KEYS)
         for command in (("off",), ("connect", UUID_A), ("forget", UUID_A)):
             vpn.record_receipt(self.uid, vpn.Receipt(OTHER_NONCE, None))  # the earlier job served the earlier client's request
             self.helper_leaves_a_receipt = False  # systemctl start succeeds by joining that job; nothing reads this call's request
@@ -1620,6 +1942,7 @@ class CliTest(MullvadSandbox):
         self.assertEqual(code, 0)
         self.assertEqual(handed, [{"vendor": "proton", "files": [{"file": "NL-792.conf", "text": PROTON_CONF}]}])
         self.assertEqual(self.stubs.argvs("systemctl")[0][-1], "vekrona-vpn-apply@import-%d.service" % self.uid)
+        self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), KEYS)
 
     def test_import_names_the_bad_file_not_its_content_and_starts_nothing(self):
         good = self.tmp / "ok.conf"
@@ -1655,7 +1978,10 @@ class CliTest(MullvadSandbox):
             code, _, err = self.run_cli("import", "--vendor", "proton")
         self.assertEqual((code, err), (1, "vekrona-vpn: no portal\n"))
 
-    def test_logging_in_registers_a_device_and_hands_only_its_key_and_addresses_to_the_helper(self):
+    def test_logging_in_registers_a_device_and_hands_only_its_key_and_addresses_to_the_helper_and_keeps_both_in_the_keyring(self):
+        # The device the keyring held (the CLI setup seeds one without an id) is removed from the account by its public key.
+        self.api.answer("GET", "/accounts/v1/devices", [{"id": "old1", "name": "old laptop", "pubkey": KEY_PUBLIC}])
+        self.api.answer("DELETE", "/accounts/v1/devices/old1", None, status=204)
         self.api.answer("POST", "/auth/v1/token", {"access_token": "TOKEN"})
         self.api.answer("POST", "/accounts/v1/devices", {"id": "d1", "name": "brave koala", "ipv4_address": "10.66.0.5/32",
                                                          "ipv6_address": "fc00:bbbb:bbbb:bb01::5/128"}, status=201)
@@ -1668,10 +1994,254 @@ class CliTest(MullvadSandbox):
         self.assertIn(doc["relay"]["hostname"], ("nl-ams-wg-001", "se-got-wg-001"))
         self.assertEqual(self.api.requests_to("POST", "/auth/v1/token")[0]["body"], {"account_number": "1234567890123456"})
         self.assertNotIn("1234567890123456", json.dumps(doc))
+        self.assertEqual(self.stubs.stored(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID), {"number": "1234567890123456"})
+        self.assertEqual(self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID), {**DEVICE_DOC, "device_id": "d1"})
+        # Only the keyring and the call log hold the account and the key. behaviors.json holds the fake tools' own answers.
         for path in self.tmp.rglob("*"):
-            if path.is_file():
-                self.assertNotIn("1234567890123456", path.read_text(errors="replace"), str(path))
+            if path.is_file() and path.name not in ("keyring.json", "calls.jsonl", "behaviors.json"):
+                text = path.read_text(errors="replace")
+                self.assertNotIn("1234567890123456", text, str(path))
+                self.assertNotIn(KEY_PRIVATE, text, str(path))
         self.assertEqual(self.api.requests_to("DELETE", "/accounts/v1/devices/d1"), [])
+        self.assertEqual(len(self.api.requests_to("DELETE", "/accounts/v1/devices/old1")), 1)
+
+    def test_logging_in_again_removes_the_device_the_keyring_held_before(self):
+        self.api.answer("POST", "/auth/v1/token", {"access_token": "TOKEN"})
+        self.api.answer("POST", "/accounts/v1/devices", {"id": "d1", "name": "brave koala", "ipv4_address": "10.66.0.5/32",
+                                                         "ipv6_address": "fc00:bbbb:bbbb:bb01::5/128"}, status=201)
+        self.api.answer("DELETE", "/accounts/v1/devices/old1", None, status=204)
+        self.stubs.seed(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, {**DEVICE_DOC, "private_key": key(7), "device_id": "old1"})
+        with mock.patch.object(sys, "stdin", io.StringIO("1234567890123456\n")):
+            code, _, err = self.run_cli("mullvad", "login")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(self.api.requests_to("DELETE", "/accounts/v1/devices/old1")), 1)
+        self.assertEqual(self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID)["device_id"], "d1")
+
+    def test_a_locked_keyring_stops_a_login_before_anything_is_registered_at_mullvad(self):
+        self.api.answer("POST", "/auth/v1/token", {"access_token": "TOKEN"})
+        self.stubs.lock(True)
+        with mock.patch.object(sys, "stdin", io.StringIO("1234567890123456\n")):
+            code, _, err = self.run_cli("mullvad", "login")
+        self.assertEqual(code, 1)
+        self.assertIn("keyring locked", err)
+        self.assertEqual(self.api.requests_to("POST", "/accounts/v1/devices"), [])
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def test_a_login_the_helper_refuses_puts_the_old_device_and_account_back_and_removes_the_new_device(self):
+        self.api.answer("POST", "/auth/v1/token", {"access_token": "TOKEN"})
+        self.api.answer("POST", "/accounts/v1/devices", {"id": "d1", "name": "brave koala", "ipv4_address": "10.66.0.5/32",
+                                                         "ipv6_address": "fc00:bbbb:bbbb:bb01::5/128"}, status=201)
+        self.api.answer("DELETE", "/accounts/v1/devices/d1", None, status=204)
+        old_device = {**DEVICE_DOC, "private_key": key(7), "device_id": "old1"}
+        self.stubs.seed(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, old_device)
+        self.stubs.seed(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID, {"number": "9999999999999999"})
+        code, _, err = self.login_that_the_helper_refuses()
+        self.assertEqual((code, err), (1, "vekrona-vpn: boom\n"))
+        self.assertEqual(self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID), old_device)
+        self.assertEqual(self.stubs.stored(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID), {"number": "9999999999999999"})
+        self.assertEqual(len(self.api.requests_to("DELETE", "/accounts/v1/devices/d1")), 1)
+        self.assertEqual(self.api.requests_to("DELETE", "/accounts/v1/devices/old1"), [])
+
+    def test_logging_out_removes_the_device_forgets_the_mullvad_connections_and_clears_the_keyring(self):
+        self.api.answer("POST", "/auth/v1/token", {"access_token": "TOKEN"})
+        self.api.answer("DELETE", "/accounts/v1/devices/d1", None, status=204)
+        self.stubs.seed(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID, {"number": "1234567890123456"})
+        self.stubs.seed(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, {**DEVICE_DOC, "device_id": "d1"})
+        self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/NL/nl-ams-wg-001"), (UUID_A, CONFIG_ID)])
+        code, out, err = self.run_cli("mullvad", "logout")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.api.requests_to("POST", "/auth/v1/token")[0]["body"], {"account_number": "1234567890123456"})
+        self.assertEqual(len(self.api.requests_to("DELETE", "/accounts/v1/devices/d1")), 1)
+        self.assertEqual(self.stubs.argvs("systemctl"), [["systemctl", "--no-ask-password", "start", "vekrona-vpn-apply@forget-%d.service" % self.uid]])
+        self.assertEqual(self.stubs.keyring(), [])
+
+    def test_logging_out_without_an_account_item_asks_for_the_number(self):
+        self.api.answer("POST", "/auth/v1/token", {"access_token": "TOKEN"})
+        self.api.answer("DELETE", "/accounts/v1/devices/d1", None, status=204)
+        self.stubs.seed(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, {**DEVICE_DOC, "device_id": "d1"})
+        self.nm_lists([])
+        with mock.patch.object(sys, "stdin", io.StringIO("1234 5678 9012 3456\n")):
+            code, _, err = self.run_cli("mullvad", "logout")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.api.requests_to("POST", "/auth/v1/token")[0]["body"], {"account_number": "1234567890123456"})
+        self.assertIsNone(self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID))
+
+    def test_a_logout_whose_device_cannot_be_removed_changes_nothing(self):
+        self.api.answer("POST", "/auth/v1/token", {"access_token": "TOKEN"})
+        self.api.answer("DELETE", "/accounts/v1/devices/d1", {"code": "INTERNAL"}, status=500)
+        self.stubs.seed(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID, {"number": "1234567890123456"})
+        self.stubs.seed(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, {**DEVICE_DOC, "device_id": "d1"})
+        self.nm_lists([(UUID_B, "vekrona-vpn/mullvad/NL/nl-ams-wg-001")])
+        code, _, err = self.run_cli("mullvad", "logout")
+        self.assertEqual(code, 1)
+        self.assertIn("cannot remove the device again", err)
+        self.assertEqual(self.stubs.called("systemctl"), [])
+        self.assertEqual(self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID)["device_id"], "d1")
+
+    def test_logging_out_of_a_device_stored_before_ids_were_kept_finds_it_by_its_public_key(self):
+        self.api.answer("POST", "/auth/v1/token", {"access_token": "TOKEN"})
+        self.api.answer("GET", "/accounts/v1/devices", [{"id": "d7", "name": "old", "pubkey": KEY_PUBLIC},
+                                                       {"id": "d8", "name": "other", "pubkey": KEY_RELAY}])
+        self.api.answer("DELETE", "/accounts/v1/devices/d7", None, status=204)
+        self.stubs.seed(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID, {"number": "1234567890123456"})
+        self.stubs.seed(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, DEVICE_DOC)
+        self.nm_lists([])
+        code, _, err = self.run_cli("mullvad", "logout")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(len(self.api.requests_to("DELETE", "/accounts/v1/devices/d7")), 1)
+        self.assertEqual(self.api.requests_to("DELETE", "/accounts/v1/devices/d8"), [])
+        self.assertIsNone(self.stubs.stored(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID))
+
+    def test_importing_a_file_stores_its_key_under_the_id_of_the_connection_the_helper_made(self):
+        good = self.tmp / "NL-792.conf"
+        good.write_text(PROTON_CONF)
+        code, _, _ = self.run_cli("import", "--vendor", "proton", str(good))
+        self.assertEqual(code, 0)
+        self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), KEYS)
+
+    def test_an_import_that_the_helper_refuses_puts_the_keyring_back_and_keeps_the_old_key_of_its_id(self):
+        first, second = self.tmp / "NL-792.conf", self.tmp / "DE-1.conf"
+        first.write_text(PROTON_CONF)
+        second.write_text(PROTON_CONF)
+        self.stubs.seed(secrets.CONFIG_KEY, CONFIG_ID, {"private_key": key(9)})
+        self.stubs.behave("systemctl", ["--no-ask-password", "start"], rc=1)
+        self.helper_failure = "file 2: nmcli connection modify failed"
+        code, _, err = self.run_cli("import", "--vendor", "proton", str(first), str(second))
+        self.assertEqual((code, err), (1, "vekrona-vpn: file 2: nmcli connection modify failed\n"))
+        self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), {"private_key": key(9)})
+        self.assertIsNone(self.stubs.stored(secrets.CONFIG_KEY, "vekrona-vpn/proton/DE/DE-1"))
+
+    def test_two_files_that_would_make_the_same_connection_are_refused_before_anything_is_stored(self):
+        first, second = self.tmp / "NL-792.conf", self.tmp / "NL-792.CONF"
+        first.write_text(PROTON_CONF)
+        second.write_text(PROTON_CONF)
+        code, _, err = self.run_cli("import", "--vendor", "proton", str(first), str(second))
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "vekrona-vpn: NL-792.conf and NL-792.CONF would both make the connection %s\n" % CONFIG_ID)
+        self.assertEqual([item for item in self.stubs.keyring() if item["attributes"]["kind"] == secrets.CONFIG_KEY], [])
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def test_an_import_whose_keyring_is_locked_starts_nothing(self):
+        good = self.tmp / "NL-792.conf"
+        good.write_text(PROTON_CONF)
+        self.stubs.lock(True)
+        code, _, err = self.run_cli("import", "--vendor", "proton", str(good))
+        self.assertEqual(code, 1)
+        self.assertIn("keyring locked", err)
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def unsealed_connection(self):
+        """A configuration whose keyfile holds its key, as an earlier vekrona left it, with a helper that seals in place of the unit."""
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.behave("nmcli", ["-e", "no", "-g", "wireguard.private-key-flags"], stdout="0 (none)\n")
+        self.nm_read(UUID_A, SEAL_FIELDS, ["0 (none)", KEY_PRIVATE, "%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER,
+                                           "10.2.0.2/32", ""], with_secrets=True)
+        self.nm_read(UUID_A, ["wireguard.peers"], ["%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER], with_secrets=True)
+        self.keyfile(UUID_A)
+        self.during_helper = self.helper_seals
+
+    def helper_seals(self):
+        """The root helper's part of a seal, run here in place of the unit: the request of a seal has a phase, the others do not."""
+        if "phase" in vpn.read_request(self.uid):
+            helper.apply(vpn.instance_name("seal", self.uid))
+
+    def test_sealing_moves_the_keys_of_the_keyfiles_to_the_keyring_and_takes_them_out(self):
+        self.unsealed_connection()
+        code, out, err = self.run_cli("seal")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), KEYS)
+        self.assertFalse(Path(vpn.sealed_path(self.uid)).exists())
+        self.assertEqual(len(self.stubs.argvs("systemctl")), 2)
+        self.assertNotIn(KEY_PRIVATE, out + err)
+
+    def test_sealing_holds_the_users_lock_from_the_export_to_the_strip(self):
+        self.unsealed_connection()
+        held = []
+
+        def probe_then_seal():
+            with open(Path(vpn.user_dir(self.uid)) / vpn.LOCK_NAME, "a") as probe:
+                try:
+                    fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    held.append(False)
+                except BlockingIOError:
+                    held.append(True)
+            self.helper_seals()
+
+        self.during_helper = probe_then_seal
+        code, _, err = self.run_cli("seal")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(held, [True, True])
+
+    def test_a_key_that_cannot_be_checked_stays_in_its_keyfile_while_the_others_are_sealed(self):
+        self.nm_lists([(UUID_A, CONFIG_ID), (UUID_B, "vekrona-vpn/other/??/sealed")])
+        self.stubs.behave("nmcli", ["-e", "no", "-g", "wireguard.private-key-flags"], stdout="0 (none)\n")
+        self.nm_read(UUID_A, SEAL_FIELDS, ["0 (none)", KEY_PRIVATE, "%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER,
+                                           "10.2.0.2/32", ""], with_secrets=True)
+        self.nm_read(UUID_B, SEAL_FIELDS, ["0 (none)", "lizard", "%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER,
+                                           "10.2.0.3/32", ""], with_secrets=True)
+        self.nm_read(UUID_A, ["wireguard.peers"], ["%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER], with_secrets=True)
+        self.keyfile(UUID_A)
+        self.keyfile(UUID_B, "[wireguard]\nprivate-key=lizard\n")
+        self.during_helper = self.helper_seals
+        code, _, err = self.run_cli("seal")
+        self.assertEqual(code, 1)
+        self.assertIn("vekrona-vpn/other/??/sealed", err)
+        self.assertIn("not a WireGuard key", err)
+        self.assertNotIn("lizard", err)
+        self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), KEYS)
+        self.assertEqual(len(self.stubs.argvs("systemctl")), 2)
+        (modified,) = self.stubs.called("nmcli", "connection", "modify")
+        self.assertEqual(modified["argv"][3], UUID_A)
+        self.assertFalse(Path(vpn.sealed_path(self.uid)).exists())
+
+    def test_sealing_with_every_key_sealed_already_starts_nothing(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        code, _, err = self.run_cli("seal")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.stubs.called("systemctl"), [])
+
+    def test_a_seal_whose_store_and_whose_strip_both_fail_reports_both(self):
+        self.unsealed_connection()
+        self.stubs.behave("secret-tool", ["store"], rc=5, stderr="dismissed\n")
+
+        def strip_refuses():
+            request = vpn.read_request(self.uid)
+            if request.get("phase") == "strip":
+                vpn.record_receipt(self.uid, vpn.Receipt(request["nonce"], "strip refused"))
+                raise vpn.VpnError("systemctl failed")
+            self.helper_seals()
+
+        self.during_helper = strip_refuses
+        code, _, err = self.run_cli("seal")
+        self.assertEqual(code, 1)
+        self.assertIn("keyring locked or unavailable", err)
+        self.assertIn("strip refused", err)
+
+    def test_a_profile_that_keeps_its_key_flag_with_no_key_in_it_is_stripped_and_stores_nothing(self):
+        self.nm_lists([(UUID_A, CONFIG_ID)])
+        self.stubs.behave("nmcli", ["-e", "no", "-g", "wireguard.private-key-flags"], stdout="0 (none)\n")
+        self.nm_read(UUID_A, SEAL_FIELDS, ["0 (none)", "", "%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER,
+                                           "10.2.0.2/32", ""], with_secrets=True)
+        self.nm_read(UUID_A, ["wireguard.peers"], ["%s allowed-ips=0.0.0.0/0;::/0; endpoint=203.0.113.9:51820" % KEY_PEER], with_secrets=True)
+        self.keyfile(UUID_A)
+        self.during_helper = self.helper_seals
+        code, _, err = self.run_cli("seal")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([item for item in self.stubs.keyring() if item["attributes"]["kind"] == secrets.CONFIG_KEY], [])
+        (modified,) = self.stubs.called("nmcli", "connection", "modify")
+        self.assertEqual(dict(zip(modified["argv"][4::2], modified["argv"][5::2]))["wireguard.private-key-flags"], "2")
+
+    def test_a_seal_whose_keyfile_still_holds_a_key_fails_and_the_key_stays_in_the_keyring(self):
+        self.unsealed_connection()
+        self.keyfile(UUID_A, "[wireguard]\nprivate-key=%s\n" % KEY_PRIVATE)
+        code, _, err = self.run_cli("seal")
+        self.assertEqual(code, 1)
+        self.assertIn("still holds a key", err)
+        self.assertNotIn(KEY_PRIVATE, err)
+        self.assertEqual(self.stubs.stored(secrets.CONFIG_KEY, CONFIG_ID), KEYS)
+        self.assertFalse(Path(vpn.sealed_path(self.uid)).exists())
+
+
 
     def test_logging_in_with_a_refused_account_or_a_bad_number_starts_nothing(self):
         self.api.answer("POST", "/auth/v1/token", {"code": "INVALID_ACCOUNT"}, status=400)
@@ -1699,21 +2269,9 @@ class CliTest(MullvadSandbox):
         self.assertEqual((code, err), (1, "vekrona-vpn: boom\n"))
         self.assertEqual(len(self.api.requests_to("DELETE", "/accounts/v1/devices/d1")), 1)
 
-    def test_a_login_that_failed_after_the_connection_was_stored_keeps_the_device_because_its_key_is_in_use(self):
-        self.api.answer("DELETE", "/accounts/v1/devices/d1", None, status=204)
-        self.during_helper = lambda: self.nm_lists([(UUID_NEW, "vekrona-vpn/mullvad/NL/nl-ams-wg-001")])
-        code, _, err = self.login_that_the_helper_refuses()
-        self.assertEqual(code, 1)
-        self.assertEqual(err, "vekrona-vpn: boom; the new device brave koala stays on the account, since NetworkManager holds its key\n")
-        self.assertEqual(self.api.requests_to("DELETE", "/accounts/v1/devices/d1"), [])
 
-    def test_a_login_that_failed_while_the_connections_cannot_be_listed_keeps_the_device_and_says_so(self):
-        self.api.answer("DELETE", "/accounts/v1/devices/d1", None, status=204)
-        self.during_helper = lambda: self.stubs.behave("nmcli", ["-t", "-f", "UUID,STATE"], rc=8, stderr="Error: not running\n")
-        code, _, err = self.login_that_the_helper_refuses()
-        self.assertEqual(code, 1)
-        self.assertIn("boom; the new device brave koala stays on the account, since it is unknown whether NetworkManager holds its key", err)
-        self.assertEqual(self.api.requests_to("DELETE", "/accounts/v1/devices/d1"), [])
+
+
 
     def test_a_login_the_helper_refuses_and_a_device_that_stays_says_which(self):
         self.api.answer("DELETE", "/accounts/v1/devices/d1", {"code": "INTERNAL"}, status=500)

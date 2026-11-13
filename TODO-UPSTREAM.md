@@ -165,3 +165,14 @@ Already tracked there with their own next step; listed here so nothing is lost. 
 - MediaTek MT7922 Bluetooth timeouts after suspend (kernel `btmtk`, `linux-firmware`): needs one more suspend test before there is anything to report.
 - Packaging noise "report only if it starts to matter": Thunar and Tumbler D-Bus service file names, NetworkManager `error setting IPv4 forwarding`, the initrd `systemd-escape` warning, Steam pressure-vessel `_srt_architecture_read_elf` assertion.
 - HP OMEN 45L BIOS F.18 firmware errors (ACPI, thermal zone, `hp_bioscfg`): HP; check for a newer BIOS first.
+
+## 13. NetworkManager (nmcli): `passwd-file` cannot name a WireGuard peer's secret
+
+- Project and version: NetworkManager 1.56.1-2.fc44 (`nmcli`).
+- Symptom on vekrona: `nmcli --wait 60 connection up uuid <uuid> passwd-file /dev/stdin`, given the line `wireguard.peers.<peer public key>.preshared-key:<psk>`, fails with status 4 and "not given in passwd-file", although the private-key line of the same file is accepted (seen in a vekrona-dev VM).
+- Root cause as known: `nmc_utils_parse_passwd_file()` in `src/libnmc-base/nm-client-utils.c` ends the name of a key at the first ':' or '='. A base64 WireGuard public key ends in '=', so the name is cut inside the public key and never matches the peer.
+- Minimal reproduction: a WireGuard profile with one peer whose preshared key is marked not saved (`wireguard.peers ... preshared-key-flags=2`); activate it with a passwd-file holding the line above. The activation fails as described.
+- Fix: not written. Nothing has been filed.
+- vekrona workaround: the private key goes through `passwd-file`; the preshared key is set on the live interface after the activation, with `wg set vvpn0 peer <pub> preshared-key /dev/stdin` (`wg_set_preshared` in `lib/vekrona_vpn.py`). The peer carries `preshared-key-flags=4` (not required), so NetworkManager neither stores the key nor asks for it.
+- File at: https://gitlab.freedesktop.org/NetworkManager/NetworkManager/-/issues (the owner decides).
+- Issue title: draft: `passwd-file cannot supply a WireGuard peer secret: the key name is cut at '='`.

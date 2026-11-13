@@ -8,6 +8,10 @@ leaves traffic blocked. The changes that need root run as vekrona-vpn-apply@<ope
 the arguments reach it through a file in /run/user/<uid>/vekrona-vpn/. Commands that change something wait for each other (a lock
 in that directory), and the helper holds a lock of its own, so a connect and an off never interleave. status and list never wait.
 
+The keys (of each configuration, and the Mullvad device) and the Mullvad account number live in the keyring (gnome-keyring, through
+secret-tool, see lib/vekrona_secrets.py). Only the commands that need a key touch it; status and list never do. A key goes to the
+helper in its request file and from there to nmcli on stdin, so NetworkManager keeps none of them.
+
   status                 one JSON object on stdout:
                            {"schema":1,"armed":bool,"tunnel":"down"|"activating"|"up",
                             "connection":null|{"uuid":str,"vendor":"mullvad"|"proton"|"other","country":"NL","name":str},
@@ -18,16 +22,21 @@ in that directory), and the helper holds a lock of its own, so a connect and an 
                              "countries":[{"code":"NL"|"??","name":str,"configs":[{"uuid":str,"name":str}]}]}]}
                          Mullvad's countries come from its relay list and have "configs":[]: connect to them by country. The
                          relay list is asked for again when it is older than a day and Mullvad is logged in
-  connect UUID           arm the kill switch and bring that configuration up
+  connect UUID           arm the kill switch and bring that configuration up (its key comes from the keyring, which may prompt)
   connect mullvad CC     the same for a random Mullvad relay of the country CC (a code, or a name such as Netherlands). When CC is
                          not a code, the country it was taken for is printed on stderr: "using Netherlands (NL)"
   off                    take the tunnel down, then remove the kill switch
   import --vendor proton|other [FILE...]
                          add the WireGuard configurations FILE... (no FILE: the file chooser, several .conf files). The country
-                         is the first two-letter token of the file name that is an ISO country ("NL-792.conf"), else "??"
-  forget UUID            remove a configuration
+                         is the first two-letter token of the file name that is an ISO country ("NL-792.conf"), else "??". The
+                         keys go to the keyring
+  forget UUID            remove a configuration and its key from the keyring
   mullvad login          read the Mullvad account number from stdin (a terminal prompt without echo), register a WireGuard
-                         device with Mullvad, and keep its key in NetworkManager. The number is never stored
+                         device with Mullvad, and keep the number and the device's key in the keyring. A device it replaces is
+                         removed from the account
+  mullvad logout         remove this device from the Mullvad account, forget the Mullvad connections and clear the keyring of them
+  seal                   move the keys that NetworkManager's keyfiles still hold into the keyring and take them out of the keyfiles
+                         (connect does this first when there is one; the install does it once)
 
 A failure exits non-zero with one line on stderr. The shell also watches /run/vekrona-vpn/state.json (root-owned:
 {"schema":1,"armed":bool,"uuid":str|null}) and runs `status` again when it changes, or when `nmcli monitor` reports a change."""
@@ -36,12 +45,14 @@ import dataclasses
 import json
 import os
 import sys
+from typing import List, Optional, Tuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lib"))
 import vekrona_cli
 import vekrona_countries
 import vekrona_mullvad as mullvad
+import vekrona_secrets as secrets
 import vekrona_vpn as vpn
 from vekrona_vpn import VpnError
 
@@ -65,18 +76,29 @@ def helper_failure(uid, nonce, exc):
     return VpnError(receipt.failure or f"{exc} (the helper did serve this request)")
 
 
+def start_helper(op, uid, nonce):
+    """Start the unit of `op` for the request handed over with `nonce`, and check that the helper served that very request."""
+    unit = vpn.APPLY_UNIT % vpn.instance_name(op, uid)
+    try:
+        vpn.run(["systemctl", "--no-ask-password", "start", unit], timeout=vpn.APPLY_WAIT_SEC)
+    except VpnError as exc:
+        raise helper_failure(uid, nonce, exc)
+    vpn.require_served(uid, op, nonce)
+
+
 def run_apply(op, request):
     """Do `op` as root: hand over the request (None: the operation takes none), start the unit, wait for it, and check that the
     helper served this request and not one of an interrupted call whose job this start merged into. Calls queue behind each
     other. A failure is reported with the line the helper left for this request."""
     uid = os.getuid()
-    unit = vpn.APPLY_UNIT % vpn.instance_name(op, uid)
     with vpn.handed_over(uid, request) as nonce:
-        try:
-            vpn.run(["systemctl", "--no-ask-password", "start", unit], timeout=vpn.APPLY_WAIT_SEC)
-        except VpnError as exc:
-            raise helper_failure(uid, nonce, exc)
-        vpn.require_served(uid, op, nonce)
+        start_helper(op, uid, nonce)
+
+
+def run_held(uid, op, request):
+    """run_apply for a caller that holds the user's lock already (vpn.user_lock), so that several operations go under one lock."""
+    with vpn.hand_over(uid, request) as nonce:
+        start_helper(op, uid, nonce)
 
 
 def command_status(args):
@@ -115,23 +137,163 @@ def mullvad_relay_for(query):
     return mullvad.select_relay(relay_list, code)
 
 
+def connection_of(uuid: str) -> vpn.Connection:
+    for connection in vpn.nm_connections():
+        if connection.uuid == uuid:
+            return connection
+    raise VpnError("not a connection of vekrona-vpn")
+
+
+def device_item() -> Optional[dict]:
+    """The keyring's Mullvad device (key, addresses and, when it was registered by this tool, its id at Mullvad), or None."""
+    return secrets.lookup_optional(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID)
+
+
+def logged_in_device() -> dict:
+    item = device_item()
+    if item is None:
+        raise VpnError("Mullvad is not logged in")
+    return item
+
+
+def device_of_item(item: dict) -> vpn.Device:
+    """The checked device of a keyring item: its key and addresses, which is all a connection takes."""
+    return vpn.validate_device({field: item.get(field) for field in vpn.DEVICE_FIELDS})
+
+
+def connection_keys(connection: vpn.Connection) -> dict:
+    """The keys of a connection, from the keyring: a Mullvad connection uses the device's key, any other its own keys."""
+    if connection.vendor == vpn.VENDOR_MULLVAD:
+        return {"private_key": device_of_item(logged_in_device()).private_key}
+    return secrets.lookup(secrets.CONFIG_KEY, connection.full_id)
+
+
 def command_connect(args):
     if args.target == "mullvad":
         if args.country is None:
             raise VpnError("connect mullvad needs a country")
-        run_apply("connect", {"mullvad": dataclasses.asdict(mullvad_relay_for(args.country))})
+        seal_pending()
+        device = device_of_item(logged_in_device())
+        relay = mullvad_relay_for(args.country)
+        run_apply("connect", {"mullvad": dataclasses.asdict(relay), "device": dataclasses.asdict(device)})
     elif args.country is not None:
         raise VpnError("connect takes a uuid, or mullvad and a country")
     else:
-        run_apply("connect", {"uuid": vpn.require_uuid(args.target)})
+        uuid = vpn.require_uuid(args.target)
+        connection = connection_of(uuid)
+        # Checked before any keyring access, so that a refused connect neither prompts nor changes anything (the helper checks it too).
+        vpn.require_bound_to_tunnel(uuid, connection.full_id)
+        seal_pending()
+        run_apply("connect", {"uuid": uuid, "keys": connection_keys(connection)})
 
 
-def command_off(args):
-    run_apply("off", None)
+def command_seal(args):
+    seal_pending()
+
+
+def seal_pending() -> None:
+    """Move the keys that NetworkManager's keyfiles still hold into the keyring and out of the keyfiles. The user's lock is held from
+    the export to the strip, so no other call of this user interleaves. The strip always runs after the export: it takes out of
+    NetworkManager the keys that were stored, and the helper removes the export with it. A key that cannot be checked stays where it
+    is: the others are stored and stripped, and the error names each connection that kept its key. Nothing runs as root unless a
+    connection holds one, so a sealed machine costs one nmcli call per connection."""
+    if not any(vpn.key_in_keyfile(vpn.nm_key_flags(connection.uuid)) for connection in vpn.nm_connections()):
+        return
+    uid = os.getuid()
+    failures: List[str] = []
+    with vpn.user_lock(uid):
+        run_held(uid, "seal", {"phase": "export"})
+        stripped: List[str] = []
+        pending: Optional[VpnError] = None
+        try:
+            items, checked, failures = sealed_items(read_sealed(uid))
+            secrets.store_all(items)
+            stripped = checked
+        except VpnError as exc:
+            pending = exc
+        strip_after(uid, stripped, pending)
+    if failures:
+        raise VpnError("these connections keep their keys in their keyfiles: " + "; ".join(failures))
+
+
+def strip_after(uid: int, stripped: List[str], pending: Optional[VpnError]) -> None:
+    """The strip that ends a seal, run whatever happened before it (`pending`). When both fail, the error carries both messages."""
+    try:
+        run_held(uid, "seal", {"phase": "strip", "uuids": stripped})
+    except VpnError as strip_error:
+        if pending is None:
+            raise
+        raise VpnError("%s; and the strip that followed it failed too: %s" % (pending, strip_error)) from pending
+    if pending is not None:
+        raise pending
+
+
+def read_sealed(uid: int) -> List[dict]:
+    """The keys the helper handed over in its file for the user (read, not removed)."""
+    path = vpn.sealed_path(uid)
+    with vpn.files_reported("read " + path):
+        with open(path) as handle:
+            text = handle.read()
+    try:
+        entries = json.loads(text)
+    except vpn.JSON_ERRORS:
+        raise VpnError("the keys the helper handed over are not JSON")
+    if not isinstance(entries, list):
+        raise VpnError("the keys the helper handed over are not a list")
+    return entries
+
+
+def sealed_item(entry: dict, mullvad_missing: bool) -> Optional[secrets.Item]:
+    """The keyring item of one key the helper handed over, checked. None when there is nothing to store: a profile whose keyfile holds
+    no key (the strip still clears its flag), or a Mullvad key when the keyring has a device already."""
+    if entry["private_key"] == "":
+        return None
+    if entry["vendor"] == vpn.VENDOR_MULLVAD:
+        if not mullvad_missing:
+            return None
+        device = vpn.validate_device({field: entry[field] for field in vpn.DEVICE_FIELDS})
+        return (secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, dataclasses.asdict(device))
+    keys = vpn.validate_keys({field: entry[field] for field in vpn.KEY_FIELDS if field in entry})
+    return (secrets.CONFIG_KEY, entry["id"], keys)
+
+
+def sealed_items(entries: List[dict]) -> Tuple[List[secrets.Item], List[str], List[str]]:
+    """(keyring items, uuids of the connections whose keys are checked, one failure per connection that is not): each entry is
+    checked by itself, so a bad one does not stop the others. The Mullvad keys are one device: the first of them, and only while the
+    keyring has none."""
+    items, uuids, failures = [], [], []
+    mullvad_missing = device_item() is None
+    for position, entry in enumerate(entries, 1):
+        name = entry.get("id") if isinstance(entry, dict) and isinstance(entry.get("id"), str) else "entry %d" % position
+        try:
+            item = sealed_item(entry, mullvad_missing)
+            uuid = vpn.require_uuid(entry["uuid"])
+        except VpnError as exc:
+            failures.append("%s (%s)" % (name, exc))
+            continue
+        except (KeyError, TypeError, AttributeError):
+            failures.append("%s (the helper handed over a key in a layout this tool does not know)" % name)
+            continue
+        if item is not None:
+            items.append(item)
+            mullvad_missing = mullvad_missing and item[0] != secrets.MULLVAD_DEVICE
+        uuids.append(uuid)
+    return items, uuids, failures
+
+
+def command_forget(args):
+    connection = connection_of(vpn.require_uuid(args.uuid))
+    run_apply("forget", {"uuid": connection.uuid})
+    if connection.vendor != vpn.VENDOR_MULLVAD:
+        try:
+            secrets.clear(secrets.CONFIG_KEY, connection.full_id)
+        except VpnError as exc:
+            raise VpnError("the connection is forgotten, but its key is still in the keyring; remove it with secret-tool clear "
+                           "application vekrona-vpn kind config-key id %s (%s)" % (connection.full_id, exc))
 
 
 def read_conf_file(path):
-    """{"file", "text"} of a configuration that parses; the error names the file, and never what is in it."""
+    """({"file", "text"}, the checked configuration) of a file that parses; the error names the file, and never what is in it."""
     name = os.path.basename(path)
     with vpn.labelled(name):
         try:
@@ -139,8 +301,15 @@ def read_conf_file(path):
                 raw = handle.read(vpn.MAX_CONF_BYTES + 1)
         except OSError as exc:
             raise VpnError(exc.strerror)
-        text, _ = vpn.check_conf(raw)
-    return {"file": name, "text": text}
+        text, conf = vpn.check_conf(raw)
+    return {"file": name, "text": text}, conf
+
+
+def keys_of(conf: vpn.WgConf) -> dict:
+    keys = {"private_key": conf.private_key}
+    if conf.preshared_key is not None:
+        keys["preshared_key"] = conf.preshared_key
+    return keys
 
 
 def command_import(args):
@@ -148,48 +317,103 @@ def command_import(args):
         paths = args.files or vekrona_cli.choose_paths(IMPORT_TITLE, directory=False)
     except vekrona_cli.PortalError as exc:
         raise VpnError(str(exc))
-    if paths:
-        run_apply("import", {"vendor": args.vendor, "files": [read_conf_file(path) for path in paths]})
-
-
-def command_forget(args):
-    run_apply("forget", {"uuid": vpn.require_uuid(args.uuid)})
-
-
-def mullvad_uuids():
-    return {connection.uuid for connection in vpn.nm_connections() if connection.vendor == vpn.VENDOR_MULLVAD}
-
-
-def failed_login(exc, token, registered, known):
-    """The error for a login whose helper failed with `exc`: the new device goes back to the account, unless NetworkManager holds
-    its key by now (the helper imports the connection first and deletes the old ones after it): then it stays, since a revoked
-    device behind the newest connection would leave every later Mullvad connect without a handshake. `known` is the Mullvad
-    connections there were before."""
+    if not paths:
+        return
+    files = [read_conf_file(path) for path in paths]
+    vpn.require_distinct_ids([(vpn.import_id(args.vendor, entry["file"]), entry["file"]) for entry, _ in files])
+    items = [(secrets.CONFIG_KEY, str(vpn.import_id(args.vendor, entry["file"])), keys_of(conf)) for entry, conf in files]
+    previous = secrets.store_all(items)
     try:
-        stored = bool(mullvad_uuids() - known)
-    except VpnError as unlisted:
-        return VpnError(f"{exc}; the new device {registered.name} stays on the account, since it is unknown whether NetworkManager "
-                        f"holds its key: {unlisted}")
-    if stored:
-        return VpnError(f"{exc}; the new device {registered.name} stays on the account, since NetworkManager holds its key")
+        run_apply("import", {"vendor": args.vendor, "files": [entry for entry, _ in files]})
+    except VpnError as exc:
+        raise undo_keyring(exc, previous)
+
+
+def command_off(args):
+    run_apply("off", None)
+
+
+def undo_keyring(exc: VpnError, previous: List[secrets.Previous]) -> VpnError:
+    """The error for an operation that failed with `exc` after its keys were stored: the keyring is put back as it was."""
+    problem = secrets.restore(previous)
+    return exc if problem is None else VpnError("%s; and the keyring could not be put back: %s" % (exc, problem))
+
+
+def undo_login(exc: VpnError, token: str, registered, previous: List[secrets.Previous]) -> VpnError:
+    """The error for a login that failed with `exc`, after the keyring is put back (`previous`) and the new device is removed from
+    the account: its key is nowhere else, so it is of no use. Each step's failure is said too."""
+    problems = []
+    problem = secrets.restore(previous)
+    if problem is not None:
+        problems.append("the keyring could not be put back: %s" % problem)
     try:
         mullvad.revoke_device(token, registered.id)
     except VpnError as revoke:
-        return VpnError(f"{exc}; the new device {registered.name} stays on the account: {revoke}")
-    return exc
+        problems.append("the new device %s stays on the account: %s" % (registered.name, revoke))
+    return VpnError("; ".join([str(exc), *problems])) if problems else exc
+
+
+def account_number(item: dict) -> str:
+    number = item.get("number")
+    if not isinstance(number, str):
+        raise VpnError("the keyring's Mullvad account holds no number")
+    return number
+
+
+def revoke_stored(token: str, item: dict) -> None:
+    """Remove the device of a keyring item from the Mullvad account: by the id it was registered with or, for an item stored before ids
+    were kept (a migrated key), by the public key of its private key. A device the account does not list is gone already."""
+    device_id = item.get("device_id")
+    if device_id is None:
+        public_key = mullvad.public_key_of(device_of_item(item).private_key)
+        ids = [device.get("id") for device in mullvad.list_devices(token)
+               if isinstance(device, dict) and device.get("pubkey") == public_key]
+        if not ids:
+            return
+        device_id = ids[0]
+    if not isinstance(device_id, str):
+        raise VpnError("the keyring's Mullvad device has no usable id")
+    mullvad.revoke_device(token, device_id)
 
 
 def command_mullvad_login(args):
     account = mullvad.read_account()
-    known = mullvad_uuids()
+    old_device = device_item()
     relay = mullvad.any_relay(mullvad.current_relays(relay_cache()))
     token = mullvad.api_token(account)
     private_key, public_key = mullvad.new_key_pair()
     registered = mullvad.register_device(token, private_key, public_key)
+    previous = []
     try:
+        previous = secrets.store_all([
+            (secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID, {"number": account}),
+            (secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID, {**dataclasses.asdict(registered.device), "device_id": registered.id}),
+        ])
         run_apply("login", {"device": dataclasses.asdict(registered.device), "relay": dataclasses.asdict(relay)})
     except VpnError as exc:
-        raise failed_login(exc, token, registered, known)
+        raise undo_login(exc, token, registered, previous)
+    if old_device is not None:
+        try:
+            revoke_stored(token, old_device)
+        except VpnError as exc:
+            raise VpnError("logged in as %s, but the device before it could not be removed: %s" % (registered.name, exc))
+
+
+def command_mullvad_logout(args):
+    """Remove this device from the Mullvad account, forget the Mullvad connections and clear the keyring of the account and the device.
+    The device goes first: if it cannot be removed, nothing else changes. Without an account item (an install from before the keyring
+    held it) the number is asked for, as login does."""
+    seal_pending()
+    device = device_item()
+    if device is not None:
+        account = secrets.lookup_optional(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID)
+        number = account_number(account) if account is not None else mullvad.read_account()
+        revoke_stored(mullvad.api_token(number), device)
+        secrets.clear(secrets.MULLVAD_DEVICE, secrets.MULLVAD_DEVICE_ID)
+    for connection in vpn.nm_connections():
+        if connection.vendor == vpn.VENDOR_MULLVAD:
+            run_apply("forget", {"uuid": connection.uuid})
+    secrets.clear(secrets.MULLVAD_ACCOUNT, secrets.MULLVAD_ACCOUNT_ID)
 
 
 def parse_args(argv):
@@ -211,6 +435,8 @@ def parse_args(argv):
     forget.set_defaults(handler=command_forget)
     mullvad_parser = commands.add_parser("mullvad").add_subparsers(dest="mullvad_command", required=True)
     mullvad_parser.add_parser("login").set_defaults(handler=command_mullvad_login)
+    mullvad_parser.add_parser("logout").set_defaults(handler=command_mullvad_logout)
+    commands.add_parser("seal").set_defaults(handler=command_seal)
     return parser.parse_args(argv)
 
 

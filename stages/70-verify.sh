@@ -455,6 +455,12 @@ if ran 40-system; then
   check assert "/run/vekrona-vpn is root:root 0755" eq "$(root stat -c '%U:%G %a' /run/vekrona-vpn)" "root:root 755"
   check assert "/run/vekrona-vpn/state.json exists, root:root 0644, so the shell can watch it" eq "$(root stat -c '%U:%G %a' /run/vekrona-vpn/state.json)" "root:root 644"
   check assert "the vekrona-vpn helper is in the root-owned copy" file_executable "$VEKRONA_SYSTEM_DIR/libexec/vekrona-vpn-apply"
+  # NetworkManager keeps no WireGuard key in its keyfiles: they hold the connections, the keys are in the keyring (vekrona-vpn seal).
+  check assert "no WireGuard keyfile of NetworkManager holds a private or preshared key" not root bash -c '
+    for keyfile in /etc/NetworkManager/system-connections/*; do
+      grep -q "^type=wireguard$" "$keyfile" && grep -qE "^(private-key|preshared-key)=" "$keyfile" && exit 0
+    done
+    exit 1'
   check assert "/etc/claude-code/managed-settings.json matches the repo file" root_files_equal "$VEKRONA_ROOT/etc/claude-code/managed-settings.json" /etc/claude-code/managed-settings.json
   check assert "/etc/claude-code/managed-settings.json is root:root 0644, so no user can loosen the policy" eq "$(root stat -c '%U:%G %a' /etc/claude-code/managed-settings.json)" "root:root 644"
   for rule in "$VEKRONA_ROOT"/etc/polkit-1/rules.d/50-vekrona-*.rules; do
